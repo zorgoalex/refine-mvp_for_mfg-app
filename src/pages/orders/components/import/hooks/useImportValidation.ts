@@ -1,6 +1,6 @@
 // Hook for validating and resolving import data
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import type {
   ParsedSheet,
   SelectionRange,
@@ -17,6 +17,7 @@ import type {
 import { FIELD_CONFIGS, FIELD_KEYWORDS, IMPORT_DEFAULTS } from '../types/importTypes';
 import { calculateOrderTotalArea } from '../../../../../utils/orderArea';
 import { detectOrderExport, extractImportRows } from '../orderExportDetection';
+import { resolveFilmName } from '../utils/filmNameResolution';
 
 export interface UnresolvedReference {
   originalValue: string;
@@ -37,6 +38,8 @@ export interface UseImportValidationReturn {
   validatedRows: ValidatedRow[];
   referenceData: ReferenceData;
   isLoading: boolean;
+  /** Индекс названий плёнок ещё загружается, а в строках есть отложенные плёнки — импорт ждать. */
+  filmIndexLoading: boolean;
   stats: ImportStats;
   unresolvedRefs: UnresolvedReferences;
   setReferenceData: (data: ReferenceData) => void;
@@ -119,6 +122,74 @@ export const findReferenceId = (name: string | null | undefined, items: Referenc
   return null;
 };
 
+export interface FilmReferenceResult {
+  filmId: number | null;
+  ambiguous: boolean;
+  /** Индекс прежних названий не готов — плёнка не подставлена автоматически. */
+  pendingIndex: boolean;
+}
+
+export const resolveFilmReference = (
+  name: string | null | undefined,
+  referenceData: ReferenceData,
+): FilmReferenceResult => {
+  const status = referenceData.filmNameIndexStatus ?? 'ready';
+  // Без полного индекса текущее имя одной плёнки может оказаться прежним именем другой:
+  // автоматический выбор откладывается до загрузки индекса, иначе — ручной выбор.
+  if (name && String(name).trim() && status !== 'ready') return { filmId: null, ambiguous: false, pendingIndex: true };
+  const resolution = resolveFilmName(name, referenceData.films, referenceData.filmNameIndex ?? []);
+  if (resolution.status === 'matched') return { filmId: resolution.filmId, ambiguous: false, pendingIndex: false };
+  if (resolution.status === 'ambiguous') return { filmId: null, ambiguous: true, pendingIndex: false };
+  // Keep legacy fuzzy matching when the index has no exact hit.
+  return { filmId: findReferenceId(name, referenceData.films), ambiguous: false, pendingIndex: false };
+};
+
+export const filmResolutionWarning = (
+  name: string | null | undefined,
+  resolution: FilmReferenceResult,
+  referenceData: ReferenceData,
+): FieldError | null => {
+  if (!name || resolution.filmId) return null;
+  if (resolution.pendingIndex) {
+    return {
+      field: 'film',
+      type: 'warning',
+      message: referenceData.filmNameIndexStatus === 'unavailable'
+        ? `Не удалось проверить прежние названия плёнок — выберите плёнку для "${name}" вручную`
+        : `Проверяются прежние названия плёнок для "${name}" — плёнка будет подставлена после проверки`,
+    };
+  }
+  return {
+    field: 'film',
+    type: 'warning',
+    message: resolution.ambiguous
+      ? `Найдено несколько канонических плёнок для "${name}". Выберите вручную.`
+      : `Не найдена плёнка: "${name}"`,
+  };
+};
+
+const sameWarnings = (left: FieldError[], right: FieldError[]): boolean =>
+  left.length === right.length
+  && left.every((warning, index) => warning.field === right[index].field && warning.message === right[index].message);
+
+/**
+ * Пересчитывает плёнку строк, отложенных до загрузки индекса. Строки с выбранной
+ * плёнкой или ручным решением не трогаются. Без изменений возвращает тот же массив.
+ */
+export const refreshPendingFilmRows = (rows: ValidatedRow[], referenceData: ReferenceData): ValidatedRow[] => {
+  let changed = false;
+  const next = rows.map((row) => {
+    if (!row.filmPendingIndex || row.film_id || !row.filmName) return row;
+    const resolution = resolveFilmReference(row.filmName, referenceData);
+    const warning = filmResolutionWarning(row.filmName, resolution, referenceData);
+    const warnings = [...row.warnings.filter((item) => item.field !== 'film'), ...(warning ? [warning] : [])];
+    if (resolution.filmId === null && resolution.pendingIndex && sameWarnings(warnings, row.warnings)) return row;
+    changed = true;
+    return { ...row, film_id: resolution.filmId, filmPendingIndex: resolution.pendingIndex, warnings };
+  });
+  return changed ? next : rows;
+};
+
 /** Partial reference context for pure row resolution (used in tests and internally). */
 export interface ResolveImportRowRefs {
   sheetMaterialTypes?: SheetMaterialReferenceItem[];
@@ -148,6 +219,9 @@ export const useImportValidation = (): UseImportValidationReturn => {
   const [referenceData, setReferenceData] = useState<ReferenceData>({
     edgeTypes: [],
     films: [],
+    // Справочники модалки ещё не переданы: отложенные плёнки (в т.ч. из восстановленного
+    // черновика) ждут, а не разрешаются по пустым данным.
+    filmNameIndexStatus: 'loading',
     materials: [],
     millingTypes: [],
     sheetMaterialTypes: [],
@@ -182,6 +256,15 @@ export const useImportValidation = (): UseImportValidationReturn => {
       totalArea: calculateOrderTotalArea(validatedRows.filter((row) => row.isValid)),
     };
   }, [validatedRows]);
+
+  // Индекс прежних названий плёнок загрузился (или стал недоступен) после разбора строк:
+  // пересчитать только отложенные автоматические сопоставления.
+  useEffect(() => {
+    setValidatedRows((prev) => refreshPendingFilmRows(prev, referenceData));
+  }, [referenceData]);
+
+  const filmIndexLoading = referenceData.filmNameIndexStatus === 'loading'
+    && validatedRows.some((row) => row.filmPendingIndex && !row.film_id);
 
   // Get unresolved references grouped by type
   const unresolvedRefs = useMemo((): UnresolvedReferences => {
@@ -267,6 +350,7 @@ export const useImportValidation = (): UseImportValidationReturn => {
         return {
           ...row,
           [idField]: newId,
+          ...(field === 'film' ? { filmPendingIndex: false } : {}),
           warnings: newWarnings,
         };
       }
@@ -448,7 +532,8 @@ export const useImportValidation = (): UseImportValidationReturn => {
 
         // Resolve references
         const edge_type_id = findReferenceId(row.edgeTypeName, referenceData.edgeTypes);
-        const film_id = findReferenceId(row.filmName, referenceData.films);
+        const filmResolution = resolveFilmReference(row.filmName, referenceData);
+        const film_id = filmResolution.filmId;
         // Variant B: material resolves to sheet_material_type_id against cuttable types only
         const { sheet_material_type_id } = resolveImportRow(row, {
           sheetMaterialTypes: referenceData.sheetMaterialTypes,
@@ -459,9 +544,8 @@ export const useImportValidation = (): UseImportValidationReturn => {
         if (row.edgeTypeName && !edge_type_id) {
           warnings.push({ field: 'edge_type', message: `Не найдена обкатка: "${row.edgeTypeName}"`, type: 'warning' });
         }
-        if (row.filmName && !film_id) {
-          warnings.push({ field: 'film', message: `Не найдена плёнка: "${row.filmName}"`, type: 'warning' });
-        }
+        const filmWarning = filmResolutionWarning(row.filmName, filmResolution, referenceData);
+        if (filmWarning) warnings.push(filmWarning);
         if (row.materialName && !sheet_material_type_id) {
           warnings.push({ field: 'material', message: `Не найден материал: "${row.materialName}"`, type: 'warning' });
         }
@@ -476,6 +560,7 @@ export const useImportValidation = (): UseImportValidationReturn => {
           quantity: isNaN(quantity) ? null : quantity,
           edge_type_id,
           film_id,
+          filmPendingIndex: filmResolution.pendingIndex,
           material_id: null,
           sheet_material_type_id,
           milling_type_id,
@@ -517,7 +602,8 @@ export const useImportValidation = (): UseImportValidationReturn => {
 
         // Resolve references
         const edge_type_id = findReferenceId(row.edgeTypeName, referenceData.edgeTypes);
-        const film_id = findReferenceId(row.filmName, referenceData.films);
+        const filmResolution = resolveFilmReference(row.filmName, referenceData);
+        const film_id = filmResolution.filmId;
         // Variant B: material resolves to sheet_material_type_id against cuttable types only
         const { sheet_material_type_id } = resolveImportRow(row, {
           sheetMaterialTypes: referenceData.sheetMaterialTypes,
@@ -528,9 +614,8 @@ export const useImportValidation = (): UseImportValidationReturn => {
         if (row.edgeTypeName && !edge_type_id) {
           warnings.push({ field: 'edge_type', message: `Не найдена обкатка: "${row.edgeTypeName}"`, type: 'warning' });
         }
-        if (row.filmName && !film_id) {
-          warnings.push({ field: 'film', message: `Не найдена плёнка: "${row.filmName}"`, type: 'warning' });
-        }
+        const filmWarning = filmResolutionWarning(row.filmName, filmResolution, referenceData);
+        if (filmWarning) warnings.push(filmWarning);
         if (row.materialName && !sheet_material_type_id) {
           warnings.push({ field: 'material', message: `Не найден материал: "${row.materialName}"`, type: 'warning' });
         }
@@ -545,6 +630,7 @@ export const useImportValidation = (): UseImportValidationReturn => {
           quantity: isNaN(quantity) ? null : quantity,
           edge_type_id,
           film_id,
+          filmPendingIndex: filmResolution.pendingIndex,
           material_id: null,
           sheet_material_type_id,
           milling_type_id,
@@ -564,6 +650,8 @@ export const useImportValidation = (): UseImportValidationReturn => {
     setValidatedRows(prev => {
       const updated = [...prev];
       const row = { ...updated[index], [field]: value };
+      // Ручной выбор плёнки (в том числе очистка) не перезаписывается пересчётом по индексу.
+      if (field === 'film_id') row.filmPendingIndex = false;
 
       // Re-validate after update
       const errors: FieldError[] = [];
@@ -610,6 +698,7 @@ export const useImportValidation = (): UseImportValidationReturn => {
     validatedRows,
     referenceData,
     isLoading,
+    filmIndexLoading,
     stats,
     unresolvedRefs,
     setReferenceData,

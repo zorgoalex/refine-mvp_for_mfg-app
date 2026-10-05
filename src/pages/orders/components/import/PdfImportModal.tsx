@@ -1,6 +1,7 @@
 // Main PDF Import Modal with wizard steps (2 steps: upload + validation)
 
 import React, { useState, useCallback, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
+import { useFilmNameIndex } from './hooks/useFilmNameIndex';
 import { Alert, Modal, Steps, Button, Space, message } from 'antd';
 import { FilePdfOutlined, CheckCircleOutlined, ArrowLeftOutlined, ArrowRightOutlined, TableOutlined } from '@ant-design/icons';
 import { useList } from '../../../../query/orderLifecycleQueries';
@@ -95,7 +96,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
   });
 
-  const { data: filmsData } = useList({
+  const { data: filmsData, isLoading: filmsLoading } = useList({
     resource: 'films',
     pagination: { pageSize: 10000 },
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
@@ -116,9 +117,14 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
   });
 
+  const filmNameIndex = useFilmNameIndex(open);
+
   // Update reference data when loaded
   useEffect(() => {
     const refData: ReferenceData = {
+      filmNameIndex: filmNameIndex.items,
+      // Автосопоставление плёнок — только когда готовы и справочник, и индекс названий.
+      filmNameIndexStatus: filmsLoading ? 'loading' : filmNameIndex.status,
       edgeTypes: (edgeTypesData?.data || []).map((item: any) => ({
         id: item.edge_type_id,
         name: item.edge_type_name,
@@ -147,7 +153,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
       })),
     };
     importValidation.setReferenceData(refData);
-  }, [edgeTypesData, filmsData, sheetMaterialTypesData, millingTypesData, materialRecency.recentIds]);
+  }, [edgeTypesData, filmsData, filmsLoading, filmNameIndex, sheetMaterialTypesData, millingTypesData, materialRecency.recentIds]);
 
   const visibleSteps = useMemo(
     () => STEPS.filter(step =>
@@ -403,7 +409,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
                 <Button
                   type="primary"
                   onClick={handleImport}
-                  disabled={importValidation.stats.validRows === 0}
+                  disabled={importValidation.stats.validRows === 0 || importValidation.filmIndexLoading}
                 >
                   Импортировать ({importValidation.stats.validRows} строк)
                 </Button>

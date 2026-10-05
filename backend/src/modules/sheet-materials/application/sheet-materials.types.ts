@@ -17,6 +17,10 @@ export interface SheetMaterialTypeDto {
   isActive: boolean;
   isCuttable: boolean;
   sortOrder: number;
+  /** Тип и категория номенклатуры 1С, примечание (как у плёнок). */
+  nomenclatureType: string | null;
+  nomenclatureCategory: string | null;
+  note: string | null;
   version: number;
 }
 
@@ -36,6 +40,10 @@ export interface SheetMaterialTypeInput {
   isActive?: boolean;
   isCuttable?: boolean;
   sortOrder?: number;
+  /** Не передано — при изменении значение сохраняется (старые клиенты PUT без этих полей); null или '' — очистить. */
+  nomenclatureType?: string | null;
+  nomenclatureCategory?: string | null;
+  note?: string | null;
 }
 
 export interface SheetMaterialsContext {
@@ -72,6 +80,23 @@ export interface SheetMaterialsPermissionDeniedInput {
   requestId: string;
   targetId?: number;
 }
+
+/** Позиция номенклатуры 1С для выбора в форме листового материала. */
+export interface OnecItemOptionDto {
+  refKey: string;
+  code: string | null;
+  name: string;
+  unitName: string | null;
+  categoryName: string | null;
+  nomenclatureType: string | null;
+  deletionMark: boolean;
+  /** Листовой материал ERP, уже привязанный к этой позиции (любой, включая отключённые). */
+  linkedSheetMaterialTypeId: number | null;
+  linkedName: string | null;
+}
+
+/** Позиции 1С из копии данных; `null` — копия недоступна (модуль 1С выключен, данных нет): ключ вводится вручную. */
+export type OnecItemsSource = () => Promise<Array<Omit<OnecItemOptionDto, 'linkedSheetMaterialTypeId' | 'linkedName'>> | null>;
 
 export interface SheetMaterialsPort {
   list(query: ListSheetMaterialTypesQuery): Promise<SheetMaterialTypeDto[]>;

@@ -1,6 +1,7 @@
 // Types for Excel Import functionality
 
 import type { WorkBook } from 'xlsx';
+import type { FilmNameIndexItem } from '../../../../../api/filmNameIndexApi';
 
 // ============================================================================
 // EXCEL DATA TYPES
@@ -119,6 +120,8 @@ export interface ValidatedRow extends ResolvedRow {
   isValid: boolean;
   errors: FieldError[];
   warnings: FieldError[];
+  /** Плёнка не сопоставлена автоматически: индекс прежних названий ещё не готов. */
+  filmPendingIndex?: boolean;
 }
 
 // ============================================================================
@@ -137,9 +140,14 @@ export interface SheetMaterialReferenceItem extends ReferenceItem {
   isCuttable?: boolean;
 }
 
+export type FilmNameIndexStatus = 'loading' | 'ready' | 'unavailable';
+
 export interface ReferenceData {
   edgeTypes: ReferenceItem[];
   films: ReferenceItem[];
+  filmNameIndex?: FilmNameIndexItem[];
+  /** Состояние индекса названий плёнок; без него (прочие потребители) — как `ready`. */
+  filmNameIndexStatus?: FilmNameIndexStatus;
   /** Variant B: replaced by sheetMaterialTypes for order detail resolution. Kept for compatibility. */
   materials?: ReferenceItem[];
   millingTypes: ReferenceItem[];

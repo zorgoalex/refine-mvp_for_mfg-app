@@ -200,9 +200,21 @@ pg_session_limits() {
   [ -z "$LOCK_TIMEOUT" ] || printf "SET lock_timeout = '%s';\n" "$LOCK_TIMEOUT"
   [ -z "$STATEMENT_TIMEOUT" ] || printf "SET statement_timeout = '%s';\n" "$STATEMENT_TIMEOUT"
 }
+# Migrations without their own BEGIN/COMMIT that must be all-or-nothing run in one psql transaction
+# (--single-transaction + ON_ERROR_STOP: any error or timeout rolls the whole file back). 202 replaces the unique
+# constraint of films by an index: a timeout between the two would leave films without the uniqueness rule.
+# Files that manage their own transactions must NOT be listed here.
+needs_single_transaction() {
+  case "$(basename "$1")" in
+    202_film_catalog_import.sql|212_films_note.sql|234_reference_nomenclature_note.sql) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 pg_apply_file() {
+  local single=""
+  if needs_single_transaction "$1"; then single="--single-transaction"; fi
   { pg_session_limits; printf '%s\n' "$APPLY_PRELUDE"; cat "$1"; } \
-    | _exec sh -c 'psql -U "${MIG_USER:-$POSTGRES_USER}" -d "${MIG_DB:-$POSTGRES_DB}" -v ON_ERROR_STOP=1'
+    | _exec env MIG_SINGLE_TX="$single" sh -c 'psql -U "${MIG_USER:-$POSTGRES_USER}" -d "${MIG_DB:-$POSTGRES_DB}" -v ON_ERROR_STOP=1 $MIG_SINGLE_TX'
 }
 
 ensure_ledger() {
@@ -2291,6 +2303,81 @@ probe_file() {
       "$(q_idx onec_agent_commands_ordering_idx)" \
       "$(q_idx onec_agent_commands_expiry_idx)" ;;
     # 198: 1C agent E3a ETL — runs, batches, staging, mirror, entity state.
+    202_film_catalog_import*) probe_all \
+      "$(q_col films canonical_film_id)" \
+      "$(q_col films nomenclature_type)" \
+      "$(q_col films nomenclature_category)" \
+      "$(q_col films catalog_key)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.films'::regclass AND conname='uq_films_name_vendor')" \
+      "$(q_con_on films fk_films_canonical_film)" \
+      "$(q_con_on films chk_films_canonical_not_self)" \
+      "$(q_con_on films chk_films_merged_inactive)" \
+      "$(q_con_on films chk_films_merged_no_keys)" \
+      "$(q_con_on films chk_films_catalog_key_format)" \
+      "$(q_idx uq_films_name_vendor_canonical)" \
+      "$(q_idx uq_films_catalog_key)" \
+      "$(q_idx idx_films_canonical)" \
+      "SELECT to_regprocedure('public.films_canonical_integrity()') IS NOT NULL AND to_regprocedure('public.films_guard_backend_columns()') IS NOT NULL AND to_regprocedure('public.films_record_name_history()') IS NOT NULL" \
+      "$(q_trg trg_films_canonical_integrity)" \
+      "$(q_trg trg_films_guard_backend_columns)" \
+      "$(q_trg trg_films_name_history)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid='public.films'::regclass AND tgname='trg_films_canonical_integrity' AND tgfoid='public.films_canonical_integrity()'::regprocedure AND tgdeferrable AND tginitdeferred AND tgenabled='O' AND NOT tgisinternal)" \
+      "$(q_tbl catalog_import_batches)" \
+      "SELECT count(*)=20 FROM information_schema.columns WHERE table_schema='public' AND table_name='catalog_import_batches'" \
+      "$(q_con_on catalog_import_batches catalog_import_batches_pkey)" \
+      "$(q_con_on catalog_import_batches chk_catalog_import_batches_source_kind)" \
+      "$(q_con_on catalog_import_batches chk_catalog_import_batches_source)" \
+      "$(q_con_on catalog_import_batches chk_catalog_import_batches_status)" \
+      "$(q_con_on catalog_import_batches chk_catalog_import_batches_reference)" \
+      "$(q_con_on catalog_import_batches chk_catalog_import_batches_version)" \
+      "$(q_con_on catalog_import_batches chk_catalog_import_batches_applied)" \
+      "$(q_con_on catalog_import_batches chk_catalog_import_batches_reverted)" \
+      "$(q_con_on catalog_import_batches catalog_import_batches_onec_source_id_fkey)" \
+      "$(q_con_on catalog_import_batches catalog_import_batches_created_by_fkey)" \
+      "$(q_con_on catalog_import_batches catalog_import_batches_applied_by_fkey)" \
+      "$(q_con_on catalog_import_batches catalog_import_batches_reverted_by_fkey)" \
+      "$(q_tbl catalog_import_rows)" \
+      "SELECT count(*)=20 FROM information_schema.columns WHERE table_schema='public' AND table_name='catalog_import_rows'" \
+      "$(q_con_on catalog_import_rows catalog_import_rows_pkey)" \
+      "$(q_con_on catalog_import_rows uq_catalog_import_rows_batch_row)" \
+      "$(q_con_on catalog_import_rows chk_catalog_import_rows_status)" \
+      "$(q_con_on catalog_import_rows catalog_import_rows_batch_id_fkey)" \
+      "$(q_con_on catalog_import_rows catalog_import_rows_vendor_id_fkey)" \
+      "$(q_con_on catalog_import_rows catalog_import_rows_canonical_film_id_fkey)" \
+      "$(q_con_on catalog_import_rows catalog_import_rows_canonical_film_type_id_fkey)" \
+      "$(q_idx uq_catalog_import_rows_key)" \
+      "$(q_tbl catalog_import_matches)" \
+      "SELECT count(*)=9 FROM information_schema.columns WHERE table_schema='public' AND table_name='catalog_import_matches'" \
+      "$(q_con_on catalog_import_matches pk_catalog_import_matches)" \
+      "$(q_con_on catalog_import_matches chk_catalog_import_matches_status)" \
+      "$(q_con_on catalog_import_matches chk_catalog_import_matches_fingerprint)" \
+      "$(q_con_on catalog_import_matches catalog_import_matches_batch_id_fkey)" \
+      "$(q_con_on catalog_import_matches catalog_import_matches_film_id_fkey)" \
+      "$(q_con_on catalog_import_matches catalog_import_matches_row_id_fkey)" \
+      "$(q_idx idx_catalog_import_matches_batch_row)" \
+      "$(q_tbl vendor_import_aliases)" \
+      "SELECT count(*)=4 FROM information_schema.columns WHERE table_schema='public' AND table_name='vendor_import_aliases'" \
+      "$(q_con_on vendor_import_aliases vendor_import_aliases_pkey)" \
+      "$(q_con_on vendor_import_aliases chk_vendor_import_aliases_source_norm)" \
+      "$(q_con_on vendor_import_aliases vendor_import_aliases_vendor_id_fkey)" \
+      "$(q_con_on vendor_import_aliases vendor_import_aliases_created_by_fkey)" \
+      "$(q_tbl film_name_history)" \
+      "SELECT count(*)=10 FROM information_schema.columns WHERE table_schema='public' AND table_name='film_name_history'" \
+      "$(q_con_on film_name_history film_name_history_pkey)" \
+      "$(q_con_on film_name_history chk_film_name_history_source)" \
+      "$(q_con_on film_name_history film_name_history_film_id_fkey)" \
+      "$(q_con_on film_name_history film_name_history_changed_by_fkey)" \
+      "$(q_con_on film_name_history film_name_history_batch_id_fkey)" \
+      "$(q_idx idx_film_name_history_film)" \
+      "$(q_idx idx_film_name_history_old_trgm)" ;;
+    212_films_note*) probe_all \
+      "$(q_col films note)" \
+      "$(q_con_on films chk_films_note_length)" ;;
+    234_reference_nomenclature_note*) probe_all \
+      "$(q_col sheet_material_types nomenclature_type)" "$(q_col sheet_material_types nomenclature_category)" "$(q_col sheet_material_types note)" \
+      "$(q_col catalog_items nomenclature_type)" "$(q_col catalog_items nomenclature_category)" "$(q_col catalog_items note)" \
+      "$(q_con_on sheet_material_types chk_sheet_material_types_note_length)" \
+      "$(q_con_on catalog_items chk_catalog_items_note_length)" ;;
     198_onec_etl*) probe_all \
       "$(q_tbl onec_etl_runs)" \
       "$(q_tbl onec_etl_batches)" \
@@ -2403,6 +2490,15 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     200_onec_etl_snapshots_revocation*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    202_film_catalog_import*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    212_films_note*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    234_reference_nomenclature_note*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     198_onec_etl*)

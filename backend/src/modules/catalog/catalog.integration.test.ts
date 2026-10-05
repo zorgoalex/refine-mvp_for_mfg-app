@@ -80,6 +80,16 @@ describe.skipIf(!url)('catalog real PostgreSQL, rollback-only fixtures', () => {
     const audit = (await client.query("SELECT diff_json FROM audit_log WHERE entity_type='catalog_item' AND entity_id=$1 AND request_id=$2 AND after_json->>'version'='3'", [String(first.id), prefix])).rows[0];
     expect(audit.diff_json).toMatchObject({ refKey1c: { from: uuid, to: null }, sortOrder: { from: 200, to: 0 } });
   });
+  it('stores nomenclature fields; a legacy client without them keeps them; null clears; audited', async () => {
+    const created = await service.save(actor, { ...input, nomenclatureType: 'Услуга', nomenclatureCategory: 'УСЛУГИ', note: 'n1' }, key(), prefix);
+    expect(created).toMatchObject({ nomenclatureType: 'Услуга', nomenclatureCategory: 'УСЛУГИ', note: 'n1' });
+    const legacy = await service.save(actor, { ...input, description: 'legacy', expectedVersion: 1 }, key(), prefix, created.id);
+    expect(legacy).toMatchObject({ nomenclatureType: 'Услуга', nomenclatureCategory: 'УСЛУГИ', note: 'n1', version: 2 });
+    const cleared = await service.save(actor, { ...input, description: 'legacy', note: '', nomenclatureType: null, expectedVersion: 2 }, key(), prefix, created.id);
+    expect(cleared).toMatchObject({ nomenclatureType: null, nomenclatureCategory: 'УСЛУГИ', note: null, version: 3 });
+    const audit = (await client.query("SELECT diff_json FROM audit_log WHERE entity_type='catalog_item' AND entity_id=$1 AND after_json->>'version'='3'", [String(created.id)])).rows[0];
+    expect(audit.diff_json).toMatchObject({ note: { from: 'n1', to: null }, nomenclatureType: { from: 'Услуга', to: null } });
+  });
   it('replays a pre-upgrade receipt unchanged and supplies defaults on new legacy creates', async () => {
     const legacyKey = key();
     const legacyResponse = { id: 123, name: 'E2E historical response' };

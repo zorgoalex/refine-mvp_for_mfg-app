@@ -1,10 +1,12 @@
 import React from "react";
 import { List, CreateButton } from "@refinedev/antd";
+import { ReferenceTableContext } from "../ui/tooltipDelay";
 
 type ListProps = React.ComponentProps<typeof List>;
 
 export const LocalizedList: React.FC<ListProps> = (props) => {
   return (
+    <ReferenceTableContext.Provider value={true}>
     <List
       {...props}
       headerButtons={(headerProps) => {
@@ -31,5 +33,6 @@ export const LocalizedList: React.FC<ListProps> = (props) => {
         });
       }}
     />
+    </ReferenceTableContext.Provider>
   );
 };

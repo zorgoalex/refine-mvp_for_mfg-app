@@ -773,3 +773,18 @@ describe('apply-migrations.sh auto — detect-only against the live erp_test con
     expect(() => run(['probe', '147'])).toThrow();
   });
 });
+
+describe('apply-migrations.sh — all-or-nothing film catalog migrations', () => {
+  const files = ['202_film_catalog_import.sql', '212_films_note.sql', '234_reference_nomenclature_note.sql'];
+  it('runs them in one psql transaction: an error or a lock/statement timeout in the middle rolls the whole file back', () => {
+    expect(scriptText).toContain(`${files.join('|')}) return 0 ;;`);
+    expect(scriptText).toContain('if needs_single_transaction "$1"; then single="--single-transaction"; fi');
+    expect(scriptText).toContain('-v ON_ERROR_STOP=1 $MIG_SINGLE_TX');
+  });
+  it('they carry no transaction control of their own (it would end the runner transaction early)', () => {
+    for (const file of files) {
+      const sql = readFileSync(resolve(migDir, file), 'utf8');
+      expect(sql, file).not.toMatch(/^\s*(COMMIT|ROLLBACK|START TRANSACTION|BEGIN\s*;|BEGIN\s+(TRANSACTION|WORK|ISOLATION))/im);
+    }
+  });
+});

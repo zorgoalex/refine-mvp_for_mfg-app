@@ -1,6 +1,6 @@
 import { nameRule } from '../../utils/nameRules';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Descriptions, Divider, Form, Input, InputNumber, Modal, Select, Space, Switch, Tag, Typography, message } from 'antd';
+import { Alert, Button, Descriptions, Divider, Form, Input, InputNumber, Modal, Row, Select, Space, Switch, Tag, Typography, message } from 'antd';
 import dayjs from 'dayjs';
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from '../../utils/dateFormat';
 import type { ColumnsType } from 'antd/es/table';
@@ -10,12 +10,15 @@ import { Table } from '../../ui/tooltipDelay';
 import { catalogApi, type CatalogInput, type CatalogItem, type CatalogKind, type CatalogUnit } from '../../api/catalogApi';
 import { can } from '../../utils/permissions';
 import { CATALOG_KIND_OPTIONS, catalogDraft, catalogPayload, catalogFailureState, catalogCommandIdentity } from './catalogForm';
+import { CategoryCell, NomenclatureFormItems, NoteCell } from '../../components/NomenclatureFields';
 
 export function CatalogItemsList() {
   const canManage = can('references.manage');
   const canView = canManage || can('references.view');
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [units, setUnits] = useState<CatalogUnit[]>([]);
+  // Backend знает тип/категорию/примечание (миграция 234); иначе колонки и поля формы скрыты и в запросах их нет.
+  const [nomenclatureSupported, setNomenclatureSupported] = useState(false);
   const [total, setTotal] = useState(0);
   const [query, setQuery] = useState<{ q: string; kind?: CatalogKind; active: 'true' | 'false' | 'all'; offset: number; limit: number }>({ q: '', active: 'true', offset: 0, limit: 25 });
   const [loading, setLoading] = useState(false);
@@ -38,9 +41,11 @@ export function CatalogItemsList() {
     const current = ++sequence.current;
     setLoading(true); setLoadError('');
     try {
-      const [page, unitList] = await Promise.all([catalogApi.list(query), catalogApi.units()]);
+      // Возможности backend — отдельным запросом: не зависят от того, есть ли записи и какой фильтр. Прежний backend
+      // отвечает ошибкой — поля типа/категории/примечания считаются неподдержанными.
+      const [page, unitList, capabilities] = await Promise.all([catalogApi.list(query), catalogApi.units(), catalogApi.capabilities().catch(() => ({} as { nomenclatureFields?: boolean }))]);
       if (current !== sequence.current) return;
-      setItems(page.items); setTotal(page.total); setUnits(unitList);
+      setItems(page.items); setTotal(page.total); setUnits(unitList); setNomenclatureSupported(capabilities.nomenclatureFields === true);
     } catch (error) {
       if (current === sequence.current) setLoadError(error instanceof Error ? error.message : 'Не удалось загрузить справочник');
     } finally { if (current === sequence.current) setLoading(false); }
@@ -73,7 +78,7 @@ export function CatalogItemsList() {
     savingRef.current = true; setSaving(true);
     let submitted = false;
     try {
-      const input = catalogPayload(await form.validateFields());
+      const input = catalogPayload(await form.validateFields(), nomenclatureSupported);
       const payload = editing ? { ...input, expectedVersion: editing.version } : input;
       const fingerprint = JSON.stringify({ id: editing?.id ?? null, payload });
       command.current = catalogCommandIdentity(command.current, fingerprint);
@@ -95,15 +100,20 @@ export function CatalogItemsList() {
   };
 
   const columns: ColumnsType<CatalogItem> = [
-    { title: 'ID', dataIndex: 'id', width: 85 },
-    { title: 'Название / артикул', dataIndex: 'name', width: 270, render: (_, item) => <div style={{ overflowWrap: 'anywhere' }}><Typography.Text strong>{item.name}</Typography.Text><br /><Typography.Text type="secondary">{item.sku ?? 'Без артикула'}</Typography.Text></div> },
-    { title: 'Тип', dataIndex: 'kind', width: 160, render: kind => CATALOG_KIND_OPTIONS.find(option => option.value === kind)?.label },
-    { title: 'Единица', dataIndex: 'unitName', width: 130 },
-    { title: 'Базовая цена, ₸', dataIndex: 'basePrice', align: 'right', width: 155, render: price => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{price === null ? 'Не задана' : Number(price).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> },
-    { title: '1C_key', dataIndex: 'refKey1c', width: 220, render: value => <span style={{ overflowWrap: 'anywhere' }}>{value || '—'}</span> },
-    { title: 'Порядок', dataIndex: 'sortOrder', width: 100 },
-    { title: 'Активен', dataIndex: 'isActive', width: 125, render: active => <Tag color={active ? 'green' : undefined}>{active ? 'Активен' : 'В архиве'}</Tag> },
-    { title: 'Действия', width: 130, render: (_, item) => <Button style={{ minHeight: 40 }} onClick={() => start(item)}>{canManage ? 'Изменить' : 'Просмотр'}</Button> },
+    { title: 'ID', dataIndex: 'id', width: 56 },
+    { title: 'Название / артикул', dataIndex: 'name', render: (_, item) => <div style={{ overflowWrap: 'anywhere' }}><Typography.Text strong>{item.name}</Typography.Text><br /><Typography.Text type="secondary">{item.sku ?? 'Без артикула'}</Typography.Text></div> },
+    { title: 'Тип', dataIndex: 'kind', width: 96, render: kind => CATALOG_KIND_OPTIONS.find(option => option.value === kind)?.label },
+    { title: 'Единица', dataIndex: 'unitName', width: 82 },
+    { title: 'Базовая цена, ₸', dataIndex: 'basePrice', align: 'right', width: 108, render: price => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{price === null ? 'Не задана' : Number(price).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> },
+    { title: '1C_key', dataIndex: 'refKey1c', width: 96, render: value => value ? <span title={value} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span> : '—' },
+    { title: 'Порядок', dataIndex: 'sortOrder', width: 78 },
+    ...(nomenclatureSupported ? [
+      { title: 'Тип номенклатуры', dataIndex: 'nomenclatureType', width: 108, ellipsis: true, render: (value: string | null) => value || '—' },
+      { title: 'Категория номенклатуры', dataIndex: 'nomenclatureCategory', width: 116, ellipsis: true, render: (value: string | null) => <CategoryCell value={value} /> },
+      { title: 'Примечание', dataIndex: 'note', width: 130, render: (value: string | null) => <NoteCell value={value} /> },
+    ] as ColumnsType<CatalogItem> : []),
+    { title: 'Активен', dataIndex: 'isActive', width: 96, render: active => <Tag color={active ? 'green' : undefined}>{active ? 'Активен' : 'В архиве'}</Tag> },
+    { title: 'Действия', width: 112, render: (_, item) => <Button style={{ minHeight: 40 }} onClick={() => start(item)}>{canManage ? 'Изменить' : 'Просмотр'}</Button> },
   ];
 
   if (!canView) return <Alert type="warning" showIcon message="Нет доступа к справочнику «Товары и услуги»" />;
@@ -119,7 +129,7 @@ export function CatalogItemsList() {
         {canManage && <Button type="primary" icon={<PlusOutlined />} disabled={loading || !!loadError || !units.length} onClick={() => start()}>Создать позицию</Button>}
       </Space>
       {loadError ? <Alert type="error" showIcon message="Не удалось загрузить справочник" description={loadError} action={<Button onClick={() => void load()}>Повторить</Button>} />
-        : <Table<CatalogItem> rowKey="id" loading={loading} dataSource={items} columns={columns} scroll={{ x: 1375 }} locale={{ emptyText: query.q || query.kind || query.active === 'false' ? 'По выбранным условиям позиций нет' : 'Каталог пока пуст. Создайте первый товар или услугу.' }} pagination={{ total, current: Math.floor(query.offset / query.limit) + 1, pageSize: query.limit, pageSizeOptions: [25, 50, 100], showSizeChanger: true, onChange: (page, limit) => setQuery(previous => ({ ...previous, limit, offset: (page - 1) * limit })) }} />}
+        : <Table<CatalogItem> rowKey="id" loading={loading} dataSource={items} columns={columns} tableLayout="fixed" scroll={{ x: nomenclatureSupported ? 1260 : 900 }} locale={{ emptyText: query.q || query.kind || query.active === 'false' ? 'По выбранным условиям позиций нет' : 'Каталог пока пуст. Создайте первый товар или услугу.' }} pagination={{ total, current: Math.floor(query.offset / query.limit) + 1, pageSize: query.limit, pageSizeOptions: [25, 50, 100], showSizeChanger: true, onChange: (page, limit) => setQuery(previous => ({ ...previous, limit, offset: (page - 1) * limit })) }} />}
       {!loading && !loadError && units.length === 0 && <Alert type="warning" showIcon message="Нет единиц измерения" description="Сначала добавьте единицу в справочнике «Единицы измерения», затем нажмите «Обновить»." />}
     </Space>
     <Modal open={open} title={editing ? (canManage ? 'Изменить позицию' : 'Карточка позиции') : 'Новая позиция'} onCancel={close} closable={!saving && !uncertain} maskClosable={false} keyboard={!saving && !uncertain} width={620} footer={<Space>
@@ -135,6 +145,7 @@ export function CatalogItemsList() {
         <Form.Item name="unitId" label="Единица измерения" rules={[{ required: true, message: 'Выберите единицу измерения' }]}><Select showSearch optionFilterProp="label" options={units.map(unit => ({ value: unit.id, label: `${unit.name}${unit.symbol ? ` (${unit.symbol})` : ''}` }))} /></Form.Item>
         <Form.Item name="basePrice" label="Базовая цена, ₸" extra="Пусто — цена не задана; 0 — бесплатная позиция."><InputNumber<string> stringMode controls={false} style={{ width: '100%' }} placeholder="Не задана" decimalSeparator="," /></Form.Item>
         <Form.Item name="description" label="Описание"><Input.TextArea rows={3} maxLength={2000} showCount /></Form.Item>
+        {nomenclatureSupported && <Row gutter={16}><NomenclatureFormItems colProps={{ xs: 24, sm: 12 }} /></Row>}
         <Divider>Служебные поля</Divider>
         <Form.Item name="refKey1c" label="1C_key" extra="Необязательно. UUID записи в 1С; уникален, включая архив. Автоматически не создаётся."><Input maxLength={38} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" /></Form.Item>
         <Form.Item name="sortOrder" label="Порядок сортировки" rules={[{ required: true, message: 'Укажите порядок сортировки' }]}><InputNumber min={-32768} max={32767} style={{ width: '100%' }} /></Form.Item>

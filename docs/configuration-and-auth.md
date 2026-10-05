@@ -379,3 +379,53 @@ Snapshot export/import работает через NestJS, когда
 
 Для актуального read-model должны быть применены все audit migrations, включая
 `backend/db/migrations/012_audit_log_payment_deadline_dimensions.sql`.
+
+### Справочник плёнок: импорт каталога 1С
+
+`BACKEND_FILM_CATALOG_IMPORT_ENABLED` (backend, по умолчанию `false`) включает
+импорт каталога плёнок: `/api/v1/catalog-imports*` (черновик, сопоставление,
+применение, отмена, откат, выгрузка в Excel). При выключенном флаге эти маршруты
+отвечают `404`. Кнопку «Импорт каталога 1С» на странице `/films` показывает
+frontend-флаг `RUNTIME_CONFIG_FILM_CATALOG_IMPORT`.
+
+Права: импорт — `references.manage`; источник «Зеркало 1С» и пакеты, созданные из
+него, — дополнительно `onec.view` (проверяется при каждом запросе к пакету).
+История названий `GET /api/v1/films/{filmId}/name-history` и поиск похожих
+`GET /api/v1/films/similar` — `references.view`, работают без флага.
+
+Колонки `films.canonical_film_id`, `films.catalog_key` и `films.ref_key_1c`
+записывает только backend: Hasura разрешает запись в `films` лишь по явному списку
+колонок, а триггер базы отклоняет изменение служебных колонок вне операции
+импорта. Порядок включения:
+
+1. применить миграции `202_film_catalog_import.sql`, `212_films_note.sql` и
+   `234_reference_nomenclature_note.sql` (аддитивны, совместимы с прежними frontend/backend) и
+   перезагрузить схему Hasura (`reload_metadata`), чтобы новые колонки стали доступны для чтения;
+2. выкатить backend этой версии — ДО frontend: frontend сопоставляет плёнки импортируемых
+   заказов по индексу названий `GET /api/v1/films/name-index`, а без него (прежний backend)
+   каждая плёнка импорта требует ручного выбора;
+3. выкатить frontend (читает новые колонки, форма `/films` больше не отправляет `ref_key_1c`);
+4. применить Hasura metadata для `films` (явный список колонок записи + preset
+   `edited_by`; точечно, без замены всей metadata — `ops/hasura/films-write-permissions.sh plan|apply`) — только после шага 3, иначе прежний frontend не сможет сохранить плёнку;
+5. выставить `BACKEND_FILM_CATALOG_IMPORT_ENABLED=true`, пересоздать backend и
+   включить `RUNTIME_CONFIG_FILM_CATALOG_IMPORT`.
+
+Откат:
+
+- до шага 4 и пока в `film_name_history` нет записей (плёнки не переименовывались и не
+  объединялись) — обычный: сначала вернуть frontend, затем backend; миграции остаются;
+- после шага 4 (права Hasura) либо после первого переименования/объединения плёнки frontend и
+  backend ниже этой версии НЕ откатываются: прежний frontend подбирает плёнку импортируемого заказа
+  только по справочнику (после переименований — молча не ту) и отправляет в Hasura колонку
+  `ref_key_1c`, которую metadata уже не принимает. Аварийный путь — исправлять вперёд:
+  ошибочно применённый пакет сначала откатить командой «Откатить» в мастере импорта (она, как и
+  весь `/api/v1/catalog-imports*`, работает только при включённом
+  `BACKEND_FILM_CATALOG_IMPORT_ENABLED`), и лишь затем выключить импорт
+  (`BACKEND_FILM_CATALOG_IMPORT_ENABLED=false`, `RUNTIME_CONFIG_FILM_CATALOG_IMPORT=false`). Если
+  флаги уже выключены, а пакет нужно откатить: включить оба флага, откатить пакет, выключить снова.
+- backend ниже этой версии при выложенном frontend этой версии не откатывать ни на каком шаге:
+  без индекса названий каждая плёнка импорта требует ручного выбора.
+
+Права insert/update `films` в Hasura включают колонку `note` (frontend запрашивает её у Hasura).
+Минимальная версия backend для черновиков из файла решений — эта; перед откатом
+backend ниже неё отменить черновики с источником «Файл решений».

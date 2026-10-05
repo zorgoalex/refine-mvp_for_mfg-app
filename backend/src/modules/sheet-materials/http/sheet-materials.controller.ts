@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser, RequestWithCurrentUser } from '../../../permissions/current-user';
 import { SheetMaterialsService } from '../application/sheet-materials.service';
-import type { SheetMaterialsContext, SheetMaterialTypeDto } from '../application/sheet-materials.types';
+import type { OnecItemOptionDto, SheetMaterialsContext, SheetMaterialTypeDto } from '../application/sheet-materials.types';
 import { SheetMaterialsRuntimeConfigService } from './sheet-materials-runtime-config.service';
 
 const inputSchema = z.object({
@@ -32,6 +32,9 @@ const inputSchema = z.object({
   isActive: z.boolean().optional(),
   isCuttable: z.boolean().optional(),
   sortOrder: z.number().int().min(-32768).max(32767).optional(),
+  nomenclatureType: z.string().trim().max(50).nullable().optional(),
+  nomenclatureCategory: z.string().trim().max(150).nullable().optional(),
+  note: z.string().trim().max(2000).nullable().optional(),
 });
 const createSchema = inputSchema.strict();
 const updateSchema = inputSchema.extend({ version: z.number().int().min(0) }).strict();
@@ -55,6 +58,22 @@ export class SheetMaterialsController {
     this.assertEnabled();
     const ctx = this.context(request);
     return this.service.list({ ...ctx, includeInactive: includeInactive === 'true' });
+  }
+
+  // До ':id': иначе «capabilities» разбирался бы как идентификатор (так отвечает прежний backend — FE считает поля неподдержанными).
+  @ApiOperation({ operationId: 'getSheetMaterialCapabilities', summary: 'Fields this backend supports for sheet material types' })
+  @Get('capabilities')
+  async capabilities(@Req() request: RequestWithCurrentUser): Promise<{ nomenclatureFields: true; onecItemPicker: true }> {
+    this.assertEnabled();
+    return this.service.capabilities(this.context(request));
+  }
+
+  // До ':id' (см. capabilities). Позиции номенклатуры 1С для выбора в форме; право — sheet_materials.manage.
+  @ApiOperation({ operationId: 'listSheetMaterialOnecItems', summary: '1C nomenclature items to link a sheet material type to' })
+  @Get('onec-items')
+  async onecItems(@Req() request: RequestWithCurrentUser): Promise<{ available: boolean; items: OnecItemOptionDto[] }> {
+    this.assertEnabled();
+    return this.service.onecItems(this.context(request));
   }
 
   @ApiOperation({ operationId: 'getSheetMaterialType', summary: 'Get a sheet material type' })

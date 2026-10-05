@@ -7,6 +7,8 @@ import { Space, Badge, Tag, Button } from 'antd';
 import { useHighlightRow } from '../../hooks/useHighlightRow';
 import { LocalizedList } from '../../components/LocalizedList';
 import { can } from '../../utils/permissions';
+import { CategoryCell, NoteCell } from '../../components/NomenclatureFields';
+import { useSheetMaterialNomenclature } from './useSheetMaterialNomenclature';
 
 export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
   const canManage = can('sheet_materials.manage');
@@ -20,6 +22,7 @@ export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
     },
   });
   const { highlightProps } = useHighlightRow('sheet_material_type_id', tableProps.dataSource);
+  const nomenclature = useSheetMaterialNomenclature();
   const { show } = useNavigation();
 
   const typeIds = useMemo(
@@ -123,6 +126,9 @@ export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
           filters={[{ text: 'Да', value: true }, { text: 'Нет', value: false }]}
         />
         <Table.Column dataIndex="color" title="Цвет" render={(v) => v ?? '—'} />
+        <Table.Column title="Тип номенклатуры" key="nomenclatureType" ellipsis render={(_, record: any) => nomenclature.byId.get(Number(record.sheet_material_type_id))?.nomenclatureType || '—'} />
+        <Table.Column title="Категория номенклатуры" key="nomenclatureCategory" ellipsis render={(_, record: any) => <CategoryCell value={nomenclature.byId.get(Number(record.sheet_material_type_id))?.nomenclatureCategory} />} />
+        <Table.Column title="Примечание" key="note" width={160} render={(_, record: any) => <NoteCell value={nomenclature.byId.get(Number(record.sheet_material_type_id))?.note} />} />
         <Table.Column
           dataIndex="is_active"
           title="Активен"

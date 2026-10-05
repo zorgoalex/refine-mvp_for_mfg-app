@@ -1,3 +1,4 @@
+import type { FilmReferenceResolution, FilmReferenceWriteInput } from '../domain/film-reference-resolution';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import type { TransactionClient } from '../../../database/database.types';
@@ -322,6 +323,11 @@ export interface OrderRestoreOutboxInput extends OrderRestoreAuditInput {
 
 export interface OrderWriteUnitOfWork {
   setSessionUser(userId: string): Promise<void>;
+  /**
+   * Каталог плёнок: новые/изменённые ссылки на дубль → канон под FOR SHARE,
+   * неактивная итоговая запись → 422 FILM_INACTIVE. Optional in test doubles.
+   */
+  resolveFilmReferencesForWrite?(orderId: number | null, input: FilmReferenceWriteInput): Promise<FilmReferenceResolution>;
   getTransactionClient(): TransactionClient;
   prepareCatalogLines(orderId: number | null, input: unknown, deleted: unknown, user: CurrentUser): Promise<OrderCatalogPlan>;
   persistCatalogLines(orderId: number, plan: OrderCatalogPlan, user: CurrentUser, requestId: string): Promise<void>;

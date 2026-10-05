@@ -18,6 +18,9 @@ export interface SheetMaterialTypeInput {
   isActive?: boolean;
   isCuttable?: boolean;
   sortOrder?: number;
+  nomenclatureType?: string | null;
+  nomenclatureCategory?: string | null;
+  note?: string | null;
 }
 
 export interface SheetMaterialTypeDto {
@@ -37,10 +40,47 @@ export interface SheetMaterialTypeDto {
   isActive: boolean;
   isCuttable: boolean;
   sortOrder: number;
+  /** Нет у backend до миграции 234. */
+  nomenclatureType?: string | null;
+  nomenclatureCategory?: string | null;
+  note?: string | null;
   version: number;
 }
 
+/** Позиция номенклатуры 1С для выбора в форме листового материала. */
+export interface OnecItemOption {
+  refKey: string;
+  code: string | null;
+  name: string;
+  unitName: string | null;
+  categoryName: string | null;
+  nomenclatureType: string | null;
+  deletionMark: boolean;
+  linkedSheetMaterialTypeId: number | null;
+  linkedName: string | null;
+}
+
 export const sheetMaterialsApi = {
+  list(includeInactive = false): Promise<SheetMaterialTypeDto[]> {
+    return httpClient.get<SheetMaterialTypeDto[]>(
+      includeInactive ? `${apiRoutes.sheetMaterials.list}?includeInactive=true` : apiRoutes.sheetMaterials.list,
+    );
+  },
+
+  /** Возможности backend; прежний backend отвечает ошибкой («capabilities» как id) — поля считаются неподдержанными. */
+  capabilities(): Promise<{ nomenclatureFields?: boolean; onecItemPicker?: boolean }> {
+    return httpClient.get<{ nomenclatureFields?: boolean; onecItemPicker?: boolean }>(apiRoutes.sheetMaterials.capabilities);
+  },
+
+  /** Позиции номенклатуры 1С для поля «Позиция 1С»; `available: false` — данных 1С нет, ключ вводится вручную. */
+  onecItems(): Promise<{ available: boolean; items: OnecItemOption[] }> {
+    return httpClient.get<{ available: boolean; items: OnecItemOption[] }>(apiRoutes.sheetMaterials.onecItems);
+  },
+
+  get(id: number): Promise<SheetMaterialTypeDto> {
+    return httpClient.get<SheetMaterialTypeDto>(apiRoutes.sheetMaterials.byId(id));
+  },
+
   async create(input: SheetMaterialTypeInput): Promise<SheetMaterialTypeDto> {
     const response = await httpClient.post<SheetMaterialTypeDto>(
       apiRoutes.sheetMaterials.list,

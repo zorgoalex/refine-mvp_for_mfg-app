@@ -6,6 +6,9 @@ vi.mock('@nestjs/common', () => ({
   Delete: () => () => undefined,
   Get: () => () => undefined,
   HttpCode: () => () => undefined,
+  Inject: () => () => undefined,
+  Injectable: () => () => undefined,
+  Optional: () => () => undefined,
   Param: () => () => undefined,
   Post: () => () => undefined,
   Put: () => () => undefined,
@@ -68,5 +71,18 @@ describe('SheetMaterialsController', () => {
     const ctrl = new SheetMaterialsController(svc, rc);
     await expect(ctrl.create(reqUser, { ...validBody, refKey1c: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' })).resolves.toBeDefined();
     await expect(ctrl.create(reqUser, { ...validBody, refKey1c: 'not-a-uuid' })).rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it('reports supported fields through the service (permission check lives there); disabled feature → 503', async () => {
+    const service = { capabilities: vi.fn().mockReturnValue({ nomenclatureFields: true }) } as any;
+    const on = new SheetMaterialsController(service, { getFeatureFlags: () => ({ sheetMaterialsEnabled: true }) } as any);
+    await expect(on.capabilities(reqUser)).resolves.toEqual({ nomenclatureFields: true });
+    expect(service.capabilities).toHaveBeenCalledTimes(1);
+    const off = new SheetMaterialsController(service, { getFeatureFlags: () => ({ sheetMaterialsEnabled: false }) } as any);
+    await expect(off.capabilities(reqUser)).rejects.toMatchObject({ statusCode: 503 });
+    // Список позиций 1С — тот же порядок: флаг модуля, затем сервис (право проверяет он).
+    service.onecItems = vi.fn().mockResolvedValue({ available: false, items: [] });
+    await expect(on.onecItems(reqUser)).resolves.toEqual({ available: false, items: [] });
+    await expect(off.onecItems(reqUser)).rejects.toMatchObject({ statusCode: 503 });
   });
 });

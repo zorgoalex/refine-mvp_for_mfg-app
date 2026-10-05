@@ -93,6 +93,7 @@ const FilmList = lazy(async () => ({ default: (await import("./pages/films/list"
 const FilmCreate = lazy(async () => ({ default: (await import("./pages/films/create")).FilmCreate }));
 const FilmEdit = lazy(async () => ({ default: (await import("./pages/films/edit")).FilmEdit }));
 const FilmShow = lazy(async () => ({ default: (await import("./pages/films/show")).FilmShow }));
+const CatalogImportPage = lazy(async () => ({ default: (await import("./pages/films/catalog-import/CatalogImportPage")).CatalogImportPage }));
 
 const ClientList = lazy(async () => ({ default: (await import("./pages/clients/list")).ClientList }));
 const ClientCreate = lazy(async () => ({ default: (await import("./pages/clients/create")).ClientCreate }));
@@ -916,6 +917,8 @@ const ThemedApp = () => {
                     <Route path="create" element={<FilmCreate />} />
                     <Route path="edit/:id" element={<FilmEdit />} />
                     <Route path="show/:id" element={<FilmShow />} />
+                    <Route path="catalog-import" element={<CatalogImportPage />} />
+                    <Route path="catalog-import/:id" element={<CatalogImportPage />} />
                   </Route>
                   <Route path="/clients" >
                     <Route index element={<ClientList />} />

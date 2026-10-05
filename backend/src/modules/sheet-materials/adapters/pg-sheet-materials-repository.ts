@@ -28,7 +28,13 @@ import type {
 } from '../application/sheet-materials.types';
 
 const SELECT_COLUMNS = `sheet_material_type_id, name, material_type_id, unit_id, thickness_mm, width_mm, height_mm,
-  supplier_id, vendor_id, supplier_article, texture, color, ref_key_1c::text, is_active, is_cuttable, sort_order, version`;
+  supplier_id, vendor_id, supplier_article, texture, color, ref_key_1c::text, is_active, is_cuttable, sort_order,
+  nomenclature_type, nomenclature_category, note, version`;
+
+/** Текст поля: обрезка пробелов, пустое — NULL. */
+const text = (value: string | null | undefined): string | null => (value == null ? null : value.trim() || null);
+/** При изменении: не переданное поле сохраняет прежнее значение. */
+const kept = (value: string | null | undefined, previous: string | null): string | null => (value === undefined ? previous : text(value));
 
 /**
  * Backend-owned sheet-material-type CRUD (SP1). Every write is audited in-tx
@@ -70,8 +76,9 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
         const inserted = await tx.query(
           `INSERT INTO sheet_material_types
              (name, material_type_id, unit_id, thickness_mm, width_mm, height_mm,
-              supplier_id, vendor_id, supplier_article, texture, color, ref_key_1c, is_active, is_cuttable, sort_order, created_by, edited_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::uuid,COALESCE($13,true),COALESCE($14,true),COALESCE($15,100),$16,$16)
+              supplier_id, vendor_id, supplier_article, texture, color, ref_key_1c, is_active, is_cuttable, sort_order,
+              nomenclature_type, nomenclature_category, note, created_by, edited_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::uuid,COALESCE($13,true),COALESCE($14,true),COALESCE($15,100),$17,$18,$19,$16,$16)
            RETURNING ${SELECT_COLUMNS}`,
           [
             input.name,
@@ -90,6 +97,9 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
             input.isCuttable ?? null,
             input.sortOrder ?? null,
             numOrNull(command.currentUser.id),
+            text(input.nomenclatureType),
+            text(input.nomenclatureCategory),
+            text(input.note),
           ],
         );
         const row = mapRow(inserted.rows[0]);
@@ -131,6 +141,7 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
              name=$2, material_type_id=$3, unit_id=$4, thickness_mm=$5, width_mm=$6, height_mm=$7,
              supplier_id=$8, vendor_id=$9, supplier_article=$10, texture=$11, color=$12, ref_key_1c=$13::uuid,
              is_active=COALESCE($14, is_active), is_cuttable=COALESCE($15, is_cuttable), sort_order=COALESCE($16, sort_order),
+             nomenclature_type=$18, nomenclature_category=$19, note=$20,
              version=version+1, edited_by=$17, updated_at=now()
            WHERE sheet_material_type_id=$1
            RETURNING ${SELECT_COLUMNS}`,
@@ -152,6 +163,9 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
             input.isCuttable ?? null,
             input.sortOrder ?? null,
             numOrNull(command.currentUser.id),
+            kept(input.nomenclatureType, before.nomenclatureType),
+            kept(input.nomenclatureCategory, before.nomenclatureCategory),
+            kept(input.note, before.note),
           ],
         );
         const after = mapRow(updated.rows[0]);
@@ -264,6 +278,9 @@ function mapRow(r: Record<string, unknown>): SheetMaterialTypeDto {
     isActive: Boolean(r.is_active),
     isCuttable: r.is_cuttable == null ? true : Boolean(r.is_cuttable),
     sortOrder: toNum(r.sort_order),
+    nomenclatureType: r.nomenclature_type == null ? null : String(r.nomenclature_type),
+    nomenclatureCategory: r.nomenclature_category == null ? null : String(r.nomenclature_category),
+    note: r.note == null ? null : String(r.note),
     version: toNum(r.version),
   };
 }
@@ -285,6 +302,9 @@ function diffShape(s: SheetMaterialTypeDto): Record<string, unknown> {
     isActive: s.isActive,
     isCuttable: s.isCuttable,
     sortOrder: s.sortOrder,
+    nomenclatureType: s.nomenclatureType,
+    nomenclatureCategory: s.nomenclatureCategory,
+    note: s.note,
   };
 }
 

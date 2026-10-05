@@ -6,6 +6,10 @@ import { useParams } from 'react-router-dom';
 import { can } from '../../utils/permissions';
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useRecordTabTitle } from '../../utils/recordTitle';
+import { NomenclatureView } from '../../components/NomenclatureFields';
+import { useSheetMaterialCapabilities, useSheetMaterialNomenclature } from './useSheetMaterialNomenclature';
+import { useQuery } from '@tanstack/react-query';
+import { sheetMaterialsApi } from '../../api/sheetMaterialsApi';
 
 const { Title } = Typography;
 
@@ -24,6 +28,18 @@ export const SheetMaterialShow: React.FC<IResourceComponentsProps> = () => {
     preferredFields: ['name'],
   });
 
+  const nomenclature = useSheetMaterialNomenclature();
+  // Название позиции 1С — тем, кто правит справочник (список позиций 1С отдаётся только им); остальным — ключ.
+  const capabilities = useSheetMaterialCapabilities(canManage);
+  const onecItemsQuery = useQuery({
+    queryKey: ['sheet-materials', 'onec-items'],
+    queryFn: () => sheetMaterialsApi.onecItems(),
+    enabled: canManage && capabilities.onecItemPicker,
+    retry: false,
+    staleTime: 60_000,
+  });
+  const onecKey = typeof record?.ref_key_1c === 'string' ? record.ref_key_1c.toLowerCase() : null;
+  const onecItem = onecKey ? onecItemsQuery.data?.items.find((item) => item.refKey === onecKey) : undefined;
   const { data: typeOne } = useOne({ resource: 'material_types', id: record?.material_type_id, queryOptions: { enabled: !!record?.material_type_id } });
   const { data: unitOne } = useOne({ resource: 'units', id: record?.unit_id, queryOptions: { enabled: !!record?.unit_id } });
   const { data: supplierOne } = useOne({ resource: 'suppliers', id: record?.supplier_id, queryOptions: { enabled: !!record?.supplier_id } });
@@ -68,7 +84,16 @@ export const SheetMaterialShow: React.FC<IResourceComponentsProps> = () => {
       </Row>
       <Divider />
       <Row gutter={[16, 16]}>
-        <Col span={8}><Title level={5}>Ключ 1C</Title><TextField value={record?.ref_key_1c ?? '—'} /></Col>
+        <NomenclatureView values={nomenclature.byId.get(Number(record?.sheet_material_type_id))} />
+      </Row>
+      <Divider />
+      <Row gutter={[16, 16]}>
+        <Col span={8}>
+          <Title level={5}>Позиция 1С</Title>
+          {onecItem
+            ? <><TextField value={[onecItem.name, onecItem.unitName, onecItem.categoryName].filter(Boolean).join(' · ')} /><br /><Typography.Text type="secondary" style={{ fontSize: 12 }}>{record?.ref_key_1c}</Typography.Text></>
+            : <TextField value={record?.ref_key_1c ?? '—'} />}
+        </Col>
         <Col span={8}><Title level={5}>Conversion Key</Title><TextField value={record?.conversion_key ?? '—'} /></Col>
         <Col span={8}><Title level={5}>Создан</Title><TextField value={record?.created_by || '—'} /></Col>
       </Row>

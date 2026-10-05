@@ -420,6 +420,8 @@ export const envSchema = z
     BACKEND_WHATSAPP_CLEANUP_OWNER: z.enum(['none', 'in_process', 'external']).default('none'),
     /** 1C agent integration (E1): mTLS agent API on a dedicated listener + admin API. */
     BACKEND_ENABLE_ONEC_AGENT: booleanFromEnv.default(false),
+    // Импорт каталога плёнок из 1С (миграции 202, 212); до включения применить миграции.
+    BACKEND_FILM_CATALOG_IMPORT_ENABLED: booleanFromEnv.default(false),
     ONEC_AGENT_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
     /** Shared secret Traefik adds to agent requests; proves the request came through the mTLS router. */
     ONEC_INGRESS_SECRET: optionalTrimmedStringFromEnv,
