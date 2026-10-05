@@ -20,8 +20,7 @@ import {
   resolveOrderFinancialVisibility,
 } from '../utils/orderFinancialVisibility';
 import {
-  canViewResourceByRoleVisibility,
-  getCurrentUserRoleKey,
+  canViewResourceForUser,
   normalizeRoleVisibilityMatrix,
 } from '../utils/resourceVisibility';
 import { useSiderMenuItems } from '../utils/siderMenuItems';
@@ -35,7 +34,6 @@ export const DefaultRootRedirect: React.FC = () => {
   const currentUser = featureFlags.useBackendPermissions
     ? authSession.getUser()
     : authStorage.getUser();
-  const currentRoleKey = getCurrentUserRoleKey(currentUser);
   const roleVisibilityMatrix = normalizeRoleVisibilityMatrix(
     getSetting(SETTING_KEYS.RESOURCE_VISIBILITY_BY_ROLE),
   );
@@ -58,8 +56,8 @@ export const DefaultRootRedirect: React.FC = () => {
   const canViewNavigation = useCallback(
     (name: string) =>
       canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions, canViewFinancials) &&
-      canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
-    [canViewFinancials, currentRoleKey, currentUser, roleVisibilityMatrix],
+      canViewResourceForUser(name, currentUser, roleVisibilityMatrix),
+    [canViewFinancials, currentUser, roleVisibilityMatrix],
   );
   const menuConfig = useMemo(() => getSidebarMenuConfig(variant), [variant]);
   const noopNavigate = useCallback(() => {}, []);
