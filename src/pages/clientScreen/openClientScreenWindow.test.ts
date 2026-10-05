@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { CLIENT_SCREEN_PATH } from './clientScreenPath';
 import { clientScreenWindowFeatures, pickCustomerScreen } from './openClientScreenWindow';
-import { orderFormMirrorTabs, orderFormNames } from './useClientScreenOrderBridge';
+import { clientScreenControlModel } from './clientScreenControlModel';
+import type { ClientScreenPresenterView } from './clientScreenPresenter';
+import { mirroredTab, orderFormMirrorTabs, orderFormNames } from './useClientScreenOrderBridge';
 
 describe('opening the customer window', () => {
   it('always opens with noopener, so the drafts in sessionStorage are never copied into it', () => {
@@ -42,5 +44,31 @@ describe('order form bridge helpers', () => {
     expect([names.client(6), names.paymentStatus(1), names.edgeType(2), names.client(null), names.film(undefined)]).toEqual([undefined, undefined, undefined, undefined, undefined]);
     const empty = orderFormNames(null, () => undefined);
     expect([empty.client(5), empty.film(8)]).toEqual([undefined, undefined]);
+  });
+});
+
+describe('customer screen control in the order header', () => {
+  const view = (over: Partial<ClientScreenPresenterView> = {}): ClientScreenPresenterView =>
+    ({ phase: 'idle', presentedOrderKey: null, lost: null, workstationDisabled: false, policyStale: false, ...over });
+
+  it('offers the emergency switch-off in every tab that is not switched off — also in a tab that presents nothing', () => {
+    // Tab B: nothing presented here; another browser tab may be presenting.
+    expect(clientScreenControlModel(view(), '7', true)).toMatchObject({ mode: 'idle', label: 'Показать клиенту', canPresent: true, emergency: true });
+    expect(clientScreenControlModel(view({ presentedOrderKey: '9', phase: 'owner' }), '7', true)).toMatchObject({ mode: 'idle', label: 'Показать этот заказ', emergency: true });
+    expect(clientScreenControlModel(view({ presentedOrderKey: '7', phase: 'owner' }), '7', true)).toEqual({ mode: 'presenting', waiting: false, emergency: true });
+    expect(clientScreenControlModel(view({ presentedOrderKey: '7', phase: 'claiming' }), '7', true)).toMatchObject({ mode: 'presenting', waiting: true });
+    expect(clientScreenControlModel(view({ presentedOrderKey: '7', phase: 'owner', policyStale: true }), '7', true)).toMatchObject({ waiting: true });
+    expect(clientScreenControlModel(view({ workstationDisabled: true, presentedOrderKey: '7' }), '7', true)).toEqual({ mode: 'workstation-off' });
+  });
+
+  it('does not offer to present while the form has no backend reference names (the customer would see dashes)', () => {
+    const model = clientScreenControlModel(view(), '7', false);
+    expect(model).toMatchObject({ mode: 'idle', canPresent: false, emergency: true });
+    expect(model.mode === 'idle' && model.hint).toContain('справочники');
+  });
+
+  it('maps the manager tab to a mirrored tab or to nothing', () => {
+    expect(['basic', 'details', 'dates', 'finance', 'services'].map(mirroredTab)).toEqual(['basic', 'details', 'dates', 'finance', 'services']);
+    expect(['hdf', 'cut', 'workshops', 'requirements', 'additional', ''].map(mirroredTab)).toEqual([null, null, null, null, null, null]);
   });
 });

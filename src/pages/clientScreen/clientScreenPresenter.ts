@@ -1,5 +1,6 @@
 import {
-  buildClientScreenSnapshot, createClientScreenIdMap, filterClientScreenUi, type ClientScreenIdFor, type ClientScreenOrderSource,
+  buildClientScreenSnapshot, createClientScreenIdMap, filterClientScreenUi, resolveClientScreenTab, type ClientScreenIdFor,
+  type ClientScreenOrderSource,
 } from './buildClientScreenSnapshot';
 import type { ClientScreenEnvironment } from './clientScreenEnvironment';
 import { CLIENT_SCREEN_VIEWER_LOCK, clientScreenMessage, clientScreenOwnerLock, type ClientScreenMessage } from './clientScreenProtocol';
@@ -7,7 +8,7 @@ import {
   POLICY_REFRESH_MS, createPublisherState, publisherApplyPolicy, publisherCanPublish, publisherClaim, publisherConfirm, publisherOnLockHeld,
   publisherOnMessage, publisherRelease, publisherState, publisherTick, publisherUi, type ClientScreenPolicy, type PublisherLoss, type PublisherState,
 } from './clientScreenPublisherCore';
-import type { ClientScreenSnapshot, ClientScreenUi } from './clientScreenSnapshotSchema';
+import type { ClientScreenSnapshot, ClientScreenTabKey, ClientScreenUi } from './clientScreenSnapshotSchema';
 import { clientScreenAllowed } from './clientScreenWorkstation';
 
 /**
@@ -19,7 +20,10 @@ import { clientScreenAllowed } from './clientScreenWorkstation';
 export interface ClientScreenOrderProvider {
   /** Current display state of the presented order. */
   getSource(): ClientScreenOrderSource;
-  /** Current interface state; row ids are resolved with `idFor`. */
+  /**
+   * Current interface state; row ids are resolved with `idFor`. `tab` is the manager's own tab (null
+   * on a tab the customer screen does not mirror); the presenter decides what the customer sees.
+   */
   getUi(idFor: ClientScreenIdFor): ClientScreenUi;
 }
 
@@ -58,6 +62,8 @@ export class ClientScreenPresenter {
   private blanked = false;
   /** The snapshot sent last; the interface state is filtered against it. */
   private lastSnapshot: ClientScreenSnapshot | null = null;
+  /** The tab the customer saw last: kept while the manager is on a tab the customer may not see. */
+  private lastCustomerTab: ClientScreenTabKey | null = null;
   private scheduled = false;
   /** One press of «Показать клиенту»: its number and the workstation generation read at the press. */
   private attempt = 0;
@@ -97,6 +103,7 @@ export class ClientScreenPresenter {
       this.idFor = createClientScreenIdMap(() => this.deps.env.randomId());
       this.blanked = false;
       this.lastSnapshot = null;
+      this.lastCustomerTab = null;
       // This press is valid only for the generation it was made in: a switch-off in between, even
       // one that is already undone, cancels it. Checked again after every asynchronous step.
       const attempt = ++this.attempt;
@@ -301,7 +308,11 @@ export class ClientScreenPresenter {
   /** The interface state goes through the same policy as the data, against the snapshot sent last. */
   private sendUi(): void {
     if (!this.provider || !this.lastSnapshot || !this.state.policy) return;
-    const ui = filterClientScreenUi(this.provider.getUi(this.idFor), this.lastSnapshot, this.state.policy.visibleCodes);
+    const raw = this.provider.getUi(this.idFor);
+    // A tab hidden by the settings, or not mirrored at all, leaves the customer on the last tab shown.
+    const tab = resolveClientScreenTab(raw.tab, this.lastCustomerTab, this.lastSnapshot);
+    this.lastCustomerTab = tab;
+    const ui = filterClientScreenUi({ ...raw, tab }, this.lastSnapshot, this.state.policy.visibleCodes);
     const message = publisherUi(this.state, ui);
     if (message) this.send(message);
   }
@@ -344,6 +355,7 @@ export class ClientScreenPresenter {
     this.provider = null;
     this.orderKey = null;
     this.lastSnapshot = null;
+    this.lastCustomerTab = null;
     this.blanked = false;
     this.refresh();
   }

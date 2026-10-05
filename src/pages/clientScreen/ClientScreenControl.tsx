@@ -3,6 +3,7 @@ import { Button, Popconfirm, Space, Tag, Tooltip, message } from 'antd';
 import { DesktopOutlined, EyeInvisibleOutlined, PoweroffOutlined } from '@ant-design/icons';
 import { getClientScreenPresenter, useClientScreenView } from './clientScreenInstance';
 import type { ClientScreenOrderProvider } from './clientScreenPresenter';
+import { clientScreenControlModel } from './clientScreenControlModel';
 import type { PublisherLoss } from './clientScreenPublisherCore';
 
 /**
@@ -18,7 +19,7 @@ const LOSS_TEXT: Partial<Record<PublisherLoss, { type: 'info' | 'warning' | 'err
 
 const compact: React.CSSProperties = { height: '27px', fontSize: '13px', padding: '0 12px' };
 
-export const ClientScreenControl: React.FC<{ orderKey: string; provider: ClientScreenOrderProvider }> = ({ orderKey, provider }) => {
+export const ClientScreenControl: React.FC<{ orderKey: string; provider: ClientScreenOrderProvider; referencesReady: boolean }> = ({ orderKey, provider, referencesReady }) => {
   const view = useClientScreenView();
   const announced = useRef<PublisherLoss | null>(null);
 
@@ -32,8 +33,9 @@ export const ClientScreenControl: React.FC<{ orderKey: string; provider: ClientS
   if (!view.available) return null;
   const presenter = getClientScreenPresenter();
   if (!presenter) return null;
+  const model = clientScreenControlModel(view, orderKey, referencesReady);
 
-  if (view.workstationDisabled) {
+  if (model.mode === 'workstation-off') {
     return (
       <Space size={6}>
         <Tag>Экран клиента отключён</Tag>
@@ -60,26 +62,24 @@ export const ClientScreenControl: React.FC<{ orderKey: string; provider: ClientS
     </Popconfirm>
   );
 
-  if (view.presentedOrderKey === orderKey) {
-    const waiting = view.phase !== 'owner' || view.policyStale;
+  if (model.mode === 'presenting') {
     return (
       <Space size={6}>
-        <Tag color={waiting ? 'default' : 'green'}>{waiting ? 'Открываем экран клиента…' : 'Клиент видит этот заказ'}</Tag>
+        <Tag color={model.waiting ? 'default' : 'green'}>{model.waiting ? 'Открываем экран клиента…' : 'Клиент видит этот заказ'}</Tag>
         <Button style={compact} icon={<EyeInvisibleOutlined />} onClick={() => presenter.hide(orderKey)}>Скрыть от клиента</Button>
         {emergency}
       </Space>
     );
   }
 
-  const other = view.presentedOrderKey !== null;
   return (
     <Space size={6}>
-      <Tooltip title={other ? 'Сейчас клиенту показан другой заказ. Нажмите, чтобы показать этот' : 'Показать этот заказ на экране клиента'}>
-        <Button style={compact} icon={<DesktopOutlined />} onClick={() => presenter.present(orderKey, provider)}>
-          {other ? 'Показать этот заказ' : 'Показать клиенту'}
+      <Tooltip title={model.hint}>
+        <Button style={compact} icon={<DesktopOutlined />} disabled={!model.canPresent} onClick={() => presenter.present(orderKey, provider)}>
+          {model.label}
         </Button>
       </Tooltip>
-      {other ? emergency : null}
+      {emergency}
     </Space>
   );
 };

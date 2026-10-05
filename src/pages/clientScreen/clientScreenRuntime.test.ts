@@ -524,6 +524,37 @@ describe('customer screen: manager windows and the customer window together', ()
     await until(() => a.getView().phase === 'idle' && a.getView().presentedOrderKey === null && a.getView().lost === 'error', 'presenter cleaned up');
   });
 
+  it('a tab hidden by the settings, or not mirrored at all, leaves the customer on the last tab shown', async () => {
+    const policy = { current: { enabled: true, visibleCodes: ['summary.number', 'tab.basic', 'basic.client', 'tab.details', 'details.name'], version: 3 } as ClientScreenPolicy };
+    const { startViewer, presenter } = setup(policy);
+    const viewer = startViewer();
+    await until(() => viewer.getRole() === 'viewer', 'viewer lock');
+    const a = presenter();
+    const shownOrder = order('A1');
+    shownOrder.source = { ...shownOrder.source, tabs: [{ key: 'basic', label: 'Основное' }, { key: 'details', label: 'Детали' }, { key: 'finance', label: 'Финансы' }] };
+    a.present('order-1', shownOrder);
+    await until(() => viewer.getState().ui?.tab === 'details', 'details shown');
+    // Finance is a mirrored tab, but the settings hide it: the customer stays on details, not on the first tab.
+    shownOrder.ui = { ...shownOrder.ui, tab: 'finance' };
+    a.notifyUi('order-1');
+    await wait(60);
+    expect(viewer.getState().ui?.tab).toBe('details');
+    // A tab the customer screen does not mirror at all.
+    shownOrder.ui = { ...shownOrder.ui, tab: null };
+    a.notifyUi('order-1');
+    await wait(60);
+    expect(viewer.getState().ui?.tab).toBe('details');
+    shownOrder.ui = { ...shownOrder.ui, tab: 'basic' };
+    a.notifyUi('order-1');
+    await until(() => viewer.getState().ui?.tab === 'basic', 'visible tab followed');
+    // A new presentation starts without a remembered tab.
+    a.hide('order-1');
+    shownOrder.ui = { ...shownOrder.ui, tab: 'finance' };
+    a.present('order-1', shownOrder);
+    await until(() => viewer.getState().ui !== null && viewer.getState().shown !== null, 'presented again');
+    expect(viewer.getState().ui?.tab).toBe('basic');
+  });
+
   it('a second customer window stays passive', async () => {
     const { startViewer } = setup();
     const first = startViewer();

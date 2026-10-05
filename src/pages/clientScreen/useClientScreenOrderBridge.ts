@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { OrderFormDataReferences } from '../../query/orderFormDataReferences';
 import { getOrderDraftStore } from '../../stores/orderFormStore';
-import { resolveClientScreenTab, type ClientScreenIdFor } from './buildClientScreenSnapshot';
+import type { ClientScreenIdFor } from './buildClientScreenSnapshot';
 import { getClientScreenPresenter } from './clientScreenInstance';
 import type { ClientScreenOrderProvider } from './clientScreenPresenter';
 import { CLIENT_SCREEN_TAB_KEYS, type ClientScreenTabKey, type ClientScreenUi } from './clientScreenSnapshotSchema';
@@ -22,6 +22,8 @@ export interface ClientScreenOrderBridgeInput {
   references: OrderFormDataReferences | null | undefined;
   sheetMaterialName: (id: number | null | undefined) => string | undefined;
   canViewServiceMoney: boolean;
+  /** This order's workspace tab is the one on screen (several order forms stay mounted at once). */
+  active: boolean;
 }
 
 const TAB_LABELS: Record<ClientScreenTabKey, [string, string]> = {
@@ -67,13 +69,24 @@ export function orderFormNames(
   };
 }
 
+/** The manager's tab as a mirrored tab key, or null when the customer screen has no such tab. */
+export function mirroredTab(activeTab: string): ClientScreenTabKey | null {
+  return (CLIENT_SCREEN_TAB_KEYS as readonly string[]).includes(activeTab) ? activeTab as ClientScreenTabKey : null;
+}
+
+function currentScrollRatio(): number {
+  const max = document.documentElement.scrollHeight - window.innerHeight;
+  return max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+}
+
 /** Detail columns in the form's default order; the manager's own column settings come in a later step. */
 const DEFAULT_DETAIL_COLUMNS = Object.keys(DETAIL_COLUMN_FIELDS);
 
 export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput): { provider: ClientScreenOrderProvider } {
   const latest = useRef(input);
   latest.current = input;
-  const lastVisibleTab = useRef<ClientScreenTabKey | null>(null);
+  // Scroll position of THIS order: sampled only while its workspace tab is on screen, kept otherwise.
+  const scrollRatio = useRef(0);
 
   const provider = useMemo<ClientScreenOrderProvider>(() => ({
     getSource() {
@@ -95,16 +108,13 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
     },
     getUi(_idFor: ClientScreenIdFor): ClientScreenUi {
       const current = latest.current;
-      const tabs = orderFormMirrorTabs(current.operational);
-      // On a tab the customer screen does not mirror, the customer keeps the last mirrored one.
-      const tab = resolveClientScreenTab(current.activeTab, lastVisibleTab.current, { tabs });
-      if ((CLIENT_SCREEN_TAB_KEYS as readonly string[]).includes(current.activeTab)) lastVisibleTab.current = current.activeTab as ClientScreenTabKey;
-      const max = document.documentElement.scrollHeight - window.innerHeight;
+      if (current.active) scrollRatio.current = currentScrollRatio();
       return {
-        tab,
+        // The manager's own tab; on a tab that is not mirrored the presenter keeps the customer's last one.
+        tab: mirroredTab(current.activeTab),
         focus: null,
         editing: null,
-        scroll: { ratio: max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0 },
+        scroll: { ratio: scrollRatio.current },
         page: null,
       };
     },
@@ -131,14 +141,15 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
 
   useEffect(() => {
     getClientScreenPresenter()?.notifyUi(orderKey);
-  }, [orderKey, input.activeTab]);
+  }, [orderKey, input.activeTab, input.active]);
 
   useEffect(() => {
     const presenter = getClientScreenPresenter();
     if (!presenter) return undefined;
     let frame = 0;
     const onScroll = () => {
-      if (frame || presenter.getView().presentedOrderKey !== orderKey) return;
+      // Another order's tab may be on screen: its scrolling is not this order's.
+      if (frame || !latest.current.active || presenter.getView().presentedOrderKey !== orderKey) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
         presenter.notifyUi(orderKey);

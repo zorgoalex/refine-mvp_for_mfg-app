@@ -149,11 +149,21 @@ try {
 
   await page.getByRole('button', { name: 'Показать клиенту' }).click();
   await expect(popup.getByRole('heading', { level: 1 })).toHaveText(/Заказ № |Ваш заказ/, { timeout: 30000 });
-  await page.getByRole('button', { name: 'Отключить экран клиента' }).click();
-  await page.getByRole('button', { name: 'Отключить', exact: true }).click();
+
+  // Emergency switch-off from ANOTHER app tab, which presents nothing itself.
+  const other = await context.newPage();
+  other.on('pageerror', (e) => errors.push(`manager-2: ${e.message.split('\n')[0]}`));
+  await other.goto(`${base}/orders/edit/${orderId}`, { waitUntil: 'domcontentloaded' });
+  const emergency = other.getByRole('button', { name: 'Отключить экран клиента' });
+  await expect(emergency).toBeVisible({ timeout: 120000 });
+  await expect(other.getByText('Клиент видит этот заказ')).toHaveCount(0);
+  await emergency.click();
+  await other.getByRole('button', { name: 'Отключить', exact: true }).click();
+  await expect(other.getByText('Экран клиента отключён')).toBeVisible({ timeout: 20000 });
   await expect(page.getByText('Экран клиента отключён')).toBeVisible({ timeout: 20000 });
   await expect.poll(async () => popup.isClosed() || await popup.getByText('Экран клиента отключён').count() > 0, { timeout: 20000 }).toBe(true);
-  results.push(`emergency switch-off: customer window ${popup.isClosed() ? 'closed' : 'shows the "disabled" splash'}`);
+  results.push(`emergency switch-off from an idle second tab: presenting tab stopped, customer window ${popup.isClosed() ? 'closed' : 'shows the "disabled" splash'}`);
+  await other.close();
   await page.getByRole('button', { name: 'Включить', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Показать клиенту' })).toBeVisible({ timeout: 20000 });
   results.push('re-enabled: the button is back, nothing is presented');
