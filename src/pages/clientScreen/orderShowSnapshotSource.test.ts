@@ -115,6 +115,65 @@ describe('buildOrderShowSource', () => {
   });
 });
 
+describe('view page: what the reviewer asked to pin down', () => {
+  const wireOf = (source: ReturnType<typeof buildOrderShowSource>, codes: readonly string[] = ALL) =>
+    JSON.stringify(buildClientScreenSnapshot(source, codes, createClientScreenIdMap(() => `id${Math.random().toString(36).slice(2, 10)}`)));
+
+  it.each([['price', '14 500 ₸/м²'], ['detail_cost', '16 385 ₸']])('grouping by %s without the right to see money sends no group titles', (groupField, title) => {
+    const base = input();
+    const groupedRows = [
+      { kind: 'detail', detail: base.details[0], groupIndex: 0 },
+      { kind: 'separator', groupIndex: 1, key: 's1', selectionKeys: [72], label: `РАЗДЕЛИТЕЛЬ ${title}` },
+      { kind: 'detail', detail: base.details[1], groupIndex: 1 },
+    ];
+    const source = buildOrderShowSource(input({ canViewFinancials: false, groupedRows, groupField, groupLabelOf: () => `ПЕРВАЯ ${title}` }));
+    expect(source.details.grouping).toBeNull();
+    const wire = wireOf(source);
+    for (const hidden of ['РАЗДЕЛИТЕЛЬ', 'ПЕРВАЯ', '14 500', '16 385']) expect(wire).not.toContain(hidden);
+    // With the right the same grouping is mirrored.
+    expect(buildOrderShowSource(input({ groupedRows, groupField, groupLabelOf: () => 'x' })).details.grouping?.groups).toHaveLength(2);
+  });
+
+  it('the snapshot builder itself drops group titles of a field the manager has no values for', () => {
+    const base = input();
+    const source = buildOrderShowSource(input({ canViewFinancials: false }));
+    const forged = { ...source, details: { ...source.details, grouping: { field: 'cost' as const, groups: [{ key: '0', title: 'ДЕНЬГИ-В-ЗАГОЛОВКЕ', rowKeys: ['71', '72'] }] } } };
+    expect(wireOf(forged)).not.toContain('ДЕНЬГИ-В-ЗАГОЛОВКЕ');
+    expect(base.canViewFinancials).toBe(true);
+  });
+
+  it('a live production status wins over the saved one; a cleared live status is empty', () => {
+    const live = buildOrderShowSource(input({ liveProductionStatusByDetailId: new Map<number, unknown>([[71, 5], [72, 4]]),
+      names: { ...input().names, productionStatus: (id) => ({ 4: 'Фрезеровка', 5: 'Шлифовка' } as Record<number, string>)[id] } }));
+    expect(live.details.rows.map((row) => row.values.production_status)).toEqual(['Шлифовка', 'Фрезеровка']);
+    const cleared = buildOrderShowSource(input({ liveProductionStatusByDetailId: new Map<number, unknown>([[71, null]]) }));
+    expect(cleared.details.rows[0].values.production_status).toBeNull();
+    expect(buildOrderShowSource(input()).details.rows[0].values.production_status).toBe('Фрезеровка');
+  });
+
+  it('rows follow the grouped order of the page even when the group titles may not be sent', () => {
+    const third = { detail_id: 73, detail_number: 3, height: 1, width: 1, quantity: 1, area: 0, milling_type_id: 1, film_id: 8 };
+    const base = input();
+    const details = [base.details[0], base.details[1], third];
+    // On screen: 71 and 73 in the first group, 72 in the second.
+    const groupedRows = [
+      { kind: 'detail', detail: details[0], groupIndex: 0 }, { kind: 'detail', detail: details[2], groupIndex: 0 },
+      { kind: 'separator', groupIndex: 1, key: 's1', selectionKeys: [72], label: 'Раскрой 12' },
+      { kind: 'detail', detail: details[1], groupIndex: 1 },
+    ];
+    const unsupported = buildOrderShowSource(input({ details, groupedRows, groupField: 'cut_job', groupLabelOf: () => 'Раскрой 7' }));
+    expect(unsupported.details.rows.map((row) => row.key)).toEqual(['71', '73', '72']);
+    const snapshot = buildClientScreenSnapshot(unsupported, ALL, createClientScreenIdMap(() => `id${Math.random().toString(36).slice(2, 10)}`));
+    expect(snapshot.details!.groups).toBeUndefined();
+    expect(snapshot.details!.rows.map((row) => row.cells[0])).toEqual(['1', '3', '2']);
+    // Grouping by a field that is not ticked: same order, no titles.
+    const unticked = buildOrderShowSource(input({ details, groupedRows, groupField: 'film', groupLabelOf: () => 'Белый софт' }));
+    const hidden = buildClientScreenSnapshot(unticked, ['tab.details', 'details.n'], createClientScreenIdMap(() => `id${Math.random().toString(36).slice(2, 10)}`));
+    expect(hidden.details!.groups).toBeUndefined();
+    expect(hidden.details!.rows.map((row) => row.cells[0])).toEqual(['1', '3', '2']);
+  });
+});
+
 describe('the panel of the view page as a customer tab', () => {
   it('finance panel → finance tab; everything else → the detail table', () => {
     expect(orderShowMirroredTab('finance', true)).toBe('finance');

@@ -3278,6 +3278,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       record={record as unknown as Record<string, unknown>}
       clientName={resolvedClientName}
       details={sortedDetails as any[]}
+      liveProductionStatusByDetailId={currentDetailProductionStatusById}
       groupedRows={clientScreenGroupField ? groupedDataSource as any[] : null}
       groupField={clientScreenGroupField}
       groupLabelOf={clientScreenGroupLabelOf}

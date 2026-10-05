@@ -111,8 +111,10 @@ export function buildClientScreenSnapshot(source: ClientScreenOrderSource, visib
       rows: source.details.rows.map((row) => ({ id: idFor('detail', row.key), cells: order.map((field) => text(row.values[field])) })),
     };
     const grouping = source.details.grouping;
-    // Group headers carry the value of the grouping field, so they go only when that field may be seen.
-    if (grouping?.field && isClientScreenCodeVisible(`details.${grouping.field}`, visible)) {
+    // Group headers carry the value of the grouping field, so they go only when that field may be
+    // seen: ticked, and a value the manager has at all (not money without the right to see it).
+    if (grouping?.field && isClientScreenCodeVisible(`details.${grouping.field}`, visible) && available(source.details.rows, grouping.field)
+      && source.details.rows.some((row) => row.values[grouping.field as DetailField] !== undefined)) {
       const known = new Set(source.details.rows.map((row) => row.key));
       table.groups = grouping.groups.map((group) => ({
         id: idFor('detail-group', group.key),

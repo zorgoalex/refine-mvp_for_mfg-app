@@ -52,7 +52,7 @@ export function useClientScreenShowBridge(input: ClientScreenShowBridgeInput): {
   }, [
     orderKey, input.record, input.clientName, input.details, input.groupedRows, input.groupField, columns, input.payments,
     input.names.millingType, input.names.edgeType, input.names.film, input.names.paymentType, input.names.productionStatus,
-    input.names.materialOf, input.canViewFinancials,
+    input.names.materialOf, input.canViewFinancials, input.liveProductionStatusByDetailId, input.groupLabelOf,
   ]);
 
   useEffect(() => {

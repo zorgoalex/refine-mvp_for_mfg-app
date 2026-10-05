@@ -33,6 +33,11 @@ export interface OrderShowSourceInput {
     /** The material name the page shows for a detail. */
     materialOf: (detail: Readonly<Record<string, unknown>>) => string | null | undefined;
   };
+  /**
+   * Production status of a detail as the page shows it right now (live updates), by detail id; a
+   * detail the map does not have keeps the status of its own record.
+   */
+  liveProductionStatusByDetailId?: ReadonlyMap<number, unknown>;
   /** Without it the page shows no money at all: nothing of it is passed on. */
   canViewFinancials: boolean;
 }
@@ -87,28 +92,45 @@ export function buildOrderShowSource(input: OrderShowSourceInput): ClientScreenO
     film: nameOf(names.film, 'film_id', 'film_name'),
     productionStatus: (id: number | null | undefined) => (id === null || id === undefined ? undefined : names.productionStatus(Number(id))),
   };
+  const liveStatus = (detail: Readonly<Record<string, unknown>>): unknown => {
+    const id = idOf(detail.detail_id);
+    return id !== null && input.liveProductionStatusByDetailId?.has(id) ? input.liveProductionStatusByDetailId.get(id) : detail.production_status_id;
+  };
   const asDetail = (detail: Readonly<Record<string, unknown>>): OrderDetail => ({
     ...detail,
     // The material is whatever name the page resolved; ids of the material never matter here.
     sheet_material_type_id: null,
     material_name_resolved: names.materialOf(detail) ?? null,
     milling_type_id: idOf(detail.milling_type_id), edge_type_id: idOf(detail.edge_type_id), film_id: idOf(detail.film_id),
-    production_status_id: idOf(detail.production_status_id),
+    production_status_id: idOf(liveStatus(detail)),
     milling_cost_per_sqm: input.canViewFinancials ? numberOrNull(detail.milling_cost_per_sqm) : undefined,
     detail_cost: input.canViewFinancials ? numberOrNull(detail.detail_cost) : undefined,
   }) as unknown as OrderDetail;
 
-  const details = input.details.map(asDetail);
+  // Rows in the order on screen: a grouped page draws its groups one after another, whether or not
+  // the customer may see the group titles.
+  const onScreen = input.groupedRows && input.groupField
+    ? orderDetailMirrorRows<Readonly<Record<string, unknown>>>(input.groupedRows as never[], {
+      groupField: input.groupField, keyOf: orderShowDetailKey, labelOf: (detail) => input.groupLabelOf?.(detail) ?? '',
+    })
+    : null;
+  const position = new Map<string, number>((onScreen?.rowKeys ?? []).map((key, index) => [key, index]));
+  const sourceDetails = onScreen
+    ? input.details
+      .map((detail, index) => ({ detail, index, at: position.get(orderShowDetailKey(detail)) ?? Number.POSITIVE_INFINITY }))
+      .sort((left, right) => (left.at === right.at ? left.index - right.index : left.at < right.at ? -1 : 1))
+      .map((item) => item.detail)
+    : input.details;
+  const details = sourceDetails.map(asDetail);
   const partsCount = details.reduce((sum, detail) => sum + (Number(detail.quantity) || 0), 0);
   const finalAmount = Number(record.final_amount) || Number(record.total_amount) || 0;
   const paidAmount = Number(record.paid_amount) || 0;
   const totalKnown = input.canViewFinancials && (record.final_amount !== undefined || record.total_amount !== undefined);
 
-  const grouped = input.groupedRows && input.groupField
-    ? orderDetailMirrorRows<Readonly<Record<string, unknown>>>(input.groupedRows as never[], {
-      groupField: input.groupField, keyOf: orderShowDetailKey, labelOf: (detail) => input.groupLabelOf?.(detail) ?? '',
-    }).grouping
-    : null;
+  // Titles of groups by a money field are money: without the right to see it they are not passed on.
+  const groupedField = onScreen?.grouping ? GROUPING_FIELDS[onScreen.grouping.field] ?? null : null;
+  const moneyGrouping = groupedField === 'price_per_sqm' || groupedField === 'cost';
+  const grouped = onScreen?.grouping && (input.canViewFinancials || !moneyGrouping) ? onScreen.grouping : null;
 
   const columnOrder = input.columnKeys.map((key) => SHOW_DETAIL_COLUMN_FIELDS[key]).filter((field): field is DetailField => Boolean(field));
   const client = textOrNull(input.clientName) ?? textOrNull(record.client_name);
@@ -150,7 +172,7 @@ export function buildOrderShowSource(input: OrderShowSourceInput): ClientScreenO
       : [],
     details: {
       columnOrder,
-      rows: details.map((detail, index) => ({ key: orderShowDetailKey(input.details[index]), values: orderDetailDisplayValues(detail, detailNames) })),
+      rows: details.map((detail, index) => ({ key: orderShowDetailKey(sourceDetails[index]), values: orderDetailDisplayValues(detail, detailNames) })),
       grouping: grouped
         ? {
           field: GROUPING_FIELDS[grouped.field] ?? null,
