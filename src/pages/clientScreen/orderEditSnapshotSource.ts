@@ -4,6 +4,7 @@ import { formatDate } from '../../utils/dateFormat';
 import { formatNumber } from '../../utils/numberFormat';
 import { calculateOrderTotalArea } from '../../utils/orderArea';
 import { orderCatalogLineAmount, orderCatalogSubtotal, type OrderCatalogLine } from '../../utils/orderCatalogLines';
+import { resolveHeaderMaterialName } from '../../utils/materialDisplayName';
 import { isOrderDetailPlaceholder } from '../../utils/orderDetailRows';
 import { buildOrderHeaderMaterialSummaryItems } from '../orders/orderMaterialsSummary';
 import type { ClientScreenOrderSource, ClientScreenValue, DetailField } from './buildClientScreenSnapshot';
@@ -148,12 +149,15 @@ export function orderDetailDisplayValues(
 
 /**
  * The lines of the order header that come from the details, as the manager's header shows them:
- * how many positions, the materials (with HDF and its area), and the milling, edge and film when
+ * how many positions, the materials (with HDF and its area; the order's own material when no detail
+ * names one), and the milling, edge and film when
  * every detail has the same one («—» otherwise).
  */
 export function clientScreenHeaderFromDetails(
   rows: ReadonlyArray<Partial<Record<DetailField, ClientScreenValue>>>,
   hdfDetails: readonly OrderHdfDetail[] | null | undefined,
+  /** The order's own material: named when no detail names one, as in the manager's header. */
+  headerMaterial?: string | null,
 ): { positions: string; material: ClientScreenValue; milling_type: ClientScreenValue; edge_type: ClientScreenValue; film: ClientScreenValue } {
   const distinct = (field: DetailField): string[] =>
     Array.from(new Set(rows.map((row) => row[field]).filter((value): value is string => typeof value === 'string' && value !== '')));
@@ -161,7 +165,9 @@ export function clientScreenHeaderFromDetails(
     const values = distinct(field);
     return values.length === 1 ? values[0] : null;
   };
-  const materials = buildOrderHeaderMaterialSummaryItems(distinct('material'), (hdfDetails ?? []) as OrderHdfDetail[]).map((item) => item.label);
+  const detailMaterials = distinct('material');
+  const materialNames = detailMaterials.length > 0 ? detailMaterials : headerMaterial ? [headerMaterial] : [];
+  const materials = buildOrderHeaderMaterialSummaryItems(materialNames, (hdfDetails ?? []) as OrderHdfDetail[]).map((item) => item.label);
   return {
     positions: formatNumber(rows.length, 0),
     material: materials.length ? materials.join(', ') : null,
@@ -215,7 +221,7 @@ export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenO
       client_phone: input.clientContacts?.phone,
       client_phones: input.clientContacts?.otherPhones,
       deadline: clientScreenDate(header.planned_completion_date),
-      ...clientScreenHeaderFromDetails(detailRows.map((row) => row.values), input.hdfDetails),
+      ...clientScreenHeaderFromDetails(detailRows.map((row) => row.values), input.hdfDetails, resolveHeaderMaterialName(header as never)),
       parts: `${formatNumber(partsCount, 0)}`,
       area: `${formatNumber(totalArea, 2)} м²`,
       final: totalKnown ? clientScreenMoney(finalAmount) : undefined,

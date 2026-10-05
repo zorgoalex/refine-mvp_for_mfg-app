@@ -145,6 +145,13 @@ describe('buildOrderShowSource', () => {
     expect(summaryOf({}, ALL).some((field) => field.code.startsWith('summary.client_phone'))).toBe(false);
   });
 
+  it('a view page order without details names its own material', () => {
+    const record = { ...input().record, material_name: 'МДФ 19 мм (шапка)' };
+    expect(buildOrderShowSource(input({ record, details: [] })).summary.material).toBe('МДФ 19 мм (шапка)');
+    expect(buildOrderShowSource(input({ record })).summary.material).toBe('МДФ 16 мм');
+    expect(buildOrderShowSource(input({ details: [] })).summary.material).toBeNull();
+  });
+
   it('every view column key maps to a field of the registry', () => {
     const fields = new Set(CLIENT_SCREEN_CODES.filter((code) => code.startsWith('details.')).map((code) => code.slice('details.'.length)));
     for (const field of Object.values(SHOW_DETAIL_COLUMN_FIELDS)) expect(fields.has(field)).toBe(true);

@@ -371,5 +371,37 @@ describe('the order header for the customer', () => {
       { code: 'summary.material', label: 'Материал', value: 'МДФ 16 мм' },
     ]);
   });
-});
 
+  it('an order without details names its own material, as the header of the manager; hidden unless ticked', () => {
+    const src = buildOrderEditSource(input({ details: [], header: { ...input().header, material_name: 'МДФ 19 мм (шапка)' } as OrderEditSourceInput['header'] }));
+    expect(src.summary.material).toBe('МДФ 19 мм (шапка)');
+    const idFor = () => createClientScreenIdMap(() => 'idaaaaaa');
+    expect(JSON.stringify(buildClientScreenSnapshot(src, CLIENT_SCREEN_CODES.filter((code) => code !== 'summary.material'), idFor()))).not.toContain('МДФ 19 мм');
+    expect(buildClientScreenSnapshot(src, ['summary.material'], idFor()).summary).toEqual([{ code: 'summary.material', label: 'Материал', value: 'МДФ 19 мм (шапка)' }]);
+    // Details that name a material win over the order's own.
+    const withDetails = buildOrderEditSource(input({ header: { ...input().header, material_name: 'МДФ 19 мм (шапка)' } as OrderEditSourceInput['header'] }));
+    expect(withDetails.summary.material).toBe('МДФ 16 мм');
+  });
+
+  it('a very long material line is cut visibly and the snapshot still passes the wire schema', () => {
+    const base = input();
+    const details = Array.from({ length: 45 }, (_, index) => ({ ...base.details[0], detail_id: 1000 + index, detail_number: index + 1, sheet_material_type_id: 500 + index }));
+    const src = buildOrderEditSource(input({
+      details: details as OrderEditSourceInput['details'],
+      names: { ...base.names, sheetMaterial: (id) => `Материал с очень длинным названием для проверки границы ${id}` },
+    }));
+    expect((src.summary.material as string).length).toBeGreaterThan(2000);
+    const snapshot = buildClientScreenSnapshot(src, CLIENT_SCREEN_CODES, createClientScreenIdMap((() => { let n = 0; return () => `id${String(++n).padStart(6, '0')}`; })()));
+    const material = snapshot.summary.find((field) => field.code === 'summary.material')!.value;
+    expect(material).toHaveLength(2000);
+    expect(material.endsWith('…')).toBe(true);
+    expect(clientScreenSnapshotSchema.safeParse(snapshot).success).toBe(true);
+    // Any other long text is bounded the same way (a note of a detail, a group title).
+    const long = 'я'.repeat(5000);
+    const noted = buildClientScreenSnapshot(
+      buildOrderEditSource(input({ header: { ...base.header, notes: long }, details: [{ ...base.details[0], note: long }] as OrderEditSourceInput['details'] })),
+      CLIENT_SCREEN_CODES, createClientScreenIdMap((() => { let n = 0; return () => `id${String(++n).padStart(6, '0')}`; })()),
+    );
+    expect(clientScreenSnapshotSchema.safeParse(noted).success).toBe(true);
+  });
+});

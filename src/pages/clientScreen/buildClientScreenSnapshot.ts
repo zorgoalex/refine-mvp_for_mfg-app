@@ -46,7 +46,12 @@ export type ClientScreenIdFor = (scope: 'detail' | 'detail-group' | 'payment' | 
 const EMPTY = '—';
 const RIGHT_ALIGNED = new Set(['height', 'width', 'quantity', 'area', 'price_per_sqm', 'cost', 'amount', 'price', 'sum']);
 const LABELS = new Map<string, string>(CLIENT_SCREEN_GROUPS.flatMap((group) => group.fields.map((field) => [field.code, field.label] as const)));
-const text = (value: ClientScreenValue): string => (value === null || value === undefined || value === '' ? EMPTY : value);
+/** The longest text the wire takes for one value; longer text is cut, visibly, instead of failing the whole snapshot. */
+export const CLIENT_SCREEN_TEXT_LIMIT = 2000;
+const text = (value: ClientScreenValue): string => {
+  if (value === null || value === undefined || value === '') return EMPTY;
+  return value.length > CLIENT_SCREEN_TEXT_LIMIT ? `${value.slice(0, CLIENT_SCREEN_TEXT_LIMIT - 1)}…` : value;
+};
 
 function fields<G extends string>(group: string, order: readonly G[], values: FieldsOf<G>, visible: ReadonlySet<string>): ClientScreenField[] {
   const result: ClientScreenField[] = [];
@@ -76,7 +81,7 @@ export function buildClientScreenSnapshot(source: ClientScreenOrderSource, visib
     summary: fields('summary', SUMMARY_ORDER.filter((key) => key !== 'order_name' || clientScreenTitle(source, visible).by === 'number'), source.summary, visible),
     tabs: source.tabs
       .filter((tab) => (CLIENT_SCREEN_TAB_KEYS as readonly string[]).includes(tab.key) && tabOn(tab.key))
-      .map((tab) => (tab.key === 'details' ? { key: tab.key, label: tab.label, counter: String(source.details.rows.length) } : { key: tab.key, label: tab.label })),
+      .map((tab) => (tab.key === 'details' ? { key: tab.key, label: tab.label.slice(0, 200), counter: String(source.details.rows.length) } : { key: tab.key, label: tab.label.slice(0, 200) })),
   };
 
   if (tabOn('basic')) snapshot.basic = fields('basic', fieldKeys('basic') as Array<keyof ClientScreenOrderSource['basic']>, source.basic, visible);

@@ -1,4 +1,5 @@
 import type { OrderDetail, OrderHdfDetail } from '../../types/orders';
+import { resolveHeaderMaterialName } from '../../utils/materialDisplayName';
 import { formatNumber } from '../../utils/numberFormat';
 import { calculateOrderTotalArea } from '../../utils/orderArea';
 import type { ClientScreenOrderSource, ClientScreenValue, DetailField } from './buildClientScreenSnapshot';
@@ -153,7 +154,7 @@ export function buildOrderShowSource(input: OrderShowSourceInput): ClientScreenO
       client_phone: input.clientContacts?.phone,
       client_phones: input.clientContacts?.otherPhones,
       deadline: clientScreenDate(record.planned_completion_date as string | null | undefined),
-      ...clientScreenHeaderFromDetails(detailRows.map((row) => row.values), input.hdfDetails),
+      ...clientScreenHeaderFromDetails(detailRows.map((row) => row.values), input.hdfDetails, resolveHeaderMaterialName(record as never)),
       parts: formatNumber(partsCount, 0),
       area: `${formatNumber(calculateOrderTotalArea(details), 2)} м²`,
       final: totalKnown ? money(finalAmount) : undefined,
