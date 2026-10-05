@@ -19474,6 +19474,351 @@ paths:
         '403': {description: Permission denied}
         '404': {description: 1C document not found}
         '503': {description: 1C integration is disabled}
+  /api/v1/inventory/warehouses:
+    get:
+      tags: [Inventory]
+      operationId: listInventoryWarehouses
+      summary: Active warehouses (includeInactive=true — all) with their 1C link status
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: includeInactive, in: query, required: false, schema: {type: boolean}}
+      responses:
+        '200': {description: Warehouses}
+        '404': {description: NOT_FOUND (BACKEND_INVENTORY_ENABLED=false)}
+    post:
+      tags: [Inventory]
+      operationId: createInventoryWarehouse
+      summary: Create a warehouse (1C key required)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, refKey1c]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 128}
+                refKey1c: {type: string, format: uuid}
+                workshopId: {type: integer, nullable: true}
+                responsibleEmployeeId: {type: integer, nullable: true}
+      responses:
+        '201': {description: Created warehouse}
+        '409': {description: WAREHOUSE_NAME_TAKEN or WAREHOUSE_1C_KEY_TAKEN}
+        '422': {description: WAREHOUSE_1C_NOT_FOUND}
+  /api/v1/inventory/warehouses/onec:
+    get:
+      tags: [Inventory]
+      operationId: listInventoryOnecWarehouses
+      summary: 1C warehouses from the mirror with their ERP links
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      responses:
+        '200': {description: '{available, items[]}'}
+  /api/v1/inventory/warehouses/sync-onec:
+    post:
+      tags: [Inventory]
+      operationId: syncInventoryWarehousesFromOnec
+      summary: Create or link ERP warehouses for all 1C warehouses
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      responses:
+        '200': {description: '{created, linked, skipped}'}
+        '409': {description: ONEC_MIRROR_UNAVAILABLE}
+  /api/v1/inventory/warehouses/{warehouseId}:
+    patch:
+      tags: [Inventory]
+      operationId: updateInventoryWarehouse
+      summary: Update or (de)activate a warehouse
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      parameters:
+        - {name: warehouseId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version]
+              properties:
+                version: {type: string}
+                name: {type: string, minLength: 1, maxLength: 128}
+                refKey1c: {type: string, format: uuid}
+                workshopId: {type: integer, nullable: true}
+                responsibleEmployeeId: {type: integer, nullable: true}
+                isActive: {type: boolean}
+                onecConsumptionSince: {type: string, format: date-time, nullable: true, description: 'Момент начала расхода из документов 1С (null — выключить); 409 ONEC_BASELINE_REQUIRED, если инвентаризации склада не учтены'}
+      responses:
+        '200': {description: Updated warehouse}
+        '404': {description: WAREHOUSE_NOT_FOUND}
+        '409': {description: WAREHOUSE_STALE, WAREHOUSE_HAS_STOCK, WAREHOUSE_HAS_DRAFTS or ONEC_BASELINE_REQUIRED}
+        '422': {description: WAREHOUSE_1C_NOT_FOUND or WAREHOUSE_1C_KEY_REQUIRED}
+  /api/v1/inventory/balances:
+    get:
+      tags: [Inventory]
+      operationId: listInventoryBalances
+      summary: Film stock balances (ERP accounting)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: warehouseId, in: query, required: false, schema: {type: integer, minimum: 1}}
+        - {name: vendorId, in: query, required: false, schema: {type: integer, minimum: 1}}
+        - {name: search, in: query, required: false, schema: {type: string, maxLength: 200}}
+        - {name: nonZero, in: query, required: false, schema: {type: boolean}}
+        - {name: negative, in: query, required: false, schema: {type: boolean}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 500}}
+      responses:
+        '200': {description: '{total, totalQuantity, items[]}'}
+  /api/v1/inventory/stock:
+    get:
+      tags: [Inventory]
+      operationId: getInventoryWarehouseStock
+      summary: Warehouse stock by material tabs — films from ERP accounting, other materials from 1C balances (read-only)
+      description: >-
+        One REPEATABLE READ READ ONLY snapshot of the warehouse, ERP film balances and the 1C mirror. A 1C item goes to the
+        tab of the ERP sheet material linked by 1C key; items linked to ERP films are hidden (the film tab is ERP accounting);
+        items accepted by the film catalog import but not linked yet form «film_unlinked» (not part of «all»).
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: warehouseId, in: query, required: true, schema: {type: integer, minimum: 1, maximum: 32767}}
+        - {name: group, in: query, required: false, schema: {type: string, pattern: '^(all|film|film_unlinked|no_type|unlinked|material:[1-9][0-9]{0,4})$', default: all}}
+        - {name: categoryKey, in: query, required: false, description: 1C category GUID or «none» (rows without a category), schema: {type: string}}
+        - {name: search, in: query, required: false, schema: {type: string, maxLength: 200}}
+        - {name: nonZero, in: query, required: false, schema: {type: boolean}}
+        - {name: negative, in: query, required: false, schema: {type: boolean}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 500}}
+      responses:
+        '200': {description: '{warehouseId, warehouseName, onec{available, reason, snapshotVersion, …}, tabs[], categories[], total, items[]}'}
+        '400': {description: VALIDATION_FAILED}
+        '404': {description: WAREHOUSE_NOT_FOUND or NOT_FOUND (BACKEND_INVENTORY_ENABLED=false)}
+  /api/v1/inventory/documents:
+    get:
+      tags: [Inventory]
+      operationId: listInventoryDocuments
+      summary: Stock documents journal
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: type, in: query, required: false, schema: {type: string, enum: [receipt, writeoff, inventory, onec]}}
+        - {name: status, in: query, required: false, schema: {type: string, enum: [draft, posted, cancelled]}}
+        - {name: from, in: query, required: false, schema: {type: string, format: date}}
+        - {name: to, in: query, required: false, schema: {type: string, format: date}}
+        - {name: filmId, in: query, required: false, schema: {type: integer, minimum: 1}}
+        - {name: orderId, in: query, required: false, schema: {type: integer, minimum: 1}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200}}
+      responses:
+        '200': {description: '{total, items[]}'}
+    post:
+      tags: [Inventory]
+      operationId: createInventoryDocument
+      summary: Manual receipt / write-off / inventory (optionally posted)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [docType, warehouseId, docDate, lines]
+              properties:
+                docType: {type: string, enum: [receipt, writeoff, inventory]}
+                warehouseId: {type: integer, minimum: 1}
+                docDate: {type: string, format: date}
+                orderId: {type: integer, nullable: true, description: write-off only}
+                comment: {type: string, maxLength: 2000, nullable: true}
+                lines: {type: array, minItems: 1, maxItems: 200, items: {type: object, additionalProperties: false, required: [filmId, quantity], properties: {filmId: {type: integer, minimum: 1}, quantity: {type: number, minimum: 0}}}}
+                post: {type: boolean}
+                allowNegative: {type: boolean}
+                countedAt: {type: string, format: date-time, nullable: true, description: 'Момент подсчёта (только inventory)'}
+      responses:
+        '201': {description: Stock document}
+        '409': {description: STOCK_WOULD_GO_NEGATIVE}
+  /api/v1/inventory/documents/{documentId}:
+    get:
+      tags: [Inventory]
+      operationId: getInventoryDocument
+      summary: Stock document with lines and movements
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: documentId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Stock document}
+        '404': {description: STOCK_DOCUMENT_NOT_FOUND}
+  /api/v1/inventory/imports:
+    post:
+      tags: [Inventory]
+      operationId: createInventoryImport
+      summary: Stock file import draft (rows parsed in the browser)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [docType, warehouseId, docDate, fileName, fileSha256, sheetName, rows]
+              properties:
+                docType: {type: string, enum: [receipt, inventory]}
+                warehouseId: {type: integer, minimum: 1}
+                docDate: {type: string, format: date}
+                fileName: {type: string, minLength: 1, maxLength: 255}
+                fileSha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+                sheetName: {type: string, minLength: 1, maxLength: 255}
+                rows: {type: array, minItems: 1, maxItems: 2000, items: {type: object}}
+                countedAt: {type: string, format: date-time, nullable: true, description: 'Момент подсчёта (только inventory)'}
+      responses:
+        '201': {description: Draft stock document with matched lines}
+  /api/v1/inventory/documents/{documentId}/lines/{lineId}:
+    patch:
+      tags: [Inventory]
+      operationId: updateInventoryDocumentLine
+      summary: Resolve a draft line
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      parameters:
+        - {name: documentId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: lineId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version]
+              properties:
+                version: {type: integer, minimum: 1}
+                filmId: {type: integer, minimum: 1}
+                quantity: {type: number, minimum: 0}
+                confirmMatch: {type: boolean}
+                confirmQuantity: {type: boolean}
+                skip: {type: boolean}
+      responses:
+        '200': {description: Stock document}
+        '409': {description: STOCK_DOCUMENT_STALE or STOCK_DOCUMENT_NOT_DRAFT}
+  /api/v1/inventory/documents/{documentId}/post:
+    post:
+      tags: [Inventory]
+      operationId: postInventoryDocument
+      summary: Post a draft document
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      parameters:
+        - {name: documentId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [version], properties: {version: {type: integer, minimum: 1}, allowNegative: {type: boolean}}}
+      responses:
+        '201': {description: Posted stock document}
+        '409': {description: STOCK_WOULD_GO_NEGATIVE, STOCK_DOCUMENT_UNRESOLVED or STOCK_DOCUMENT_STALE}
+  /api/v1/inventory/documents/{documentId}/cancel:
+    post:
+      tags: [Inventory]
+      operationId: cancelInventoryDocument
+      summary: Cancel a draft document
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      parameters:
+        - {name: documentId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [version], properties: {version: {type: integer, minimum: 1}}}
+      responses:
+        '201': {description: Cancelled stock document}
+        '409': {description: STOCK_DOCUMENT_STALE or STOCK_DOCUMENT_NOT_DRAFT}
+  /api/v1/inventory/onec-consumption/issues:
+    get:
+      tags: [Inventory]
+      operationId: listInventoryOnecIssues
+      summary: 1C consumption lines not applied to the ERP ledger (reasons)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: warehouseId, in: query, required: false, schema: {type: integer, minimum: 1}}
+        - {name: code, in: query, required: false, schema: {type: string, pattern: '^[A-Z_]{3,40}$'}}
+        - {name: includeBeforeCutoff, in: query, required: false, schema: {type: boolean}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 500}}
+      responses:
+        '200': {description: '{total, counts[], items[]}'}
+  /api/v1/inventory/onec-consumption/run:
+    post:
+      tags: [Inventory]
+      operationId: runInventoryOnecConsumption
+      summary: Run the 1C consumption projection pass now (skipped when BACKEND_INVENTORY_ONEC_CONSUMPTION is off)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      responses:
+        '200': {description: 'Pass outcome {status, candidates, processed, documents, failed} or {status: skipped, reason}'}
+  /api/v1/inventory/warehouses/{warehouseId}/onec-consumption/compensate:
+    post:
+      tags: [Inventory]
+      operationId: compensateInventoryOnecConsumption
+      summary: Return the 1C consumption of a warehouse to zero and clear its start moment (rollback)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      parameters:
+        - {name: warehouseId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      responses:
+        '200': {description: '{documents, remaining}; повтор с тем же Idempotency-Key возвращает сохранённый ответ'}
+        '404': {description: WAREHOUSE_NOT_FOUND}
+        '409': {description: 'ONEC_COMPENSATION_SUPERSEDED (прерванный откат, а расход снова включён), IDEMPOTENCY_IN_PROGRESS не возвращается — прерванный откат продолжается'}
+        '422': {description: IDEMPOTENCY_KEY_REUSED}
+  /api/v1/orders/{orderId}/sheet-stock:
+    get:
+      tags: [Inventory]
+      operationId: getOrderSheetStock
+      summary: Stock of the sheet materials used by an order, from 1C balances (no reservation)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: orderId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: '{items: [{sheetMaterialTypeId, name, refKey1c, onecName, unitName, quantity, quantityM2, demandM2, warehouses[], status}], incompleteWarehouses: [{warehouseId, name, reason}], snapshotVersion}; status `incomplete` and a non-empty incompleteWarehouses mean some active ERP warehouses with a 1C key had no readable 1C balances (snapshot not loaded or revoked, ambiguous source, warehouse absent from the 1C mirror), so quantity is partial and coverage is not final'}
+        '404': {description: ORDER_NOT_FOUND or NOT_FOUND (inventory disabled)}
+  /api/v1/orders/{orderId}/film-stock:
+    get:
+      tags: [Inventory]
+      operationId: getOrderFilmStock
+      summary: Stock of the films used by an order (physical, no reservation)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: orderId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Film stock per order film}
+        '404': {description: ORDER_NOT_FOUND}
 components:
   securitySchemes:
     bitrixWidgetSession:

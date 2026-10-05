@@ -16,11 +16,17 @@ import { computeOrderBathFilmUsage } from '../../../cut/cutFilmUsage';
 import { buildCutJobNameById, CutJobLinks } from '../../CutJobLinks';
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from '../../orderMaterialsSummary';
 import { businessOrderDetails } from '../../../../utils/orderDetailRows';
+import { ORDER_FILM_COLUMN_WIDTH, OrderFilmStockCaption, orderFilmStockColumns, OrderSheetStockCaption, orderSheetStockColumns } from '../../../inventory/orderFilmStockColumns';
+import { useOrderSheetStock } from '../../../inventory/useOrderSheetStock';
+import { useOrderFilmStock } from '../../../inventory/useOrderFilmStock';
 
 const { Text } = Typography;
 
 export const OrderMaterialsTab: React.FC = () => {
   const { details, hdfDetails, header } = useOrderFormStore();
+  const filmStock = useOrderFilmStock(header.order_id);
+  const sheetStock = useOrderSheetStock(header.order_id);
+  const inventoryViewAllowed = filmStock.allowed;
   const businessDetails = useMemo(
     () => businessOrderDetails(details),
     [details],
@@ -186,6 +192,7 @@ export const OrderMaterialsTab: React.FC = () => {
       key: 'detailsCount',
       align: 'center' as const,
     },
+    ...(sheetStock.allowed ? orderSheetStockColumns<(typeof sheetMaterialRows)[number]>(sheetStock.byId) : []),
   ];
 
   const filmMaterialColumns = [
@@ -195,14 +202,16 @@ export const OrderMaterialsTab: React.FC = () => {
       key: 'name',
     },
     {
-      title: 'Кол-во м²',
+      title: 'м²',
+      width: ORDER_FILM_COLUMN_WIDTH.number,
       dataIndex: 'totalArea',
       key: 'totalArea',
       align: 'right' as const,
       render: (value: number) => formatNumber(value, 2),
     },
     {
-      title: 'Кол-во деталей',
+      title: 'Детали',
+      width: ORDER_FILM_COLUMN_WIDTH.number,
       dataIndex: 'detailsCount',
       key: 'detailsCount',
       align: 'center' as const,
@@ -211,6 +220,7 @@ export const OrderMaterialsTab: React.FC = () => {
       title: 'Пог. м',
       dataIndex: 'bathLinearMeters',
       key: 'bathLinearMeters',
+      width: ORDER_FILM_COLUMN_WIDTH.number,
       align: 'right' as const,
       render: (value: number) => value > 0 ? formatNumber(value, 1) : '—',
     },
@@ -218,6 +228,7 @@ export const OrderMaterialsTab: React.FC = () => {
       title: 'Листы',
       dataIndex: 'bathSheets',
       key: 'bathSheets',
+      width: ORDER_FILM_COLUMN_WIDTH.sheets,
       align: 'center' as const,
       render: (value: number) => value > 0 ? value : '—',
     },
@@ -225,10 +236,12 @@ export const OrderMaterialsTab: React.FC = () => {
       title: 'Раскрои',
       dataIndex: 'cutJobIds',
       key: 'cutJobIds',
+      width: ORDER_FILM_COLUMN_WIDTH.cutJobs,
       render: (value: number[]) => (
-        <CutJobLinks cutJobIds={value} cutJobNameById={cutJobNameById} />
+        <CutJobLinks compact cutJobIds={value} cutJobNameById={cutJobNameById} />
       ),
     },
+    ...(inventoryViewAllowed ? orderFilmStockColumns<(typeof filmMaterialRows)[number]>(filmStock.byFilmId) : []),
   ];
 
   return (
@@ -244,6 +257,7 @@ export const OrderMaterialsTab: React.FC = () => {
             <Text strong style={{ fontSize: 14 }}>
               Пленка
             </Text>
+            {inventoryViewAllowed && <div><OrderFilmStockCaption {...filmStock} /></div>}
           </div>
           <Table
             dataSource={filmMaterialRows}
@@ -253,7 +267,7 @@ export const OrderMaterialsTab: React.FC = () => {
             pagination={false}
             bordered
             loading={cutJobsLoading}
-            scroll={{ x: 680 }}
+            tableLayout="fixed"
             locale={{
               emptyText: cutViewAllowed ? 'Нет данных по пленке' : 'Нет доступа к данным раскроя',
             }}
@@ -281,6 +295,7 @@ export const OrderMaterialsTab: React.FC = () => {
                     <Text strong style={{ fontSize: '1.1em' }}>{totalSheets > 0 ? totalSheets : '—'}</Text>
                   </Table.Summary.Cell>
                   <Table.Summary.Cell index={5} />
+                  {inventoryViewAllowed && <><Table.Summary.Cell index={6} /><Table.Summary.Cell index={7} /></>}
                 </Table.Summary.Row>
               );
             }}
@@ -292,6 +307,7 @@ export const OrderMaterialsTab: React.FC = () => {
             <Text strong style={{ fontSize: 14 }}>
               Листовые материалы
             </Text>
+            {sheetStock.allowed && <div><OrderSheetStockCaption {...sheetStock} /></div>}
           </div>
           <Table
             dataSource={sheetMaterialRows}
@@ -318,6 +334,7 @@ export const OrderMaterialsTab: React.FC = () => {
                   <Table.Summary.Cell index={2} align="center">
                     <Text strong style={{ fontSize: '1.1em' }}>{totalDetails}</Text>
                   </Table.Summary.Cell>
+                  {sheetStock.allowed && <><Table.Summary.Cell index={3} /><Table.Summary.Cell index={4} /></>}
                 </Table.Summary.Row>
               );
             }}

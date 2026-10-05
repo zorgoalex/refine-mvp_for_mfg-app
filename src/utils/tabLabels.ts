@@ -1,5 +1,7 @@
 export const RESOURCE_LABELS: Record<string, string> = {
   onec_purchase_documents: 'Документы 1С',
+  'film-inventory': 'Остатки на складах',
+  'inventory-warehouses': 'Справочник складов',
   orders_view: 'Заказы',
   'orders-trash': 'Корзина',
   calendar: 'Календарь',
@@ -72,6 +74,7 @@ const PATH_TO_RESOURCE: Record<string, string> = {
   'extra-resources': 'extra_resources',
   'catalog-items': 'catalog_items',
   'bazis-cut': 'bazis-cut-sets',
+  inventory: 'film-inventory',
 };
 
 const ACTION_LABELS: Record<string, string> = {
@@ -90,6 +93,7 @@ export const resourceFromPath = (pathname: string): string | undefined => {
   if (pathname === ONEC_DOCUMENTS_PATH_PREFIX || pathname.startsWith(`${ONEC_DOCUMENTS_PATH_PREFIX}/`)) {
     return 'onec_purchase_documents';
   }
+  if (pathname === '/inventory/warehouses' || pathname.startsWith('/inventory/warehouses/')) return 'inventory-warehouses';
   const seg = pathname.split('/').filter(Boolean)[0];
   return seg ? resourceKeyFromSegment(seg) : undefined;
 };

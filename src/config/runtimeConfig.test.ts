@@ -52,6 +52,20 @@ describe('runtimeConfig', () => {
     });
   });
 
+  it('keeps catalog import visibility off unless explicit runtime config enables it', () => {
+    applyRuntimeConfig({ features: { filmCatalogImport: true } });
+    expect(getLoadedRuntimeConfig()?.features?.filmCatalogImport).toBe(true);
+    applyRuntimeConfig({ features: {} });
+    expect(getLoadedRuntimeConfig()?.features?.filmCatalogImport).toBeUndefined();
+  });
+
+  it('keeps inventory visibility off unless runtime config enables it', () => {
+    applyRuntimeConfig({ features: { inventory: true } });
+    expect(featureFlags.inventory).toBe(true);
+    applyRuntimeConfig({ features: {} });
+    expect(featureFlags.inventory).toBe(false);
+  });
+
   it('falls back to build-time env when runtime config is missing', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('', { status: 404 }));
 

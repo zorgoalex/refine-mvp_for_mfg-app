@@ -20,6 +20,7 @@ const RUNTIME_CONFIG_ENV_KEYS = [
   'RUNTIME_CONFIG_BACKEND_WHATSAPP',
   'RUNTIME_CONFIG_BACKEND_ONEC',
   'RUNTIME_CONFIG_FILM_CATALOG_IMPORT',
+  'RUNTIME_CONFIG_INVENTORY',
   'RUNTIME_CONFIG_BACKEND_REFERENCES',
   'RUNTIME_CONFIG_BACKEND_BAZIS',
   'RUNTIME_CONFIG_BAZIS_CUT',
@@ -70,6 +71,7 @@ describe('runtime-config handler', () => {
       },
       features: {
         filmCatalogImport: false,
+        inventory: false,
         backendAuth: false,
         backendPermissions: false,
         backendOrdersRead: false,
@@ -120,6 +122,7 @@ describe('runtime-config handler', () => {
     vi.stubEnv('RUNTIME_CONFIG_HASURA_URL', 'https://hasura.example.test/v1/graphql/');
     vi.stubEnv('RUNTIME_CONFIG_BACKEND_AUTH', 'true');
     vi.stubEnv('RUNTIME_CONFIG_FILM_CATALOG_IMPORT', 'true');
+    vi.stubEnv('RUNTIME_CONFIG_INVENTORY', 'true');
     vi.stubEnv('RUNTIME_CONFIG_BACKEND_DEADLINES', 'true');
     vi.stubEnv('RUNTIME_CONFIG_BAZIS_CUT', 'true');
     vi.stubEnv('RUNTIME_CONFIG_CNC_TELEGRAM', 'true');
@@ -147,6 +150,7 @@ describe('runtime-config handler', () => {
       },
       features: {
         filmCatalogImport: true,
+        inventory: true,
         backendAuth: true,
         backendDeadlines: true,
         bazisCut: true,
@@ -177,24 +181,24 @@ describe('runtime-config handler', () => {
     expect(res.body).toMatchObject({
       apiUrl: 'https://backend-test.mebelkz.app',
       hasuraUrl: 'https://hasura-test.mebelkz.app/v1/graphql',
-      features: { filmCatalogImport: true },
+      features: { filmCatalogImport: true, inventory: true },
     });
   });
 
   it('keeps the film catalog UI off outside stage unless explicitly enabled', () => {
     const prodRes = createResponse();
     handler({ method: 'GET', headers: { host: 'mebelkz.app' } } as VercelRequest, prodRes as unknown as VercelResponse);
-    expect(prodRes.body).toMatchObject({ features: { filmCatalogImport: false } });
+    expect(prodRes.body).toMatchObject({ features: { filmCatalogImport: false, inventory: false } });
 
     vi.stubEnv('VERCEL_GIT_COMMIT_REF', 'feat/backend-erp-stage1');
     const stageBranchRes = createResponse();
     handler({ method: 'GET', headers: {} } as VercelRequest, stageBranchRes as unknown as VercelResponse);
-    expect(stageBranchRes.body).toMatchObject({ features: { filmCatalogImport: true } });
+    expect(stageBranchRes.body).toMatchObject({ features: { filmCatalogImport: true, inventory: true } });
 
     vi.stubEnv('RUNTIME_CONFIG_FILM_CATALOG_IMPORT', 'false');
     const explicitOff = createResponse();
     handler({ method: 'GET', headers: { host: 'app-test.mebelkz.app' } } as VercelRequest, explicitOff as unknown as VercelResponse);
-    expect(explicitOff.body).toMatchObject({ features: { filmCatalogImport: false } });
+    expect(explicitOff.body).toMatchObject({ features: { filmCatalogImport: false, inventory: true } });
   });
 
   it('uses the stage backend for Vercel previews without overriding explicit env', () => {

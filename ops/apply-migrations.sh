@@ -207,6 +207,8 @@ pg_session_limits() {
 needs_single_transaction() {
   case "$(basename "$1")" in
     202_film_catalog_import.sql|212_films_note.sql|234_reference_nomenclature_note.sql) return 0 ;;
+    # Склад плёнки и расход из документов 1С: тоже без собственных BEGIN/COMMIT.
+    203_film_stock.sql|205_warehouses_onec_key_required.sql|206_inventory_onec_autosync_state.sql|217_inventory_onec_consumption.sql) return 0 ;;
     # Закупки и загрузчик документов 1С: файлы без собственных BEGIN/COMMIT — одной транзакцией, иначе отказ по
     # lock/statement timeout посреди файла оставил бы половину изменений (например, DROP старого CHECK без нового).
     194_order_resource_procurement.sql|197_onec_purchase_documents.sql|204_procurement_workspace.sql) return 0 ;;
@@ -2308,6 +2310,61 @@ probe_file() {
       "$(q_idx onec_agent_commands_ordering_idx)" \
       "$(q_idx onec_agent_commands_expiry_idx)" ;;
     # 198: 1C agent E3a ETL — runs, batches, staging, mirror, entity state.
+    203_film_stock*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM public.warehouses)" \
+      "$(q_tbl stock_documents)" \
+      "$(q_con_on stock_documents chk_stock_documents_doc_type)" \
+      "$(q_con_on stock_documents chk_stock_documents_status)" \
+      "$(q_con_on stock_documents chk_stock_documents_source)" \
+      "$(q_con_on stock_documents chk_stock_documents_order_writeoff)" \
+      "$(q_con_on stock_documents chk_stock_documents_comment)" \
+      "$(q_con_on stock_documents chk_stock_documents_version)" \
+      "$(q_con_on stock_documents chk_stock_documents_file)" \
+      "$(q_con_on stock_documents chk_stock_documents_file_sha)" \
+      "$(q_con_on stock_documents chk_stock_documents_posted)" \
+      "$(q_con_on stock_documents chk_stock_documents_cancelled)" \
+      "$(q_idx idx_stock_documents_status_created)" \
+      "$(q_idx idx_stock_documents_order)" \
+      "$(q_idx idx_stock_documents_file_sha)" \
+      "$(q_tbl stock_document_lines)" \
+      "$(q_con_on stock_document_lines uq_stock_document_lines_no)" \
+      "$(q_con_on stock_document_lines chk_stock_document_lines_quantity)" \
+      "$(q_con_on stock_document_lines chk_stock_document_lines_match)" \
+      "$(q_con_on stock_document_lines chk_stock_document_lines_quantity_status)" \
+      "$(q_con_on stock_document_lines chk_stock_document_lines_line_no)" \
+      "$(q_idx idx_stock_document_lines_film)" \
+      "$(q_tbl stock_balances)" \
+      "$(q_con_on stock_balances pk_stock_balances)" \
+      "$(q_idx idx_stock_balances_film)" \
+      "$(q_tbl stock_movements)" \
+      "$(q_con_on stock_movements uq_stock_movements_document_film)" \
+      "$(q_con_on stock_movements chk_stock_movements_type)" \
+      "$(q_con_on stock_movements chk_stock_movements_balance)" \
+      "$(q_idx idx_stock_movements_film_created)" \
+      "$(q_tbl stock_import_aliases)" \
+      "$(q_con_on stock_import_aliases uq_stock_import_aliases_source)" \
+      "$(q_con_on stock_import_aliases chk_stock_import_aliases_name)" ;;
+    205_warehouses_onec_key_required*) probe_all \
+      "$(q_con_on warehouses chk_warehouses_ref_key_1c_required)" ;;
+    206_inventory_onec_autosync_state*) probe_all \
+      "$(q_tbl inventory_onec_autosync_state)" \
+      "$(q_con_on inventory_onec_autosync_state chk_inventory_onec_autosync_seq)" ;;
+    217_inventory_onec_consumption*) probe_all \
+      "$(q_col warehouses onec_consumption_since)" \
+      "$(q_col stock_documents counted_at)" \
+      "$(q_col stock_documents projection_seq)" \
+      "$(q_con_on stock_documents chk_stock_documents_onec)" \
+      "$(q_con_on stock_documents chk_stock_documents_counted_at)" \
+      "$(q_con_def_on_safe chk_stock_documents_doc_type stock_documents "CHECK ((doc_type = ANY (ARRAY['receipt'::text, 'writeoff'::text, 'inventory'::text, 'onec'::text])))")" \
+      "$(q_con_def_on_safe chk_stock_documents_source stock_documents "CHECK ((source = ANY (ARRAY['manual'::text, 'import'::text, 'onec'::text])))")" \
+      "$(q_con_def_on_safe chk_stock_movements_type stock_movements "CHECK ((movement_type = ANY (ARRAY['receipt'::text, 'writeoff'::text, 'inventory_adjustment'::text, 'onec'::text])))")" \
+      "$(q_idx uq_stock_documents_onec_projection)" \
+      "$(q_idx idx_stock_movements_inventory_last)" \
+      "$(q_tbl inventory_onec_projection)" \
+      "$(q_tbl inventory_onec_applied)" \
+      "$(q_tbl inventory_onec_issues)" \
+      "$(q_con_on inventory_onec_issues chk_inventory_onec_issues_code)" \
+      "$(q_tbl inventory_onec_generation)" ;;
     202_film_catalog_import*) probe_all \
       "$(q_col films canonical_film_id)" \
       "$(q_col films nomenclature_type)" \
@@ -2670,6 +2727,18 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     200_onec_etl_snapshots_revocation*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    203_film_stock*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    205_warehouses_onec_key_required*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    206_inventory_onec_autosync_state*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    217_inventory_onec_consumption*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     202_film_catalog_import*)

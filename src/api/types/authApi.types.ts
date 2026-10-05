@@ -67,6 +67,8 @@ export type PermissionName =
   | 'vendors.manage'
   | 'clients.view'
   | 'clients.update'
+  | 'inventory.view'
+  | 'inventory.manage'
   | string;
 
 export interface BackendUserIdentity {

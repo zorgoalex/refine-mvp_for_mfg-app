@@ -39,6 +39,7 @@ describe('featureFlags', () => {
       workosAuth: false,
       useBackendWhatsApp: false,
       useBackendOnec: false,
+      inventory: false,
     });
   });
 
