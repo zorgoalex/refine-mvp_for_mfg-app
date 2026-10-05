@@ -1,13 +1,17 @@
 import { chromium, expect } from '@playwright/test';
 import assert from 'node:assert/strict';
+import { isStageRelayTarget, settingsRestoreRequest, stageTargetProblem, STAGE_SITE } from './helpers/clientScreenLiveGuards.mjs';
 import { printableError } from './helpers/redactSecrets.mjs';
 import { vercelBypassCookies } from './helpers/vercelBypass.mjs';
 
 // Live check of the manager side in the real application against the stage backend: log in, open a
 // test order, present it, follow tabs, hide, emergency switch-off. Nothing is saved in the order.
-// The organisation setting is switched on for the run and restored in `finally` (and verified).
+// The organisation setting is switched on for the run and restored in `finally` (and verified): only
+// what this run itself changed, and only if nobody changed it since. Runs against the stage backend
+// only: a deployment configured for any other backend is refused before logging in.
 // Env: BASE_URL (a built deployment), ORDER_ID (an existing test order), CODEX_PLAYWRIGHT_USERNAME /
-// CODEX_PLAYWRIGHT_PASSWORD, optional VERCEL_AUTOMATION_BYPASS_SECRET, optional LAYOUT=legacy.
+// CODEX_PLAYWRIGHT_PASSWORD, optional VERCEL_AUTOMATION_BYPASS_SECRET, optional LAYOUT=legacy,
+// optional SELF_INTERRUPT=1.
 // Secrets are never printed.
 const base = (process.env.BASE_URL ?? '').replace(/\/$/, '');
 assert.match(base, /^https:\/\//, 'BASE_URL must be an https URL');
@@ -24,13 +28,62 @@ const errors = [];
 let api = null;
 let token = null;
 let original = null;
+// The server's answer to this run's own change of the setting; null until that change is accepted.
+let applied = null;
+const settingsRequest = (method, body) => fetch(`${api}/client-screen/settings`, {
+  method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+});
 const settingsCall = async (method, body) => {
-  const response = await fetch(`${api}/client-screen/settings`, {
-    method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
-  });
+  const response = await settingsRequest(method, body);
   assert.ok(response.ok, `${method} client-screen settings → ${response.status}`);
   return response.json();
 };
+
+// Restores the shared stage setting and proves it. Only this run's own change is undone: if the run
+// changed nothing there is nothing to restore, and if somebody else changed the setting meanwhile
+// the server refuses (409) and their change stays. A backend that is briefly away (a redeploy) is
+// retried: the request is conditional on the version, so repeating it is safe.
+let restoring = null;
+const restoreSettings = () => {
+  restoring ??= (async () => {
+    const restore = settingsRestoreRequest(original, applied);
+    if (!restore) {
+      console.log(JSON.stringify({ settingsRestored: 'not needed', reason: 'this run did not change the setting' }));
+      return;
+    }
+    let failure = 'not attempted';
+    for (let attempt = 1; attempt <= 8; attempt += 1) {
+      try {
+        const response = await settingsRequest('PUT', restore);
+        if (response.status === 409) {
+          console.log(JSON.stringify({ settingsRestored: false, reason: 'the setting was changed by someone else during the run; left as it is' }));
+          process.exitCode = 1;
+          return;
+        }
+        if (response.ok) {
+          const after = await settingsCall('GET');
+          const restored = after.enabled === original.enabled && JSON.stringify(after.visibleCodes) === JSON.stringify(original.visibleCodes);
+          console.log(JSON.stringify({ settingsRestored: restored, enabled: after.enabled, codes: after.visibleCodes.length, attempt }));
+          if (!restored) process.exitCode = 1;
+          return;
+        }
+        failure = `PUT client-screen settings → ${response.status}`;
+      } catch (error) {
+        failure = printableError(error, secrets);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10000));
+    }
+    console.log(JSON.stringify({ settingsRestored: false, error: failure }));
+    process.exitCode = 1;
+  })();
+  return restoring;
+};
+// A run that is stopped from outside (the host's load guard, Ctrl+C) still puts the setting back.
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+  process.once(signal, () => {
+    void restoreSettings().finally(() => process.exit(1));
+  });
+}
 
 const browser = await chromium.launch({ headless: true });
 try {
@@ -39,9 +92,13 @@ try {
   if (cookies.length) await context.addCookies(cookies);
   // A preview deployment has the customer screen flag off; this run switches it on for its own browser only.
   let runtimeConfig = null;
+  let targetProblem = null;
   await context.route(/runtime-config/, async (route) => {
     const response = await route.fetch();
     const json = await response.json();
+    // A deployment of any backend but stage does not get its configuration: the app cannot start.
+    targetProblem = stageTargetProblem(json);
+    if (targetProblem) return route.abort();
     runtimeConfig = json;
     // LAYOUT=legacy forces the classic layout with a tab bar, whatever the test user prefers.
     const ui = process.env.LAYOUT === 'legacy' ? { ...(json.ui ?? {}), evolutionEnabled: false, forceLegacy: true } : json.ui;
@@ -49,13 +106,12 @@ try {
   });
 
   // The stage backend and Hasura accept browser calls only from the stage site. When the build under
-  // test is a preview deployment, its calls to them are relayed by this script as if they came from
-  // the stage site; on the stage site itself nothing is relayed.
+  // test is a preview deployment, its calls to them (and to nothing else) are relayed by this script
+  // as if they came from the stage site; on the stage site itself nothing is relayed.
   const pageOrigin = new URL(base).origin;
-  const STAGE_SITE = 'https://app-test.mebelkz.app';
   if (pageOrigin !== STAGE_SITE) {
     const cors = { 'access-control-allow-origin': pageOrigin, 'access-control-allow-credentials': 'true', vary: 'Origin' };
-    await context.route((url) => url.hostname.endsWith('.mebelkz.app') && url.origin !== pageOrigin, async (route) => {
+    await context.route((url) => isStageRelayTarget(url.href), async (route) => {
       const request = route.request();
       if (request.method() === 'OPTIONS') {
         return route.fulfill({ status: 204, headers: { ...cors, 'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
@@ -75,6 +131,10 @@ try {
   const page = await context.newPage();
   page.on('pageerror', (e) => errors.push(`manager: ${e.message.split('\n')[0]}`));
   await page.goto(`${base}/login`, { waitUntil: 'domcontentloaded' });
+  // No credentials are typed and nothing is written before the deployment's backend is known to be stage.
+  await expect.poll(() => runtimeConfig !== null || targetProblem !== null, { timeout: 60000 }).toBe(true);
+  assert.equal(targetProblem, null, `refusing to run: ${targetProblem}`);
+  assert.equal(stageTargetProblem(runtimeConfig), null, 'the deployment talks to the stage backend');
   await page.fill('#username', username);
   await page.fill('#password', password);
   await page.locator('button[type="submit"]').click();
@@ -96,8 +156,10 @@ try {
   for (const code of ['summary.number', 'summary.client', 'tab.basic', 'basic.client', 'tab.details', 'details.n', 'details.quantity', 'tab.finance', 'finance.final']) {
     if (!codes.includes(code)) codes.push(code);
   }
-  await settingsCall('PUT', { enabled: true, visibleCodes: codes, expectedVersion: original.version });
+  applied = await settingsCall('PUT', { enabled: true, visibleCodes: codes, expectedVersion: original.version });
   results.push('organisation switch turned on for the run');
+  // SELF_INTERRUPT=1 proves the interruption path: the run stops itself here, as the load guard would.
+  if (process.env.SELF_INTERRUPT === '1') process.kill(process.pid, 'SIGTERM');
 
   await page.goto(`${base}/orders/edit/${orderId}`, { waitUntil: 'domcontentloaded' });
   const present = page.getByRole('button', { name: 'Показать клиенту' });
@@ -178,19 +240,6 @@ try {
   }, null, 1));
   process.exitCode = 1;
 } finally {
-  // Restore the shared stage setting exactly, whatever happened above, and prove it.
-  if (api && token && original) {
-    try {
-      const current = await settingsCall('GET');
-      await settingsCall('PUT', { enabled: original.enabled, visibleCodes: original.visibleCodes, expectedVersion: current.version });
-      const after = await settingsCall('GET');
-      const restored = after.enabled === original.enabled && JSON.stringify(after.visibleCodes) === JSON.stringify(original.visibleCodes);
-      console.log(JSON.stringify({ settingsRestored: restored, enabled: after.enabled, codes: after.visibleCodes.length }));
-      if (!restored) process.exitCode = 1;
-    } catch (error) {
-      console.log(JSON.stringify({ settingsRestored: false, error: printableError(error, secrets) }));
-      process.exitCode = 1;
-    }
-  }
+  await restoreSettings();
   await browser.close();
 }
