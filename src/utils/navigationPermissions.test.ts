@@ -97,6 +97,10 @@ describe('navigation permissions', () => {
     expect(canViewNavigationResource('payments', {
       permissions: ['payments.view', 'orders.view_financials'],
     }, true, false)).toBe(false);
+    // the analytics screen is not opened by payments.view alone (an ordinary manager)
+    expect(canViewNavigationResource('payments_view', {
+      permissions: ['payments.view', 'orders.view_financials'],
+    }, true)).toBe(false);
   });
 
   it('requires orders.view for production-adjacent order resources in backend mode', () => {

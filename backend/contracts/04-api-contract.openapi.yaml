@@ -19168,6 +19168,43 @@ paths:
         '403': {description: "Permission denied (audited as payments.onec_denied)"}
         '404': {description: "ONEC_RECEIPT_NOT_FOUND — no such line or it is outside the user's payment scope"}
         '503': {description: "ONEC_PAYMENT_MATCHING_DISABLED — the feature or the 1C integration is off"}
+  /api/v1/payments-analytics/summary:
+    get:
+      tags:
+        - Payments
+      operationId: getPaymentsAnalyticsSummary
+      summary: "Payments of a period under the analytics list filters: total, by payment type, by day (read-only)"
+      security:
+        - {bearerAuth: []}
+      x-permission: finance.analytics.view
+      description: >-
+        Requires finance.analytics.view and payments.view, and a payment visibility scope «all» (a user limited to
+        their own orders is refused). The period is required and covers at most 366 days.
+      parameters:
+        - {name: dateFrom, in: query, required: true, schema: {type: string, format: date}}
+        - {name: dateTo, in: query, required: true, schema: {type: string, format: date}}
+        - {name: orderName, in: query, required: false, schema: {type: string, maxLength: 200}, description: Substring}
+        - {name: clientName, in: query, required: false, schema: {type: string, maxLength: 200}, description: Substring}
+        - {name: notes, in: query, required: false, schema: {type: string, maxLength: 200}, description: Substring}
+        - {name: typePaidName, in: query, required: false, schema: {type: string, maxLength: 200}}
+        - {name: orderStatusName, in: query, required: false, schema: {type: string, maxLength: 200}}
+        - {name: paymentStatusName, in: query, required: false, schema: {type: string, maxLength: 200}}
+        - {name: productionStatusName, in: query, required: false, schema: {type: string, maxLength: 200}}
+        - {name: orderDateFrom, in: query, required: false, schema: {type: string, format: date}}
+        - {name: orderDateTo, in: query, required: false, schema: {type: string, format: date}}
+        - {name: amountMin, in: query, required: false, schema: {type: number}}
+        - {name: amountMax, in: query, required: false, schema: {type: number}}
+        - {name: orderAmountMin, in: query, required: false, schema: {type: number}}
+        - {name: orderAmountMax, in: query, required: false, schema: {type: number}}
+        - {name: totalPaymentsMin, in: query, required: false, schema: {type: number}}
+        - {name: totalPaymentsMax, in: query, required: false, schema: {type: number}}
+        - {name: orderBalanceMin, in: query, required: false, schema: {type: number}}
+        - {name: orderBalanceMax, in: query, required: false, schema: {type: number}}
+      responses:
+        '200': {description: "{dateFrom, dateTo, count, amount, byType[{typePaidName,count,amount}], byDay[{paymentDate,count,amount}]}; amounts are decimal strings"}
+        '400': {description: "VALIDATION_FAILED — a bad filter, a missing period or a period longer than 366 days"}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as payments.analytics_denied)"}
   /api/v1/onec/customer-orders:
     get:
       tags:

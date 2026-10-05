@@ -53,7 +53,8 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   workshops: ['references.view'],
   work_centers: ['references.view'],
   payments: ['payments.view'],
-  payments_view: ['payments.view', 'finance.analytics.view'],
+  // «+Платежи» — аналитика: только finance.analytics.view (у менеджера его нет); список «Платежи» — payments.view.
+  payments_view: ['finance.analytics.view'],
   clients_analytics_view: ['clients.analytics.view'],
   groups: ['groups.view'],
   projects: ['projects.view'],

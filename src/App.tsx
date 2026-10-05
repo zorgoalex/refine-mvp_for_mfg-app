@@ -1018,7 +1018,8 @@ const ThemedApp = () => {
                     <Route path="edit/:id" element={<PaymentEdit />} />
                     <Route path="show/:id" element={<PaymentShow />} />
                   </Route>
-                  <Route path="/payments-analytics" element={<FinancialRoute><Outlet /></FinancialRoute>}>
+                  {/* Аналитика платежей — для ролей с finance.analytics.view (топ-менеджер и выше), как и пункт меню. */}
+                  <Route path="/payments-analytics" element={<FinancialRoute><PermissionRoute permission="finance.analytics.view"><Outlet /></PermissionRoute></FinancialRoute>}>
                     <Route index element={<PaymentsAnalyticsList />} />
                     <Route path="show/:id" element={<PaymentsAnalyticsShow />} />
                   </Route>

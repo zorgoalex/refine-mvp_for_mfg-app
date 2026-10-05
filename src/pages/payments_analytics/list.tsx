@@ -15,6 +15,8 @@ import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
 import { countPaymentsAfter, findPaymentByOrderName } from "../../api/reports/paymentsAnalyticsReportApi";
 import { HasuraReportError } from "../../api/hasuraReportClient";
+import { PaymentsAnalyticsSummaryPanel } from "./PaymentsAnalyticsSummaryPanel";
+import { dayLabel, type SummaryDay } from "./paymentsAnalyticsSummary";
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -43,6 +45,21 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
   });
 
   const { show } = useNavigation();
+
+  // Итоги дня (из сводки за период) — для подписи первой строки каждого дня в таблице
+  const [summaryDays, setSummaryDays] = useState<Record<string, SummaryDay>>({});
+  const handleSummaryDays = useCallback((days: Record<string, SummaryDay>) => setSummaryDays(days), []);
+  const pageRows = (tableProps?.dataSource ?? []) as ReadonlyArray<{ payment_id: number; payment_date: string }>;
+  // группировка по дням имеет смысл, только пока список отсортирован по дате платежа
+  const groupedByDay = sorters[0]?.field === "payment_date";
+  const dayStartIds = React.useMemo(() => {
+    const ids = new Set<number>();
+    if (!groupedByDay) return ids;
+    pageRows.forEach((row, index) => {
+      if (index === 0 || pageRows[index - 1].payment_date !== row.payment_date) ids.add(row.payment_id);
+    });
+    return ids;
+  }, [groupedByDay, pageRows]);
 
   // useSelect для статусов
   const { selectProps: orderStatusSelectProps } = useSelect({
@@ -544,13 +561,18 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
         </Card>
       )}
 
+      <PaymentsAnalyticsSummaryPanel filters={filters} onDays={handleSummaryDays} />
       <Table
         {...tableProps}
+        className="pa-table"
         rowKey="payment_id"
         sticky
         scroll={{ x: "max-content", y: 600 }}
         rowClassName={(record) =>
-          record.payment_id === highlightedPaymentId ? "highlighted-row" : ""
+          [
+            record.payment_id === highlightedPaymentId ? "highlighted-row" : "",
+            dayStartIds.has(record.payment_id) ? "pa-day-start" : "",
+          ].filter(Boolean).join(" ")
         }
         onRow={(record) => ({
           onDoubleClick: () => {
@@ -562,8 +584,18 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
           dataIndex="payment_date"
           title="Дата платежа"
           sorter
-          width={110}
-          render={(value) => formatDate(value)}
+          width={groupedByDay ? 150 : 110}
+          render={(value, record: any) => {
+            if (!groupedByDay) return formatDate(value);
+            if (!dayStartIds.has(record.payment_id)) return <span className="pa-day-rest">{formatDate(value)}</span>;
+            const day = summaryDays[value as string];
+            return (
+              <span className="pa-day" title={formatDate(value)}>
+                {dayLabel(value as string)}
+                {day ? <span className="pa-day__total">{day.count} пл. · {formatNumber(day.amount, 0)} ₸</span> : null}
+              </span>
+            );
+          }}
         />
         <Table.Column
           dataIndex="amount"
