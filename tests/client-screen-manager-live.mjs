@@ -13,7 +13,7 @@ import { vercelBypassCookies } from './helpers/vercelBypass.mjs';
 // only: a deployment configured for any other backend is refused before logging in.
 // Env: BASE_URL (a built deployment), ORDER_ID (an existing test order), CODEX_PLAYWRIGHT_USERNAME /
 // CODEX_PLAYWRIGHT_PASSWORD, optional VERCEL_AUTOMATION_BYPASS_SECRET, optional LAYOUT=legacy,
-// optional SELF_INTERRUPT=1 | during.
+// optional SELF_INTERRUPT=1 | during, optional ROLLBACK=1.
 // Secrets are never printed.
 const base = (process.env.BASE_URL ?? '').replace(/\/$/, '');
 assert.match(base, /^https:\/\//, 'BASE_URL must be an https URL');
@@ -323,6 +323,23 @@ try {
   await page.getByRole('button', { name: 'Скрыть от клиента' }).click();
   await expect(viewPopup.getByText('Здесь появится ваш заказ')).toBeVisible({ timeout: 20000 });
   results.push('view page: «Скрыть от клиента» → splash');
+
+  // Rollback on a running presentation: the organisation switch is turned off while the customer
+  // sees the order; within a minute the customer is back on the splash, without any reload.
+  if (process.env.ROLLBACK === '1') {
+    await page.getByRole('button', { name: 'Показать клиенту' }).click();
+    await expect(viewPopup.getByRole('heading', { level: 1 })).toHaveText(/Заказ № |Ваш заказ/, { timeout: 30000 });
+    const mine = change.outcome().applied;
+    const startedAt = Date.now();
+    const off = await change.run(async () => {
+      const response = await settingsRequest('PUT', { enabled: false, visibleCodes: mine.visibleCodes, expectedVersion: mine.version });
+      return { ok: response.ok, status: response.status, body: response.ok ? await response.json() : null };
+    });
+    assert.ok(off.ok, `PUT client-screen settings (switch off) → ${off.status}`);
+    await expect(viewPopup.getByRole('heading', { level: 1 })).toHaveCount(0, { timeout: 90000 });
+    await expect(page.getByText('Клиент видит этот заказ')).toHaveCount(0, { timeout: 30000 });
+    results.push(`rollback: switched off in the settings during a presentation → the customer lost the order in ${Math.round((Date.now() - startedAt) / 1000)} s`);
+  }
 
   assert.deepEqual([...new Set(errors)], [], 'no page errors');
   console.log(JSON.stringify({ live: 'passed', base: new URL(base).host, results }, null, 1));
