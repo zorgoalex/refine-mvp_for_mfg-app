@@ -2,17 +2,16 @@ import type { ClientScreenPresenterView } from './clientScreenPresenter';
 
 /**
  * What the order header shows for the customer screen, as plain data. The emergency switch-off is
- * offered in every app tab of the workstation while the screen is not switched off — also in a tab
- * that presents nothing, because another tab may be the one presenting.
+ * not here: it is in the app header of every tab while something is presented.
  */
 export type ClientScreenControlModel =
   | { mode: 'workstation-off' }
-  | { mode: 'presenting'; waiting: boolean; emergency: true }
-  | { mode: 'idle'; label: 'Показать клиенту' | 'Показать этот заказ'; canPresent: boolean; hint: string; emergency: true };
+  | { mode: 'presenting'; waiting: boolean }
+  | { mode: 'idle'; label: 'Показать клиенту' | 'Показать этот заказ'; canPresent: boolean; hint: string };
 
 export function clientScreenControlModel(view: ClientScreenPresenterView, orderKey: string, referencesReady: boolean): ClientScreenControlModel {
   if (view.workstationDisabled) return { mode: 'workstation-off' };
-  if (view.presentedOrderKey === orderKey) return { mode: 'presenting', waiting: view.phase !== 'owner' || view.policyStale, emergency: true };
+  if (view.presentedOrderKey === orderKey) return { mode: 'presenting', waiting: view.phase !== 'owner' || view.policyStale };
   const other = view.presentedOrderKey !== null;
   return {
     mode: 'idle',
@@ -22,6 +21,5 @@ export function clientScreenControlModel(view: ClientScreenPresenterView, orderK
     hint: !referencesReady
       ? 'Экран клиента недоступен: справочники формы ещё не загружены'
       : other ? 'Сейчас клиенту показан другой заказ. Нажмите, чтобы показать этот' : 'Показать этот заказ на экране клиента',
-    emergency: true,
   };
 }

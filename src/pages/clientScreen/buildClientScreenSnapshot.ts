@@ -21,7 +21,7 @@ export interface ClientScreenRowSource<F extends string> {
 export interface ClientScreenOrderSource {
   /** Tabs as the manager sees them: their order and their labels. */
   tabs: ReadonlyArray<{ key: ClientScreenTabKey; label: string }>;
-  summary: FieldsOf<'number' | 'client' | 'parts' | 'area' | 'final' | 'debt'>;
+  summary: FieldsOf<'number' | 'client' | 'client_phone' | 'client_phones' | 'parts' | 'area' | 'final' | 'debt'>;
   basic: FieldsOf<'client' | 'order_name' | 'order_date' | 'order_status' | 'payment_status' | 'production_status' | 'manager' | 'priority' | 'doweling' | 'notes'>;
   dates: FieldsOf<'planned' | 'completion' | 'issue'>;
   finance: FieldsOf<'total' | 'discount' | 'surcharge' | 'final' | 'paid' | 'debt'>;
@@ -71,7 +71,7 @@ export function buildClientScreenSnapshot(source: ClientScreenOrderSource, visib
 
   const snapshot: ClientScreenSnapshot = {
     title: visible.has('summary.number') && source.summary.number ? `Заказ № ${source.summary.number}` : 'Ваш заказ',
-    summary: fields('summary', ['client', 'parts', 'area', 'final', 'debt'], source.summary, visible),
+    summary: fields('summary', ['client', 'client_phone', 'client_phones', 'parts', 'area', 'final', 'debt'], source.summary, visible),
     tabs: source.tabs
       .filter((tab) => (CLIENT_SCREEN_TAB_KEYS as readonly string[]).includes(tab.key) && tabOn(tab.key))
       .map((tab) => (tab.key === 'details' ? { key: tab.key, label: tab.label, counter: String(source.details.rows.length) } : { key: tab.key, label: tab.label })),

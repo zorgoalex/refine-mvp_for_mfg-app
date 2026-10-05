@@ -181,6 +181,8 @@ try {
   for (const code of ['summary.number', 'summary.client', 'tab.basic', 'basic.client', 'tab.details', 'details.n', 'details.quantity', 'tab.finance', 'finance.final']) {
     if (!codes.includes(code)) codes.push(code);
   }
+  // CLIENT_PHONE=1: the client's phone is ticked for the run (needs a backend that knows the code).
+  if (process.env.CLIENT_PHONE === '1' && !codes.includes('summary.client_phone')) codes.push('summary.client_phone');
   const switching = change.run(async () => {
     const response = await settingsRequest('PUT', { enabled: true, visibleCodes: codes, expectedVersion: original.version });
     return { ok: response.ok, status: response.status, body: response.ok ? await response.json() : null };
@@ -205,6 +207,51 @@ try {
   await expect(page.getByText('Клиент видит этот заказ')).toBeVisible({ timeout: 30000 });
   results.push(`customer window opened and shows: ${(await popup.getByRole('heading', { level: 1 }).innerText()).replace(/\d/g, '#')}`);
   assert.equal(await popup.evaluate(() => sessionStorage.length), 0, 'customer window sessionStorage is empty (noopener)');
+  if (process.env.CLIENT_PHONE === '1') {
+    await expect(popup.locator('.client-screen__chip').filter({ hasText: 'Телефон клиента' })).toHaveCount(1, { timeout: 30000 });
+    results.push('the client phone is on the customer screen when ticked');
+  } else {
+    assert.equal(await popup.locator('.client-screen__chip').filter({ hasText: 'Телефон клиента' }).count(), 0, 'the client phone is not shown unless ticked');
+  }
+
+  // App header: the eye and the emergency button exist only while something is presented; the eye
+  // shows a miniature of exactly what the customer sees. The presenting workspace tab is marked.
+  const eye = page.getByRole('button', { name: 'Что видит клиент' });
+  await expect(eye).toBeVisible({ timeout: 20000 });
+  await expect(page.getByRole('button', { name: 'Отключить экран клиента' })).toBeVisible();
+  await eye.hover();
+  const miniature = page.locator('[role="dialog"][aria-label="Экран клиента"] .client-screen-preview');
+  await expect(miniature).toBeVisible({ timeout: 10000 });
+  await expect(miniature.locator('.client-screen__title')).toHaveText(await popup.getByRole('heading', { level: 1 }).innerText());
+  assert.deepEqual(
+    await miniature.locator('.client-screen__tab').allInnerTexts(),
+    await popup.locator('.client-screen__tab').allInnerTexts(),
+    'the miniature has the customer\'s tabs',
+  );
+  await page.mouse.move(5, 400);
+  await expect(miniature).toHaveCount(0, { timeout: 10000 });
+  const tabEyes = page.locator('.workspace-tabs .client-screen-tab-eye');
+  const hasWorkspaceTabs = await page.locator('.workspace-tabs').count() > 0;
+  if (hasWorkspaceTabs) await expect(tabEyes).toHaveCount(1, { timeout: 10000 });
+  results.push(`app header: eye with a live miniature and the emergency button${hasWorkspaceTabs ? '; the presenting workspace tab is marked' : ''}`);
+
+  // Leaving the order (another page of the app) does not take it away from the customer.
+  const shownBefore = await popup.getByRole('heading', { level: 1 }).innerText();
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/orders');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await page.waitForURL((url) => url.pathname === '/orders', { timeout: 20000 });
+  await page.waitForTimeout(3000);
+  await expect(popup.getByRole('heading', { level: 1 })).toHaveText(shownBefore);
+  await expect(eye).toBeVisible();
+  if (hasWorkspaceTabs) await expect(tabEyes).toHaveCount(1);
+  await eye.click();
+  await page.locator('[role="dialog"][aria-label="Экран клиента"]').getByRole('button', { name: 'Перейти к заказу' }).click();
+  await page.waitForURL((url) => url.pathname === `/orders/edit/${orderId}`, { timeout: 20000 });
+  await expect(page.getByText('Клиент видит этот заказ')).toBeVisible({ timeout: 30000 });
+  await expect(popup.getByRole('heading', { level: 1 })).toHaveText(shownBefore);
+  results.push('switching to another page keeps the order on the customer screen; «Перейти к заказу» returns to it');
 
   const selectedTab = () => popup.getByRole('tab', { selected: true });
   const managerTab = (name) => page.getByRole('tab', { name }).first();
@@ -273,7 +320,9 @@ try {
   await page.getByRole('button', { name: 'Скрыть от клиента' }).click();
   await expect(popup.getByText('Здесь появится ваш заказ')).toBeVisible({ timeout: 20000 });
   await expect(page.getByRole('button', { name: 'Показать клиенту' })).toBeVisible();
-  results.push('«Скрыть от клиента» → splash');
+  await expect(page.getByRole('button', { name: 'Что видит клиент' })).toHaveCount(0, { timeout: 10000 });
+  await expect(page.getByRole('button', { name: 'Отключить экран клиента' })).toHaveCount(0);
+  results.push('«Скрыть от клиента» → splash; the header eye and the emergency button are gone');
 
   await page.getByRole('button', { name: 'Показать клиенту' }).click();
   await expect(popup.getByRole('heading', { level: 1 })).toHaveText(/Заказ № |Ваш заказ/, { timeout: 30000 });

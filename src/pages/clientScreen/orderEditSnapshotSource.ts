@@ -21,6 +21,11 @@ export interface OrderEditSourceInput {
   payments: readonly Payment[];
   catalogLines: readonly OrderCatalogLine[];
   dowelingLinks: readonly OrderDowelingLink[];
+  /**
+   * Contact data of the order's client, already formatted. A value that is not loaded (or that the
+   * manager may not see) is undefined and is not sent; a client without it has null.
+   */
+  clientContacts?: ClientScreenClientContacts | null;
   /** Full order number shown in the page title; while it is not known the customer sees a generic title. */
   orderNumber: string | null;
   /** Tabs of the form in the manager's order with the manager's labels (all of them; unknown keys are ignored). */
@@ -46,6 +51,35 @@ export interface OrderEditSourceInput {
    * detail appear the moment the manager starts it.
    */
   editingRow?: { rowKey: string | number; values: Partial<OrderDetail> } | null;
+}
+
+export interface ClientScreenClientContacts {
+  /** The primary phone (or the first one). */
+  phone: string | null | undefined;
+  /** The other phones, comma separated. */
+  otherPhones: string | null | undefined;
+}
+
+/** Phone number the way the order header shows it: "8 xxx xxx xxxx". */
+export function clientScreenPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 11) return `8 ${digits.slice(1, 4)} ${digits.slice(4, 7)} ${digits.slice(7, 11)}`;
+  if (digits.length === 10) return `8 ${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6, 10)}`;
+  return phone;
+}
+
+/** Phones of one client as the customer screen shows them; `undefined` while they are not loaded. */
+export function clientScreenClientContacts(
+  phones: ReadonlyArray<{ phone_number?: string | null; is_primary?: boolean | null }> | null | undefined,
+): ClientScreenClientContacts {
+  if (!phones) return { phone: undefined, otherPhones: undefined };
+  const numbers = phones.filter((item) => typeof item.phone_number === 'string' && item.phone_number.trim() !== '');
+  const primary = numbers.find((item) => item.is_primary) ?? numbers[0];
+  const others = numbers.filter((item) => item !== primary).map((item) => clientScreenPhone(item.phone_number as string));
+  return {
+    phone: primary ? clientScreenPhone(primary.phone_number as string) : null,
+    otherPhones: others.length ? others.join(', ') : null,
+  };
 }
 
 /** Detail table column key → registry field. Columns without an entry are never shown to the customer. */
@@ -132,6 +166,8 @@ export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenO
       // Only the order number: the order name is a separate field with its own tick.
       number: input.orderNumber || null,
       client: named(header.client_id, names.client),
+      client_phone: input.clientContacts?.phone,
+      client_phones: input.clientContacts?.otherPhones,
       parts: `${formatNumber(partsCount, 0)}`,
       area: `${formatNumber(totalArea, 2)} м²`,
       final: totalKnown ? clientScreenMoney(finalAmount) : undefined,

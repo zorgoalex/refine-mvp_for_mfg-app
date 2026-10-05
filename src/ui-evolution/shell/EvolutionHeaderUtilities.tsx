@@ -18,6 +18,7 @@ import { useNavigate } from 'react-router-dom';
 import { authSession } from '../../api/authSession';
 import { GlobalSvgCutUploadAction } from '../../components/GlobalSvgCutUploadAction';
 import { NotificationBell } from '../../components/NotificationBell';
+import { ClientScreenGlobalIndicator } from '../../pages/clientScreen/ClientScreenGlobalIndicator';
 import { featureFlags } from '../../config/featureFlags';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import type { UserIdentity } from '../../types/auth';
@@ -115,6 +116,7 @@ export const EvolutionHeaderUtilities: React.FC<EvolutionHeaderUtilitiesProps> =
           </Tooltip>
         ) : null}
         {identity && !tablet ? <NotificationBell /> : null}
+        {identity ? <ClientScreenGlobalIndicator /> : null}
         {identity && !operational && !tablet ? (
           <Tooltip title={mode === 'dark' ? 'Темная тема' : 'Светлая тема'}>
             <Switch

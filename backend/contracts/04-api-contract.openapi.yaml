@@ -21042,6 +21042,8 @@ components:
       enum:
         - summary.number
         - summary.client
+        - summary.client_phone
+        - summary.client_phones
         - summary.parts
         - summary.area
         - summary.final

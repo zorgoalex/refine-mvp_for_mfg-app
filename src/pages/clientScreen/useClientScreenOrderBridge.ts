@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { OrderFormDataReferences } from '../../query/orderFormDataReferences';
 import { getOrderDraftStore } from '../../stores/orderFormStore';
+import { useTabStore } from '../../stores/tabStore';
 import { isOrderDetailPlaceholder } from '../../utils/orderDetailRows';
 import type { ClientScreenIdFor } from './buildClientScreenSnapshot';
 import { getClientScreenPresenter } from './clientScreenInstance';
+import { clientScreenUnmountAction } from './clientScreenOrderKeys';
 import type { ClientScreenOrderProvider } from './clientScreenPresenter';
 import { CLIENT_SCREEN_TAB_KEYS, type ClientScreenTabKey, type ClientScreenUi } from './clientScreenSnapshotSchema';
 import {
@@ -29,6 +31,8 @@ export interface ClientScreenOrderBridgeInput {
   operational: boolean;
   references: OrderFormDataReferences | null | undefined;
   sheetMaterialName: (id: number | null | undefined) => string | undefined;
+  /** Phones of the order's client, when they are loaded. */
+  clientContacts?: OrderEditSourceInput['clientContacts'];
   /** Film names including films no longer offered for new details; the form's own list when absent. */
   filmNameById?: Map<number, string>;
   canViewServiceMoney: boolean;
@@ -125,6 +129,19 @@ export function useClientScreenScroll(orderKey: string, active: boolean): () => 
   }).current;
 }
 
+/**
+ * The screen of an order unmounts. The manager switching to another tab must not take the order away
+ * from the customer: while the order's tab stays open the presentation goes on with the state kept
+ * at this moment; only closing the order ends it.
+ */
+export function releaseClientScreenSource(orderKey: string, provider: ClientScreenOrderProvider): void {
+  const presenter = getClientScreenPresenter();
+  if (!presenter) return;
+  const openTabKeys = useTabStore.getState().tabs.map((tab) => tab.key);
+  if (clientScreenUnmountAction(orderKey, openTabKeys) === 'keep') presenter.detach(orderKey, provider);
+  else presenter.hide(orderKey);
+}
+
 /** Detail columns in the form's default order, used until the detail table has been on screen. */
 const DEFAULT_DETAIL_COLUMNS = Object.keys(DETAIL_COLUMN_FIELDS);
 /** How often the open row editor is looked at for new values while the order is presented. */
@@ -215,6 +232,7 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
         catalogLines: state.catalogLines,
         dowelingLinks: state.dowelingLinks,
         orderNumber: current.orderNumber,
+        clientContacts: current.clientContacts,
         tabs: orderFormMirrorTabs(current.operational),
         names: orderFormNames(current.references, current.sheetMaterialName, current.filmNameById),
         // The manager's own columns, sorting and grouping, once the detail table has been on screen.
@@ -248,17 +266,18 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
     const presenter = getClientScreenPresenter();
     if (!presenter) return undefined;
     const unsubscribe = getOrderDraftStore(orderKey).subscribe(() => presenter.notifyChanged(orderKey));
+    // The form of the presented order is on screen again: it is the live source once more.
+    presenter.attach(orderKey, provider);
     return () => {
       unsubscribe();
-      // The form of the presented order is gone (tab closed, order switched): the customer sees the splash.
-      presenter.hide(orderKey);
+      releaseClientScreenSource(orderKey, provider);
     };
-  }, [orderKey]);
+  }, [orderKey, provider]);
 
   // Names loaded later, the order number and the layout change what is shown as well.
   useEffect(() => {
     getClientScreenPresenter()?.notifyChanged(orderKey);
-  }, [orderKey, input.references, input.orderNumber, input.operational, input.canViewServiceMoney, input.sheetMaterialName, input.filmNameById]);
+  }, [orderKey, input.references, input.orderNumber, input.operational, input.canViewServiceMoney, input.sheetMaterialName, input.filmNameById, input.clientContacts]);
 
   // The detail table: its columns, row order and groups change the snapshot; the page and the cell
   // are interface state. The open row editor and the cell the keyboard is in are looked at on a

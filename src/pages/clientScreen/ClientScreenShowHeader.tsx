@@ -1,9 +1,10 @@
 import React from 'react';
 import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
 import { ClientScreenControl } from './ClientScreenControl';
-import { getClientScreenPresenter } from './clientScreenInstance';
+import { getClientScreenPresenter, useClientScreenView } from './clientScreenInstance';
 import { ClientScreenBoundary } from './ClientScreenOrderHeader';
 import type { OrderShowSourceInput } from './orderShowSnapshotSource';
+import { useClientScreenClientContacts } from './useClientScreenClientContacts';
 import { orderShowPresentationKey, useClientScreenShowBridge } from './useClientScreenShowBridge';
 
 /**
@@ -19,7 +20,10 @@ interface Props extends OrderShowSourceInput {
 
 const Connected: React.FC<Props> = ({ orderId, ready, ...input }) => {
   const orderKey = orderShowPresentationKey(orderId);
-  const { provider } = useClientScreenShowBridge({ ...input, orderKey, active: useKeepAlive().isActive });
+  const presentedHere = useClientScreenView().presentedOrderKey === orderKey;
+  const clientId = Number(input.record.client_id);
+  const clientContacts = useClientScreenClientContacts(Number.isFinite(clientId) && clientId > 0 ? clientId : null, presentedHere);
+  const { provider } = useClientScreenShowBridge({ ...input, clientContacts, orderKey, active: useKeepAlive().isActive });
   return <ClientScreenControl orderKey={orderKey} provider={provider} referencesReady={ready} />;
 };
 

@@ -1,0 +1,33 @@
+/* Manager side: the indicator next to the notification bell and the small preview of the customer's screen. */
+.client-screen-indicator { position: relative; display: inline-flex; align-items: center; gap: 2px; }
+.client-screen-indicator__eye { color: #389e0d; font-size: 18px; }
+.client-screen-indicator__eye--waiting { color: #8c8c8c; }
+.client-screen-indicator__panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 1050;
+  width: 472px;
+  padding: 12px;
+  background: #ffffff;
+  color: #1a2330;
+  border: 1px solid #dce2ea;
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.22);
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: default;
+}
+.client-screen-indicator__caption { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-weight: 600; }
+.client-screen-indicator__note { margin-top: 6px; color: #64707e; font-weight: 400; }
+.client-screen-indicator__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+/* The customer's screen at 35%: a 1280×720 page scaled down, never interactive. */
+.client-screen-preview { width: 448px; height: 252px; overflow: hidden; border: 1px solid #dce2ea; border-radius: 6px; background: #f3f5f8; }
+.client-screen-preview__page { width: 1280px; height: 720px; overflow: hidden; transform: scale(0.35); transform-origin: top left; pointer-events: none; user-select: none; }
+.client-screen-preview__page .client-screen,
+.client-screen-preview__page .client-screen__order,
+.client-screen-preview__page .client-screen__splash { min-height: 720px; }
+.client-screen-preview__empty { display: flex; align-items: center; justify-content: center; height: 100%; color: #64707e; }
+/* Workspace tab of the order the customer sees. */
+.client-screen-tab-eye { color: #52c41a; font-size: 1em; margin-right: 6px; vertical-align: -0.125em; }

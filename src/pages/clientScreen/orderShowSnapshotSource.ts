@@ -4,7 +4,9 @@ import { calculateOrderTotalArea } from '../../utils/orderArea';
 import type { ClientScreenOrderSource, ClientScreenValue, DetailField } from './buildClientScreenSnapshot';
 import type { ClientScreenTabKey } from './clientScreenSnapshotSchema';
 import { orderDetailMirrorRows } from './orderDetailTableMirror';
-import { clientScreenDate, clientScreenMoney, GROUPING_FIELDS, orderDetailDisplayValues } from './orderEditSnapshotSource';
+import {
+  clientScreenDate, clientScreenMoney, GROUPING_FIELDS, orderDetailDisplayValues, type ClientScreenClientContacts,
+} from './orderEditSnapshotSource';
 
 /**
  * Turns what the order VIEW page has loaded into the same display source the edit form gives: names
@@ -17,6 +19,8 @@ export interface OrderShowSourceInput {
   /** The order record of the view page (names are already in it). */
   record: Readonly<Record<string, unknown>>;
   clientName: string | null | undefined;
+  /** Contact data of the client, already formatted; undefined values are not loaded and not sent. */
+  clientContacts?: ClientScreenClientContacts | null;
   /** Details in the order on screen (the page's own sorting). */
   details: ReadonlyArray<Readonly<Record<string, unknown>>>;
   /** The page's grouped data source while grouping is on (separators and details), otherwise null. */
@@ -141,6 +145,8 @@ export function buildOrderShowSource(input: OrderShowSourceInput): ClientScreenO
       // The view page has no full order number; the order name is never used in its place.
       number: null,
       client,
+      client_phone: input.clientContacts?.phone,
+      client_phones: input.clientContacts?.otherPhones,
       parts: formatNumber(partsCount, 0),
       area: `${formatNumber(calculateOrderTotalArea(details), 2)} м²`,
       final: totalKnown ? money(finalAmount) : undefined,

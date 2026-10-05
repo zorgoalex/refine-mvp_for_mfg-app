@@ -555,6 +555,108 @@ describe('customer screen: manager windows and the customer window together', ()
     expect(viewer.getState().ui?.tab).toBe('basic');
   });
 
+  it('the order screen goes away while its tab stays: the customer keeps the order; the settings still apply; the screen comes back live', async () => {
+    const policy = { current: allCodes };
+    const { startViewer, presenter } = setup(policy);
+    const viewer = startViewer();
+    await until(() => viewer.getRole() === 'viewer', 'viewer lock');
+    const a = presenter();
+    const shownOrder = order('A1');
+    shownOrder.ui = { tab: 'details', focus: { code: 'details.name' }, editing: null, scroll: { ratio: 0.4 }, page: null };
+    a.present('order-1', shownOrder);
+    await until(() => shownTitle(viewer) === 'Заказ № A1', 'presented');
+    await until(() => viewer.getState().ui?.scroll?.ratio === 0.4, 'ui shown');
+
+    // The last state of the screen is taken at the moment it goes away.
+    shownOrder.source = { ...shownOrder.source, basic: { ...shownOrder.source.basic, order_name: 'Заказ A1 перед уходом' } };
+    a.detach('order-1', shownOrder);
+    await until(() => JSON.stringify(viewer.getState().shown).includes('Заказ A1 перед уходом'), 'kept state shown');
+    expect(a.getView()).toMatchObject({ phase: 'owner', presentedOrderKey: 'order-1' });
+    // Nothing is pointed at any more; the tab and the scroll position stay.
+    await until(() => viewer.getState().ui?.focus === null, 'focus mark gone');
+    expect(viewer.getState().ui).toMatchObject({ tab: 'details', scroll: { ratio: 0.4 } });
+
+    // Later changes of the gone screen object are not read.
+    shownOrder.source = { ...shownOrder.source, basic: { ...shownOrder.source.basic, order_name: 'ПОСЛЕ УХОДА' } };
+    a.notifyChanged('order-1');
+    await wait(80);
+    expect(JSON.stringify(viewer.getState().shown)).not.toContain('ПОСЛЕ УХОДА');
+
+    // A settings change still filters what is kept.
+    policy.current = { enabled: true, visibleCodes: ['summary.number', 'tab.details', 'details.name'], version: 2 };
+    await a.reloadPolicy();
+    await until(() => !JSON.stringify(viewer.getState().shown).includes('Заказ A1 перед уходом'), 'kept state filtered again');
+    expect(JSON.stringify(viewer.getState().shown)).toContain('Фасад A1');
+    expect(JSON.stringify(viewer.getState().shown)).not.toContain('цена A1');
+
+    // The screen is mounted again: live once more.
+    const back = order('A1');
+    back.source = { ...back.source, details: { ...back.source.details, rows: [{ key: 'A1-row-1', values: { name: 'Фасад A1 снова живой', cost: 'x' } }] } };
+    a.attach('order-1', back);
+    await until(() => JSON.stringify(viewer.getState().shown).includes('Фасад A1 снова живой'), 'live again');
+    // Attaching the screen of another order does nothing.
+    const other = order('B2');
+    a.attach('order-2', other);
+    a.detach('order-2', other);
+    await wait(60);
+    expect(shownTitle(viewer)).toBe('Заказ № A1');
+    expect(a.getView().presentedOrderKey).toBe('order-1');
+  });
+
+  it('a screen that goes away before anything was shown ends the presentation', async () => {
+    const { presenter, opened } = setup();
+    const a = presenter();
+    const failing = order('A1');
+    a.present('order-1', failing);
+    await until(() => opened.mock.calls.length === 1, 'window requested');
+    failing.getSource = () => { throw new Error('screen is gone'); };
+    a.detach('order-1', failing);
+    expect(a.getView().presentedOrderKey).toBeNull();
+  });
+
+  it('the preview is exactly what was sent: filtered data and interface state; it is gone with the presentation', async () => {
+    const policy = { current: { enabled: true, visibleCodes: ['summary.number', 'tab.details', 'details.name'], version: 1 } as ClientScreenPolicy };
+    const { startViewer, presenter } = setup(policy);
+    const viewer = startViewer();
+    await until(() => viewer.getRole() === 'viewer', 'viewer lock');
+    const a = presenter();
+    const changes = vi.fn();
+    a.subscribePreview(changes);
+    expect(a.getPreview()).toBeNull();
+    const shownOrder = order('A1');
+    a.present('order-1', shownOrder);
+    await until(() => shownTitle(viewer) === 'Заказ № A1' && viewer.getState().ui !== null, 'presented');
+    const preview = a.getPreview();
+    expect(preview?.snapshot).toEqual(viewer.getState().shown?.snapshot);
+    expect(preview?.ui).toEqual(viewer.getState().ui);
+    expect(JSON.stringify(preview)).not.toContain('цена A1');
+    expect(JSON.stringify(preview)).not.toContain('секрет A1');
+    expect(changes).toHaveBeenCalled();
+    shownOrder.ui = { ...shownOrder.ui, scroll: { ratio: 0.7 } };
+    a.notifyUi('order-1');
+    expect(a.getPreview()?.ui?.scroll?.ratio).toBe(0.7);
+    a.hide('order-1');
+    expect(a.getPreview()).toBeNull();
+  });
+
+  it('a window that presents nothing learns that another window does, and that it stopped', async () => {
+    const { startViewer, presenter } = setup();
+    const viewer = startViewer();
+    await until(() => viewer.getRole() === 'viewer', 'viewer lock');
+    const a = presenter();
+    const idle = presenter();
+    expect(idle.getView().presentingElsewhere).toBe(false);
+    a.present('order-1', order('A1'));
+    await until(() => shownTitle(viewer) === 'Заказ № A1', 'presented');
+    await until(() => idle.getView().presentingElsewhere, 'the idle window sees the presentation', 6000);
+    expect(idle.getView().presentedOrderKey).toBeNull();
+    // The presenting window itself does not count its own presentation as "elsewhere".
+    await wait(2500);
+    expect(a.getView().presentingElsewhere).toBe(false);
+    a.hide('order-1');
+    await until(() => !idle.getView().presentingElsewhere, 'the idle window sees it stopped', 6000);
+  }, 20000);
+
   it('a second customer window stays passive', async () => {
     const { startViewer } = setup();
     const first = startViewer();

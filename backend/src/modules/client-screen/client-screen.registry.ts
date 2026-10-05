@@ -5,7 +5,8 @@
  * organisation ticked it (client_screen_settings.visible_codes) together with its tab.
  */
 export const CLIENT_SCREEN_CODES = [
-  'summary.number', 'summary.client', 'summary.parts', 'summary.area', 'summary.final', 'summary.debt',
+  'summary.number', 'summary.client', 'summary.client_phone', 'summary.client_phones', 'summary.parts', 'summary.area',
+  'summary.final', 'summary.debt',
   'tab.basic',
   'basic.client', 'basic.order_name', 'basic.order_date', 'basic.order_status', 'basic.payment_status',
   'basic.production_status', 'basic.manager', 'basic.priority', 'basic.doweling', 'basic.notes',

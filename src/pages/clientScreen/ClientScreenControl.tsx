@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { Button, Popconfirm, Space, Tag, message } from 'antd';
-import { DesktopOutlined, EyeInvisibleOutlined, PoweroffOutlined } from '@ant-design/icons';
+import { Button, Space, Tag, message } from 'antd';
+import { DesktopOutlined, EyeInvisibleOutlined } from '@ant-design/icons';
 import { Tooltip } from '../../ui/tooltipDelay';
 import { getClientScreenPresenter, useClientScreenView } from './clientScreenInstance';
 import type { ClientScreenOrderProvider } from './clientScreenPresenter';
@@ -8,8 +8,10 @@ import { clientScreenControlModel } from './clientScreenControlModel';
 import type { PublisherLoss } from './clientScreenPublisherCore';
 
 /**
- * Customer screen controls in the order header: present this order, hide, and the emergency
- * switch-off of the whole workstation. Renders nothing when the feature is off for the deployment.
+ * Customer screen controls in the order header: present this order, hide, and the way back after an
+ * emergency switch-off. The emergency switch-off itself and the preview of the customer's screen are
+ * in the app header (ClientScreenGlobalIndicator), visible while something is presented. Renders
+ * nothing when the feature is off for the deployment.
  */
 const LOSS_TEXT: Partial<Record<PublisherLoss, { type: 'info' | 'warning' | 'error'; text: string }>> = {
   taken: { type: 'info', text: 'Показ клиенту перехвачен в другой вкладке' },
@@ -45,30 +47,11 @@ export const ClientScreenControl: React.FC<{ orderKey: string; provider: ClientS
     );
   }
 
-  const emergency = (
-    <Popconfirm
-      title={(
-        <div style={{ maxWidth: 320 }}>
-          <div>Отключить экран клиента на этом рабочем месте?</div>
-          <div style={{ fontWeight: 400 }}>Показ прекратится во всех вкладках. Клиенту можно показать свой экран: Win+P → «Повторяющийся».</div>
-        </div>
-      )}
-      okText="Отключить"
-      cancelText="Отмена"
-      onConfirm={() => void presenter.disableWorkstation().catch(() => undefined)}
-    >
-      <Tooltip title="Аварийно отключить экран клиента">
-        <Button style={{ ...compact, padding: '0 8px' }} danger icon={<PoweroffOutlined />} aria-label="Отключить экран клиента" />
-      </Tooltip>
-    </Popconfirm>
-  );
-
   if (model.mode === 'presenting') {
     return (
       <Space size={6}>
         <Tag color={model.waiting ? 'default' : 'green'}>{model.waiting ? 'Открываем экран клиента…' : 'Клиент видит этот заказ'}</Tag>
         <Button style={compact} icon={<EyeInvisibleOutlined />} onClick={() => presenter.hide(orderKey)}>Скрыть от клиента</Button>
-        {emergency}
       </Space>
     );
   }
@@ -80,7 +63,6 @@ export const ClientScreenControl: React.FC<{ orderKey: string; provider: ClientS
           {model.label}
         </Button>
       </Tooltip>
-      {emergency}
     </Space>
   );
 };

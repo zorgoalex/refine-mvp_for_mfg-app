@@ -1,3 +1,4 @@
+import { clientScreenOrderPath, clientScreenUnmountAction, orderShowPresentationKey } from './clientScreenOrderKeys';
 import { describe, expect, it } from 'vitest';
 import { CLIENT_SCREEN_PATH } from './clientScreenPath';
 import { clientScreenWindowFeatures, pickCustomerScreen } from './openClientScreenWindow';
@@ -49,13 +50,13 @@ describe('order form bridge helpers', () => {
 
 describe('customer screen control in the order header', () => {
   const view = (over: Partial<ClientScreenPresenterView> = {}): ClientScreenPresenterView =>
-    ({ phase: 'idle', presentedOrderKey: null, lost: null, workstationDisabled: false, policyStale: false, ...over });
+    ({ phase: 'idle', presentedOrderKey: null, lost: null, workstationDisabled: false, policyStale: false, presentingElsewhere: false, ...over });
 
-  it('offers the emergency switch-off in every tab that is not switched off — also in a tab that presents nothing', () => {
+  it('the order header offers presenting; the emergency switch-off is not its business any more', () => {
     // Tab B: nothing presented here; another browser tab may be presenting.
-    expect(clientScreenControlModel(view(), '7', true)).toMatchObject({ mode: 'idle', label: 'Показать клиенту', canPresent: true, emergency: true });
-    expect(clientScreenControlModel(view({ presentedOrderKey: '9', phase: 'owner' }), '7', true)).toMatchObject({ mode: 'idle', label: 'Показать этот заказ', emergency: true });
-    expect(clientScreenControlModel(view({ presentedOrderKey: '7', phase: 'owner' }), '7', true)).toEqual({ mode: 'presenting', waiting: false, emergency: true });
+    expect(clientScreenControlModel(view(), '7', true)).toMatchObject({ mode: 'idle', label: 'Показать клиенту', canPresent: true });
+    expect(clientScreenControlModel(view({ presentedOrderKey: '9', phase: 'owner' }), '7', true)).toMatchObject({ mode: 'idle', label: 'Показать этот заказ' });
+    expect(clientScreenControlModel(view({ presentedOrderKey: '7', phase: 'owner' }), '7', true)).toEqual({ mode: 'presenting', waiting: false });
     expect(clientScreenControlModel(view({ presentedOrderKey: '7', phase: 'claiming' }), '7', true)).toMatchObject({ mode: 'presenting', waiting: true });
     expect(clientScreenControlModel(view({ presentedOrderKey: '7', phase: 'owner', policyStale: true }), '7', true)).toMatchObject({ waiting: true });
     expect(clientScreenControlModel(view({ workstationDisabled: true, presentedOrderKey: '7' }), '7', true)).toEqual({ mode: 'workstation-off' });
@@ -63,7 +64,7 @@ describe('customer screen control in the order header', () => {
 
   it('does not offer to present while the form has no backend reference names (the customer would see dashes)', () => {
     const model = clientScreenControlModel(view(), '7', false);
-    expect(model).toMatchObject({ mode: 'idle', canPresent: false, emergency: true });
+    expect(model).toMatchObject({ mode: 'idle', canPresent: false });
     expect(model.mode === 'idle' && model.hint).toContain('справочники');
   });
 
@@ -133,5 +134,23 @@ describe('what the detail table shows, for the customer screen', () => {
     expect(mirroredEditing(at('gone', 'height'), details, names, idFor).focus).toBeNull();
     const broken = { ...table(null), getActiveCell: () => { throw new Error('table is gone'); } };
     expect(mirroredEditing(broken, details, names, idFor)).toEqual({ focus: null, editing: null });
+  });
+});
+
+describe('presentation sources and workspace tabs', () => {
+  it('each source has its page, which is the key of its workspace tab', () => {
+    expect(clientScreenOrderPath('7')).toBe('/orders/edit/7');
+    expect(clientScreenOrderPath('new')).toBe('/orders/create');
+    expect(clientScreenOrderPath(orderShowPresentationKey(7))).toBe('/orders/show/7');
+  });
+
+  it('an order screen that unmounts with its tab open keeps the presentation; a closed tab ends it', () => {
+    const tabs = ['/orders', '/orders/edit/7', '/orders/show/9'];
+    expect(clientScreenUnmountAction('7', tabs)).toBe('keep');
+    expect(clientScreenUnmountAction(orderShowPresentationKey(9), tabs)).toBe('keep');
+    // The view page of order 7 is not open, although its edit form is.
+    expect(clientScreenUnmountAction(orderShowPresentationKey(7), tabs)).toBe('end');
+    expect(clientScreenUnmountAction('8', tabs)).toBe('end');
+    expect(clientScreenUnmountAction('7', [])).toBe('end');
   });
 });

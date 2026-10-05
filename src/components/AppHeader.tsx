@@ -16,6 +16,7 @@ import { useNavigate } from "react-router-dom";
 import type { UserIdentity } from "../types/auth";
 import { GlobalSvgCutUploadAction } from "./GlobalSvgCutUploadAction";
 import { NotificationBell } from "./NotificationBell";
+import { ClientScreenGlobalIndicator } from "../pages/clientScreen/ClientScreenGlobalIndicator";
 import { useAppTheme } from "../theme/ThemeProvider";
 import { authStorage } from "../utils/auth";
 import { authSession } from "../api/authSession";
@@ -116,6 +117,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSider }) => {
 
             {/* Колокольчик уведомлений */}
             <NotificationBell />
+            <ClientScreenGlobalIndicator />
 
             <span className="app-header__theme-toggle">
               <Tooltip title={mode === "dark" ? "Темная тема" : "Светлая тема"}>

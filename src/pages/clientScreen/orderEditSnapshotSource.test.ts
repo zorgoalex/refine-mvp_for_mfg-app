@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { buildClientScreenSnapshot, createClientScreenIdMap, filterClientScreenUi } from './buildClientScreenSnapshot';
 import { buildMirrorView } from './mirrorView';
-import { CLIENT_SCREEN_CODES } from './clientScreenRegistry';
+import { CLIENT_SCREEN_CODES, CLIENT_SCREEN_DEFAULT_VISIBLE_CODES } from './clientScreenRegistry';
 import { clientScreenSnapshotSchema } from './clientScreenSnapshotSchema';
 import {
-  buildOrderEditSource, DETAIL_COLUMN_FIELDS, GROUPING_FIELDS, orderEditEditingValues, type OrderEditSourceInput,
+  buildOrderEditSource, clientScreenClientContacts, clientScreenPhone, DETAIL_COLUMN_FIELDS, GROUPING_FIELDS, orderEditEditingValues,
+  type OrderEditSourceInput,
 } from './orderEditSnapshotSource';
 
 const map = (entries: Record<number, string>) => (id: number | null | undefined) => (id === null || id === undefined ? undefined : entries[id]);
@@ -255,6 +256,55 @@ describe('the table of the manager: row order, the row being filled, live editor
     expect(buildMirrorView(snapshot, ui).table!.rows[0].cells.map((cell) => cell.text)).toEqual(['1', '—']);
     // Escape: no editor any more, the saved film is back.
     expect(buildMirrorView(snapshot, { ...ui, editing: null }).table!.rows[0].cells.map((cell) => cell.text)).toEqual(['1', 'Белый софт']);
+  });
+});
+
+describe('contact data of the client', () => {
+  const phones = [
+    { phone_number: '+7 (701) 111-22-33', is_primary: false },
+    { phone_number: '87052223344', is_primary: true },
+    { phone_number: '  ', is_primary: false },
+    { phone_number: '7273334455', is_primary: false },
+  ];
+
+  it('formats phones as the order header does; the primary one first, the others together', () => {
+    expect(clientScreenPhone('+7 (701) 111-22-33')).toBe('8 701 111 2233');
+    expect(clientScreenPhone('7273334455')).toBe('8 727 333 4455');
+    expect(clientScreenPhone('112')).toBe('112');
+    expect(clientScreenClientContacts(phones)).toEqual({ phone: '8 705 222 3344', otherPhones: '8 701 111 2233, 8 727 333 4455' });
+    expect(clientScreenClientContacts([{ phone_number: '87011112233' }])).toEqual({ phone: '8 701 111 2233', otherPhones: null });
+    expect(clientScreenClientContacts([])).toEqual({ phone: null, otherPhones: null });
+  });
+
+  it('phones that are not loaded are not sent at all, not even as a dash', () => {
+    expect(clientScreenClientContacts(undefined)).toEqual({ phone: undefined, otherPhones: undefined });
+    const wire = (clientContacts: OrderEditSourceInput['clientContacts'], codes: readonly string[]) =>
+      buildClientScreenSnapshot(buildOrderEditSource(input({ clientContacts })), codes, createClientScreenIdMap(() => 'idaaaaaa')).summary;
+    expect(wire(clientScreenClientContacts(undefined), CLIENT_SCREEN_CODES).map((field) => field.code)).not.toContain('summary.client_phone');
+    expect(wire(undefined, CLIENT_SCREEN_CODES).map((field) => field.code)).not.toContain('summary.client_phone');
+    // Loaded and ticked: shown next to the client; a client without phones shows a dash.
+    expect(wire(clientScreenClientContacts(phones), CLIENT_SCREEN_CODES).slice(0, 3)).toEqual([
+      { code: 'summary.client', label: 'Клиент', value: 'Садыков Арман' },
+      { code: 'summary.client_phone', label: 'Телефон клиента', value: '8 705 222 3344' },
+      { code: 'summary.client_phones', label: 'Доп. телефоны клиента', value: '8 701 111 2233, 8 727 333 4455' },
+    ]);
+    expect(wire(clientScreenClientContacts([]), CLIENT_SCREEN_CODES).find((field) => field.code === 'summary.client_phone')?.value).toBe('—');
+  });
+
+  it('phones are hidden until ticked: neither the default set nor a set without their codes sends them', () => {
+    const contacts = clientScreenClientContacts(phones);
+    const serialize = (codes: readonly string[]) =>
+      JSON.stringify(buildClientScreenSnapshot(buildOrderEditSource(input({ clientContacts: contacts })), codes, createClientScreenIdMap(() => 'idaaaaaa')));
+    expect(CLIENT_SCREEN_DEFAULT_VISIBLE_CODES).not.toContain('summary.client_phone');
+    expect(CLIENT_SCREEN_DEFAULT_VISIBLE_CODES).not.toContain('summary.client_phones');
+    for (const codes of [CLIENT_SCREEN_DEFAULT_VISIBLE_CODES, CLIENT_SCREEN_CODES.filter((code) => !code.startsWith('summary.client_phone'))]) {
+      const wire = serialize(codes);
+      for (const hidden of ['705 222', '701 111', '727 333']) expect(wire).not.toContain(hidden);
+    }
+    // Each phone code shows only its own value.
+    const onlyPrimary = serialize(['summary.client_phone']);
+    expect(onlyPrimary).toContain('8 705 222 3344');
+    expect(onlyPrimary).not.toContain('701 111');
   });
 });
 

@@ -9,6 +9,7 @@ import { getOrderDraftStore } from '../../stores/orderFormStore';
 import { can } from '../../utils/permissions';
 import { ClientScreenControl } from './ClientScreenControl';
 import { getClientScreenPresenter, useClientScreenView } from './clientScreenInstance';
+import { useClientScreenClientContacts } from './useClientScreenClientContacts';
 import { useClientScreenOrderBridge } from './useClientScreenOrderBridge';
 
 /**
@@ -36,10 +37,12 @@ const Connected: React.FC<Props> = ({ orderKey, orderNumber, activeTab, operatio
   // it is looked up the same way the detail table does, and only while this order is presented.
   const presentedHere = useClientScreenView().presentedOrderKey === orderKey;
   const details = useStore(getOrderDraftStore(orderKey), (state) => state.details);
+  const clientId = useStore(getOrderDraftStore(orderKey), (state) => state.header.client_id ?? null);
+  const clientContacts = useClientScreenClientContacts(clientId, presentedHere);
   const filmIds = useMemo(() => (presentedHere ? details.map((detail) => detail.film_id ?? null) : []), [details, presentedHere]);
   const filmNameById = useFilmNamesWithInactive(formData.references.filmNameById, filmIds, presentedHere);
   const { provider } = useClientScreenOrderBridge({
-    orderKey, orderNumber, activeTab, operational, references: formData.references, sheetMaterialName, filmNameById,
+    orderKey, orderNumber, activeTab, operational, references: formData.references, sheetMaterialName, filmNameById, clientContacts,
     canViewServiceMoney: can('orders.view_financials'),
     active: keepAlive.isActive,
   });

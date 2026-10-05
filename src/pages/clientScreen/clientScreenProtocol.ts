@@ -66,4 +66,5 @@ export function clientScreenRandomId(length = 16): string {
 }
 
 export const CLIENT_SCREEN_VIEWER_LOCK = 'erp-client-screen-viewer';
+export const CLIENT_SCREEN_OWNER_LOCK_PREFIX = 'erp-client-screen-owner-';
 export const clientScreenOwnerLock = (ownerEpoch: number) => `erp-client-screen-owner-${ownerEpoch}`;

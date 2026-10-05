@@ -109,6 +109,18 @@ describe('buildOrderShowSource', () => {
     expect(snapshot.tabs.map((tab) => tab.key)).toEqual(['details']);
   });
 
+  it('client phones from the view page: sent only when loaded and ticked', () => {
+    const contacts = { phone: '8 705 222 3344', otherPhones: null };
+    const summaryOf = (over: Partial<OrderShowSourceInput>, codes: readonly string[]) =>
+      buildClientScreenSnapshot(buildOrderShowSource(input(over)), codes, createClientScreenIdMap(() => 'idaaaaaa')).summary;
+    expect(summaryOf({ clientContacts: contacts }, ALL).filter((field) => field.code.startsWith('summary.client_phone'))).toEqual([
+      { code: 'summary.client_phone', label: 'Телефон клиента', value: '8 705 222 3344' },
+      { code: 'summary.client_phones', label: 'Доп. телефоны клиента', value: '—' },
+    ]);
+    expect(JSON.stringify(summaryOf({ clientContacts: contacts }, ['summary.client']))).not.toContain('705 222');
+    expect(summaryOf({}, ALL).some((field) => field.code.startsWith('summary.client_phone'))).toBe(false);
+  });
+
   it('every view column key maps to a field of the registry', () => {
     const fields = new Set(CLIENT_SCREEN_CODES.filter((code) => code.startsWith('details.')).map((code) => code.slice('details.'.length)));
     for (const field of Object.values(SHOW_DETAIL_COLUMN_FIELDS)) expect(fields.has(field)).toBe(true);

@@ -16,7 +16,7 @@ function source(over: Partial<ClientScreenOrderSource> = {}): ClientScreenOrderS
       { key: 'basic', label: 'Обзор' }, { key: 'details', label: 'Состав' }, { key: 'dates', label: 'Логистика' },
       { key: 'finance', label: 'Финансы' }, { key: 'services', label: 'Услуги/товары' },
     ],
-    summary: group('summary', ['number', 'client', 'parts', 'area', 'final', 'debt']),
+    summary: group('summary', ['number', 'client', 'client_phone', 'client_phones', 'parts', 'area', 'final', 'debt']),
     basic: group('basic', ['client', 'order_name', 'order_date', 'order_status', 'payment_status', 'production_status', 'manager', 'priority', 'doweling', 'notes']),
     dates: group('dates', ['planned', 'completion', 'issue']),
     finance: group('finance', ['total', 'discount', 'surcharge', 'final', 'paid', 'debt']),

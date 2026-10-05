@@ -3,7 +3,9 @@ import {
   type ClientScreenOrderSource,
 } from './buildClientScreenSnapshot';
 import type { ClientScreenEnvironment } from './clientScreenEnvironment';
-import { CLIENT_SCREEN_VIEWER_LOCK, clientScreenMessage, clientScreenOwnerLock, type ClientScreenMessage } from './clientScreenProtocol';
+import {
+  CLIENT_SCREEN_OWNER_LOCK_PREFIX, CLIENT_SCREEN_VIEWER_LOCK, clientScreenMessage, clientScreenOwnerLock, type ClientScreenMessage,
+} from './clientScreenProtocol';
 import {
   POLICY_REFRESH_MS, createPublisherState, publisherApplyPolicy, publisherCanPublish, publisherClaim, publisherConfirm, publisherOnLockHeld,
   publisherOnMessage, publisherRelease, publisherState, publisherTick, publisherUi, type ClientScreenPolicy, type PublisherLoss, type PublisherState,
@@ -34,6 +36,14 @@ export interface ClientScreenPresenterView {
   workstationDisabled: boolean;
   /** The settings could not be confirmed in time: the customer sees the splash until they are. */
   policyStale: boolean;
+  /** Another window of this browser presents an order to the customer right now. */
+  presentingElsewhere: boolean;
+}
+
+/** What was sent to the customer window last: exactly this is on the customer's screen. */
+export interface ClientScreenPreview {
+  snapshot: ClientScreenSnapshot;
+  ui: ClientScreenUi | null;
 }
 
 export interface ClientScreenPresenterDeps {
@@ -44,11 +54,18 @@ export interface ClientScreenPresenterDeps {
 }
 
 const VIEWER_WAIT_MS = 8000;
+/** How often a window that presents nothing looks whether another window does. */
+const ELSEWHERE_CHECK_MS = 2000;
 
 export class ClientScreenPresenter {
   private state: PublisherState;
   private view: ClientScreenPresenterView;
   private readonly listeners = new Set<() => void>();
+  private readonly previewListeners = new Set<() => void>();
+  private preview: ClientScreenPreview | null = null;
+  /** The display state read from the order screen last; kept when that screen goes away. */
+  private lastSource: ClientScreenOrderSource | null = null;
+  private lastRawUi: ClientScreenUi | null = null;
   private channel: { post(message: ClientScreenMessage): void; close(): void } | null = null;
   private stops: Array<() => void> = [];
   private provider: ClientScreenOrderProvider | null = null;
@@ -65,6 +82,8 @@ export class ClientScreenPresenter {
   /** The tab the customer saw last: kept while the manager is on a tab the customer may not see. */
   private lastCustomerTab: ClientScreenTabKey | null = null;
   private scheduled = false;
+  private elsewhere = false;
+  private elsewhereCheckedAt = 0;
   /** One press of «Показать клиенту»: its number and the workstation generation read at the press. */
   private attempt = 0;
   private pending: { attempt: number; gen: number; claim: () => void; stopWait: () => void } | null = null;
@@ -87,6 +106,51 @@ export class ClientScreenPresenter {
     return () => this.listeners.delete(listener);
   };
 
+  /** What the customer sees right now (the last snapshot and interface state sent), or null. */
+  getPreview = (): ClientScreenPreview | null => this.preview;
+
+  subscribePreview = (listener: () => void): (() => void) => {
+    this.previewListeners.add(listener);
+    return () => this.previewListeners.delete(listener);
+  };
+
+  /**
+   * The screen of the presented order is going away while its workspace tab stays (the manager
+   * switched to another tab and the app unloaded this one): the customer keeps seeing the order as
+   * it was. The settings still apply — every re-read filters the kept state again.
+   */
+  detach(orderKey: string, provider: ClientScreenOrderProvider): void {
+    this.guard(() => {
+      if (orderKey !== this.orderKey || this.provider !== provider) return;
+      let source = this.lastSource;
+      let ui = this.lastRawUi;
+      try {
+        source = provider.getSource();
+        ui = provider.getUi(this.idFor);
+      } catch {
+        // the screen is already half gone: what was read last is good enough
+      }
+      if (!source) {
+        this.forget('released');
+        return;
+      }
+      const kept = { source, ui: ui ?? { tab: null, focus: null, editing: null, scroll: null, page: null } };
+      // Nothing is being typed or pointed at any more.
+      const still: ClientScreenUi = { ...kept.ui, focus: null, editing: null };
+      this.provider = { getSource: () => kept.source, getUi: () => still };
+      this.publish();
+    });
+  }
+
+  /** The screen of the presented order is back: it is the live source again. */
+  attach(orderKey: string, provider: ClientScreenOrderProvider): void {
+    this.guard(() => {
+      if (orderKey !== this.orderKey || this.provider === provider) return;
+      this.provider = provider;
+      this.publish();
+    });
+  }
+
   /** «Показать клиенту» for one order. */
   present(orderKey: string, provider: ClientScreenOrderProvider): void {
     this.guard(() => {
@@ -104,6 +168,9 @@ export class ClientScreenPresenter {
       this.blanked = false;
       this.lastSnapshot = null;
       this.lastCustomerTab = null;
+      this.lastSource = null;
+      this.lastRawUi = null;
+      this.setPreview(null);
       // This press is valid only for the generation it was made in: a switch-off in between, even
       // one that is already undone, cancels it. Checked again after every asynchronous step.
       const attempt = ++this.attempt;
@@ -253,6 +320,7 @@ export class ClientScreenPresenter {
     // Nothing of this epoch is on the customer screen yet: the first confirmed policy publishes.
     this.blanked = true;
     this.lastSnapshot = null;
+    this.setPreview(null);
     void this.deps.env.locks.request(clientScreenOwnerLock(epoch), {}, () => {
       if (this.lockedEpoch !== epoch || this.state.epoch !== epoch) return undefined;
       const held = new Promise<void>((resolve) => { this.releaseOwnerLock = resolve; });
@@ -262,6 +330,24 @@ export class ClientScreenPresenter {
         void this.reloadPolicy();
       });
       return held;
+    }).catch(() => undefined);
+  }
+
+  /**
+   * Whether another window holds an owner lock: the app header of every window shows the emergency
+   * switch-off while an order is presented from any of them. Read-only; a failure means "unknown".
+   */
+  private lookElsewhere(): void {
+    const now = this.deps.env.now();
+    if (now - this.elsewhereCheckedAt < ELSEWHERE_CHECK_MS) return;
+    this.elsewhereCheckedAt = now;
+    const mine = this.lockedEpoch ? clientScreenOwnerLock(this.lockedEpoch) : null;
+    void this.deps.env.locks.query().then((snapshot) => {
+      const next = (snapshot.held ?? []).some((lock) => typeof lock.name === 'string'
+        && lock.name.startsWith(CLIENT_SCREEN_OWNER_LOCK_PREFIX) && lock.name !== mine);
+      if (next === this.elsewhere) return;
+      this.elsewhere = next;
+      this.refresh();
     }).catch(() => undefined);
   }
 
@@ -275,6 +361,7 @@ export class ClientScreenPresenter {
     const workstation = this.deps.env.readWorkstation();
     // A press that is still waiting for the customer window dies with its generation.
     if (this.pending && !clientScreenAllowed(workstation, this.pending.gen)) this.stopLocal('disabled');
+    this.lookElsewhere();
     const before = this.state.phase;
     this.apply(publisherTick(this.state, workstation, this.deps.env.now()));
     if (before !== 'idle' && this.state.phase === 'idle') this.afterLoss();
@@ -293,15 +380,19 @@ export class ClientScreenPresenter {
     if (this.state.phase !== 'owner' || !this.provider) return;
     const allowed = publisherCanPublish(this.state, this.deps.env.readWorkstation(), this.deps.env.now());
     if (!allowed && (this.blanked || !this.state.policy)) return;
-    const snapshot = allowed && this.state.policy
-      ? buildClientScreenSnapshot(this.provider.getSource(), this.state.policy.visibleCodes, this.idFor)
-      : null;
+    let snapshot: ClientScreenSnapshot | null = null;
+    if (allowed && this.state.policy) {
+      this.lastSource = this.provider.getSource();
+      snapshot = buildClientScreenSnapshot(this.lastSource, this.state.policy.visibleCodes, this.idFor);
+    }
     const next = publisherState(this.state, snapshot);
     this.state = next.state;
     this.blanked = snapshot === null;
     this.lastSnapshot = snapshot;
     this.send(next.message);
     if (snapshot) this.sendUi();
+    // sendUi sets the preview with the interface state; a blank or a state without one is set here.
+    if (!snapshot || this.preview?.snapshot !== snapshot) this.setPreview(snapshot ? { snapshot, ui: null } : null);
     this.refresh();
   }
 
@@ -309,12 +400,26 @@ export class ClientScreenPresenter {
   private sendUi(): void {
     if (!this.provider || !this.lastSnapshot || !this.state.policy) return;
     const raw = this.provider.getUi(this.idFor);
+    this.lastRawUi = raw;
     // A tab hidden by the settings, or not mirrored at all, leaves the customer on the last tab shown.
     const tab = resolveClientScreenTab(raw.tab, this.lastCustomerTab, this.lastSnapshot);
     this.lastCustomerTab = tab;
     const ui = filterClientScreenUi({ ...raw, tab }, this.lastSnapshot, this.state.policy.visibleCodes);
     const message = publisherUi(this.state, ui);
     if (message) this.send(message);
+    this.setPreview({ snapshot: this.lastSnapshot, ui });
+  }
+
+  private setPreview(next: ClientScreenPreview | null): void {
+    if (next === null && this.preview === null) return;
+    this.preview = next;
+    this.previewListeners.forEach((listener) => {
+      try {
+        listener();
+      } catch {
+        // a listener of the header must not break the presenter
+      }
+    });
   }
 
   /** Best effort: a broken channel ends the presentation locally instead of throwing. */
@@ -356,7 +461,10 @@ export class ClientScreenPresenter {
     this.orderKey = null;
     this.lastSnapshot = null;
     this.lastCustomerTab = null;
+    this.lastSource = null;
+    this.lastRawUi = null;
     this.blanked = false;
+    this.setPreview(null);
     this.refresh();
   }
 
@@ -390,6 +498,7 @@ export class ClientScreenPresenter {
       lost: this.state.lost,
       workstationDisabled,
       policyStale: this.state.phase === 'owner' && this.blanked,
+      presentingElsewhere: this.elsewhere,
     };
   }
 

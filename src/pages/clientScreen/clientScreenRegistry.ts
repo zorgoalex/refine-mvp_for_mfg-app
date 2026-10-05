@@ -3,7 +3,8 @@
  * (parity is guarded by clientScreenRegistry.test.ts against the OpenAPI enum).
  */
 export const CLIENT_SCREEN_CODES = [
-  'summary.number', 'summary.client', 'summary.parts', 'summary.area', 'summary.final', 'summary.debt',
+  'summary.number', 'summary.client', 'summary.client_phone', 'summary.client_phones', 'summary.parts', 'summary.area',
+  'summary.final', 'summary.debt',
   'tab.basic',
   'basic.client', 'basic.order_name', 'basic.order_date', 'basic.order_status', 'basic.payment_status',
   'basic.production_status', 'basic.manager', 'basic.priority', 'basic.doweling', 'basic.notes',
@@ -58,6 +59,8 @@ export const CLIENT_SCREEN_GROUPS: readonly ClientScreenGroup[] = [
     fields: [
       { code: 'summary.number', label: 'Номер заказа' },
       { code: 'summary.client', label: 'Клиент' },
+      { code: 'summary.client_phone', label: 'Телефон клиента' },
+      { code: 'summary.client_phones', label: 'Доп. телефоны клиента' },
       { code: 'summary.parts', label: 'Деталей' },
       { code: 'summary.area', label: 'Площадь' },
       { code: 'summary.final', label: 'Итоговая сумма' },

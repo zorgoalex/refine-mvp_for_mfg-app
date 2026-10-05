@@ -31,7 +31,9 @@ export function getClientScreenPresenter(): ClientScreenPresenter | null {
   return presenter;
 }
 
-const NO_VIEW: ClientScreenPresenterView = { phase: 'idle', presentedOrderKey: null, lost: null, workstationDisabled: false, policyStale: false };
+const NO_VIEW: ClientScreenPresenterView = {
+  phase: 'idle', presentedOrderKey: null, lost: null, workstationDisabled: false, policyStale: false, presentingElsewhere: false,
+};
 const noSubscribe = () => () => undefined;
 const noView = () => NO_VIEW;
 

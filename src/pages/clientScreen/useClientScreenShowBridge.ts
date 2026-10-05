@@ -3,7 +3,7 @@ import { getClientScreenPresenter } from './clientScreenInstance';
 import type { ClientScreenOrderProvider } from './clientScreenPresenter';
 import type { ClientScreenUi } from './clientScreenSnapshotSchema';
 import { buildOrderShowSource, orderShowMirroredTab, type OrderShowSourceInput } from './orderShowSnapshotSource';
-import { useClientScreenScroll } from './useClientScreenOrderBridge';
+import { releaseClientScreenSource, useClientScreenScroll } from './useClientScreenOrderBridge';
 
 /**
  * Connects one order VIEW page to the customer screen. It only reads what the page has loaded and
@@ -18,7 +18,7 @@ export interface ClientScreenShowBridgeInput extends OrderShowSourceInput {
   active: boolean;
 }
 
-export const orderShowPresentationKey = (orderId: number | string): string => `view:${orderId}`;
+export { orderShowPresentationKey } from './clientScreenOrderKeys';
 
 export function useClientScreenShowBridge(input: ClientScreenShowBridgeInput): { provider: ClientScreenOrderProvider } {
   const latest = useRef(input);
@@ -41,16 +41,17 @@ export function useClientScreenShowBridge(input: ClientScreenShowBridgeInput): {
 
   const { orderKey } = input;
 
-  // The page is gone (tab closed, another order opened in it): the customer sees the splash.
-  useEffect(() => () => {
-    getClientScreenPresenter()?.hide(orderKey);
-  }, [orderKey]);
+  // Back on screen: the live source again. Gone: the presentation goes on while the tab stays open.
+  useEffect(() => {
+    getClientScreenPresenter()?.attach(orderKey, provider);
+    return () => releaseClientScreenSource(orderKey, provider);
+  }, [orderKey, provider]);
 
   const columns = input.columnKeys.join('\u0001');
   useEffect(() => {
     getClientScreenPresenter()?.notifyChanged(orderKey);
   }, [
-    orderKey, input.record, input.clientName, input.details, input.groupedRows, input.groupField, columns, input.payments,
+    orderKey, input.record, input.clientName, input.clientContacts, input.details, input.groupedRows, input.groupField, columns, input.payments,
     input.names.millingType, input.names.edgeType, input.names.film, input.names.paymentType, input.names.productionStatus,
     input.names.materialOf, input.canViewFinancials, input.liveProductionStatusByDetailId, input.groupLabelOf,
   ]);
