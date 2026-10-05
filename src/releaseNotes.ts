@@ -29,6 +29,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-05", title: "Платежи: быстрые периоды; МДФ-доска при многих вкладках",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "Платежи: над списком — быстрые периоды «Все», «Сегодня», «Эта неделя» (понедельник–воскресенье). Меняют только период; остальные фильтры остаются.",
+    ],
+    fixed: [
+      "Вариант NewLine, МДФ-доска и доски статусов: когда вкладок много и верхняя панель занимает несколько строк, панель инструментов доски больше не съезжает вниз и не закрывает заголовки колонок, а страница не прокручивается целиком.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-05", title: "Экран клиента: заказ на втором мониторе",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

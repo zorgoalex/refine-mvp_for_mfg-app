@@ -157,3 +157,22 @@
   background: var(--evo-surface-muted);
   color: var(--evo-text);
 }
+
+/* --- быстрые периоды --- */
+:root[data-ui-variant="workbench"] .payments-presets__item {
+  border-color: var(--evo-border);
+  background: var(--evo-surface);
+  color: var(--evo-text-secondary);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .payments-presets__item:hover {
+  border-color: var(--evo-border-strong, var(--evo-border));
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .payments-presets__item[aria-pressed="true"] {
+  border-color: var(--evo-primary);
+  background: color-mix(in srgb, var(--evo-primary) 10%, var(--evo-surface));
+  color: var(--evo-primary);
+}

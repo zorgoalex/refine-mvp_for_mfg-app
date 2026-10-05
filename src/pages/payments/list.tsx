@@ -16,6 +16,7 @@ import { OrderDeletedTag, orderDeletedReferenceClassName } from "../../component
 import dayjs from "dayjs";
 import { useOptionalUiVariant } from "../../ui-variant/UiVariantProvider";
 import { paymentTypeTone } from "./paymentTypeTone";
+import { PAYMENT_DATE_PRESETS, applyPaymentPreset, detectPaymentPreset, paymentPresetRange, type PaymentDatePreset } from "./paymentDatePreset";
 import "./list.css";
 
 const { RangePicker } = DatePicker;
@@ -160,6 +161,16 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
     setShowResultCount(false);
   };
 
+  // Быстрые периоды над списком: меняют только условие по дате платежа, остальные фильтры остаются
+  const todayIso = dayjs().format("YYYY-MM-DD");
+  const activePreset = detectPaymentPreset(filters, todayIso);
+  const choosePreset = (preset: PaymentDatePreset) => {
+    setFilters(applyPaymentPreset(filters, preset, todayIso) as any, "replace");
+    setCurrent(1);
+    const range = paymentPresetRange(preset, todayIso);
+    form.setFieldsValue?.({ date_range: range ? [dayjs(range[0]), dayjs(range[1])] : undefined });
+  };
+
   // Получаем общее количество записей
   const totalRecords = tableProps?.pagination ? tableProps.pagination.total || 0 : 0;
 
@@ -275,6 +286,21 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
           </Form>
         </Card>
       )}
+      <div className="payments-presets" role="group" aria-label="Период платежей">
+        {PAYMENT_DATE_PRESETS.map((preset) => (
+          <button
+            key={preset.key}
+            type="button"
+            className="payments-presets__item"
+            aria-pressed={activePreset === preset.key}
+            data-testid={`payments-preset-${preset.key}`}
+            onClick={() => choosePreset(preset.key)}
+          >
+            {preset.label}
+          </button>
+        ))}
+        {activePreset === null ? <span className="payments-presets__custom">свой период</span> : null}
+      </div>
       {isMobile ? (
         <PaymentCardList
           rows={tableProps.dataSource ?? []}
