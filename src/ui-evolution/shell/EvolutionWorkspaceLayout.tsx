@@ -37,6 +37,7 @@ import '../styles/workbench-calendar.css';
 import '../styles/workbench-cut.css';
 import '../styles/workbench-board.css';
 import '../styles/workbench-procurement.css';
+import '../styles/workbench-payments.css';
 
 const EvolutionRouteSkeleton: React.FC = () => (
   <div

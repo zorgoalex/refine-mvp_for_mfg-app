@@ -1,0 +1,159 @@
+/* «NewLine»: экран «Платежи» (список и вкладка «Поступления 1С»).
+   Только оформление: фильтры, сортировка, действия и вкладки — прежние. */
+
+/* --- вкладки экрана: подчёркнутые, плотные --- */
+:root[data-ui-variant="workbench"] .payments-page-tabs > .ant-tabs-nav {
+  margin-bottom: 6px;
+}
+
+:root[data-ui-variant="workbench"] .payments-page-tabs > .ant-tabs-nav .ant-tabs-tab {
+  padding: 9px 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .payments-page-tabs > .ant-tabs-nav .ant-tabs-tab + .ant-tabs-tab {
+  margin-left: 22px;
+}
+
+:root[data-ui-variant="workbench"] .payments-page-tabs > .ant-tabs-nav .ant-tabs-tab:not(.ant-tabs-tab-active) .ant-tabs-tab-btn {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .payments-page-tabs > .ant-tabs-nav .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .payments-page-tabs > .ant-tabs-nav .ant-tabs-ink-bar {
+  height: 2px;
+  background: var(--evo-text);
+}
+
+/* --- блок фильтров --- */
+:root[data-ui-variant="workbench"] .payments-list .ant-page-header-content > div > .ant-card {
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-lg);
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .payments-list .ant-page-header-content > div > .ant-card .ant-form-item-label > label {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* --- таблицы: карточка, плотные строки, одна тонкая линия, без «зебры» --- */
+:root[data-ui-variant="workbench"] .payments-list .ant-table-wrapper,
+:root[data-ui-variant="workbench"] .payments-page-tabs .ant-table-wrapper {
+  overflow: hidden;
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .payments-list .ant-table-wrapper .ant-table-thead > tr > th,
+:root[data-ui-variant="workbench"] .payments-page-tabs .ant-table-wrapper .ant-table-thead > tr > th {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--evo-border);
+  background: var(--evo-surface);
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .payments-list .ant-table-wrapper .ant-table-thead > tr > th::before,
+:root[data-ui-variant="workbench"] .payments-page-tabs .ant-table-wrapper .ant-table-thead > tr > th::before {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .payments-list .ant-table-wrapper .ant-table-tbody > tr > td,
+:root[data-ui-variant="workbench"] .payments-page-tabs .ant-table-wrapper .ant-table-tbody > tr > td {
+  padding: 7px 12px;
+  border-top: 0;
+  border-bottom: 1px solid var(--evo-border);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* !important: общая «зебра» таблиц (payments/list.css) задаёт фон строк с !important */
+:root[data-ui-variant="workbench"] .payments-list .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:not(.order-deleted-reference-row) > td,
+:root[data-ui-variant="workbench"] .payments-page-tabs .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:not(.order-deleted-reference-row) > td {
+  background-color: var(--evo-surface) !important;
+}
+
+:root[data-ui-variant="workbench"] .payments-list .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:not(.order-deleted-reference-row):hover > td,
+:root[data-ui-variant="workbench"] .payments-page-tabs .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:not(.order-deleted-reference-row):hover > td {
+  background-color: color-mix(in srgb, var(--evo-primary) 4%, var(--evo-surface)) !important;
+}
+
+:root[data-ui-variant="workbench"] .payments-list .ant-table-wrapper .ant-table-tbody > tr:last-child > td,
+:root[data-ui-variant="workbench"] .payments-page-tabs .ant-table-wrapper .ant-table-tbody > tr:last-child > td {
+  border-bottom: 0;
+}
+
+:root[data-ui-variant="workbench"] .payments-list .ant-table-wrapper .ant-pagination,
+:root[data-ui-variant="workbench"] .payments-page-tabs .ant-table-wrapper .ant-pagination {
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--evo-border);
+  font-size: 12.5px;
+}
+
+/* --- ячейки списка платежей --- */
+:root[data-ui-variant="workbench"] .payments-list .ant-table-tbody > tr > td:first-child {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .payments-list__order {
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .payments-list__amount {
+  color: var(--evo-text-secondary);
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .payments-list__amount b {
+  color: var(--evo-text);
+  font-weight: 700;
+}
+
+:root[data-ui-variant="workbench"] .payments-list__type {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+:root[data-ui-variant="workbench"] .payments-list__type::before {
+  flex: 0 0 9px;
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--evo-text-secondary);
+  content: "";
+}
+
+:root[data-ui-variant="workbench"] .payments-list__type[data-tone="card"]::before {
+  background: #2f6ee5;
+}
+
+:root[data-ui-variant="workbench"] .payments-list__type[data-tone="cash"]::before {
+  background: #d9952b;
+}
+
+:root[data-ui-variant="workbench"] .payments-list__type[data-tone="transfer"]::before {
+  background: #1f9d8a;
+}
+
+/* действия в строке — спокойные иконки без рамок */
+:root[data-ui-variant="workbench"] .payments-list .ant-table-tbody > tr > td .ant-btn-icon-only.ant-btn-sm {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .payments-list .ant-table-tbody > tr > td .ant-btn-icon-only.ant-btn-sm:hover {
+  background: var(--evo-surface-muted);
+  color: var(--evo-text);
+}

@@ -14,6 +14,8 @@ import { useIsMobile } from "../../hooks/useDeviceTier";
 import { PaymentCardList } from "./mobile/PaymentCardList";
 import { OrderDeletedTag, orderDeletedReferenceClassName } from "../../components/OrderDeletedTag";
 import dayjs from "dayjs";
+import { useOptionalUiVariant } from "../../ui-variant/UiVariantProvider";
+import { paymentTypeTone } from "./paymentTypeTone";
 import "./list.css";
 
 const { RangePicker } = DatePicker;
@@ -41,6 +43,8 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
   const { highlightProps } = useHighlightRow("payment_id", tableProps.dataSource);
   const { show } = useNavigation();
   const isMobile = useIsMobile();
+  // NewLine: denser table with the amount, the order and the payment type set off
+  const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
 
   const orderIds = useMemo(
     () => Array.from(new Set(((tableProps?.dataSource as any[]) || []).map((i) => i?.order_id).filter((v) => v != null))),
@@ -162,6 +166,7 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
   return (
     <List
       title="Платежи"
+      wrapperProps={{ className: 'payments-list' }}
       headerButtons={({ defaultButtons }) => (
         <>
           <Button
@@ -310,7 +315,7 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
               const order = orderMap[r?.order_id];
               return (
                 <Space size={4} wrap>
-                  <span>{order?.label ?? r?.order_id}</span>
+                  <span className="payments-list__order">{order?.label ?? r?.order_id}</span>
                   <OrderDeletedTag deleted={order?.deleted} />
                 </Space>
               );
@@ -319,13 +324,21 @@ export const PaymentList: React.FC<IResourceComponentsProps> = () => {
           <Table.Column
             dataIndex="type_paid_id"
             title="Тип оплаты"
-            render={(_, r: any) => typeMap[r?.type_paid_id] ?? r?.type_paid_id}
+            render={(_, r: any) => {
+              const typeName = typeMap[r?.type_paid_id] ?? r?.type_paid_id;
+              return isWorkbench
+                ? <span className="payments-list__type" data-tone={paymentTypeTone(String(typeName ?? ''))}>{typeName}</span>
+                : typeName;
+            }}
           />
           <Table.Column
             dataIndex="amount"
             title="Сумма"
             sorter
-            render={(value) => formatNumber(value as number, 0)}
+            align={isWorkbench ? 'right' : undefined}
+            render={(value) => (isWorkbench
+              ? <span className="payments-list__amount"><b>{formatNumber(value as number, 0)}</b> ₸</span>
+              : formatNumber(value as number, 0))}
           />
           <Table.Column
             dataIndex="payment_date"
