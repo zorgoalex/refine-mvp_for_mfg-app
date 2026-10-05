@@ -174,9 +174,17 @@
    только точкой у названия колонки. */
 
 :root[data-ui-variant="workbench"] .status-board-page.status-board-page--cnc {
-  /* верхняя панель 48 + отступы оболочки + нижняя строка: страница целиком на экране, без общей прокрутки */
-  height: calc(100vh - 136px);
+  /* верхняя панель (48px, с переносом вкладок — выше; её высоту страница кладёт в переменную)
+     + отступы оболочки + нижняя строка: страница целиком на экране, без общей прокрутки */
+  height: calc(100vh - var(--status-board-toolbar-sticky-top, 48px) - 88px);
   padding: 18px 24px 16px;
+}
+
+/* Страница не прокручивается (прокрутка — внутри доски), а «липкое» смещение панели инструментов
+   отсчитывалось бы от самой страницы: при вкладках в несколько строк панель съезжала вниз на высоту
+   верхней панели и закрывала заголовки колонок. */
+:root[data-ui-variant="workbench"] .status-board-page .status-board-toolbar-disclosure {
+  top: 0;
 }
 
 :root[data-ui-variant="workbench"] .status-board-page--cnc .status-board-page__header h1,
@@ -315,4 +323,10 @@
 :root[data-ui-variant="workbench"] .status-board-page--cnc .status-board-card__footer {
   border-top-color: var(--evo-border);
   color: var(--evo-text-secondary);
+}
+
+/* Доска сама занимает весь экран: минимальная высота оболочки (рассчитана на панель в одну строку)
+   иначе добавляет общую прокрутку страницы, когда вкладки идут в несколько строк. */
+:root[data-ui-variant="workbench"] .evolution-shell__content:has(.status-board-page) {
+  min-height: 0;
 }
