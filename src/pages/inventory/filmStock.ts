@@ -6,6 +6,18 @@ export function filmStockBadge(stock: number | null | undefined): FilmStockBadge
     ? { kind: 'stock', label: `склад ${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(stock)} м`, quantity: stock }
     : { kind: 'none', label: 'нет на складе', quantity: stock ?? null };
 }
+/**
+ * Метка остатка плёнки в таблице деталей заказа. Пока ответа нет (загрузка, ошибка, несохранённый заказ) или плёнки нет
+ * в ответе, метки нет: отсутствие данных — не «нет на складе».
+ */
+export function filmStockBadgeFor(
+  loaded: boolean,
+  stockByFilmId: ReadonlyMap<number, number | null>,
+  filmId: number | null | undefined,
+): FilmStockBadge | null {
+  if (!loaded || filmId == null || !stockByFilmId.has(filmId)) return null;
+  return filmStockBadge(stockByFilmId.get(filmId));
+}
 /** Остатки плёнки в карточке заказа: обновляются сами каждые 15 с, пока вкладка браузера открыта, и по фокусу окна. */
 export const ORDER_FILM_STOCK_REFRESH = {
   staleTime: 10_000,

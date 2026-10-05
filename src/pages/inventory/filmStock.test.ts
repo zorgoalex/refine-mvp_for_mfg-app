@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filmStockAvailability, filmStockBadge, inventoryQueryString, parseStockCsv, parseStockRows, selectDefaultStockSheet, lineFilmOptions, lineFilmValue, operationWarehouse, resolveActiveWarehouse } from './filmStock';
+import { filmStockAvailability, filmStockBadge, filmStockBadgeFor, inventoryQueryString, parseStockCsv, parseStockRows, selectDefaultStockSheet, lineFilmOptions, lineFilmValue, operationWarehouse, resolveActiveWarehouse } from './filmStock';
 
 describe('film stock frontend helpers', () => {
   it('parses rows by headers, skips totals and preserves missing quantity', () => {
@@ -111,4 +111,17 @@ describe('open stock operation keeps its warehouse', () => {
     expect(operationWarehouse(2, [5])).toBeNull();
     expect(operationWarehouse(undefined, [5])).toBeNull();
   });
+
+  it('shows no badge without an answer: missing data is not «нет на складе»', () => {
+    const stock = new Map<number, number | null>([[7, 12.5], [8, 0], [9, null]]);
+    expect(filmStockBadgeFor(true, stock, 7)).toMatchObject({ kind: 'stock', quantity: 12.5 });
+    expect(filmStockBadgeFor(true, stock, 8)).toMatchObject({ kind: 'none', label: 'нет на складе' });
+    expect(filmStockBadgeFor(true, stock, 9)).toMatchObject({ kind: 'none' });
+    // Loading, a failed request, an unsaved order (query disabled) and a film missing from the answer.
+    expect(filmStockBadgeFor(false, stock, 7)).toBeNull();
+    expect(filmStockBadgeFor(false, new Map(), 7)).toBeNull();
+    expect(filmStockBadgeFor(true, stock, 10)).toBeNull();
+    expect(filmStockBadgeFor(true, stock, null)).toBeNull();
+  });
 });
+

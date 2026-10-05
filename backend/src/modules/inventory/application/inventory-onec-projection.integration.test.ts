@@ -43,7 +43,10 @@ describe.skipIf(!url)('1C consumption projection — real PostgreSQL', { timeout
   let film1: number;
   let film2: number;
   const reader = new FakeReader();
-  const alerts = { raise: async () => undefined, resolve: async () => undefined } as unknown as OnecAlertsPort;
+  // Хранилище алертов экрана «1С»: по умолчанию пустышка; `failAlerts` — сбой уже после записи движений прохода.
+  let failAlerts = false;
+  const alertWrite = async () => { if (failAlerts) throw new Error('Тест: хранилище алертов недоступно'); };
+  const alerts = { raise: alertWrite, resolve: alertWrite } as unknown as OnecAlertsPort;
   const tag = 'E2E-Тест-расход1С-' + randomUUID().slice(0, 8);
   const W = randomUUID();
   const ITEM1 = randomUUID();
@@ -156,8 +159,40 @@ describe.skipIf(!url)('1C consumption projection — real PostgreSQL', { timeout
 
   it('applies a shipment after the cutoff once; a repeat pass writes nothing', async () => {
     putDoc(1);
-    const outcome = await pass();
-    expect(outcome).toMatchObject({ status: 'done', documents: 1, failed: 0 });
+    // Ручной запуск («Пересчитать сейчас»): без inventory.manage — отказ и ничего не записано.
+    const httpRequestId = `req-${randomUUID()}`;
+    await expect(projection.runNow({ currentUser: { ...admin, permissions: ['inventory.view'] }, requestId: httpRequestId }))
+      .rejects.toMatchObject({ statusCode: 403 });
+    expect(await onecDocs()).toBe(0);
+    const runEvents = async (requestId: string) => (await watcher.query<{ event: string; actor: string; entity_id: string; pass: string; status: string }>(
+      `SELECT event, user_id::text AS actor, entity_id::text, metadata_json->>'passRequestId' AS pass, status_code AS status
+         FROM audit_log WHERE event LIKE 'inventory.onec_consumption_run_%' AND request_id = $1 ORDER BY (event LIKE '%_finished'), event`, [requestId])).rows;
+    // Проход записал движение, а затем упал (сбой записи алерта): инициатор и HTTP-запрос остаются связаны с движением.
+    failAlerts = true;
+    try {
+      await expect(projection.runNow({ currentUser: admin, requestId: httpRequestId })).rejects.toThrow('хранилище алертов');
+    } finally { failAlerts = false; }
+    expect(await balance(film1)).toBe(95);
+    const failedRun = await runEvents(httpRequestId);
+    expect(failedRun.map((row) => [row.event, row.status, row.actor])).toEqual([
+      ['inventory.onec_consumption_run_requested', 'started', String(admin.id)],
+      ['inventory.onec_consumption_run_finished', 'failed', String(admin.id)],
+    ]);
+    expect(failedRun[0].pass).toMatch(/^onec-consumption-manual-/);
+    expect(failedRun.every((row) => row.entity_id === failedRun[0].pass && row.pass === failedRun[0].pass)).toBe(true);
+    // Движение этого прохода (от служебного исполнителя) помечено requestId прохода — он и есть связь.
+    const linked = await watcher.query(
+      `SELECT 1 FROM audit_log WHERE event = 'inventory.onec_consumption_applied' AND request_id = $1 AND metadata_json->>'onecDocumentId' = '1'`,
+      [failedRun[0].pass]);
+    expect(linked.rows).toHaveLength(1);
+    // Повторный ручной запуск: документ уже применён — движений нет; запрос и итог записаны.
+    const secondRequestId = `req-${randomUUID()}`;
+    const outcome = await projection.runNow({ currentUser: admin, requestId: secondRequestId });
+    expect(outcome).toMatchObject({ status: 'done', documents: 0, failed: 0 });
+    expect((await runEvents(secondRequestId)).map((row) => [row.event, row.status])).toEqual([
+      ['inventory.onec_consumption_run_requested', 'started'],
+      ['inventory.onec_consumption_run_finished', 'done'],
+    ]);
     expect(await balance(film1)).toBe(95);
     const doc = (await watcher.query<{ doc_type: string; status: string; projection_seq: number; onec_document_id: string }>(
       "SELECT doc_type, status, projection_seq, onec_document_id FROM stock_documents WHERE source = 'onec' AND warehouse_id = $1", [warehouseId])).rows;

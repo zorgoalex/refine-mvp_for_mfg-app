@@ -391,9 +391,15 @@ backend ниже неё отменить черновики с источник�
 привязанные к заказу, видны и изменяемы только при `orders.view` и доступе к этому
 заказу. Команды записи требуют заголовок `Idempotency-Key`. Остатки ведутся по
 основной плёнке справочника; списание в минус требует подтверждения
-(`allowNegative`). Порядок включения: миграция `203_film_stock.sql` (после 202),
-затем `BACKEND_INVENTORY_ENABLED=true`, пересоздание backend и
-`RUNTIME_CONFIG_INVENTORY`.
+(`allowNegative`).
+
+Порядок выкладки и включения — единый для всего склада: миграции `203_film_stock.sql`,
+`205_warehouses_onec_key_required.sql`, `206_inventory_onec_autosync_state.sql` и
+`217_inventory_onec_consumption.sql` (все четыре, после 202; backend склада читает колонки
+каждой из них, в том числе `warehouses.onec_consumption_since` из 217 при выключенном расходе)
+→ backend этой версии → права Hasura `warehouses` (только чтение) →
+`BACKEND_INVENTORY_ENABLED=true`, пересоздание backend и `RUNTIME_CONFIG_INVENTORY`.
+Включать склад на схеме без любой из четырёх миграций нельзя.
 
 Справочник складов (`/api/v1/inventory/warehouses`) пишет только backend; в Hasura
 таблица `warehouses` — только чтение. Каждый склад привязан к складу 1С
@@ -401,12 +407,12 @@ backend ниже неё отменить черновики с источник�
 доступном зеркале 1С ключ проверяется по нему, `POST …/warehouses/sync-onec`
 создаёт склады ERP для всех складов 1С (зеркало обязательно).
 
-Миграция `205_warehouses_onec_key_required.sql` (CHECK `ref_key_1c IS NOT NULL`
-NOT VALID) применяется **после** выкладки backend со справочником складов с ключом
-1С: такой backend работает и без 205, а прежний создаёт склады без ключа и после
-205 получит отказ. Порядок: backend + frontend → миграция 205 → привязать склады
-без ключа в «Справочнике складов» (на проде без зеркала 1С — ввод `Ref_Key`
-вручную). Откат backend ниже этой версии: сначала
+Миграция `205_warehouses_onec_key_required.sql` — CHECK `ref_key_1c IS NOT NULL` NOT VALID:
+существующие строки не проверяются, новая или изменяемая запись склада обязана иметь ключ 1С.
+Склад «Склад плёнки», созданный миграцией 203 без ключа, привязывается к складу 1С в
+«Справочнике складов» (без зеркала 1С — ввод `Ref_Key` вручную). Backend без справочника складов
+в `warehouses` не пишет, поэтому 205 применяется вместе с остальными миграциями до backend. Если
+понадобится backend, создающий склады без ключа: сначала
 `ALTER TABLE public.warehouses DROP CONSTRAINT IF EXISTS chk_warehouses_ref_key_1c_required;`
 (данные не меняются; повторное применение 205 вернёт ограничение).
 

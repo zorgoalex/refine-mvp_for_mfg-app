@@ -330,7 +330,7 @@ export class InventoryController {
   @Post('inventory/onec-consumption/run')
   @HttpCode(200)
   runOnecConsumption(@Req() request: RequestWithCurrentUser) {
-    return this.projection.runNow(this.user(request).permissions);
+    return this.projection.runNow({ currentUser: this.user(request), requestId: request.requestId ?? 'unknown' });
   }
 
   @ApiOperation({ operationId: 'compensateInventoryOnecConsumption', summary: 'Return the 1C consumption of a warehouse to zero and clear its start moment (rollback)' })

@@ -2,6 +2,8 @@ import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } f
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { ApiError } from '../../../common/errors/api-error';
+import { auditService } from '../../../common/audit/audit.service';
+import type { CurrentUser } from '../../../permissions/current-user';
 import type { BackendEnv } from '../../../config/env.validation';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
@@ -42,6 +44,8 @@ export class InventoryOnecProjectionService implements OnModuleInit, OnModuleDes
   private firstPass: NodeJS.Timeout | null = null;
   private hourly: NodeJS.Timeout | null = null;
   private running: Promise<ProjectionPassOutcome> | null = null;
+  /** requestId идущего прохода — им помечены движения и аудит документов этого прохода. */
+  private runningRequestId: string | null = null;
   private rerun = false;
   private unsubscribe: (() => void) | null = null;
   private unsubscribeDocuments: (() => void) | null = null;
@@ -97,22 +101,35 @@ export class InventoryOnecProjectionService implements OnModuleInit, OnModuleDes
   /** Один проход за раз; сигнал во время прохода запускает ещё один после него (изменения не теряются). */
   async runPass(trigger: string): Promise<ProjectionPassOutcome> {
     if (!this.enabled()) return { status: 'skipped', reason: 'disabled' };
-    if (this.running) {
+    return this.beginPass(trigger).done;
+  }
+
+  /**
+   * Запускает проход или присоединяется к идущему — синхронно, без ожиданий: вызывающий сразу знает requestId прохода,
+   * которым будут помечены движения и аудит документов (ручной запуск сохраняет связь с ним до ожидания итога).
+   */
+  private beginPass(
+    trigger: string,
+    requestId: string = `onec-consumption-${trigger}-${randomUUID()}`,
+  ): { passRequestId: string; done: Promise<ProjectionPassOutcome>; joined: boolean } {
+    if (this.running && this.runningRequestId) {
       this.rerun = true;
-      return this.running;
+      return { passRequestId: this.runningRequestId, done: this.running, joined: true };
     }
-    this.running = this.pass(trigger).finally(() => {
+    this.runningRequestId = requestId;
+    const done = this.pass(trigger, requestId).finally(() => {
       this.running = null;
+      this.runningRequestId = null;
       if (this.rerun) {
         this.rerun = false;
         void this.safePass(`${trigger}-rerun`);
       }
     });
-    return this.running;
+    this.running = done;
+    return { passRequestId: requestId, done, joined: false };
   }
 
-  private async pass(trigger: string): Promise<ProjectionPassOutcome> {
-    const requestId = `onec-consumption-${trigger}-${randomUUID()}`;
+  private async pass(trigger: string, requestId: string): Promise<ProjectionPassOutcome> {
     let candidates: ConsumptionDocumentView[];
     let onecWarehouses: OnecWarehouse[];
     const sources = (await this.database.query<{ source_id: string }>('SELECT source_id FROM onec_sources ORDER BY source_id')).rows
@@ -311,10 +328,53 @@ export class InventoryOnecProjectionService implements OnModuleInit, OnModuleDes
     return this.repository.listIssues(this.database, filter);
   }
 
-  /** Ручной запуск прохода (проверка на stage; при выключенном флаге — skipped). */
-  runNow(permissions: readonly string[]): Promise<ProjectionPassOutcome> {
-    this.require(permissions, 'inventory.manage');
-    return this.runPass('manual');
+  /**
+   * Ручной запуск прохода («Пересчитать сейчас»; при выключенном флаге — skipped). Движения прохода пишутся от
+   * служебного исполнителя с requestId прохода. Кто и каким HTTP-запросом его запустил, сохраняется ДО начала прохода
+   * событием аудита `inventory.onec_consumption_run_requested` (инициатор, requestId запроса, requestId прохода): связь
+   * остаётся и тогда, когда проход записал движения и упал позже. Итог или сбой — отдельным событием
+   * `inventory.onec_consumption_run_finished`.
+   */
+  async runNow(ctx: { currentUser: CurrentUser; requestId: string }): Promise<ProjectionPassOutcome> {
+    this.require(ctx.currentUser.permissions, 'inventory.manage');
+    if (!this.enabled()) return { status: 'skipped', reason: 'disabled' };
+    const record = (event: 'requested' | 'finished', passRequestId: string, statusCode: string, metadata: Record<string, unknown>) =>
+      this.database.transaction((tx) => auditService.record(tx, {
+        event: `inventory.onec_consumption_run_${event}`,
+        entityType: 'inventory_onec_projection',
+        entityId: passRequestId,
+        actorUserId: ctx.currentUser.id,
+        actorUsername: ctx.currentUser.username ?? null,
+        actorRole: ctx.currentUser.role ?? null,
+        requestId: ctx.requestId,
+        source: 'inventory',
+        statusField: 'status',
+        statusCode,
+        stageCode: 'manual_run',
+        metadata: { passRequestId, ...metadata },
+      }));
+    let begun: ReturnType<InventoryOnecProjectionService['beginPass']>;
+    if (this.running && this.runningRequestId) {
+      // Проход уже идёт (запущен не этим запросом): присоединиться и записать связь с ним, не дожидаясь итога.
+      begun = this.beginPass('manual');
+      await record('requested', begun.passRequestId, 'joined', { joined: true });
+    } else {
+      const planned = `onec-consumption-manual-${randomUUID()}`;
+      await record('requested', planned, 'started', { joined: false });
+      begun = this.beginPass('manual', planned);
+      // Пока писалась связь, проход мог начать другой сигнал — тогда движения помечены его requestId.
+      if (begun.joined) await record('requested', begun.passRequestId, 'joined', { joined: true, plannedPassRequestId: planned });
+    }
+    let outcome: ProjectionPassOutcome;
+    try {
+      outcome = await begun.done;
+    } catch (error) {
+      await record('finished', begun.passRequestId, 'failed', { error: describe(error) })
+        .catch((auditError) => this.logger.error(`1C consumption manual run: failure audit not written: ${describe(auditError)}`));
+      throw error;
+    }
+    await record('finished', begun.passRequestId, outcome.status, { outcome });
+    return outcome;
   }
 
   /** Служебный исполнитель: тот же, что у автосинхронизации складов (is_service_account, integration_service). */
@@ -331,4 +391,3 @@ export class InventoryOnecProjectionService implements OnModuleInit, OnModuleDes
     return { id: Number(rows[0].user_id), username: rows[0].username };
   }
 }
-

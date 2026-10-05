@@ -108,7 +108,7 @@ import { millingTypeDimensionWarning } from '../../../../utils/millingTypeDimens
 import { newDetailMaterialDefault } from '../../newDetailMaterialDefault';
 import { useQuery } from '@tanstack/react-query';
 import { inventoryApi } from '../../../../api/inventoryApi';
-import { filmStockBadge, ORDER_FILM_STOCK_REFRESH, orderFilmStockKey } from '../../../inventory/filmStock';
+import { filmStockBadgeFor, ORDER_FILM_STOCK_REFRESH, orderFilmStockKey } from '../../../inventory/filmStock';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -2384,8 +2384,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             {getDisplayedField(d, 'film_id') ? <>
               <FilmCell filmId={getDisplayedField(d, 'film_id')!} namesById={filmNameById} loading={referencesLoading} />
               {inventoryViewAllowed && editingKey === null && (() => {
-                const badge = filmStockBadge(stockByFilmId.get(getDisplayedField(d, 'film_id')!));
-                return <Tag color={badge.kind === 'none' ? 'red' : 'blue'} style={{ marginInlineStart: 4 }}>{badge.label}</Tag>;
+                // Метка — только по полученному ответу: при загрузке, ошибке и у несохранённого заказа её нет.
+                const badge = filmStockBadgeFor(filmStockQuery.isSuccess, stockByFilmId, getDisplayedField(d, 'film_id'));
+                return badge ? <Tag color={badge.kind === 'none' ? 'red' : 'blue'} style={{ marginInlineStart: 4 }}>{badge.label}</Tag> : null;
               })()}
             </> : '—'}
           </span>

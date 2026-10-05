@@ -136,8 +136,9 @@ describe('InventoryController', () => {
     await expectError(() => controller.onecIssues(view, { code: 'bad code' }), 400, 'VALIDATION_FAILED');
     await controller.onecIssues(view, { warehouseId: '2', code: 'FILM_UNLINKED', includeBeforeCutoff: 'true' });
     expect(projection.listIssues).toHaveBeenLastCalledWith(['inventory.view'], { warehouseId: 2, code: 'FILM_UNLINKED', includeBeforeCutoff: true, offset: 0, limit: 100 });
-    await controller.runOnecConsumption(view);
-    expect(projection.runNow).toHaveBeenCalledWith(['inventory.view']);
+    // Ручной запуск: сервису передаются инициатор и requestId HTTP-запроса (право проверяет сервис, аудит пишет он же).
+    await controller.runOnecConsumption({ ...view, requestId: 'req-run-1' });
+    expect(projection.runNow).toHaveBeenCalledWith({ currentUser: view.user, requestId: 'req-run-1' });
     await expectError(() => controller.compensateOnecConsumption({ user: user(['inventory.manage']) }, 'k', 'abc'), 400, 'VALIDATION_FAILED');
     await expectError(() => controller.compensateOnecConsumption({ user: user(['inventory.manage']) }, 'k', '40000'), 404, 'WAREHOUSE_NOT_FOUND');
     await controller.compensateOnecConsumption({ user: user(['inventory.manage']), requestId: 'r' }, 'k1', '2');
