@@ -296,6 +296,34 @@ try {
   await expect(page.getByRole('button', { name: 'Показать клиенту' })).toBeVisible({ timeout: 20000 });
   results.push('re-enabled: the button is back, nothing is presented');
 
+  // The order VIEW page presents the same order from what it has loaded itself.
+  await page.goto(`${base}/orders/show/${orderId}`, { waitUntil: 'domcontentloaded' });
+  const presentView = page.getByRole('button', { name: 'Показать клиенту' });
+  await expect(presentView).toBeVisible({ timeout: 120000 });
+  await expect(presentView).toBeEnabled({ timeout: 120000 });
+  const [viewPopup] = await Promise.all([context.waitForEvent('page', { timeout: 30000 }), presentView.click()]);
+  viewPopup.on('pageerror', (e) => errors.push(`customer (view): ${e.message.split('\n')[0]}`));
+  await expect(viewPopup.getByRole('heading', { level: 1 })).toHaveText(/Заказ № |Ваш заказ/, { timeout: 60000 });
+  await expect(page.getByText('Клиент видит этот заказ')).toBeVisible({ timeout: 30000 });
+  await expect(viewPopup.getByRole('tab', { selected: true })).toHaveText(/Детали заказа/, { timeout: 20000 });
+  await expect(viewPopup.locator('tbody tr[data-row-id]').first()).toBeVisible({ timeout: 20000 });
+  assert.equal(await viewPopup.getByRole('columnheader', { name: 'Сумма', exact: true }).count(), 0, 'view: hidden cost column is absent');
+  assert.equal(await viewPopup.getByRole('columnheader', { name: 'Примечание', exact: true }).count(), 0, 'view: hidden note column is absent');
+  const viewHeaders = await viewPopup.getByRole('columnheader').allInnerTexts();
+  assert.ok(viewHeaders.includes('Кол-во'), `view: ticked quantity column is present (columns: ${viewHeaders.join(' | ')})`);
+  results.push(`view page presented: ${await viewPopup.locator('tbody tr[data-row-id]').count()} detail rows, hidden columns absent`);
+  const financePanel = page.locator('.order-show-info-tabs [role="tab"]').filter({ hasText: 'Финансы' });
+  if (await financePanel.count()) {
+    await financePanel.first().click();
+    await expect(viewPopup.getByRole('tab', { selected: true })).toHaveText(/Финансы/, { timeout: 20000 });
+    await page.locator('.order-show-info-tabs [role="tab"]').filter({ hasText: 'Группы заказа' }).first().click();
+    await expect(viewPopup.getByRole('tab', { selected: true })).toHaveText(/Детали заказа/, { timeout: 20000 });
+    results.push('view page: the finance panel is mirrored as the finance tab; any other panel shows the detail table');
+  }
+  await page.getByRole('button', { name: 'Скрыть от клиента' }).click();
+  await expect(viewPopup.getByText('Здесь появится ваш заказ')).toBeVisible({ timeout: 20000 });
+  results.push('view page: «Скрыть от клиента» → splash');
+
   assert.deepEqual([...new Set(errors)], [], 'no page errors');
   console.log(JSON.stringify({ live: 'passed', base: new URL(base).host, results }, null, 1));
 } catch (error) {

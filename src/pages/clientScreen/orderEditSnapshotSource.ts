@@ -62,9 +62,9 @@ export const GROUPING_FIELDS: Readonly<Record<string, DetailField>> = {
 };
 
 /** Money the manager does not have (undefined) stays unavailable; it is never turned into a zero. */
-const money = (value: number | null | undefined): ClientScreenValue =>
+export const clientScreenMoney = (value: number | null | undefined): ClientScreenValue =>
   (value === undefined ? undefined : value === null ? null : `${formatNumber(Number(value) || 0, 2)} ${CURRENCY_SYMBOL}`);
-const dateText = (value: Date | string | null | undefined): ClientScreenValue =>
+export const clientScreenDate = (value: Date | string | null | undefined): ClientScreenValue =>
   (value ? formatDate(typeof value === 'string' ? value : value.toISOString()) : null);
 const named = (id: number | null | undefined, nameOf: NameOf): ClientScreenValue => (id === null || id === undefined ? null : nameOf(id) ?? null);
 const size = (value: number | null | undefined): ClientScreenValue =>
@@ -73,7 +73,11 @@ const amount = (value: number | null | undefined): ClientScreenValue =>
   (value === undefined ? undefined : value === null ? null : formatNumber(value, 2));
 export const detailRowKey = (detail: OrderDetail): string => String(detail.temp_id ?? detail.detail_id ?? 0);
 
-function detailValues(detail: OrderDetail, names: OrderEditSourceInput['names']): Record<DetailField, ClientScreenValue> {
+/** One detail as display text: names instead of ids, the formats of the order screens. */
+export function orderDetailDisplayValues(
+  detail: OrderDetail,
+  names: Pick<OrderEditSourceInput['names'], 'sheetMaterial' | 'millingType' | 'edgeType' | 'film' | 'productionStatus'>,
+): Record<DetailField, ClientScreenValue> {
   return {
     n: detail.detail_number === null || detail.detail_number === undefined ? null : String(detail.detail_number),
     name: detail.detail_name ?? null,
@@ -130,13 +134,13 @@ export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenO
       client: named(header.client_id, names.client),
       parts: `${formatNumber(partsCount, 0)}`,
       area: `${formatNumber(totalArea, 2)} м²`,
-      final: totalKnown ? money(finalAmount) : undefined,
-      debt: totalKnown ? money(remaining) : undefined,
+      final: totalKnown ? clientScreenMoney(finalAmount) : undefined,
+      debt: totalKnown ? clientScreenMoney(remaining) : undefined,
     },
     basic: {
       client: named(header.client_id, names.client),
       order_name: header.order_name ?? null,
-      order_date: dateText(header.order_date),
+      order_date: clientScreenDate(header.order_date),
       order_status: named(header.order_status_id, names.orderStatus),
       payment_status: named(header.payment_status_id, names.paymentStatus),
       production_status: named(header.production_status_id, names.productionStatus),
@@ -146,32 +150,32 @@ export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenO
       notes: header.notes ?? null,
     },
     dates: {
-      planned: dateText(header.planned_completion_date),
-      completion: dateText(header.completion_date),
-      issue: dateText(header.issue_date),
+      planned: clientScreenDate(header.planned_completion_date),
+      completion: clientScreenDate(header.completion_date),
+      issue: clientScreenDate(header.issue_date),
     },
     finance: {
-      total: money(header.total_amount),
-      discount: money(header.discount),
-      surcharge: money(header.surcharge),
-      final: money(header.final_amount),
-      paid: money(header.paid_amount),
+      total: clientScreenMoney(header.total_amount),
+      discount: clientScreenMoney(header.discount),
+      surcharge: clientScreenMoney(header.surcharge),
+      final: clientScreenMoney(header.final_amount),
+      paid: clientScreenMoney(header.paid_amount),
       debt: header.final_amount === undefined || header.paid_amount === undefined
         ? undefined
-        : money(Math.max(0, (Number(header.final_amount) || 0) - (Number(header.paid_amount) || 0))),
+        : clientScreenMoney(Math.max(0, (Number(header.final_amount) || 0) - (Number(header.paid_amount) || 0))),
     },
     payments: input.payments.map((payment) => ({
       key: String(payment.temp_id ?? payment.payment_id ?? 0),
       values: {
-        date: dateText(payment.payment_date),
+        date: clientScreenDate(payment.payment_date),
         type: named(payment.type_paid_id, names.paymentType),
-        amount: money(payment.amount),
+        amount: clientScreenMoney(payment.amount),
         note: payment.notes ?? null,
       },
     })),
     details: {
       columnOrder,
-      rows: business.map((detail) => ({ key: detailRowKey(detail), values: detailValues(detail, names) })),
+      rows: business.map((detail) => ({ key: detailRowKey(detail), values: orderDetailDisplayValues(detail, names) })),
       grouping: input.grouping
         ? {
           field: groupingField,
@@ -231,7 +235,7 @@ export function orderEditEditingValues(
   }
   // The saved material name belongs to the saved material only.
   if (merged.sheet_material_type_id !== detail.sheet_material_type_id) merged.material_name_resolved = null;
-  const display = detailValues(merged as unknown as OrderDetail, names);
+  const display = orderDetailDisplayValues(merged as unknown as OrderDetail, names);
   const result: Array<{ code: `details.${DetailField}`; value: string }> = [];
   for (const key of columnKeys) {
     const field = DETAIL_COLUMN_FIELDS[key];

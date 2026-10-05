@@ -90,6 +90,41 @@ function currentScrollRatio(): number {
   return max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
 }
 
+/**
+ * Scroll position of one order screen for the customer screen: sampled only while that screen's
+ * workspace tab is on screen (several order screens stay mounted at once), kept otherwise. Scrolling
+ * of the presented order is reported to the presenter once per frame.
+ */
+export function useClientScreenScroll(orderKey: string, active: boolean): () => number {
+  const activeNow = useRef(active);
+  activeNow.current = active;
+  const ratio = useRef(0);
+
+  useEffect(() => {
+    const presenter = getClientScreenPresenter();
+    if (!presenter) return undefined;
+    let frame = 0;
+    const onScroll = () => {
+      // Another order's tab may be on screen: its scrolling is not this order's.
+      if (frame || !activeNow.current || presenter.getView().presentedOrderKey !== orderKey) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        presenter.notifyUi(orderKey);
+      });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [orderKey]);
+
+  return useRef(() => {
+    if (activeNow.current) ratio.current = currentScrollRatio();
+    return ratio.current;
+  }).current;
+}
+
 /** Detail columns in the form's default order, used until the detail table has been on screen. */
 const DEFAULT_DETAIL_COLUMNS = Object.keys(DETAIL_COLUMN_FIELDS);
 /** How often the open row editor is looked at for new values while the order is presented. */
@@ -165,8 +200,7 @@ export function mirroredEditing(
 export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput): { provider: ClientScreenOrderProvider } {
   const latest = useRef(input);
   latest.current = input;
-  // Scroll position of THIS order: sampled only while its workspace tab is on screen, kept otherwise.
-  const scrollRatio = useRef(0);
+  const scrollRatio = useClientScreenScroll(input.orderKey, input.active);
 
   const provider = useMemo<ClientScreenOrderProvider>(() => ({
     getSource() {
@@ -194,7 +228,6 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
     },
     getUi(idFor: ClientScreenIdFor): ClientScreenUi {
       const current = latest.current;
-      if (current.active) scrollRatio.current = currentScrollRatio();
       const store = getOrderDraftStore(current.orderKey);
       const mirror = readOrderDetailTableMirror(store);
       const names = orderFormNames(current.references, current.sheetMaterialName, current.filmNameById);
@@ -202,11 +235,11 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
         // The manager's own tab; on a tab that is not mirrored the presenter keeps the customer's last one.
         tab: mirroredTab(current.activeTab),
         ...mirroredEditing(mirror, store.getState().details, names, idFor),
-        scroll: { ratio: scrollRatio.current },
+        scroll: { ratio: scrollRatio() },
         page: mirroredPage(mirror, store.getState().details),
       };
     },
-  }), []);
+  }), [scrollRatio]);
 
   const { orderKey } = input;
 
@@ -267,25 +300,6 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
   useEffect(() => {
     getClientScreenPresenter()?.notifyUi(orderKey);
   }, [orderKey, input.activeTab, input.active]);
-
-  useEffect(() => {
-    const presenter = getClientScreenPresenter();
-    if (!presenter) return undefined;
-    let frame = 0;
-    const onScroll = () => {
-      // Another order's tab may be on screen: its scrolling is not this order's.
-      if (frame || !latest.current.active || presenter.getView().presentedOrderKey !== orderKey) return;
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        presenter.notifyUi(orderKey);
-      });
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => {
-      window.removeEventListener('scroll', onScroll);
-      if (frame) cancelAnimationFrame(frame);
-    };
-  }, [orderKey]);
 
   return { provider };
 }

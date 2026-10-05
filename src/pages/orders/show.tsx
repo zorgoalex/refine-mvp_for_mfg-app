@@ -23,6 +23,7 @@ import { handleExcelError } from "../../utils/excel/excelErrorHandler";
 import { openOrderProductionPdfPreview } from "../../utils/pdf/orderProductionPdf";
 import { OrderPrintView } from "./components/print/OrderPrintView";
 import { OrderShowHeader } from "./components/sections/OrderShowHeader";
+import { ClientScreenShowHeader } from "../clientScreen/ClientScreenShowHeader";
 import { overlayDetailProductionStatuses } from '../../utils/orderProductionSummary';
 import { OrderDatesBlock } from "./components/sections/OrderDatesBlock";
 import { OrderFinanceBlock } from "./components/sections/OrderFinanceBlock";
@@ -3249,6 +3250,43 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     if (key === 'move-project') setMoveModalOpen(true);
     if (key === 'delete-order') handleDeleteOrder();
   };
+  // Customer screen: what this page has loaded and shows (read-only; see ClientScreenShowHeader).
+  const clientScreenPaymentTypes = useMemo(
+    () => new Map<number, string>((paymentTypesData?.data || []).map((item: any) => [Number(item.type_paid_id), String(item.type_paid_name ?? '')])),
+    [paymentTypesData],
+  );
+  const clientScreenNames = useMemo(() => ({
+    millingType: millingTypesMap as Map<number, string>,
+    edgeType: edgeTypesMap as Map<number, string>,
+    film: filmsMap,
+    paymentType: clientScreenPaymentTypes,
+    productionStatus: (id: number) => productionStatusesById.get(id)?.name,
+    materialOf: (detail: any) => resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap),
+  }), [clientScreenPaymentTypes, edgeTypesMap, filmsMap, materialsMap, millingTypesMap, productionStatusesById, resolvedNameByDetailId]);
+  const clientScreenPaymentsSource = backendOrder?.payments ?? paymentsData?.data;
+  const clientScreenPayments = useMemo(() => (clientScreenPaymentsSource ?? []) as any[], [clientScreenPaymentsSource]);
+  const clientScreenGroupField = groupingActive ? grouping.state.field ?? null : null;
+  const clientScreenGroupLabelOf = useCallback(
+    (detail: any) => (clientScreenGroupField ? String(groupLabelOf(detail, clientScreenGroupField) ?? '') : ''),
+    [clientScreenGroupField, groupLabelOf],
+  );
+  const clientScreenControl = record?.order_id && !deletedOrder ? (
+    <ClientScreenShowHeader
+      orderId={record.order_id}
+      activeInfoPanel={activeInfoPanel}
+      ready={Boolean(productionSummaryDetailsLoaded && millingTypesData && edgeTypesData && filmsData && productionStatusesData)}
+      record={record as unknown as Record<string, unknown>}
+      clientName={resolvedClientName}
+      details={sortedDetails as any[]}
+      groupedRows={clientScreenGroupField ? groupedDataSource as any[] : null}
+      groupField={clientScreenGroupField}
+      groupLabelOf={clientScreenGroupLabelOf}
+      columnKeys={visibleDetailColumns.map((column) => String(column.key ?? ''))}
+      payments={clientScreenPayments}
+      names={clientScreenNames}
+      canViewFinancials={canViewFinancials}
+    />
+  ) : null;
   const workbenchEditButton = canEditOrderContent && record?.order_id ? (
     <Button type="primary" icon={<EditOutlined />} onClick={() => navigate(`/orders/edit/${record.order_id}`)}>
       Изменить
@@ -3261,6 +3299,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const workbenchBarSendAction = isWorkbench ? orderSendAction : null;
   const workbenchHeadActions = isWorkbench ? (
     <>
+      {clientScreenControl}
       {workbenchPaymentButton}
       {workbenchPrintItems.length > 0 ? (
         <Dropdown trigger={['click']} menu={{ items: workbenchPrintItems, onClick: handleWorkbenchAction }}>
@@ -3447,6 +3486,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             </>
           ) : (
             <>
+              {clientScreenControl}
               {canEditOrderContent && <EditButton>Изменить</EditButton>}
               {canUpdateOrders && (
                 <Button
@@ -3670,6 +3710,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   </>
                 ) : (
                   <>
+                    {clientScreenControl}
                     <Button
                       icon={<EyeOutlined />}
                       onClick={() => {
