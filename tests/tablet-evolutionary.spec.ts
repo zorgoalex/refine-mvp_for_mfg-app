@@ -906,6 +906,15 @@ async function setupBoardTabletMocks(page: Page, db: WorkflowMockDb) {
         }
         await route.fallback();
     });
+    // The balloon centre of the shell leases server balloons on every page; it is not a write of the board.
+    await page.route(/\/api\/v1\/notifications\/balloons\/(?:claim|ack)$/, async (route) => {
+        const claim = route.request().url().endsWith('/claim');
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(claim ? { items: [] } : { acknowledged: 0 }),
+        });
+    });
 
     await page.route(/\/api\/v1\/orders\/status-board(?:\?.*)?$/, async (route) => {
         const url = new URL(route.request().url());
