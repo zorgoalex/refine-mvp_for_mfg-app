@@ -361,6 +361,7 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
   return (
     <List
       title="+Клиенты (аналитика)"
+      wrapperProps={{ className: 'wb-list' }}
       headerButtons={() => (
         <>
           <Space.Compact style={{ marginRight: 8 }}>

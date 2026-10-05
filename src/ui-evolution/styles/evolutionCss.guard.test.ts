@@ -48,6 +48,7 @@ describe('evolution CSS isolation', () => {
     'src/ui-evolution/styles/workbench-board.css',
     'src/ui-evolution/styles/workbench-procurement.css',
     'src/ui-evolution/styles/workbench-payments.css',
+    'src/ui-evolution/styles/workbench-lists.css',
   ])('keeps the workbench stylesheet %s scoped to its own variant marker', (file) => {
     const workbench = postcss.parse(readFileSync(file, 'utf8'));
     const unscoped: string[] = [];

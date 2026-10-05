@@ -131,6 +131,7 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
   return (
     <List
       title="Клиенты"
+      wrapperProps={{ className: 'wb-list' }}
       headerButtons={() => (
         <>
           <Space.Compact style={{ marginRight: 8 }}>
@@ -165,9 +166,9 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
           },
         })}
       >
-        <Table.Column dataIndex="client_id" title="id" sorter />
+        <Table.Column dataIndex="client_id" title="id" sorter className="wb-list__muted" />
         <ReferenceSortOrderColumn />
-        <Table.Column dataIndex="client_name" title="Имя клиента" sorter />
+        <Table.Column dataIndex="client_name" title="Имя клиента" sorter className="wb-list__title" />
         <Table.Column
           dataIndex="person_type"
           title="Тип лица"

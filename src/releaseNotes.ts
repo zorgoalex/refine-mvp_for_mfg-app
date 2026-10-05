@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-06", title: "NewLine: «Клиенты», «+Клиенты» и таблица «+Платежи»",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Вариант NewLine: списки «Клиенты», «+Клиенты (аналитика)» и таблица «+Платежи (аналитика)» оформлены в стиле нового дизайна — плотные строки в карточке, тонкие разделители, спокойные иконки действий. Поиск, фильтры, сортировка и действия работают как прежде.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-06", title: "«+Платежи (аналитика)»: итоги периода и доступ",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

@@ -43,6 +43,7 @@
 }
 
 /* --- таблицы: карточка, плотные строки, одна тонкая линия, без «зебры» --- */
+:root[data-ui-variant="workbench"] .payments-analytics .ant-table-wrapper,
 :root[data-ui-variant="workbench"] .payments-list .ant-table-wrapper,
 :root[data-ui-variant="workbench"] .payments-page-tabs .ant-table-wrapper {
   overflow: hidden;
@@ -51,6 +52,7 @@
   background: var(--evo-surface);
 }
 
+:root[data-ui-variant="workbench"] .payments-analytics .ant-table-wrapper .ant-table-thead > tr > th,
 :root[data-ui-variant="workbench"] .payments-list .ant-table-wrapper .ant-table-thead > tr > th,
 :root[data-ui-variant="workbench"] .payments-page-tabs .ant-table-wrapper .ant-table-thead > tr > th {
   padding: 8px 12px;
@@ -61,11 +63,13 @@
   font-weight: 600;
 }
 
+:root[data-ui-variant="workbench"] .payments-analytics .ant-table-wrapper .ant-table-thead > tr > th::before,
 :root[data-ui-variant="workbench"] .payments-list .ant-table-wrapper .ant-table-thead > tr > th::before,
 :root[data-ui-variant="workbench"] .payments-page-tabs .ant-table-wrapper .ant-table-thead > tr > th::before {
   display: none;
 }
 
+:root[data-ui-variant="workbench"] .payments-analytics .ant-table-wrapper .ant-table-tbody > tr > td,
 :root[data-ui-variant="workbench"] .payments-list .ant-table-wrapper .ant-table-tbody > tr > td,
 :root[data-ui-variant="workbench"] .payments-page-tabs .ant-table-wrapper .ant-table-tbody > tr > td {
   padding: 7px 12px;
@@ -75,22 +79,26 @@
   font-variant-numeric: tabular-nums;
 }
 
+:root[data-ui-variant="workbench"] .payments-analytics .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:not(.order-deleted-reference-row) > td,
 /* !important: общая «зебра» таблиц (payments/list.css) задаёт фон строк с !important */
 :root[data-ui-variant="workbench"] .payments-list .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:not(.order-deleted-reference-row) > td,
 :root[data-ui-variant="workbench"] .payments-page-tabs .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:not(.order-deleted-reference-row) > td {
   background-color: var(--evo-surface) !important;
 }
 
+:root[data-ui-variant="workbench"] .payments-analytics .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:not(.order-deleted-reference-row):hover > td,
 :root[data-ui-variant="workbench"] .payments-list .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:not(.order-deleted-reference-row):hover > td,
 :root[data-ui-variant="workbench"] .payments-page-tabs .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:not(.order-deleted-reference-row):hover > td {
   background-color: color-mix(in srgb, var(--evo-primary) 4%, var(--evo-surface)) !important;
 }
 
+:root[data-ui-variant="workbench"] .payments-analytics .ant-table-wrapper .ant-table-tbody > tr:last-child > td,
 :root[data-ui-variant="workbench"] .payments-list .ant-table-wrapper .ant-table-tbody > tr:last-child > td,
 :root[data-ui-variant="workbench"] .payments-page-tabs .ant-table-wrapper .ant-table-tbody > tr:last-child > td {
   border-bottom: 0;
 }
 
+:root[data-ui-variant="workbench"] .payments-analytics .ant-table-wrapper .ant-pagination,
 :root[data-ui-variant="workbench"] .payments-list .ant-table-wrapper .ant-pagination,
 :root[data-ui-variant="workbench"] .payments-page-tabs .ant-table-wrapper .ant-pagination {
   margin: 0;
@@ -175,4 +183,38 @@
   border-color: var(--evo-primary);
   background: color-mix(in srgb, var(--evo-primary) 10%, var(--evo-surface));
   color: var(--evo-primary);
+}
+
+/* --- «+Платежи (аналитика)»: итоги и дни в тонах NewLine --- */
+:root[data-ui-variant="workbench"] .payments-analytics .pa-summary {
+  border-color: var(--evo-border);
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .payments-analytics .pa-summary__tile {
+  border-color: var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .payments-analytics .pa-summary__label {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .payments-analytics .pa-summary__hint,
+:root[data-ui-variant="workbench"] .payments-analytics .pa-day__total,
+:root[data-ui-variant="workbench"] .payments-analytics .pa-day-rest {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .payments-analytics .ant-table-tbody > tr.pa-day-start > td {
+  border-top: 1px solid var(--evo-border-strong, var(--evo-border));
+}
+
+:root[data-ui-variant="workbench"] .payments-analytics .ant-table-tbody > tr > td .ant-btn-icon-only.ant-btn-sm {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--evo-text-secondary);
 }

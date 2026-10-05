@@ -347,6 +347,7 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
   return (
     <List
       title="+Платежи (аналитика)"
+      wrapperProps={{ className: 'payments-analytics' }}
       headerButtons={() => (
         <>
           <Space.Compact style={{ marginRight: 8 }}>
