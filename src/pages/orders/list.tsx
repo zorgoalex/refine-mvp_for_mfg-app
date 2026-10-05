@@ -79,8 +79,7 @@ import { canQueryUsersResource } from "../../utils/resourcePermissions";
 import { can } from "../../utils/permissions";
 import { canViewNavigationResource } from "../../utils/navigationPermissions";
 import {
-  canViewResourceByRoleVisibility,
-  getCurrentUserRoleKey,
+  canViewResourceForUser,
   normalizeRoleVisibilityMatrix,
 } from "../../utils/resourceVisibility";
 import {
@@ -306,9 +305,9 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       featureFlags.useBackendPermissions,
       canViewFinancials,
     ) &&
-    canViewResourceByRoleVisibility(
+    canViewResourceForUser(
       'order-status-board',
-      getCurrentUserRoleKey(navigationUser),
+      navigationUser,
       roleVisibilityMatrix,
     );
   const ordersReadBackendMode = getOrdersReadBackendMode(useBackendOrdersRead);

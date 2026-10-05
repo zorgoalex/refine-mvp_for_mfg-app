@@ -26,8 +26,7 @@ import { useAppSettings, SETTING_KEYS } from "../hooks/useAppSettings";
 import { useSidebarCollapsedPreference } from "../hooks/useSidebarCollapsedPreference";
 import { useSidebarMenuPreferences } from "../hooks/useSidebarMenuPreferences";
 import {
-  canViewResourceByRoleVisibility,
-  getCurrentUserRoleKey,
+  canViewResourceForUser,
   normalizeRoleVisibilityMatrix,
 } from "../utils/resourceVisibility";
 import {
@@ -77,7 +76,6 @@ export const CustomSider: React.FC = () => {
   }, []);
 
   const { canViewFinancials } = useOrderFinancialVisibility(currentUser);
-  const currentRoleKey = getCurrentUserRoleKey(currentUser);
   const roleVisibilityMatrix = normalizeRoleVisibilityMatrix(
     getSetting(SETTING_KEYS.RESOURCE_VISIBILITY_BY_ROLE),
   );
@@ -101,8 +99,8 @@ export const CustomSider: React.FC = () => {
   const canViewNavigation = useCallback(
     (name: string) =>
       canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions, canViewFinancials) &&
-      canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
-    [canViewFinancials, currentRoleKey, currentUser, roleVisibilityMatrix],
+      canViewResourceForUser(name, currentUser, roleVisibilityMatrix),
+    [canViewFinancials, currentUser, roleVisibilityMatrix],
   );
 
   const sider = useSiderMenuItems({

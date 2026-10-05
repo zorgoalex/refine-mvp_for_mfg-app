@@ -16,8 +16,7 @@ import {
 import { canManageOrderContent } from '../../utils/orderFinancialVisibility';
 import { useOrderFinancialVisibility } from '../../hooks/useOrderFinancialVisibility';
 import {
-  canViewResourceByRoleVisibility,
-  getCurrentUserRoleKey,
+  canViewResourceForUser,
   normalizeRoleVisibilityMatrix,
 } from '../../utils/resourceVisibility';
 import { RESOURCE_LABELS } from '../../utils/tabLabels';
@@ -47,7 +46,6 @@ export function useEvolutionNavigation(onNavigate?: () => void) {
     ? authSession.getUser()
     : authStorage.getUser();
   const { canViewFinancials } = useOrderFinancialVisibility(currentUser);
-  const currentRoleKey = getCurrentUserRoleKey(currentUser);
   const roleVisibilityMatrix = normalizeRoleVisibilityMatrix(
     getSetting(SETTING_KEYS.RESOURCE_VISIBILITY_BY_ROLE),
   );
@@ -66,8 +64,8 @@ export function useEvolutionNavigation(onNavigate?: () => void) {
   const canViewNavigation = useCallback(
     (name: string) =>
       canViewNavigationResource(name, currentUser, featureFlags.useBackendPermissions, canViewFinancials) &&
-      canViewResourceByRoleVisibility(name, currentRoleKey, roleVisibilityMatrix),
-    [canViewFinancials, currentRoleKey, currentUser, roleVisibilityMatrix],
+      canViewResourceForUser(name, currentUser, roleVisibilityMatrix),
+    [canViewFinancials, currentUser, roleVisibilityMatrix],
   );
 
   const navigate = useCallback((route: string) => {

@@ -1,6 +1,6 @@
 import { useConfigurationStickyTabs } from './useConfigurationStickyTabs';
 import { Tooltip, Table } from '../../ui/tooltipDelay';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Card,
   Tabs,
@@ -47,6 +47,9 @@ import { OrgStructureConfig } from './components/OrgStructureConfig';
 import { CutConfigTab } from './components/CutConfigTab';
 import { LabelsConfigTab } from './components/LabelsConfigTab';
 import { FinancialLayerAccessMatrix } from './components/FinancialLayerAccessMatrix';
+import { UserScreenVisibility } from './components/UserScreenVisibility';
+import { createVisibilityWriter, type VisibilityWriter } from '../../utils/visibilityWriter';
+import { Segmented } from '../../ui/Segmented';
 import { ExportTemplatesConfigTab } from './components/ExportTemplatesConfigTab';
 import { ProductionThresholdsConfigTab } from './components/ProductionThresholdsConfigTab';
 import { ProcurementSettingsTab } from './components/ProcurementSettingsTab';
@@ -508,30 +511,62 @@ const TableVisibilityByRoleTab: React.FC = () => {
       ),
     [resources],
   );
-  const savedMatrix = normalizeRoleVisibilityMatrix(
-    getSetting<RoleVisibilityMatrix>(SETTING_KEYS.RESOURCE_VISIBILITY_BY_ROLE),
-  );
-  const matrix = useMemo(
-    () => buildInitialResourceVisibility(menuResources, roles, savedMatrix),
-    [menuResources, roles, savedMatrix],
-  );
-
-  const handleToggle = async (resourceName: string, role: VisibilityRole, checked: boolean) => {
-    const roleKey = normalizeRoleKey(role);
-    const nextMatrix: RoleVisibilityMatrix = {
-      ...matrix,
-      [resourceName]: {
-        ...(matrix[resourceName] ?? {}),
-        [roleKey]: checked,
-      },
-    };
-
-    await saveSetting(
+  const rawVisibility = getSetting<RoleVisibilityMatrix>(SETTING_KEYS.RESOURCE_VISIBILITY_BY_ROLE);
+  const savedMatrix = useMemo(() => normalizeRoleVisibilityMatrix(rawVisibility), [rawVisibility]);
+  const [visibilityMode, setVisibilityMode] = useState<'roles' | 'users'>('roles');
+  // One writer for both modes: the setting is a single JSON value, each write builds on the
+  // previous one and the controls are locked until it is stored.
+  const saveSettingRef = useRef(saveSetting);
+  saveSettingRef.current = saveSetting;
+  const writerRef = useRef<VisibilityWriter | null>(null);
+  if (!writerRef.current) {
+    writerRef.current = createVisibilityWriter(savedMatrix, (next) => saveSettingRef.current(
       SETTING_KEYS.RESOURCE_VISIBILITY_BY_ROLE,
-      nextMatrix,
-      'Видимость пунктов меню по ролям',
-    );
-    message.success('Видимость обновлена');
+      next,
+      'Видимость пунктов меню по ролям и пользователям',
+    ));
+  }
+  const [localMatrix, setLocalMatrix] = useState(savedMatrix);
+  const [visibilitySaving, setVisibilitySaving] = useState(false);
+  // Nothing is written before the stored setting is loaded (a write replaces the whole value).
+  const visibilityLocked = visibilitySaving || isSettingsLoading;
+  useEffect(() => {
+    if (writerRef.current?.sync(savedMatrix)) setLocalMatrix(savedMatrix);
+  }, [savedMatrix]);
+  const matrix = useMemo(
+    () => buildInitialResourceVisibility(menuResources, roles, localMatrix),
+    [menuResources, roles, localMatrix],
+  );
+
+  const applyVisibility = async (
+    update: (current: RoleVisibilityMatrix) => RoleVisibilityMatrix,
+    success: string,
+  ) => {
+    const writer = writerRef.current!;
+    setVisibilitySaving(true);
+    try {
+      await writer.apply(update);
+      message.success(success);
+    } catch {
+      message.error('Не удалось сохранить видимость');
+    } finally {
+      setLocalMatrix(writer.current);
+      setVisibilitySaving(writer.pending > 0);
+    }
+  };
+
+  const handleToggle = (resourceName: string, role: VisibilityRole, checked: boolean) => {
+    const roleKey = normalizeRoleKey(role);
+    return applyVisibility((current) => {
+      const built = buildInitialResourceVisibility(menuResources, roles, current);
+      return {
+        ...built,
+        [resourceName]: {
+          ...(built[resourceName] ?? {}),
+          [roleKey]: checked,
+        },
+      };
+    }, 'Видимость обновлена');
   };
 
   const columns = [
@@ -561,7 +596,8 @@ const TableVisibilityByRoleTab: React.FC = () => {
         render: (_: unknown, record: { name: string }) => (
           <Checkbox
             checked={matrix[record.name]?.[roleKey] ?? true}
-            onChange={(event) => handleToggle(record.name, role, event.target.checked)}
+            disabled={visibilityLocked}
+            onChange={(event) => void handleToggle(record.name, role, event.target.checked)}
           />
         ),
       };
@@ -570,15 +606,35 @@ const TableVisibilityByRoleTab: React.FC = () => {
 
   return (
     <div style={{ padding: '16px 0' }}>
-      <Table
-        rowKey="name"
-        loading={isSettingsLoading || isRolesLoading}
-        dataSource={menuResources}
-        columns={columns}
-        pagination={false}
-        size="middle"
-        scroll={{ x: 'max-content' }}
+      <Segmented
+        value={visibilityMode}
+        disabled={visibilityLocked}
+        onChange={(value) => setVisibilityMode(value as 'roles' | 'users')}
+        options={[
+          { label: 'По ролям', value: 'roles' },
+          { label: 'По пользователям', value: 'users' },
+        ]}
+        style={{ marginBottom: 16 }}
       />
+      {visibilityMode === 'roles' ? (
+        <Table
+          rowKey="name"
+          loading={isSettingsLoading || isRolesLoading}
+          dataSource={menuResources}
+          columns={columns}
+          pagination={false}
+          size="middle"
+          scroll={{ x: 'max-content' }}
+        />
+      ) : (
+        <UserScreenVisibility
+          resources={menuResources}
+          matrix={localMatrix}
+          loading={isSettingsLoading}
+          saving={visibilityLocked}
+          apply={applyVisibility}
+        />
+      )}
     </div>
   );
 };

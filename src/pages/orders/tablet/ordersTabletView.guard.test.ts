@@ -13,7 +13,7 @@ describe('tablet orders view integration', () => {
     expect(list).toContain('window.localStorage.setItem(ordersViewKey, returnMode)');
     expect(list).toContain('featureFlags.orderStatusBoard');
     expect(list).toContain('canViewNavigationResource(');
-    expect(list).toContain('canViewResourceByRoleVisibility(');
+    expect(list).toContain('canViewResourceForUser(');
     expect(list).toContain('...(isTablet && canViewStatusBoard');
     expect(list).toContain("if (!isTablet || !canViewStatusBoard) return");
     expect(list).toContain('orders-tablet-view-switch');
