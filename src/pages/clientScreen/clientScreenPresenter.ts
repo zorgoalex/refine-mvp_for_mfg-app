@@ -164,6 +164,9 @@ export class ClientScreenPresenter {
       this.releaseLock();
       this.provider = provider;
       this.orderKey = orderKey;
+      // A customer window of an earlier build cannot show this build's data: it is told to close,
+      // and the window of this version is found (or opened) below.
+      this.deps.env.retireOldViewers();
       this.idFor = createClientScreenIdMap(() => this.deps.env.randomId());
       this.blanked = false;
       this.lastSnapshot = null;

@@ -229,10 +229,14 @@ function setup(policy: { current: ClientScreenPolicy } = { current: allCodes }, 
     return viewer;
   };
   const opened = vi.fn();
-  const presenter = (options: { wrapPost?: Parameters<typeof createClientScreenEnvironment>[0]['wrapPost']; suspendedTimers?: boolean } = {}): ClientScreenPresenter => {
+  const presenter = (options: {
+    wrapPost?: Parameters<typeof createClientScreenEnvironment>[0]['wrapPost']; suspendedTimers?: boolean;
+    tweakEnv?: (env: ClientScreenEnvironment) => ClientScreenEnvironment;
+  } = {}): ClientScreenPresenter => {
     const base = workstation.envFor({ now, wrapPost: options.wrapPost });
     // A background manager window: its timers do not run, only explicit calls do.
-    const env = options.suspendedTimers ? { ...base, setInterval: () => () => undefined } : base;
+    const timed = options.suspendedTimers ? { ...base, setInterval: () => () => undefined } : base;
+    const env = options.tweakEnv ? options.tweakEnv(timed) : timed;
     const instance = new ClientScreenPresenter({ env, loadPolicy: async () => policy.current, openWindow: opened });
     disposables.push(() => instance.dispose());
     return instance;
@@ -660,6 +664,40 @@ describe('customer screen: manager windows and the customer window together', ()
     a.hide('order-1');
     await until(() => !idle.getView().presentingElsewhere, 'the idle window sees it stopped', 6000);
   }, 20000);
+
+  it('a customer window of an earlier build is not used: it is told to close and a window of this build is opened', async () => {
+    const { startViewer, presenter, opened } = setup();
+    // The old window: holds the viewer lock of the previous version and listens on the previous channel.
+    let oldEnv: ClientScreenEnvironment | null = null;
+    const a = presenter({ tweakEnv: (env) => { oldEnv = env; return env; } });
+    let releaseOld: () => void = () => undefined;
+    void oldEnv!.locks.request('erp-client-screen-viewer', {}, () => new Promise<void>((resolve) => { releaseOld = resolve; }));
+    const oldChannel = new BroadcastChannel('erp-client-screen');
+    const received: unknown[] = [];
+    oldChannel.onmessage = (event) => received.push(event.data);
+    disposables.push(() => { releaseOld(); oldChannel.close(); });
+    await wait(30);
+
+    const shownOrder = order('A1');
+    shownOrder.source = { ...shownOrder.source, summary: { ...shownOrder.source.summary, client_phone: '8 705 222 3344' } };
+    a.present('order-1', shownOrder);
+    // The old window's lock does not count as a customer window: a new one is requested…
+    await until(() => opened.mock.calls.length === 1, 'a window of this build is requested');
+    // …and the old one gets the closing message of its own version, nothing else.
+    await until(() => received.length > 0, 'old window told to close');
+    expect(received).toEqual([{ v: 1, t: 'shutdown' }]);
+
+    const viewer = startViewer();
+    await until(() => shownTitle(viewer) === 'Заказ № A1', 'presented in the window of this build');
+    expect(JSON.stringify(viewer.getState().shown)).toContain('8 705 222 3344');
+    // Later changes and settings re-reads keep arriving there.
+    shownOrder.source = { ...shownOrder.source, summary: { ...shownOrder.source.summary, client_phone: '8 701 000 0000' } };
+    a.notifyChanged('order-1');
+    await until(() => JSON.stringify(viewer.getState().shown).includes('8 701 000 0000'), 'change shown');
+    await a.reloadPolicy();
+    expect(JSON.stringify(viewer.getState().shown)).toContain('8 701 000 0000');
+    expect(received).toHaveLength(1);
+  });
 
   it('a second customer window stays passive', async () => {
     const { startViewer } = setup();

@@ -1,4 +1,6 @@
-import { CLIENT_SCREEN_CHANNEL, clientScreenRandomId, parseClientScreenMessage, type ClientScreenMessage } from './clientScreenProtocol';
+import {
+  CLIENT_SCREEN_CHANNEL, CLIENT_SCREEN_RETIRED_VIEWERS, clientScreenRandomId, parseClientScreenMessage, type ClientScreenMessage,
+} from './clientScreenProtocol';
 import {
   CLIENT_SCREEN_WORKSTATION_KEY, CLIENT_SCREEN_WORKSTATION_LOCK, disableClientScreenWorkstation, enableClientScreenWorkstation,
   parseClientScreenWorkstation, serializeClientScreenWorkstation, type ClientScreenWorkstation,
@@ -25,6 +27,8 @@ export interface ClientScreenEnvironment {
   /** Switch-off / re-enable: read and replace the record inside the workstation lock. */
   updateWorkstation(action: 'disable' | 'enable'): Promise<ClientScreenWorkstation>;
   setInterval(callback: () => void, ms: number): () => void;
+  /** Tells customer windows of earlier builds to close; best effort, never throws. */
+  retireOldViewers(): void;
 }
 
 interface StorageLike {
@@ -37,6 +41,8 @@ export function createClientScreenEnvironment(overrides: {
   locks: ClientScreenLocks;
   onStorageEvent?: (listener: (key: string | null) => void) => () => void;
   channelName?: string;
+  /** Customer windows of earlier builds (channel and closing message); the real list by default. */
+  retiredViewers?: ReadonlyArray<{ channel: string; shutdown: unknown }>;
   /** Clock, for tests. */
   now?: () => number;
   /** Wraps the channel sender, for tests of a failing channel. */
@@ -79,6 +85,17 @@ export function createClientScreenEnvironment(overrides: {
     setInterval(callback, ms) {
       const handle = globalThis.setInterval(callback, ms);
       return () => globalThis.clearInterval(handle);
+    },
+    retireOldViewers() {
+      for (const retired of overrides.retiredViewers ?? CLIENT_SCREEN_RETIRED_VIEWERS) {
+        try {
+          const channel = new BroadcastChannel(retired.channel);
+          channel.postMessage(retired.shutdown);
+          channel.close();
+        } catch {
+          // an outdated window that cannot be reached simply stays where it is
+        }
+      }
     },
   };
 }

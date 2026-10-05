@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { clientScreenMessage, clientScreenRandomId, parseClientScreenMessage, type ClientScreenMessage } from './clientScreenProtocol';
+import {
+  CLIENT_SCREEN_CHANNEL, CLIENT_SCREEN_OWNER_LOCK_PREFIX, CLIENT_SCREEN_PROTOCOL_VERSION, CLIENT_SCREEN_RETIRED_VIEWERS, CLIENT_SCREEN_VIEWER_LOCK,
+  clientScreenMessage, clientScreenOwnerLock, clientScreenRandomId, parseClientScreenMessage, type ClientScreenMessage,
+} from './clientScreenProtocol';
+import { CLIENT_SCREEN_CODES } from './clientScreenRegistry';
 import type { ClientScreenSnapshot, ClientScreenUi } from './clientScreenSnapshotSchema';
 import {
   CLIENT_SCREEN_WORKSTATION_DEFAULT, clientScreenAllowed, disableClientScreenWorkstation, enableClientScreenWorkstation,
@@ -46,7 +50,7 @@ describe('client screen protocol', () => {
   it('drops anything with an unknown key, a wrong version, a wrong type or a foreign shape', () => {
     const state = all[5];
     for (const bad of [
-      null, 'state', 42, {}, { ...state, v: 2 }, { ...state, t: 'takeover' }, { ...state, extra: 1 },
+      null, 'state', 42, {}, { ...state, v: 1 }, { ...state, v: 3 }, { ...state, t: 'takeover' }, { ...state, extra: 1 },
       { ...state, snapshot: { ...snapshot, header: { order_id: 7 } } },
       { ...state, snapshot: { ...snapshot, summary: [{ code: 'orders.secret', label: 'x', value: 'y' }] } },
       { ...state, snapshot: { ...snapshot, details: { ...snapshot.details!, rows: [{ id: 'rowaaaaaa', cells: ['only one'] }] } } },
@@ -92,5 +96,42 @@ describe('workstation record', () => {
     expect(clientScreenAllowed({ disabled: false, gen: 5 }, 5)).toBe(true);
     expect(clientScreenAllowed({ disabled: false, gen: 5 }, 4)).toBe(false);
     expect(clientScreenAllowed({ disabled: true, gen: 5 }, 5)).toBe(false);
+  });
+});
+
+describe('wire version', () => {
+  it('names of the channel and of the locks carry the version, so windows of different builds never meet', () => {
+    expect(CLIENT_SCREEN_PROTOCOL_VERSION).toBe(2);
+    expect(CLIENT_SCREEN_CHANNEL).toBe('erp-client-screen-v2');
+    expect(CLIENT_SCREEN_VIEWER_LOCK).toBe('erp-client-screen-viewer-v2');
+    expect(clientScreenOwnerLock(7)).toBe('erp-client-screen-owner-v2-7');
+    expect(clientScreenOwnerLock(7).startsWith(CLIENT_SCREEN_OWNER_LOCK_PREFIX)).toBe(true);
+    const retired = CLIENT_SCREEN_RETIRED_VIEWERS.map((item) => item.channel);
+    expect(retired).toEqual(['erp-client-screen']);
+    expect(retired).not.toContain(CLIENT_SCREEN_CHANNEL);
+  });
+
+  it('a message of the previous version is not a message; the closing message for old windows is theirs, not ours', () => {
+    expect(parseClientScreenMessage({ v: 1, t: 'shutdown' })).toBeNull();
+    expect(parseClientScreenMessage({ v: 1, t: 'hello', viewerId: 'aaaaaaaaaaaaaaaa' })).toBeNull();
+    expect(CLIENT_SCREEN_RETIRED_VIEWERS[0].shutdown).toEqual({ v: 1, t: 'shutdown' });
+    expect(parseClientScreenMessage({ v: CLIENT_SCREEN_PROTOCOL_VERSION, t: 'shutdown' })).not.toBeNull();
+  });
+
+  // The registry of codes is wire data: a customer window of an older build drops a snapshot with a
+  // code it does not know. Changing this list means: raise CLIENT_SCREEN_PROTOCOL_VERSION, add the
+  // previous channel to CLIENT_SCREEN_RETIRED_VIEWERS, then update the pair below.
+  it('the registry of codes is pinned to the wire version', () => {
+    expect({ version: CLIENT_SCREEN_PROTOCOL_VERSION, codes: CLIENT_SCREEN_CODES.join(' ') }).toEqual({
+      version: 2,
+      codes: 'summary.number summary.client summary.client_phone summary.client_phones summary.parts summary.area summary.final summary.debt '
+        + 'tab.basic basic.client basic.order_name basic.order_date basic.order_status basic.payment_status basic.production_status basic.manager '
+        + 'basic.priority basic.doweling basic.notes '
+        + 'tab.details details.n details.name details.height details.width details.quantity details.area details.material details.milling_type '
+        + 'details.edge_type details.film details.price_per_sqm details.cost details.note details.production_status '
+        + 'tab.dates dates.planned dates.completion dates.issue '
+        + 'tab.finance finance.total finance.discount finance.surcharge finance.final finance.paid finance.debt finance.payments finance.payments_note '
+        + 'tab.services services.name services.quantity services.price services.sum',
+    });
   });
 });
