@@ -240,12 +240,17 @@ try {
     await expect(popup.locator('td[data-focused="true"]')).toHaveCount(1, { timeout: 20000 });
     const before = await popup.locator('td[data-focused="true"]').innerText();
     await page.keyboard.type('777');
-    await expect(popup.locator('td.client-screen__cell--edited')).toHaveText('777', { timeout: 20000 });
-    await expect(popup.locator('td[data-focused="true"]')).toHaveText('777');
+    // The customer's cell shows what the manager's editor holds (the same digits), marked as being edited.
+    const digits = (text) => text.replace(/\D/g, '');
+    const typed = digits(await page.locator('.ant-table-tbody input:focus').inputValue());
+    assert.ok(typed.includes('777') && typed !== digits(before), 'the editor took the typed digits');
+    await expect.poll(async () => digits(await popup.locator('td[data-focused="true"]').innerText()), { timeout: 20000 }).toBe(typed);
+    await expect(popup.locator('td[data-focused="true"].client-screen__cell--edited')).toHaveCount(1);
+    const editedCells = await popup.locator('td.client-screen__cell--edited').count();
     await page.keyboard.press('Escape');
     await expect(popup.locator('td.client-screen__cell--edited')).toHaveCount(0, { timeout: 20000 });
-    await expect(popup.locator('tbody tr[data-row-id]').first().locator('td').filter({ hasText: /^777$/ })).toHaveCount(0);
-    results.push(`live edit mirrored: the cell showed 777 while typing and went back to ${before.replace(/\d/g, '#')} after Escape`);
+    await expect.poll(async () => (await popup.locator('tbody tr[data-row-id]').first().innerText()).replace(/\D/g, '').includes(typed), { timeout: 20000 }).toBe(false);
+    results.push(`live edit mirrored: the customer saw the typed value in the same cell (${editedCells} cell(s) changed live), back to the saved value after Escape`);
 
     await managerTab(/Финансы/).click();
     await expect(selectedTab()).toHaveText(/Финансы/, { timeout: 20000 });
