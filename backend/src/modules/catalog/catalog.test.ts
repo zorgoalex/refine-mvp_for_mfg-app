@@ -15,6 +15,12 @@ describe('catalog validation and permissions', () => {
     expect(parseItem({ ...item, refKey1c: ' ', sortOrder: 32767 })).toMatchObject({ refKey1c: null, sortOrder: 32767 });
     for (const patch of [{ refKey1c: 'bad' }, { sortOrder: 32768 }, { sortOrder: -32769 }, { sortOrder: 1.5 }, { sortOrder: null }, { createdBy: 1 }, { editedBy: 1 }, { createdAt: '2026-01-01' }]) expect(() => parseItem({ ...item, ...patch })).toThrow();
   });
+  it('accepts nomenclature type/category and note as optional bounded text; empty becomes null; omission stays omitted', () => {
+    expect(parseItem(item)).not.toHaveProperty('note');
+    expect(parseItem({ ...item, nomenclatureType: ' Запас ', nomenclatureCategory: '', note: ' x ' })).toMatchObject({ nomenclatureType: 'Запас', nomenclatureCategory: null, note: 'x' });
+    expect(parseItem({ ...item, note: null })).toMatchObject({ note: null });
+    for (const patch of [{ nomenclatureType: 'x'.repeat(51) }, { nomenclatureCategory: 'x'.repeat(151) }, { note: 'x'.repeat(2001) }, { note: 5 }]) expect(() => parseItem({ ...item, ...patch })).toThrow();
+  });
   it('normalizes fields and decimal strings without floating arithmetic', () => {
     expect(parseItem(item)).toMatchObject({ name: 'Доставка', sku: 'SKU', basePrice: '12.50' });
     expect(parseItem({ ...item, sku: ' ', basePrice: null })).toMatchObject({ sku: null, basePrice: null });

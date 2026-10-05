@@ -115,6 +115,12 @@ async function createSchema(client: PoolClient): Promise<void> {
   await client.query(migration('024_sheet_material_type_version.sql'));
   await client.query(migration('026_sheet_material_types_reference_columns.sql'));
   await client.query(migration('033_order_material_conversion_map.sql'));
+  // sort_order добавляла 070 (вместе с другими справочниками, которых в этой схеме нет) — колонка в той же форме.
+  await client.query('ALTER TABLE sheet_material_types ADD COLUMN IF NOT EXISTS sort_order SMALLINT NOT NULL DEFAULT 100');
+  // 234 также расширяет catalog_items — здесь только заглушка таблицы, проверяются колонки листовых материалов.
+  await client.query('CREATE TABLE catalog_items (id BIGINT PRIMARY KEY)');
+  // 234 пишет имена с public. — здесь своя схема (search_path), поэтому без квалификатора.
+  await client.query(migration('234_reference_nomenclature_note.sql').replaceAll('public.', ''));
 }
 
 function makeDatabase(pool: Pool): DatabaseService {
@@ -230,6 +236,21 @@ describeIntegration('PgSheetMaterialsRepository (integration, real migration cha
       color: { from: 'Дуб', to: 'Орех' },
       isCuttable: { from: true, to: false },
     });
+  });
+
+  it('stores nomenclature type/category and note; omitted keeps, null/empty clears, diff audited', async () => {
+    const ctx = { currentUser: currentUser(), requestId: 'r' };
+    const created = await repo.create({ ...ctx, input: { ...baseInput, nomenclatureType: ' Запас ', nomenclatureCategory: 'СЫРЬЕ', note: ' Партия A ' } });
+    expect(created).toMatchObject({ nomenclatureType: 'Запас', nomenclatureCategory: 'СЫРЬЕ', note: 'Партия A' });
+    // Старый клиент (PUT без новых полей) не стирает их.
+    const legacy = await repo.update({ ...ctx, id: created.sheetMaterialTypeId, expectedVersion: 0, input: { ...baseInput, color: 'Орех' } });
+    expect(legacy).toMatchObject({ nomenclatureType: 'Запас', nomenclatureCategory: 'СЫРЬЕ', note: 'Партия A', color: 'Орех' });
+    const cleared = await repo.update({ ...ctx, id: created.sheetMaterialTypeId, expectedVersion: 1, input: { ...baseInput, color: 'Орех', nomenclatureType: null, nomenclatureCategory: '  ', note: 'Новое' } });
+    expect(cleared).toMatchObject({ nomenclatureType: null, nomenclatureCategory: null, note: 'Новое' });
+    const audit = await pool.query(`SELECT diff_json FROM audit_log WHERE event = 'sheet_material.updated' ORDER BY audit_id DESC LIMIT 1`);
+    expect(audit.rows[0].diff_json).toMatchObject({ nomenclatureType: { from: 'Запас', to: null }, note: { from: 'Партия A', to: 'Новое' } });
+    await expect(pool.query(`UPDATE sheet_material_types SET note = repeat('x', 2001) WHERE sheet_material_type_id = $1`, [created.sheetMaterialTypeId]))
+      .rejects.toMatchObject({ code: '23514' });
   });
 
   it('rejects a stale version update with 409', async () => {

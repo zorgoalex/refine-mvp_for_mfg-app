@@ -2079,3 +2079,22 @@ html {
   background: var(--evo-primary, #1677ff);
   content: '';
 }
+
+/* Справочники (LocalizedList): заголовок колонки — до двух строк с переносом по словам, остальное за «…». */
+.reference-table .ant-table-thead > tr > th,
+.reference-table .ant-table-thead > tr > th.ant-table-cell-ellipsis {
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+  line-height: 1.25;
+}
+.reference-table .ant-table-thead .reference-table__title,
+.reference-table .ant-table-thead .ant-table-column-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  min-width: 0;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: break-word;
+}

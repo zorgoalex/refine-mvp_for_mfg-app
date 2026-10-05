@@ -4,10 +4,11 @@ import { nameRule } from '../../../../utils/nameRules';
 
 import React from 'react';
 import { Modal, Form, Input, Switch, Select, notification, Divider } from 'antd';
-import { useCreate } from '@refinedev/core';
+import { useCreate, useGetIdentity } from '@refinedev/core';
 import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { useWorkspaceModalFormCheckpoint } from '../../../../workspace/workspaceModalFormCheckpoint';
+import { confirmSimilarFilmCreation } from '../../../films/similarFilmConfirmation';
 
 interface FilmQuickCreateProps {
   open: boolean;
@@ -23,6 +24,8 @@ export const FilmQuickCreate: React.FC<FilmQuickCreateProps> = ({
   const [form] = Form.useForm();
   const workspaceKey = useWorkspaceModalFormCheckpoint('film-quick-create', open, form);
   const { mutate: createFilm, isLoading } = useCreate();
+  const { data: identity } = useGetIdentity<{ permissions?: string[] }>();
+  const canViewSimilar = (identity?.permissions ?? []).includes('references.view');
 
   const { selectProps: filmTypeSelectProps } = useSelect({
     resource: 'film_types',
@@ -45,6 +48,7 @@ export const FilmQuickCreate: React.FC<FilmQuickCreateProps> = ({
   const handleOk = async () => {
     try {
       const values = await form.validateFields();
+      if (!await confirmSimilarFilmCreation(values.film_name.trim(), Number(values.vendor_id), canViewSimilar)) return;
 
       createFilm(
         {
@@ -137,6 +141,12 @@ export const FilmQuickCreate: React.FC<FilmQuickCreateProps> = ({
         <Form.Item
           label="Производитель"
           name="vendor_id"
+          rules={[{ required: true, message: 'Выберите поставщика' }, {
+            validator: async (_, value: number | undefined) => {
+              const option = vendorSelectProps.options?.find((item) => item.value === value);
+              if (typeof option?.label === 'string' && option.label.trim().toLowerCase() === 'нд') throw new Error('Поставщик «нд» недопустим');
+            },
+          }]}
         >
           <Select
             {...vendorSelectProps}

@@ -247,6 +247,8 @@ export const apiRoutes = {
   sheetMaterials: {
     list: backendApiPath('/sheet-material-types'),
     byId: (id: number) => backendApiPath(`/sheet-material-types/${id}`),
+    capabilities: backendApiPath('/sheet-material-types/capabilities'),
+    onecItems: backendApiPath('/sheet-material-types/onec-items'),
   },
   labels: {
     fields: backendApiPath('/label-fields'),

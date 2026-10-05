@@ -16,6 +16,15 @@ describe('catalog form', () => {
     expect(catalogDraft()).toEqual({ name: '', sku: null, kind: 'service', basePrice: null, description: '', isActive: true, refKey1c: null, sortOrder: 100 });
     expect(RESOURCE_PERMISSION_MAP.catalog_items).toEqual(['references.view', 'references.manage']);
   });
+  it('sends nomenclature fields only to a backend that knows them; empty becomes null', () => {
+    const draft = { ...input, nomenclatureType: ' Запас ', nomenclatureCategory: '', note: ' n ' };
+    expect(catalogPayload(draft)).not.toHaveProperty('note');
+    expect(catalogPayload(draft, true)).toMatchObject({ nomenclatureType: 'Запас', nomenclatureCategory: null, note: 'n' });
+    const item = { id: 1, version: 1, currency: 'KZT' as const, unitName: 'шт', unitSymbol: null, createdAt: '', updatedAt: '', createdBy: '1', editedBy: '1',
+      createdByName: '', editedByName: '', refKey1c: null, sortOrder: 100, ...input };
+    expect(catalogDraft(item)).not.toHaveProperty('note');
+    expect(catalogDraft({ ...item, nomenclatureType: 'Запас', nomenclatureCategory: null, note: null })).toMatchObject({ nomenclatureType: 'Запас', note: null });
+  });
   it('normalizes 1C key and sort order but never sends read-only audit fields', () => {
     expect(catalogPayload({ ...input, refKey1c: ' ABCDEF00-1234-0000-0000-000000000000 ', sortOrder: -2 })).toMatchObject({ refKey1c: 'abcdef00-1234-0000-0000-000000000000', sortOrder: -2 });
     expect(catalogPayload({ ...input, refKey1c: ' ' })).toMatchObject({ refKey1c: null, sortOrder: 100 });

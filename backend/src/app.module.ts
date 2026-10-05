@@ -29,6 +29,7 @@ import { GroupsModule } from './modules/groups/groups.module';
 import { OrgModule } from './modules/org/org.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
+import { ReferenceCatalogImportModule } from './modules/reference-catalog-import/reference-catalog-import.module';
 import { UsersModule } from './modules/users/users.module';
 import { VlmModule } from './modules/vlm/vlm.module';
 import { PermissionsModule } from './permissions/permissions.module';
@@ -76,6 +77,7 @@ import { MdfBoardModule } from './modules/mdf-board/mdf-board.module';
     OrgModule,
     ProfileModule,
     CatalogModule,
+    ReferenceCatalogImportModule,
     UsersModule,
     VlmModule,
     PermissionsModule,

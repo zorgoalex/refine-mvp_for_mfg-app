@@ -2,8 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
-import { findReferenceId, normalizeReferenceName, resolveImportRow } from './useImportValidation';
-import { IMPORT_DEFAULTS } from '../types/importTypes';
+import {
+  filmResolutionWarning,
+  findReferenceId,
+  normalizeReferenceName,
+  refreshPendingFilmRows,
+  resolveFilmReference,
+  resolveImportRow,
+} from './useImportValidation';
+import { IMPORT_DEFAULTS, type FilmNameIndexStatus, type ReferenceData, type ValidatedRow } from '../types/importTypes';
 
 describe('reference matching', () => {
   it('matches material names with optional spaces before millimeters', () => {
@@ -97,5 +104,87 @@ describe('importTypes.ts source guards', () => {
   it('IMPORT_DEFAULTS does not contain a numeric material_id literal', () => {
     // Must not have "material_id: <number>" in IMPORT_DEFAULTS block
     expect(source).not.toMatch(/IMPORT_DEFAULTS\s*=\s*\{[^}]*material_id\s*:\s*\d+/s);
+  });
+});
+
+describe('film resolution waits for the film name index (code review R4-1)', () => {
+  // Плёнка 42 переименована из «Орех» в «Орех Милано»; активная плёнка 77 сейчас называется «Орех».
+  const films = [{ id: 42, name: 'Орех Милано; Гульсум' }, { id: 77, name: 'Орех' }];
+  const index = [
+    { name: 'Орех', filmId: 42, canonicalFilmId: 42, vendorId: 1, active: true, source: 'history' as const },
+    { name: 'Орех', filmId: 77, canonicalFilmId: 77, vendorId: 2, active: true, source: 'current' as const },
+    { name: 'Белый', filmId: 5, canonicalFilmId: 5, vendorId: 1, active: true, source: 'current' as const },
+  ];
+  const refData = (status: FilmNameIndexStatus): ReferenceData => ({
+    edgeTypes: [],
+    films: [...films, { id: 5, name: 'Белый' }],
+    filmNameIndex: status === 'ready' ? index : [],
+    filmNameIndexStatus: status,
+    millingTypes: [],
+    sheetMaterialTypes: [],
+  });
+  const pendingRow = (filmName: string, status: FilmNameIndexStatus): ValidatedRow => {
+    const resolution = resolveFilmReference(filmName, refData(status));
+    const warning = filmResolutionWarning(filmName, resolution, refData(status));
+    return {
+      filmName, height: 100, width: 100, quantity: 1,
+      film_id: resolution.filmId, filmPendingIndex: resolution.pendingIndex,
+      isValid: true, errors: [], warnings: warning ? [warning] : [],
+    };
+  };
+
+  it('does not auto-select the current-name film while the index is loading', () => {
+    const row = pendingRow('Орех', 'loading');
+    expect(row.film_id).toBeNull();
+    expect(row.filmPendingIndex).toBe(true);
+    expect(row.warnings[0].message).toContain('Проверяются прежние названия');
+  });
+
+  it('requires a manual choice when the index is unavailable', () => {
+    const row = pendingRow('Орех', 'unavailable');
+    expect(row.film_id).toBeNull();
+    expect(row.warnings[0].message).toContain('выберите плёнку для "Орех" вручную');
+  });
+
+  it('re-resolves pending rows after a late index load and keeps manual choices', () => {
+    const rows = [
+      pendingRow('Орех', 'loading'),
+      pendingRow('Белый', 'loading'),
+      { ...pendingRow('Белый', 'loading'), film_id: 77, filmPendingIndex: false, warnings: [] },
+      { ...pendingRow('Орех', 'loading'), filmPendingIndex: false },
+    ];
+    const refreshed = refreshPendingFilmRows(rows, refData('ready'));
+    // «Орех» — текущее имя 77 и прежнее имя 42: выбор за пользователем.
+    expect(refreshed[0]).toMatchObject({ film_id: null, filmPendingIndex: false });
+    expect(refreshed[0].warnings.map(({ message }) => message)).toEqual([
+      'Найдено несколько канонических плёнок для "Орех". Выберите вручную.',
+    ]);
+    expect(refreshed[1]).toMatchObject({ film_id: 5, filmPendingIndex: false, warnings: [] });
+    // Ручной выбор и ручная очистка не перезаписываются.
+    expect(refreshed[2]).toBe(rows[2]);
+    expect(refreshed[3]).toBe(rows[3]);
+  });
+
+  it('switches the pending warning when the index becomes unavailable and is stable otherwise', () => {
+    const rows = [pendingRow('Орех', 'loading')];
+    expect(refreshPendingFilmRows(rows, refData('loading'))).toBe(rows);
+    const unavailable = refreshPendingFilmRows(rows, refData('unavailable'));
+    expect(unavailable[0]).toMatchObject({ film_id: null, filmPendingIndex: true });
+    expect(unavailable[0].warnings[0].message).toContain('вручную');
+    expect(refreshPendingFilmRows(unavailable, refData('unavailable'))).toBe(unavailable);
+  });
+
+  it('keeps legacy behaviour for consumers without an index status', () => {
+    const legacy = { ...refData('ready'), filmNameIndex: undefined, filmNameIndexStatus: undefined };
+    expect(resolveFilmReference('Орех', legacy)).toEqual({ filmId: 77, ambiguous: false, pendingIndex: false });
+  });
+
+  it('all order import modals pass the index status and block import while it loads', () => {
+    for (const modal of ['ExcelImportModal.tsx', 'PdfImportModal.tsx', 'VlmImportModal.tsx']) {
+      const source = readFileSync(resolve(__dirname, '..', modal), 'utf8');
+      expect(source, modal).toContain("filmNameIndexStatus: filmsLoading ? 'loading' : filmNameIndex.status");
+      expect(source, modal).toContain('const { data: filmsData, isLoading: filmsLoading } = useList({');
+      expect(source, modal).toContain('importValidation.stats.validRows === 0 || importValidation.filmIndexLoading');
+    }
   });
 });

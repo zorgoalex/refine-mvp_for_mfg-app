@@ -1,7 +1,7 @@
 import { nameRule } from '../../utils/nameRules';
 import { Edit, useSelect } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
-import { Form, Input, Switch, Select, Checkbox } from "antd";
+import { Form, Input, Switch, Select, Checkbox, Typography } from "antd";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
 import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
 
@@ -42,15 +42,16 @@ export const FilmEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Film Type" name="film_type_id">
           <Select {...typeSelectProps} />
         </Form.Item>
-        <Form.Item label="Производитель" name="vendor_id">
+        <Form.Item label="Поставщик" name="vendor_id" rules={[{ required: true, message: 'Выберите поставщика' }]}>
           <Select {...vendorSelectProps} />
         </Form.Item>
+        <Form.Item label="Тип номенклатуры" name="nomenclature_type" rules={[{ max: 50, message: 'Максимум 50 символов' }]}><Input maxLength={50} /></Form.Item>
+        <Form.Item label="Категория номенклатуры" name="nomenclature_category" rules={[{ max: 150, message: 'Максимум 150 символов' }]}><Input maxLength={150} /></Form.Item>
+        <Form.Item label="Примечание" name="note" rules={[{ max: 2000, message: 'Максимум 2000 символов' }]}><Input.TextArea maxLength={2000} showCount autoSize={{ minRows: 2, maxRows: 6 }} /></Form.Item>
         <Form.Item label="Texture" name="film_texture" valuePropName="checked">
           <Switch />
         </Form.Item>
-        <Form.Item label="Ref Key 1C" name="ref_key_1c">
-          <Input />
-        </Form.Item>
+        <Form.Item label="Ref Key 1C"><Typography.Text copyable>{current?.ref_key_1c ?? '—'}</Typography.Text></Form.Item>
         <Form.Item label="Активен" name="is_active" valuePropName="checked">
           <Checkbox>Активен</Checkbox>
         </Form.Item>

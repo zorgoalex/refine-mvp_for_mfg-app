@@ -1,0 +1,43 @@
+/* Список плёнок: шапка с поиском/фильтрами и пагинация всегда на экране, таблица без горизонтальной прокрутки. */
+.films-list__head {
+  position: sticky;
+  z-index: 15;
+  padding: 8px 0;
+  background: var(--app-surface);
+}
+.films-list .ant-table-wrapper .ant-table-pagination.ant-pagination {
+  position: sticky;
+  bottom: var(--films-list-bottom, 0px);
+  z-index: 6;
+  margin: 0;
+  padding: 8px 0;
+  background: var(--app-surface);
+  border-top: 1px solid var(--app-border-soft);
+}
+/* Один размер шрифта во всех ячейках. Название переносится на 2–3 строки и не обрезается. */
+.films-list__name { overflow-wrap: anywhere; line-height: 1.3; }
+/* Примечание — две строки, остальное за «…». */
+.films-list__note {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+.films-list__key {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Узкие колонки: заголовок — до двух строк по словам, остальное за «…» (общие стили `.reference-table`). */
+.films-list .ant-table-thead > tr > th {
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+  font-size: 0.85em;
+  line-height: 1.2;
+  padding-inline: 6px;
+}
+.films-list .ant-table-tbody > tr > td { padding-inline: 6px; }

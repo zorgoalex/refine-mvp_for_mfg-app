@@ -52,4 +52,10 @@ describe('validateSheetMaterialTypeInput', () => {
     expect(() => validateSheetMaterialTypeInput({ ...valid, refKey1c: null })).not.toThrow();
     expect(() => validateSheetMaterialTypeInput({ ...valid, refKey1c: '' })).not.toThrow();
   });
+  it('bounds nomenclature type/category and note lengths', () => {
+    expect(failedFields({ ...valid, nomenclatureType: 'x'.repeat(51) })).toContain('nomenclatureType');
+    expect(failedFields({ ...valid, nomenclatureCategory: 'x'.repeat(151) })).toContain('nomenclatureCategory');
+    expect(failedFields({ ...valid, note: 'x'.repeat(2001) })).toContain('note');
+    expect(() => validateSheetMaterialTypeInput({ ...valid, nomenclatureType: 'Запас', nomenclatureCategory: null, note: 'x'.repeat(2000) })).not.toThrow();
+  });
 });

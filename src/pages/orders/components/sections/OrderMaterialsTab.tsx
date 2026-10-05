@@ -63,9 +63,11 @@ export const OrderMaterialsTab: React.FC = () => {
     queryOptions: { enabled: hasLegacyMaterialIds },
   });
 
+  // Активные и неактивные: у старых заказов плёнка могла стать объединённым дублем.
   const { data: filmsData } = useList({
     resource: 'films',
     pagination: { pageSize: 10000 },
+    filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
   });
 
   // Создаем lookup maps

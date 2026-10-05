@@ -23,6 +23,9 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     features: {
       ...baseConfig.features,
       statusAutomation: readBooleanEnv(process.env.RUNTIME_CONFIG_STATUS_AUTOMATION, false),
+      // Stage deployment enables the film catalog UI by default (the API stays gated by the backend
+      // flag); production needs an explicit RUNTIME_CONFIG_FILM_CATALOG_IMPORT value.
+      filmCatalogImport: readBooleanEnv(process.env.RUNTIME_CONFIG_FILM_CATALOG_IMPORT, isStageRuntime(req)),
     },
   };
 
@@ -34,6 +37,12 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   return res.status(200).json(config);
+}
+
+function isStageRuntime(req: VercelRequest): boolean {
+  const rawHost = Array.isArray(req.headers?.host) ? req.headers.host[0] : req.headers?.host;
+  const host = rawHost?.trim().toLowerCase().replace(/:\d+$/, '') ?? '';
+  return host === 'app-test.mebelkz.app' || process.env.VERCEL_GIT_COMMIT_REF === 'feat/backend-erp-stage1';
 }
 
 function normalizeGitCommitSha(value: string | undefined): string | null {

@@ -1,4 +1,5 @@
 import { resolveOrderBasisProject } from '../../../../utils/orderBasisProject';
+import { useFilmNamesWithInactive } from '../../../../hooks/useFilmNamesWithInactive';
 import { nameRule } from '../../../../utils/nameRules';
 import { Table, Tooltip } from '../../../../ui/tooltipDelay';
 // Order Details Table
@@ -3287,7 +3288,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       useBackendReferences,
     ]
   );
-  const filmNameById = useMemo(
+  const activeFilmNameById = useMemo(
     () =>
       useBackendReferences
         ? orderFormData.references.filmNameById
@@ -3299,6 +3300,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       useBackendReferences,
     ]
   );
+  // Плёнки деталей, ставшие неактивными (дубли после импорта каталога 1С), — названия догружаются.
+  const detailFilmIds = useMemo(() => sortedDetails.map((detail) => detail.film_id ?? null), [sortedDetails]);
+  const filmNameById = useFilmNamesWithInactive(activeFilmNameById, detailFilmIds);
 
   const productionStatusNameById = useMemo(
     () =>

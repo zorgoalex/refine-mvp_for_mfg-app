@@ -2016,9 +2016,20 @@
                             "permission": {
                                 "check": {},
                                 "set": {
-                                    "created_by": "x-hasura-User-Id"
+                                    "created_by": "x-hasura-User-Id",
+                                    "edited_by": "x-hasura-User-Id"
                                 },
-                                "columns": "*"
+                                "columns": [
+                                    "film_name",
+                                    "film_type_id",
+                                    "vendor_id",
+                                    "film_texture",
+                                    "is_active",
+                                    "sort_order",
+                                    "nomenclature_type",
+                                    "nomenclature_category",
+                                    "note"
+                                ]
                             },
                             "comment": ""
                         },
@@ -2027,9 +2038,20 @@
                             "permission": {
                                 "check": {},
                                 "set": {
-                                    "created_by": "x-hasura-User-Id"
+                                    "created_by": "x-hasura-User-Id",
+                                    "edited_by": "x-hasura-User-Id"
                                 },
-                                "columns": "*"
+                                "columns": [
+                                    "film_name",
+                                    "film_type_id",
+                                    "vendor_id",
+                                    "film_texture",
+                                    "is_active",
+                                    "sort_order",
+                                    "nomenclature_type",
+                                    "nomenclature_category",
+                                    "note"
+                                ]
                             },
                             "comment": ""
                         },
@@ -2038,9 +2060,20 @@
                             "permission": {
                                 "check": {},
                                 "set": {
-                                    "created_by": "x-hasura-User-Id"
+                                    "created_by": "x-hasura-User-Id",
+                                    "edited_by": "x-hasura-User-Id"
                                 },
-                                "columns": "*"
+                                "columns": [
+                                    "film_name",
+                                    "film_type_id",
+                                    "vendor_id",
+                                    "film_texture",
+                                    "is_active",
+                                    "sort_order",
+                                    "nomenclature_type",
+                                    "nomenclature_category",
+                                    "note"
+                                ]
                             },
                             "comment": ""
                         },
@@ -2049,9 +2082,20 @@
                             "permission": {
                                 "check": {},
                                 "set": {
-                                    "created_by": "x-hasura-User-Id"
+                                    "created_by": "x-hasura-User-Id",
+                                    "edited_by": "x-hasura-User-Id"
                                 },
-                                "columns": "*"
+                                "columns": [
+                                    "film_name",
+                                    "film_type_id",
+                                    "vendor_id",
+                                    "film_texture",
+                                    "is_active",
+                                    "sort_order",
+                                    "nomenclature_type",
+                                    "nomenclature_category",
+                                    "note"
+                                ]
                             },
                             "comment": ""
                         }
@@ -2107,7 +2151,17 @@
                         {
                             "role": "manager",
                             "permission": {
-                                "columns": "*",
+                                "columns": [
+                                    "film_name",
+                                    "film_type_id",
+                                    "vendor_id",
+                                    "film_texture",
+                                    "is_active",
+                                    "sort_order",
+                                    "nomenclature_type",
+                                    "nomenclature_category",
+                                    "note"
+                                ],
                                 "filter": {},
                                 "check": {},
                                 "set": {
@@ -2119,7 +2173,17 @@
                         {
                             "role": "operator",
                             "permission": {
-                                "columns": "*",
+                                "columns": [
+                                    "film_name",
+                                    "film_type_id",
+                                    "vendor_id",
+                                    "film_texture",
+                                    "is_active",
+                                    "sort_order",
+                                    "nomenclature_type",
+                                    "nomenclature_category",
+                                    "note"
+                                ],
                                 "filter": {},
                                 "check": {},
                                 "set": {
@@ -2131,7 +2195,17 @@
                         {
                             "role": "superadmin",
                             "permission": {
-                                "columns": "*",
+                                "columns": [
+                                    "film_name",
+                                    "film_type_id",
+                                    "vendor_id",
+                                    "film_texture",
+                                    "is_active",
+                                    "sort_order",
+                                    "nomenclature_type",
+                                    "nomenclature_category",
+                                    "note"
+                                ],
                                 "filter": {},
                                 "check": {},
                                 "set": {
@@ -2143,9 +2217,22 @@
                         {
                             "role": "top_manager",
                             "permission": {
-                                "columns": "*",
+                                "columns": [
+                                    "film_name",
+                                    "film_type_id",
+                                    "vendor_id",
+                                    "film_texture",
+                                    "is_active",
+                                    "sort_order",
+                                    "nomenclature_type",
+                                    "nomenclature_category",
+                                    "note"
+                                ],
                                 "filter": {},
-                                "check": {}
+                                "check": {},
+                                "set": {
+                                    "edited_by": "x-hasura-User-Id"
+                                }
                             },
                             "comment": ""
                         }

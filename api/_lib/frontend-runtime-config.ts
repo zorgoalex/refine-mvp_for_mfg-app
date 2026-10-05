@@ -35,6 +35,7 @@ export interface FrontendRuntimeConfigResponse {
     workosAuth: boolean;
     backendWhatsApp: boolean;
     backendOnec: boolean;
+    filmCatalogImport: boolean;
   };
   observability: {
     performanceRum: boolean;
@@ -103,6 +104,7 @@ export function buildFrontendRuntimeConfig(
       workosAuth: readBooleanEnv(env.RUNTIME_CONFIG_WORKOS_AUTH, false),
       backendWhatsApp: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_WHATSAPP, false),
       backendOnec: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ONEC, false),
+      filmCatalogImport: readBooleanEnv(env.RUNTIME_CONFIG_FILM_CATALOG_IMPORT, false),
     },
     observability: {
       performanceRum: readBooleanEnv(env.RUNTIME_CONFIG_PERFORMANCE_RUM, false),

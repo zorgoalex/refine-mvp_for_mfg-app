@@ -38,6 +38,7 @@ describe('frontend runtime config delivery', () => {
         workosAuth: false,
         backendWhatsApp: false,
         backendOnec: false,
+        filmCatalogImport: false,
       },
       observability: { performanceRum: false },
       rollouts: {
@@ -71,6 +72,7 @@ describe('frontend runtime config delivery', () => {
         RUNTIME_CONFIG_BACKEND_REFERENCES: 'false',
         RUNTIME_CONFIG_BACKEND_WHATSAPP: 'true',
         RUNTIME_CONFIG_BACKEND_ONEC: 'true',
+        RUNTIME_CONFIG_FILM_CATALOG_IMPORT: 'true',
         RUNTIME_CONFIG_BAZIS_CUT: 'true',
         RUNTIME_CONFIG_ORDER_STATUS_BOARD: 'true',
         RUNTIME_CONFIG_ORDER_REALTIME: 'true',
@@ -119,6 +121,7 @@ describe('frontend runtime config delivery', () => {
         workosAuth: false,
         backendWhatsApp: true,
         backendOnec: true,
+        filmCatalogImport: true,
       },
       observability: { performanceRum: true },
       rollouts: {
