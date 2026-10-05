@@ -88,7 +88,7 @@ describe('evolution shell behavior preservation', () => {
 
   it('reuses the established permission and role-visibility gates', () => {
     expect(navigation).toContain('canViewNavigationResource');
-    expect(navigation).toContain('canViewResourceByRoleVisibility');
+    expect(navigation).toContain('canViewResourceForUser');
     expect(navigation).toContain("canManageOrderContent('orders.create', currentUser, canViewFinancials)");
   });
 
