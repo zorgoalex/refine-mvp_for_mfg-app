@@ -67,7 +67,7 @@ export const SUPPLIER_SEND_PERMISSIONS: readonly PermissionName[] = ['procuremen
  * is this very code with `false`: it replays accepted commands, reads, audits, purges, re-checks and delivers
  * the rows that exist, but makes no new ones — a definite refusal — and its menu says «unavailable».
  */
-export const ORDER_SEND_SUPPLIER_REQUESTS = false;
+export const ORDER_SEND_SUPPLIER_REQUESTS = true;
 export type OrderSendTarget =
   /** `phoneId` — one of the client's phones (default: primary, else the smallest), with the token the menu gave for it. */
   { kind: 'client'; phoneId?: number | null; phoneToken?: string | null }
@@ -79,7 +79,7 @@ export type OrderSendTarget =
  * release (K2a) is this very code with `false`: it still parses and replays such commands, checks and delivers
  * the rows that exist, but makes no new ones and offers no phones to choose.
  */
-export const ORDER_SEND_CLIENT_PHONE_CHOICE = false;
+export const ORDER_SEND_CLIENT_PHONE_CHOICE = true;
 
 export type OrderSendChannel = 'whatsapp' | 'telegram';
 /** Channels a send can go through in this release (Telegram comes with the next stage). */
