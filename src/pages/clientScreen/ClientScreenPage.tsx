@@ -83,7 +83,7 @@ const Table: React.FC<{ table: MirrorTable }> = ({ table }) => (
       <thead>
         <tr>
           {table.columns.map((column, index) => (
-            <th key={`${column.code}:${index}`} className={column.align === 'right' ? 'client-screen__num' : undefined}>{column.label}</th>
+            <th key={`${column.code}:${index}`} scope="col" className={column.align === 'right' ? 'client-screen__num' : undefined}>{column.label}</th>
           ))}
         </tr>
       </thead>

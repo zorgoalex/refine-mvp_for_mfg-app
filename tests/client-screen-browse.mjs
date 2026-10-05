@@ -80,6 +80,8 @@ try {
 
   const wholePage = async () => viewer.evaluate(() => document.documentElement.outerHTML);
   assert.ok(!(await wholePage()).includes('SECRET'), 'no hidden value in the customer window DOM');
+  await expect(viewer.getByRole('columnheader', { name: 'Кол-во' })).toHaveCount(1);
+  await expect(viewer.getByRole('columnheader', { name: 'Название детали' })).toHaveCount(1);
   await expect(viewer.getByRole('columnheader', { name: 'Сумма' })).toHaveCount(0);
   results.push('hidden cost column and hidden note are absent');
 

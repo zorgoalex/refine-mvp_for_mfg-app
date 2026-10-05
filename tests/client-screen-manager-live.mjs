@@ -7,7 +7,8 @@ import { vercelBypassCookies } from './helpers/vercelBypass.mjs';
 // test order, present it, follow tabs, hide, emergency switch-off. Nothing is saved in the order.
 // The organisation setting is switched on for the run and restored in `finally` (and verified).
 // Env: BASE_URL (a built deployment), ORDER_ID (an existing test order), CODEX_PLAYWRIGHT_USERNAME /
-// CODEX_PLAYWRIGHT_PASSWORD, optional VERCEL_AUTOMATION_BYPASS_SECRET. Secrets are never printed.
+// CODEX_PLAYWRIGHT_PASSWORD, optional VERCEL_AUTOMATION_BYPASS_SECRET, optional LAYOUT=legacy.
+// Secrets are never printed.
 const base = (process.env.BASE_URL ?? '').replace(/\/$/, '');
 assert.match(base, /^https:\/\//, 'BASE_URL must be an https URL');
 const orderId = Number(process.env.ORDER_ID);
@@ -42,8 +43,34 @@ try {
     const response = await route.fetch();
     const json = await response.json();
     runtimeConfig = json;
-    await route.fulfill({ response, json: { ...json, features: { ...(json.features ?? {}), clientScreen: true } } });
+    // LAYOUT=legacy forces the classic layout with a tab bar, whatever the test user prefers.
+    const ui = process.env.LAYOUT === 'legacy' ? { ...(json.ui ?? {}), evolutionEnabled: false, forceLegacy: true } : json.ui;
+    await route.fulfill({ response, json: { ...json, ui, features: { ...(json.features ?? {}), clientScreen: true } } });
   });
+
+  // The stage backend and Hasura accept browser calls only from the stage site. When the build under
+  // test is a preview deployment, its calls to them are relayed by this script as if they came from
+  // the stage site; on the stage site itself nothing is relayed.
+  const pageOrigin = new URL(base).origin;
+  const STAGE_SITE = 'https://app-test.mebelkz.app';
+  if (pageOrigin !== STAGE_SITE) {
+    const cors = { 'access-control-allow-origin': pageOrigin, 'access-control-allow-credentials': 'true', vary: 'Origin' };
+    await context.route((url) => url.hostname.endsWith('.mebelkz.app') && url.origin !== pageOrigin, async (route) => {
+      const request = route.request();
+      if (request.method() === 'OPTIONS') {
+        return route.fulfill({ status: 204, headers: { ...cors, 'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+          'access-control-allow-headers': request.headers()['access-control-request-headers'] ?? '*', 'access-control-max-age': '600' } });
+      }
+      // Long-lived streams cannot be relayed; the form works without them.
+      if (request.resourceType() === 'eventsource' || (request.headers().accept ?? '').includes('text/event-stream')) return route.abort();
+      try {
+        const response = await route.fetch({ headers: { ...request.headers(), origin: STAGE_SITE, referer: `${STAGE_SITE}/` }, timeout: 60000 });
+        return await route.fulfill({ response, headers: { ...response.headers(), ...cors } });
+      } catch {
+        return route.abort();
+      }
+    });
+  }
 
   const page = await context.newPage();
   page.on('pageerror', (e) => errors.push(`manager: ${e.message.split('\n')[0]}`));
@@ -93,7 +120,8 @@ try {
     await expect(popup.locator('tbody tr[data-row-id]').first()).toBeVisible({ timeout: 20000 });
     assert.equal(await popup.getByRole('columnheader', { name: 'Сумма', exact: true }).count(), 0, 'hidden cost column is absent');
     assert.equal(await popup.getByRole('columnheader', { name: 'Примечание', exact: true }).count(), 0, 'hidden note column is absent');
-    assert.ok(await popup.getByRole('columnheader', { name: 'Кол-во' }).count(), 'ticked quantity column is present');
+    const headers = await popup.getByRole('columnheader').allInnerTexts();
+    assert.ok(headers.includes('Кол-во'), `ticked quantity column is present (columns: ${headers.join(' | ')})`);
     results.push(`details tab mirrored with ${await popup.locator('tbody tr[data-row-id]').count()} rows; hidden columns absent`);
 
     await managerTab(/Финансы/).click();
