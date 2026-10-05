@@ -183,6 +183,16 @@ async function setupFrontendPageApiMocks(page: Page) {
         });
     });
 
+    // The balloon centre of the shell leases server balloons on every page; the smoke has no backend.
+    await page.route(/\/api\/v1\/notifications\/balloons\/(?:claim|ack)$/, async (route) => {
+        const claim = route.request().url().endsWith('/claim');
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(claim ? { items: [] } : { acknowledged: 0 }),
+        });
+    });
+
     await page.route(/\/api\/v1\/notifications(?:\?.*)?$/, async (route) => {
         await route.fulfill({
             status: 200,
