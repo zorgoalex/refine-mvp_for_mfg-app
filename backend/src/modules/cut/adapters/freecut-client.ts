@@ -22,8 +22,9 @@ interface FreecutErrorBody {
 /**
  * Thin client for the internal-only freecut optimizer (plan §6/§8). Native fetch
  * + AbortController timeout (no axios/retry lib, matching pg-order-exporter).
- * Freecut error mapping: 429/408/timeout -> retryable; 422 (CONSTRAINT_ERROR) /
- * 413 (body too large) -> non-retryable client errors surfaced with the reason.
+ * Freecut error mapping: 429/408/timeout -> retryable; 422 (CONSTRAINT_ERROR, or
+ * VALIDATION_ERROR for a request freecut rejects) / 413 (body too large) ->
+ * non-retryable client errors surfaced with the reason.
  */
 export class FreecutClient {
   private readonly baseUrl: string;
@@ -68,7 +69,12 @@ export class FreecutClient {
       case 413:
         return new ApiError(413, 'FREECUT_REQUEST_TOO_LARGE', message, details);
       case 422:
-        return new ApiError(422, 'FREECUT_CONSTRAINT_ERROR', message, details);
+        // freecut answers 422 both for a request it cannot accept (malformed body, bad
+        // parameters — VALIDATION_ERROR) and for a layout that cannot be built
+        // (CONSTRAINT_ERROR). Only the latter means «does not fit».
+        return body?.error_code === 'VALIDATION_ERROR'
+          ? new ApiError(422, 'FREECUT_VALIDATION_ERROR', message, details)
+          : new ApiError(422, 'FREECUT_CONSTRAINT_ERROR', message, details);
       case 400:
         return new ApiError(422, 'FREECUT_VALIDATION_ERROR', message, details);
       case 408:

@@ -4,6 +4,7 @@ import {
   describeCutFailure,
   extractCutFailureStatus,
   shouldMarkCutFailed,
+  isImportedCutJob,
   CUT_FAILURE_FALLBACK_CODE,
 } from './cut-failure-reason';
 
@@ -24,6 +25,9 @@ describe('describeCutFailure', () => {
     const info = describeCutFailure(new ApiError(422, 'FREECUT_VALIDATION_ERROR', 'bad input'));
     expect(info.code).toBe('FREECUT_VALIDATION_ERROR');
     expect(info.reason).toMatch(/некорректные данные/i);
+    // freecut also rejects optimizer parameters with this code, so the advice names the profile too
+    expect(info.reason).toMatch(/параметры раскроя/i);
+    expect(info.reason).toMatch(/профиль раскроя/i);
   });
 
   it('maps FREECUT_TIMEOUT to a retry-later timeout reason', () => {
@@ -136,5 +140,18 @@ describe('extractCutFailureStatus', () => {
     expect(extractCutFailureStatus(new Error('x'))).toBe(500);
     expect(extractCutFailureStatus(undefined)).toBe(500);
     expect(extractCutFailureStatus({ status: 'nope' })).toBe(500);
+  });
+});
+
+describe('imported cut layouts', () => {
+  it('recognises a layout imported from a machine file by either marker', () => {
+    expect(isImportedCutJob({ source: 'api', params: null })).toBe(true);
+    expect(isImportedCutJob({ source: 'manual', params: { objective: 'as_imported' } })).toBe(true);
+    expect(isImportedCutJob({ source: 'manual', params: null })).toBe(false);
+    expect(isImportedCutJob({ source: 'manual', params: { objective: 'min_waste' } })).toBe(false);
+  });
+
+  it('a refused recalculation of an imported layout is a precondition, not a failed calculation', () => {
+    expect(shouldMarkCutFailed(new ApiError(409, 'CUT_JOB_IMPORTED_NOT_RECALCULABLE', 'imported'))).toBe(false);
   });
 });

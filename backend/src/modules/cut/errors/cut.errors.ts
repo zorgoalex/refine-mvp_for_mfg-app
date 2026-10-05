@@ -61,6 +61,22 @@ export class CutJobNotMutableError extends ApiError {
   }
 }
 
+/**
+ * A layout imported from a machine file (SVG reverse import) is stored as is: it has no
+ * optimizer request behind it, so there is nothing to recalculate. Precondition, not a
+ * calculation outcome — the job keeps its status and its layout.
+ */
+export class CutJobImportedNotRecalculableError extends ApiError {
+  constructor(cutJobId: number) {
+    super(
+      409,
+      'CUT_JOB_IMPORTED_NOT_RECALCULABLE',
+      'Раскрой импортирован из файла станка: раскладка взята из файла как есть и пересчёту не подлежит.',
+      { cutJobId },
+    );
+  }
+}
+
 export class CutNoItemsError extends ApiError {
   constructor(cutJobId: number) {
     super(422, 'CUT_NO_ITEMS', 'В раскрое нет активных деталей для расчёта', { cutJobId });

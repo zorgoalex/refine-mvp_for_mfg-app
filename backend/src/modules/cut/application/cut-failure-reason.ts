@@ -37,6 +37,9 @@ const FALLBACK_REASON =
 const PASSTHROUGH_CODES = new Set<string>([
   'CUT_STALE_VERSION',
   'CUT_JOB_NOT_MUTABLE',
+  // Precondition: a layout imported from a machine file has nothing to recalculate;
+  // the job must keep its status and its imported layout — no solve was attempted.
+  'CUT_JOB_IMPORTED_NOT_RECALCULABLE',
   'CUT_JOB_NOT_FOUND',
   'CUT_JOB_ITEM_NOT_FOUND',
   'CUT_RESULT_COMMAND_IN_PROGRESS',
@@ -69,7 +72,7 @@ const REASON_BY_CODE: Record<string, string> = {
   FREECUT_REQUEST_TOO_LARGE:
     'Слишком много деталей в одном раскрое для оптимизатора. Разбейте задание на несколько меньших.',
   FREECUT_VALIDATION_ERROR:
-    'Некорректные данные деталей или листа для раскроя (размеры или количество). Проверьте детали и спецификацию материала.',
+    'Некорректные данные или параметры раскроя (размеры и количество деталей, лист, настройки профиля раскроя). Проверьте детали, спецификацию материала и профиль раскроя.',
   FREECUT_TIMEOUT:
     'Оптимизатор не успел рассчитать раскрой за отведённое время. Повторите расчёт или уменьшите количество деталей.',
   FREECUT_OVERLOADED:
@@ -92,6 +95,18 @@ const REASON_BY_CODE: Record<string, string> = {
   CUT_SHEET_MATERIAL_NOT_CUTTABLE:
     'Выбранный лист материала неактивен или не допускает раскрой. Выберите другой лист и повторите расчёт.',
 };
+
+/** Objective stored on a job whose layout was imported from a machine file as is. */
+export const CUT_IMPORTED_LAYOUT_OBJECTIVE = 'as_imported';
+
+/**
+ * Whether the job's layout was imported from a machine file (SVG reverse import) rather than
+ * computed: such a job is created with source `api` and the `as_imported` objective, which the
+ * optimizer does not accept. Either marker is enough — the layout itself is the imported file.
+ */
+export function isImportedCutJob(job: { source: string; params: Record<string, unknown> | null }): boolean {
+  return job.source === 'api' || job.params?.objective === CUT_IMPORTED_LAYOUT_OBJECTIVE;
+}
 
 /** Read a string `code` off an unknown error without assuming its type. */
 function extractCode(error: unknown): string | null {

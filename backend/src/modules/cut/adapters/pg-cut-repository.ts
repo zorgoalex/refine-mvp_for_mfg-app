@@ -73,6 +73,7 @@ import { computeSelectedSheetFitWarnings } from '../application/cut-sheet-fit-wa
 import { computeRequestHash } from '../application/cut-request-hash';
 import {
   describeCutFailure,
+  isImportedCutJob,
   extractCutFailureStatus,
   shouldMarkCutFailed,
 } from '../application/cut-failure-reason';
@@ -176,6 +177,7 @@ import {
   CutJobNotFoundError,
   CutDetailNotEligibleError,
   CutJobNotMutableError,
+  CutJobImportedNotRecalculableError,
   CutNoItemsError,
   CutNoSheetSpecError,
   CutOrderDetailNotFoundError,
@@ -1054,6 +1056,11 @@ export class PgCutRepository implements CutRepositoryPort {
 
       assertVersion(job, command.version);
       assertMutable(job);
+      // An imported layout has no optimizer request behind it: refuse before any write, so the job
+      // keeps its status and its groups (a failed attempt used to drop them and mark the job failed).
+      if (isImportedCutJob(job)) {
+        throw new CutJobImportedNotRecalculableError(job.cutJobId);
+      }
       // §5.4b: only a FRESH calculation may retire the active bath (a completed replay was answered above).
       await bathLifecycle?.assertRetargetAllowed();
 

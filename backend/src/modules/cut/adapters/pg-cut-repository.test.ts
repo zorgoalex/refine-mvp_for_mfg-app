@@ -1479,6 +1479,30 @@ describe('PgCutRepository', () => {
     expect(failAudit).toBeDefined();
   });
 
+  it.each([
+    ['source api', { source: 'api', params: null }],
+    ['the as_imported objective', { source: 'manual', params: { objective: 'as_imported' } }],
+  ])('calculate: refuses a layout imported from a machine file (%s) before any write', async (_name, marker) => {
+    const db = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'CNC#1.TXT', status: 'ready', version: 3, pdf_prewarm_state: 'pending', ...marker },
+      calcItems: [
+        { cut_job_item_id: 1, order_detail_id: 1, order_id: 9, qty: 1, width_mm: 600, height_mm: 400, sheet_material_type_id: 9, film_id: null, film_texture: null, smt_width_mm: 2800, smt_height_mm: 2070 },
+      ],
+    });
+    const freecut = fakeFreecut(happyResponse);
+    const repo = new PgCutRepository(db.service, freecut);
+
+    await expect(
+      repo.calculate({ currentUser: currentUser(), cutJobId: 42, version: 3, requestId: 'r', commandId: '11111111-1111-4111-8111-111111111111' }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'CUT_JOB_IMPORTED_NOT_RECALCULABLE' });
+
+    // The job keeps its status and its imported layout: no optimizer call, no command claim,
+    // no failure mark, no group cleanup, no audit of a failed calculation.
+    expect((freecut.optimize as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+    const writes = db.queries.map((q) => normalize(q.text)).filter((text) => /^(INSERT|UPDATE|DELETE)\b/i.test(text));
+    expect(writes.filter((text) => /cut_job|cut_group|cut_result_command|audit_log|outbox_events/i.test(text))).toEqual([]);
+  });
+
   it('calculate: freecut failure persists status failed + cut_job.calculate_failed audit, then rethrows', async () => {
     const db = createDatabase({
       cutJob: { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null },

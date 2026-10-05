@@ -54,6 +54,27 @@ describe('FreecutClient', () => {
     });
   });
 
+  it('maps 422 VALIDATION_ERROR (a request freecut cannot accept) to a validation error, not to «does not fit»', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(422, {
+        status: 'error',
+        error_code: 'VALIDATION_ERROR',
+        message: 'Failed to deserialize the JSON body into the target type: objective: unknown variant `as_imported`',
+      }),
+    ) as unknown as typeof fetch;
+
+    await expect(client(fetchImpl).optimize(request)).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'FREECUT_VALIDATION_ERROR',
+      details: { freecutStatus: 422, errorCode: 'VALIDATION_ERROR' },
+    });
+  });
+
+  it('keeps a 422 without a recognisable error code as a constraint error', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(422, { status: 'error', message: 'cannot place' })) as unknown as typeof fetch;
+    await expect(client(fetchImpl).optimize(request)).rejects.toMatchObject({ statusCode: 422, code: 'FREECUT_CONSTRAINT_ERROR' });
+  });
+
   it('maps 413 to a request-too-large error', async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse(413, { status: 'error', error_code: 'CONSTRAINT_ERROR', message: 'body too large' }),
