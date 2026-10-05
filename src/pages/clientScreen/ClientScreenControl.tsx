@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
-import { Button, Popconfirm, Space, Tag, Tooltip, message } from 'antd';
+import { Button, Popconfirm, Space, Tag, message } from 'antd';
 import { DesktopOutlined, EyeInvisibleOutlined, PoweroffOutlined } from '@ant-design/icons';
+import { Tooltip } from '../../ui/tooltipDelay';
 import { getClientScreenPresenter, useClientScreenView } from './clientScreenInstance';
 import type { ClientScreenOrderProvider } from './clientScreenPresenter';
 import { clientScreenControlModel } from './clientScreenControlModel';
