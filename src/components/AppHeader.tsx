@@ -45,6 +45,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSider }) => {
     worker: "Работник",
     packer: "Упаковщик",
     viewer: "Наблюдатель",
+    onec_operator: "Оператор интеграции 1С",
   };
 
   const roleName = roleNames[role] || role;

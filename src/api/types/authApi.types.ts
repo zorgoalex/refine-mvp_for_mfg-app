@@ -9,6 +9,7 @@ export type UserRole =
   | 'worker'
   | 'packer'
   | 'viewer'
+  | 'onec_operator'
   | string;
 
 export type PermissionName =

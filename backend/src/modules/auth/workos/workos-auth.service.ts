@@ -6,6 +6,7 @@ import { mapRoleIdToRole } from '../../../permissions/permissions';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { UserAccessPolicy } from '../../../permissions/policies/user-access.policy';
 import {
   InvalidCredentialsError,
   LoginMethodNotAllowedError,
@@ -39,6 +40,7 @@ import type {
 
 export const WORKOS_PROVIDER = 'workos';
 const MANAGE_SSO_PERMISSION: Parameters<PermissionsService['canUser']>[1] = 'users.manage_sso';
+const SSO_USER_POLICY = new UserAccessPolicy();
 
 export interface WorkosLoginCommand {
   code: string;
@@ -683,6 +685,17 @@ export class WorkosAuthService {
     return this.ports.workos.buildLogoutUrl(providerSessionId);
   }
 
+  private async ssoRoleDenial(
+    command: Pick<WorkosAdminUnlinkCommand, 'currentUser' | 'targetUserId'>,
+  ): Promise<string | null> {
+    const targetId = Number(command.targetUserId);
+    const target = Number.isFinite(targetId)
+      ? await this.ports.database.query<{ role_id: number | string }>('SELECT role_id FROM users WHERE user_id = $1', [targetId])
+      : { rows: [] };
+    const targetRole = target.rows[0] ? mapRoleIdToRole(Number(target.rows[0].role_id)) : null;
+    return SSO_USER_POLICY.canManageSso(command.currentUser, targetRole);
+  }
+
   private async requireManageSso(
     command: Pick<WorkosAdminUnlinkCommand, 'currentUser' | 'targetUserId' | 'requestId'>,
     event:
@@ -693,7 +706,11 @@ export class WorkosAuthService {
       | 'auth.identity.invitation_create_denied'
       | 'auth.identity.invitation_revoke_denied',
   ): Promise<void> {
-    if (this.ports.permissions.canUser(command.currentUser, MANAGE_SSO_PERMISSION)) {
+    const hasPermission = this.ports.permissions.canUser(command.currentUser, MANAGE_SSO_PERMISSION);
+    // Role boundary on top of the permission (see UserAccessPolicy.canManageSso): the target's role is read once —
+    // membership in a creation-only role never changes for an existing user.
+    const roleDenial = hasPermission ? await this.ssoRoleDenial(command) : null;
+    if (hasPermission && !roleDenial) {
       return;
     }
 
@@ -709,7 +726,7 @@ export class WorkosAuthService {
         requiredPermissions: [MANAGE_SSO_PERMISSION],
         requestId: command.requestId ?? '',
         source: 'workos',
-        reason: 'PERMISSION_DENIED',
+        reason: roleDenial ?? 'PERMISSION_DENIED',
         metadata: { mode: 'admin' },
       });
     } catch {
