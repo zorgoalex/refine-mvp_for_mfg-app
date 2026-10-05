@@ -1,10 +1,11 @@
 import { CURRENCY_SYMBOL } from '../../config/currency';
-import type { Order, OrderDetail, OrderDowelingLink, Payment } from '../../types/orders';
+import type { Order, OrderDetail, OrderDowelingLink, OrderHdfDetail, Payment } from '../../types/orders';
 import { formatDate } from '../../utils/dateFormat';
 import { formatNumber } from '../../utils/numberFormat';
 import { calculateOrderTotalArea } from '../../utils/orderArea';
 import { orderCatalogLineAmount, orderCatalogSubtotal, type OrderCatalogLine } from '../../utils/orderCatalogLines';
 import { isOrderDetailPlaceholder } from '../../utils/orderDetailRows';
+import { buildOrderHeaderMaterialSummaryItems } from '../orders/orderMaterialsSummary';
 import type { ClientScreenOrderSource, ClientScreenValue, DetailField } from './buildClientScreenSnapshot';
 import { CLIENT_SCREEN_TAB_KEYS, type ClientScreenTabKey } from './clientScreenSnapshotSchema';
 
@@ -26,6 +27,8 @@ export interface OrderEditSourceInput {
    * manager may not see) is undefined and is not sent; a client without it has null.
    */
   clientContacts?: ClientScreenClientContacts | null;
+  /** HDF details of the order: the header's material line names them with their area. */
+  hdfDetails?: readonly OrderHdfDetail[];
   /** Full order number shown in the page title; while it is not known the customer sees a generic title. */
   orderNumber: string | null;
   /** Tabs of the form in the manager's order with the manager's labels (all of them; unknown keys are ignored). */
@@ -143,6 +146,35 @@ export function orderDetailDisplayValues(
   };
 }
 
+/**
+ * The lines of the order header that come from the details, as the manager's header shows them:
+ * how many positions, the materials (with HDF and its area), and the milling, edge and film when
+ * every detail has the same one («—» otherwise).
+ */
+export function clientScreenHeaderFromDetails(
+  rows: ReadonlyArray<Partial<Record<DetailField, ClientScreenValue>>>,
+  hdfDetails: readonly OrderHdfDetail[] | null | undefined,
+): { positions: string; material: ClientScreenValue; milling_type: ClientScreenValue; edge_type: ClientScreenValue; film: ClientScreenValue } {
+  const distinct = (field: DetailField): string[] =>
+    Array.from(new Set(rows.map((row) => row[field]).filter((value): value is string => typeof value === 'string' && value !== '')));
+  const common = (field: DetailField): ClientScreenValue => {
+    const values = distinct(field);
+    return values.length === 1 ? values[0] : null;
+  };
+  const materials = buildOrderHeaderMaterialSummaryItems(distinct('material'), (hdfDetails ?? []) as OrderHdfDetail[]).map((item) => item.label);
+  return {
+    positions: formatNumber(rows.length, 0),
+    material: materials.length ? materials.join(', ') : null,
+    milling_type: common('milling_type'),
+    edge_type: common('edge_type'),
+    film: common('film'),
+  };
+}
+
+/** A discount or surcharge is a header line only when there is one, as in the manager's header. */
+export const clientScreenExtraMoney = (value: unknown, allowed: boolean): ClientScreenValue =>
+  (allowed && Number(value) > 0 ? clientScreenMoney(Number(value)) : undefined);
+
 export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenOrderSource {
   const { header, names } = input;
   const editing = input.editingRow;
@@ -172,17 +204,24 @@ export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenO
   const columnOrder = input.detailColumnOrder.map((key) => DETAIL_COLUMN_FIELDS[key]).filter((field): field is DetailField => Boolean(field));
   const groupingField = input.grouping ? GROUPING_FIELDS[input.grouping.field] ?? null : null;
 
+  const detailRows = business.map((detail) => ({ key: detailRowKey(detail), values: orderDetailDisplayValues(detail, names) }));
   return {
     tabs: input.tabs.filter((tab): tab is { key: ClientScreenTabKey; label: string } => (CLIENT_SCREEN_TAB_KEYS as readonly string[]).includes(tab.key)),
     summary: {
-      // Only the order number: the order name is a separate field with its own tick.
+      // The number and the name are separate fields, each with its own tick; either can make the title.
       number: input.orderNumber || null,
+      order_name: header.order_name ?? null,
       client: named(header.client_id, names.client),
       client_phone: input.clientContacts?.phone,
       client_phones: input.clientContacts?.otherPhones,
+      deadline: clientScreenDate(header.planned_completion_date),
+      ...clientScreenHeaderFromDetails(detailRows.map((row) => row.values), input.hdfDetails),
       parts: `${formatNumber(partsCount, 0)}`,
       area: `${formatNumber(totalArea, 2)} м²`,
       final: totalKnown ? clientScreenMoney(finalAmount) : undefined,
+      discount: clientScreenExtraMoney(header.discount, totalKnown),
+      surcharge: clientScreenExtraMoney(header.surcharge, totalKnown),
+      paid: totalKnown ? clientScreenMoney(paidAmount) : undefined,
       debt: totalKnown ? clientScreenMoney(remaining) : undefined,
     },
     basic: {
@@ -223,7 +262,7 @@ export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenO
     })),
     details: {
       columnOrder,
-      rows: business.map((detail) => ({ key: detailRowKey(detail), values: orderDetailDisplayValues(detail, names) })),
+      rows: detailRows,
       grouping: input.grouping
         ? {
           field: groupingField,

@@ -16,7 +16,8 @@ function source(over: Partial<ClientScreenOrderSource> = {}): ClientScreenOrderS
       { key: 'basic', label: 'Обзор' }, { key: 'details', label: 'Состав' }, { key: 'dates', label: 'Логистика' },
       { key: 'finance', label: 'Финансы' }, { key: 'services', label: 'Услуги/товары' },
     ],
-    summary: group('summary', ['number', 'client', 'client_phone', 'client_phones', 'parts', 'area', 'final', 'debt']),
+    summary: group('summary', ['number', 'order_name', 'client', 'client_phone', 'client_phones', 'deadline', 'positions', 'parts', 'area', 'material', 'milling_type',
+      'edge_type', 'film', 'final', 'discount', 'surcharge', 'paid', 'debt']),
     basic: group('basic', ['client', 'order_name', 'order_date', 'order_status', 'payment_status', 'production_status', 'manager', 'priority', 'doweling', 'notes']),
     dates: group('dates', ['planned', 'completion', 'issue']),
     finance: group('finance', ['total', 'discount', 'surcharge', 'final', 'paid', 'debt']),
@@ -56,10 +57,13 @@ describe('buildClientScreenSnapshot', () => {
       const alone = sentinelCodes(JSON.stringify(buildClientScreenSnapshot(source(), [code], ids())));
       const groupKey = code.split('.')[0];
       if (groupKey === 'summary') expect([...alone]).toEqual([code]);
-      else expect([...alone]).toEqual([]); // a tab alone has no values; a field alone lacks its tab
+      // The detail list always has its row number; otherwise a tab alone has no values, and a field alone lacks its tab.
+      else expect([...alone]).toEqual(code === 'tab.details' ? ['details.n'] : []);
       if (groupKey !== 'summary' && groupKey !== 'tab') {
         const withTab = sentinelCodes(JSON.stringify(buildClientScreenSnapshot(source(), [code, `tab.${groupKey}`], ids())));
-        expect([...withTab]).toEqual(code === 'finance.payments_note' ? [] : [code]); // the note column needs the payments list
+        const always = groupKey === 'details' ? ['details.n'] : [];
+        // The note column needs the payments list.
+        expect([...withTab].sort()).toEqual([...new Set(code === 'finance.payments_note' ? always : [...always, code])].sort());
       }
     }
   });
@@ -99,8 +103,12 @@ describe('buildClientScreenSnapshot', () => {
   it('keeps the manager column order, drops repeats and columns the customer may not see', () => {
     const src = source({ details: { ...source().details, columnOrder: ['film', 'cost', 'name', 'film', 'n'] } });
     const snapshot = buildClientScreenSnapshot(src, ['tab.details', 'details.n', 'details.name', 'details.film'], ids());
-    expect(snapshot.details?.columns.map((column) => column.code)).toEqual(['details.film', 'details.name', 'details.n']);
-    expect(snapshot.details?.rows[0].cells).toEqual([S('details.film', '#1'), S('details.name', '#1'), S('details.n', '#1')]);
+    // The row number is always first, wherever the manager keeps that column.
+    expect(snapshot.details?.columns.map((column) => column.code)).toEqual(['details.n', 'details.film', 'details.name']);
+    expect(snapshot.details?.rows[0].cells).toEqual([S('details.n', '#1'), S('details.film', '#1'), S('details.name', '#1')]);
+    // …also when it is not ticked and the manager's table does not list it.
+    const bare = buildClientScreenSnapshot(source({ details: { ...source().details, columnOrder: ['name'] } }), ['tab.details', 'details.name'], ids());
+    expect(bare.details?.columns.map((column) => column.code)).toEqual(['details.n', 'details.name']);
     expect(snapshot.tabs).toEqual([{ key: 'details', label: 'Состав', counter: '3' }]);
   });
 
@@ -116,11 +124,18 @@ describe('buildClientScreenSnapshot', () => {
 
   it('shows only tabs the manager has, with the manager labels and order; the number goes to the title only when ticked', () => {
     const src = source({ tabs: [{ key: 'finance', label: 'Финансы' }, { key: 'basic', label: 'Обзор' }] });
-    const snapshot = buildClientScreenSnapshot(src, CLIENT_SCREEN_CODES.filter((code) => code !== 'summary.number'), ids());
+    const snapshot = buildClientScreenSnapshot(src, CLIENT_SCREEN_CODES.filter((code) => code !== 'summary.number' && code !== 'summary.order_name'), ids());
     expect(snapshot.tabs).toEqual([{ key: 'finance', label: 'Финансы' }, { key: 'basic', label: 'Обзор' }]);
     expect(snapshot.details).toBeUndefined();
     expect(snapshot.title).toBe('Ваш заказ');
     expect(JSON.stringify(snapshot)).not.toContain(S('summary.number'));
+    expect(JSON.stringify(snapshot)).not.toContain(S('summary.order_name'));
+    // The title is made of the number when it is ticked, else of the name when that is ticked — as the manager's header.
+    const byName = buildClientScreenSnapshot(src, ['summary.order_name'], ids());
+    expect(byName).toMatchObject({ title: `Заказ ${S('summary.order_name')}`, summary: [] });
+    const byNumber = buildClientScreenSnapshot(src, ['summary.number', 'summary.order_name'], ids());
+    expect(byNumber.title).toBe(`Заказ № ${S('summary.number')}`);
+    expect(byNumber.summary).toEqual([{ code: 'summary.order_name', label: 'Название заказа', value: S('summary.order_name') }]);
   });
 
   it('a column the manager has for no row at all is not sent, not even as dashes', () => {

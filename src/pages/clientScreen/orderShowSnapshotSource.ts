@@ -1,11 +1,12 @@
-import type { OrderDetail } from '../../types/orders';
+import type { OrderDetail, OrderHdfDetail } from '../../types/orders';
 import { formatNumber } from '../../utils/numberFormat';
 import { calculateOrderTotalArea } from '../../utils/orderArea';
 import type { ClientScreenOrderSource, ClientScreenValue, DetailField } from './buildClientScreenSnapshot';
 import type { ClientScreenTabKey } from './clientScreenSnapshotSchema';
 import { orderDetailMirrorRows } from './orderDetailTableMirror';
 import {
-  clientScreenDate, clientScreenMoney, GROUPING_FIELDS, orderDetailDisplayValues, type ClientScreenClientContacts,
+  clientScreenDate, clientScreenExtraMoney, clientScreenHeaderFromDetails, clientScreenMoney, GROUPING_FIELDS, orderDetailDisplayValues,
+  type ClientScreenClientContacts,
 } from './orderEditSnapshotSource';
 
 /**
@@ -31,6 +32,8 @@ export interface OrderShowSourceInput {
   /** Keys of the visible detail table columns, left to right (the view page's column keys). */
   columnKeys: readonly string[];
   payments: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  /** HDF details of the order, for the header's material line. */
+  hdfDetails?: readonly OrderHdfDetail[];
   names: {
     millingType: Names; edgeType: Names; film: Names; paymentType: Names;
     productionStatus: (id: number) => string | undefined;
@@ -139,17 +142,24 @@ export function buildOrderShowSource(input: OrderShowSourceInput): ClientScreenO
   const columnOrder = input.columnKeys.map((key) => SHOW_DETAIL_COLUMN_FIELDS[key]).filter((field): field is DetailField => Boolean(field));
   const client = textOrNull(input.clientName) ?? textOrNull(record.client_name);
 
+  const detailRows = details.map((detail, index) => ({ key: orderShowDetailKey(sourceDetails[index]), values: orderDetailDisplayValues(detail, detailNames) }));
   return {
     tabs: SHOW_TABS.filter((tab) => tab.key !== 'finance' || input.canViewFinancials),
     summary: {
-      // The view page has no full order number; the order name is never used in its place.
+      // The view page has no full order number; the name is its own field with its own tick.
       number: null,
+      order_name: textOrNull(record.order_name),
       client,
       client_phone: input.clientContacts?.phone,
       client_phones: input.clientContacts?.otherPhones,
+      deadline: clientScreenDate(record.planned_completion_date as string | null | undefined),
+      ...clientScreenHeaderFromDetails(detailRows.map((row) => row.values), input.hdfDetails),
       parts: formatNumber(partsCount, 0),
       area: `${formatNumber(calculateOrderTotalArea(details), 2)} м²`,
       final: totalKnown ? money(finalAmount) : undefined,
+      discount: clientScreenExtraMoney(record.discount, totalKnown),
+      surcharge: clientScreenExtraMoney(record.surcharge, totalKnown),
+      paid: totalKnown ? money(paidAmount) : undefined,
       debt: totalKnown ? money(Math.max(0, finalAmount - paidAmount)) : undefined,
     },
     // The view page has no such tabs; nothing of them is sent.
@@ -178,7 +188,7 @@ export function buildOrderShowSource(input: OrderShowSourceInput): ClientScreenO
       : [],
     details: {
       columnOrder,
-      rows: details.map((detail, index) => ({ key: orderShowDetailKey(sourceDetails[index]), values: orderDetailDisplayValues(detail, detailNames) })),
+      rows: detailRows,
       grouping: grouped
         ? {
           field: GROUPING_FIELDS[grouped.field] ?? null,

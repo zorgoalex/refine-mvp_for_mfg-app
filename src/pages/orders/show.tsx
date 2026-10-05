@@ -3284,6 +3284,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       groupLabelOf={clientScreenGroupLabelOf}
       columnKeys={visibleDetailColumns.map((column) => String(column.key ?? ''))}
       payments={clientScreenPayments}
+      hdfDetails={hdfDetails}
       names={clientScreenNames}
       canViewFinancials={canViewFinancials}
     />

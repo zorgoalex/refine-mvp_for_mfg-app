@@ -3,7 +3,7 @@ import { Alert, Button, Card, Checkbox, Space, Spin, Switch, Typography, message
 import { clientScreenSettingsApi, type ClientScreenSettings } from '../../../api/clientScreenSettingsApi';
 import { ApiError } from '../../../api/apiError';
 import { can } from '../../../utils/permissions';
-import { CLIENT_SCREEN_GROUPS } from '../../clientScreen/clientScreenRegistry';
+import { CLIENT_SCREEN_ALWAYS_WITH_TAB, CLIENT_SCREEN_GROUPS } from '../../clientScreen/clientScreenRegistry';
 import {
   extractConflictSettings,
   formFromSettings,
@@ -159,11 +159,11 @@ export const ClientScreenSettingsTab: React.FC = () => {
               {group.fields.map((field) => (
                 <Checkbox
                   key={field.code}
-                  checked={selected.has(field.code)}
-                  disabled={readOnly || saving || !tabOn}
+                  checked={CLIENT_SCREEN_ALWAYS_WITH_TAB.has(field.code) ? tabOn : selected.has(field.code)}
+                  disabled={readOnly || saving || !tabOn || CLIENT_SCREEN_ALWAYS_WITH_TAB.has(field.code)}
                   onChange={(event) => setForm((prev) => (prev ? toggleCode(prev, field.code, event.target.checked) : prev))}
                 >
-                  {field.label}
+                  {field.label}{CLIENT_SCREEN_ALWAYS_WITH_TAB.has(field.code) ? ' (показывается всегда)' : ''}
                 </Checkbox>
               ))}
             </div>

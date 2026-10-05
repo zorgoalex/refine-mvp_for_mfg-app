@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef } from 'react';
 import type { MirrorTable, MirrorView } from './mirrorView';
 
 /**
@@ -45,9 +45,26 @@ const Table: React.FC<{ table: MirrorTable }> = ({ table }) => (
   </div>
 );
 
-export const ClientScreenMirror: React.FC<{ view: MirrorView; bodyRef?: React.Ref<HTMLDivElement> }> = ({ view, bodyRef }) => (
-    <div className="client-screen__order">
-      <div className="client-screen__head">
+export const ClientScreenMirror: React.FC<{ view: MirrorView; bodyRef?: React.Ref<HTMLDivElement> }> = ({ view, bodyRef }) => {
+  const orderRef = useRef<HTMLDivElement | null>(null);
+  const headRef = useRef<HTMLDivElement | null>(null);
+
+  // The column headers of a table stay in sight right under the order header, whatever its height.
+  useLayoutEffect(() => {
+    const order = orderRef.current;
+    const head = headRef.current;
+    if (!order || !head) return undefined;
+    const apply = () => order.style.setProperty('--cs-head-height', `${Math.ceil(head.offsetHeight)}px`);
+    apply();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(apply);
+    observer.observe(head);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div className="client-screen__order" ref={orderRef}>
+      <div className="client-screen__head" ref={headRef}>
         <h1 className="client-screen__title">{view.title}</h1>
         {view.summary.length ? (
           <div className="client-screen__chips">
@@ -83,4 +100,5 @@ export const ClientScreenMirror: React.FC<{ view: MirrorView; bodyRef?: React.Re
         ) : null}
       </div>
     </div>
-);
+  );
+};

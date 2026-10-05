@@ -54,11 +54,35 @@ describe('buildOrderShowSource', () => {
     expect(source.finance.debt).toMatch(/^75\s000,00 /);
   });
 
-  it('the client name falls back to the record; the order name never becomes the number', () => {
+  it('the client name falls back to the record; the title is the order name only when that is ticked', () => {
     const source = buildOrderShowSource(input({ clientName: null }));
     expect(source.summary.client).toBe('Клиент из записи');
-    const snapshot = buildClientScreenSnapshot(source, ALL, createClientScreenIdMap(() => 'idaaaaaa'));
-    expect(snapshot.title).toBe('Ваш заказ');
+    const ids = () => createClientScreenIdMap(() => 'idaaaaaa');
+    expect(buildClientScreenSnapshot(source, ALL, ids()).title).toBe('Заказ ИМЯ-ЗАКАЗА-СЕКРЕТ');
+    const withoutName = buildClientScreenSnapshot(source, ALL.filter((code) => code !== 'summary.order_name'), ids());
+    expect(withoutName.title).toBe('Ваш заказ');
+    expect(JSON.stringify(withoutName)).not.toContain('ИМЯ-ЗАКАЗА-СЕКРЕТ');
+  });
+
+  it('the header of the view page: deadline, positions, material, common parameters, money lines', () => {
+    const base = input();
+    const record = { ...base.record, planned_completion_date: '2026-10-16', discount: 5000, surcharge: 0 };
+    const details = [
+      { ...base.details[0], film_id: 8 },
+      { ...base.details[1], film_id: 8, film_name: undefined, milling_type_id: 1, milling_type_name: undefined, edge_type_id: 2, material_id: 3 },
+    ];
+    const summary = buildOrderShowSource(input({ record, details })).summary;
+    expect(summary).toMatchObject({
+      order_name: 'ИМЯ-ЗАКАЗА-СЕКРЕТ', deadline: '16.10.2026', positions: '2', parts: '6', material: 'МДФ 16 мм',
+      milling_type: 'Модерн', edge_type: 'R2', film: 'Белый софт', surcharge: undefined,
+    });
+    expect(summary.discount).toMatch(/^5\s000,00 /);
+    expect(summary.paid).toMatch(/^40\s000,00 /);
+    // Different values across the details: «—», as in the header of the manager.
+    expect(buildOrderShowSource(input({ record })).summary).toMatchObject({ milling_type: null, film: null });
+    // Without the right to see money none of the money lines exists.
+    const noMoney = buildOrderShowSource(input({ record, canViewFinancials: false })).summary;
+    expect([noMoney.final, noMoney.discount, noMoney.surcharge, noMoney.paid, noMoney.debt]).toEqual([undefined, undefined, undefined, undefined, undefined]);
   });
 
   it('without the right to see money nothing of it is passed on: no finance tab, no money columns, no payments', () => {

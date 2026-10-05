@@ -105,7 +105,9 @@ describe('buildOrderEditSource', () => {
     }));
     const idFor = createClientScreenIdMap((() => { let n = 0; return () => `id${String(++n).padStart(6, '0')}`; })());
     for (const code of ['summary.number', 'basic.order_name', 'basic.notes', 'basic.order_status', 'basic.payment_status', 'basic.manager']) {
-      const others = CLIENT_SCREEN_CODES.filter((item) => item !== code);
+      // The order name is shown by two codes (the header and the «Основное» tab): both off hide it.
+      const same = code === 'basic.order_name' ? ['basic.order_name', 'summary.order_name'] : [code];
+      const others = CLIENT_SCREEN_CODES.filter((item) => !same.includes(item));
       expect(JSON.stringify(buildClientScreenSnapshot(src, others, idFor)), code).not.toContain(`<<${code}>>`);
       expect(JSON.stringify(buildClientScreenSnapshot(src, CLIENT_SCREEN_CODES, idFor)), code).toContain(`<<${code}>>`);
     }
@@ -133,7 +135,9 @@ describe('buildOrderEditSource', () => {
     expect(bare.summary.final).toBeUndefined();
     expect(bare.summary.debt).toBeUndefined();
     const bareSnapshot = buildClientScreenSnapshot(bare, CLIENT_SCREEN_CODES, idFor);
-    expect(bareSnapshot.summary.map((field) => field.code)).toEqual(['summary.client', 'summary.parts', 'summary.area']);
+    const bareCodes = bareSnapshot.summary.map((field) => field.code);
+    expect(bareCodes).toEqual(expect.arrayContaining(['summary.client', 'summary.parts', 'summary.area']));
+    for (const money of ['summary.final', 'summary.discount', 'summary.surcharge', 'summary.paid', 'summary.debt']) expect(bareCodes).not.toContain(money);
     expect(bareSnapshot.details?.columns.map((column) => column.code)).not.toContain('details.cost');
     expect(bareSnapshot.details?.columns.map((column) => column.code)).not.toContain('details.price_per_sqm');
     // An intentionally empty price (null) is an empty cell of a column the manager does see.
@@ -283,7 +287,7 @@ describe('contact data of the client', () => {
     expect(wire(clientScreenClientContacts(undefined), CLIENT_SCREEN_CODES).map((field) => field.code)).not.toContain('summary.client_phone');
     expect(wire(undefined, CLIENT_SCREEN_CODES).map((field) => field.code)).not.toContain('summary.client_phone');
     // Loaded and ticked: shown next to the client; a client without phones shows a dash.
-    expect(wire(clientScreenClientContacts(phones), CLIENT_SCREEN_CODES).slice(0, 3)).toEqual([
+    expect(wire(clientScreenClientContacts(phones), CLIENT_SCREEN_CODES).filter((field) => field.code.startsWith('summary.client'))).toEqual([
       { code: 'summary.client', label: 'Клиент', value: 'Садыков Арман' },
       { code: 'summary.client_phone', label: 'Телефон клиента', value: '8 705 222 3344' },
       { code: 'summary.client_phones', label: 'Доп. телефоны клиента', value: '8 701 111 2233, 8 727 333 4455' },
@@ -322,6 +326,50 @@ describe('contact data of the client', () => {
     const onlyPrimary = serialize(['summary.client_phone']);
     expect(onlyPrimary).toContain('8 705 222 3344');
     expect(onlyPrimary).not.toContain('701 111');
+  });
+});
+
+describe('the order header for the customer', () => {
+  it('has what the header of the manager has, except statuses, priority and project', () => {
+    const summary = buildOrderEditSource(input()).summary;
+    expect(summary).toMatchObject({
+      number: '2418', order_name: 'Кухня — фасады', client: 'Садыков Арман', deadline: '16.10.2026', positions: '2', parts: '6',
+      material: 'МДФ 16 мм', milling_type: 'Модерн', edge_type: 'R2',
+      // The second detail has no film: one film in the order is still the common one, as in the manager's header.
+      film: 'Белый софт',
+    });
+    expect(summary.discount).toMatch(/^5\s000,00 /);
+    expect(summary.surcharge).toBeUndefined();
+    expect(summary.paid).toMatch(/^40\s000,00 /);
+    expect(Object.keys(summary)).not.toEqual(expect.arrayContaining(['order_status']));
+    for (const key of Object.keys(summary)) expect(key).not.toMatch(/status|priority|project/);
+  });
+
+  it('different values across the details give a dash; no details — no material and no common parameters', () => {
+    const base = input();
+    const mixed = buildOrderEditSource(input({
+      details: [base.details[0], { ...base.details[1], milling_type_id: 2, edge_type_id: 3, film_id: 9 }] as OrderEditSourceInput['details'],
+      names: { ...base.names, millingType: (id) => ({ 1: 'Модерн', 2: 'Классика' } as Record<number, string>)[id as number],
+        edgeType: (id) => ({ 2: 'R2', 3: 'R3' } as Record<number, string>)[id as number], film: (id) => ({ 8: 'Белый софт', 9: 'Дуб' } as Record<number, string>)[id as number] },
+    })).summary;
+    expect(mixed).toMatchObject({ milling_type: null, edge_type: null, film: null });
+    const empty = buildOrderEditSource(input({ details: [] })).summary;
+    expect(empty).toMatchObject({ positions: '0', material: null, milling_type: null, edge_type: null, film: null });
+  });
+
+  it('the header lines reach the customer only when ticked; the name is the title when the number is not shown', () => {
+    const idFor = () => createClientScreenIdMap(() => 'idaaaaaa');
+    const src = buildOrderEditSource(input());
+    const none = buildClientScreenSnapshot(src, ['summary.client'], idFor());
+    expect(none.title).toBe('Ваш заказ');
+    expect(JSON.stringify(none)).not.toContain('Кухня');
+    expect(JSON.stringify(none)).not.toContain('МДФ');
+    const named = buildClientScreenSnapshot(src, ['summary.order_name', 'summary.material', 'summary.deadline'], idFor());
+    expect(named.title).toBe('Заказ Кухня — фасады');
+    expect(named.summary).toEqual([
+      { code: 'summary.deadline', label: 'Срок выполнения', value: '16.10.2026' },
+      { code: 'summary.material', label: 'Материал', value: 'МДФ 16 мм' },
+    ]);
   });
 });
 

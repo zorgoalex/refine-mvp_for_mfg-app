@@ -21081,12 +21081,22 @@ components:
       description: Код вкладки (tab.<ключ>) или поля заказа, которое может видеть клиент. Реестр — backend/src/modules/client-screen/client-screen.registry.ts.
       enum:
         - summary.number
+        - summary.order_name
         - summary.client
         - summary.client_phone
         - summary.client_phones
+        - summary.deadline
+        - summary.positions
         - summary.parts
         - summary.area
+        - summary.material
+        - summary.milling_type
+        - summary.edge_type
+        - summary.film
         - summary.final
+        - summary.discount
+        - summary.surcharge
+        - summary.paid
         - summary.debt
         - tab.basic
         - basic.client

@@ -29,5 +29,11 @@
 .client-screen-preview__page .client-screen__order,
 .client-screen-preview__page .client-screen__splash { min-height: 720px; }
 .client-screen-preview__empty { display: flex; align-items: center; justify-content: center; height: 100%; color: #64707e; }
-/* Workspace tab of the order the customer sees. */
-.client-screen-tab-eye { color: #52c41a; font-size: 1em; margin-right: 6px; vertical-align: -0.125em; }
+/* Workspace tab of the order the customer sees: a light orange tab with a strong eye, to be found at a glance. */
+.client-screen-tab-eye { color: #1f7a00; font-size: 1.15em; margin-right: 6px; vertical-align: -0.15em; }
+.workspace-tabs .ant-tabs-tab:has(.client-screen-tab-eye),
+.workspace-tabs .ant-tabs-tab.ant-tabs-tab-active:has(.client-screen-tab-eye) {
+  background: #ffe7ba !important;
+  border-color: #ffa940 !important;
+}
+.workspace-tabs .ant-tabs-tab:has(.client-screen-tab-eye) .ant-tabs-tab-btn { color: #873800 !important; font-weight: 600; }

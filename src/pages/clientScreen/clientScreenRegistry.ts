@@ -3,8 +3,9 @@
  * (parity is guarded by clientScreenRegistry.test.ts against the OpenAPI enum).
  */
 export const CLIENT_SCREEN_CODES = [
-  'summary.number', 'summary.client', 'summary.client_phone', 'summary.client_phones', 'summary.parts', 'summary.area',
-  'summary.final', 'summary.debt',
+  'summary.number', 'summary.order_name', 'summary.client', 'summary.client_phone', 'summary.client_phones', 'summary.deadline',
+  'summary.positions', 'summary.parts', 'summary.area', 'summary.material', 'summary.milling_type', 'summary.edge_type', 'summary.film',
+  'summary.final', 'summary.discount', 'summary.surcharge', 'summary.paid', 'summary.debt',
   'tab.basic',
   'basic.client', 'basic.order_name', 'basic.order_date', 'basic.order_status', 'basic.payment_status',
   'basic.production_status', 'basic.manager', 'basic.priority', 'basic.doweling', 'basic.notes',
@@ -38,6 +39,12 @@ export const CLIENT_SCREEN_DEFAULT_VISIBLE_CODES: readonly ClientScreenCode[] = 
   'services.name', 'services.quantity', 'services.price', 'services.sum',
 ];
 
+/**
+ * Shown whenever their tab is shown, ticked or not: the row number of the detail list is the
+ * common way for the manager and the customer to name a row.
+ */
+export const CLIENT_SCREEN_ALWAYS_WITH_TAB: ReadonlySet<string> = new Set(['details.n']);
+
 export interface ClientScreenField {
   code: ClientScreenCode;
   label: string;
@@ -58,12 +65,22 @@ export const CLIENT_SCREEN_GROUPS: readonly ClientScreenGroup[] = [
     tabCode: null,
     fields: [
       { code: 'summary.number', label: 'Номер заказа' },
+      { code: 'summary.order_name', label: 'Название заказа' },
       { code: 'summary.client', label: 'Клиент' },
       { code: 'summary.client_phone', label: 'Телефон клиента' },
       { code: 'summary.client_phones', label: 'Доп. телефоны клиента' },
+      { code: 'summary.deadline', label: 'Срок выполнения' },
+      { code: 'summary.positions', label: 'Позиций' },
       { code: 'summary.parts', label: 'Деталей' },
       { code: 'summary.area', label: 'Площадь' },
+      { code: 'summary.material', label: 'Материал' },
+      { code: 'summary.milling_type', label: 'Фрезеровка' },
+      { code: 'summary.edge_type', label: 'Обкат' },
+      { code: 'summary.film', label: 'Плёнка' },
       { code: 'summary.final', label: 'Итоговая сумма' },
+      { code: 'summary.discount', label: 'Скидка' },
+      { code: 'summary.surcharge', label: 'Наценка' },
+      { code: 'summary.paid', label: 'Оплачено' },
       { code: 'summary.debt', label: 'Остаток к оплате' },
     ],
   },
@@ -157,6 +174,7 @@ export function normalizeClientScreenCodes(codes: readonly string[]): ClientScre
  * iff it and its tab.<group> code are both ticked.
  */
 export function isClientScreenCodeVisible(code: string, visible: ReadonlySet<string>): boolean {
+  if (CLIENT_SCREEN_ALWAYS_WITH_TAB.has(code)) return visible.has(`tab.${code.split('.')[0]}`);
   if (!visible.has(code)) return false;
   if (code.startsWith('tab.') || code.startsWith('summary.')) return true;
   const group = code.split('.')[0];

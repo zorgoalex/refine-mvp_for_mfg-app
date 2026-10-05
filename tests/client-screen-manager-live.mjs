@@ -183,6 +183,10 @@ try {
   }
   // CLIENT_PHONE=1: the client's phone is ticked for the run (needs a backend that knows the code).
   if (process.env.CLIENT_PHONE === '1' && !codes.includes('summary.client_phone')) codes.push('summary.client_phone');
+  // HEADER=1: the lines of the order header are ticked for the run (needs a backend that knows the codes).
+  const headerCodes = ['summary.order_name', 'summary.deadline', 'summary.positions', 'summary.material', 'summary.milling_type', 'summary.edge_type',
+    'summary.film', 'summary.paid', 'summary.discount', 'summary.surcharge'];
+  if (process.env.HEADER === '1') for (const code of headerCodes) if (!codes.includes(code)) codes.push(code);
   const switching = change.run(async () => {
     const response = await settingsRequest('PUT', { enabled: true, visibleCodes: codes, expectedVersion: original.version });
     return { ok: response.ok, status: response.status, body: response.ok ? await response.json() : null };
@@ -203,7 +207,7 @@ try {
   const [popup] = await Promise.all([context.waitForEvent('page', { timeout: 30000 }), present.click()]);
   popup.on('pageerror', (e) => errors.push(`customer: ${e.message.split('\n')[0]}`));
   assert.ok(new URL(popup.url()).pathname.endsWith('/client-screen.html'), 'the customer window is client-screen.html');
-  await expect(popup.getByRole('heading', { level: 1 })).toHaveText(/Заказ № |Ваш заказ/, { timeout: 60000 });
+  await expect(popup.getByRole('heading', { level: 1 })).toHaveText(/Заказ |Ваш заказ/, { timeout: 60000 });
   await expect(page.getByText('Клиент видит этот заказ')).toBeVisible({ timeout: 30000 });
   results.push(`customer window opened and shows: ${(await popup.getByRole('heading', { level: 1 }).innerText()).replace(/\d/g, '#')}`);
   assert.equal(await popup.evaluate(() => sessionStorage.length), 0, 'customer window sessionStorage is empty (noopener)');
@@ -212,6 +216,16 @@ try {
     results.push('the client phone is on the customer screen when ticked');
   } else {
     assert.equal(await popup.locator('.client-screen__chip').filter({ hasText: 'Телефон клиента' }).count(), 0, 'the client phone is not shown unless ticked');
+  }
+
+  if (process.env.HEADER === '1') {
+    const chips = await popup.locator('.client-screen__chip').allInnerTexts();
+    for (const label of ['Срок выполнения', 'Позиций', 'Материал', 'Фрезеровка', 'Обкат', 'Плёнка']) {
+      assert.ok(chips.some((chip) => chip.startsWith(`${label}:`)), `the header shows «${label}» (header: ${chips.map((chip) => chip.split(':')[0]).join(' | ')})`);
+    }
+    assert.ok(chips.every((chip) => !/Статус|Приоритет|Проект/i.test(chip)), 'no statuses, priority or project in the customer header');
+    await expect(popup.getByRole('heading', { level: 1 })).toHaveText(/^Заказ /);
+    results.push(`customer header mirrors the order header: ${chips.map((chip) => chip.split(':')[0]).join(', ')}`);
   }
 
   // App header: the eye and the emergency button exist only while something is presented; the eye
@@ -232,7 +246,12 @@ try {
   await expect(miniature).toHaveCount(0, { timeout: 10000 });
   const tabEyes = page.locator('.workspace-tabs .client-screen-tab-eye');
   const hasWorkspaceTabs = await page.locator('.workspace-tabs').count() > 0;
-  if (hasWorkspaceTabs) await expect(tabEyes).toHaveCount(1, { timeout: 10000 });
+  if (hasWorkspaceTabs) {
+    await expect(tabEyes).toHaveCount(1, { timeout: 10000 });
+    // The presenting tab stands out: light orange, unlike the other tabs.
+    const tabColour = (locator) => locator.evaluate((element) => getComputedStyle(element.closest('.ant-tabs-tab')).backgroundColor);
+    assert.equal(await tabColour(tabEyes.first()), 'rgb(255, 231, 186)', 'the presenting workspace tab is light orange');
+  }
   results.push(`app header: eye with a live miniature and the emergency button${hasWorkspaceTabs ? '; the presenting workspace tab is marked' : ''}`);
 
   // Leaving the order (another page of the app) does not take it away from the customer.
@@ -266,6 +285,19 @@ try {
     assert.equal(await popup.getByRole('columnheader', { name: 'Примечание', exact: true }).count(), 0, 'hidden note column is absent');
     const headers = await popup.getByRole('columnheader').allInnerTexts();
     assert.ok(headers.includes('Кол-во'), `ticked quantity column is present (columns: ${headers.join(' | ')})`);
+    // The row number is always the first column, and the column headers stay in sight while the list scrolls.
+    assert.equal(headers[0], '№', `the row number is the first column (columns: ${headers.join(' | ')})`);
+    const firstHeader = popup.getByRole('columnheader').first();
+    assert.equal(await firstHeader.evaluate((element) => getComputedStyle(element).position), 'sticky', 'column headers are sticky');
+    await popup.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    const stuck = await popup.evaluate(() => {
+      const head = document.querySelector('.client-screen__head').getBoundingClientRect();
+      const header = document.querySelector('.client-screen__table th').getBoundingClientRect();
+      return { headBottom: Math.round(head.bottom), headerTop: Math.round(header.top), headerBottom: Math.round(header.bottom), viewport: window.innerHeight };
+    });
+    assert.ok(Math.abs(stuck.headerTop - stuck.headBottom) <= 2 && stuck.headerBottom <= stuck.viewport,
+      `with the list scrolled to its end the column headers sit right under the order header (${JSON.stringify(stuck)})`);
+    await popup.evaluate(() => window.scrollTo(0, 0));
     results.push(`details tab mirrored with ${await popup.locator('tbody tr[data-row-id]').count()} rows; hidden columns absent`);
 
     // The manager's page of the table: the customer sees the same rows, not the whole list.
@@ -328,7 +360,7 @@ try {
   results.push('«Скрыть от клиента» → splash; the header eye and the emergency button are gone');
 
   await page.getByRole('button', { name: 'Показать клиенту' }).click();
-  await expect(popup.getByRole('heading', { level: 1 })).toHaveText(/Заказ № |Ваш заказ/, { timeout: 30000 });
+  await expect(popup.getByRole('heading', { level: 1 })).toHaveText(/Заказ |Ваш заказ/, { timeout: 30000 });
 
   // Emergency switch-off from ANOTHER app tab, which presents nothing itself.
   const other = await context.newPage();
@@ -355,7 +387,7 @@ try {
   await expect(presentView).toBeEnabled({ timeout: 120000 });
   const [viewPopup] = await Promise.all([context.waitForEvent('page', { timeout: 30000 }), presentView.click()]);
   viewPopup.on('pageerror', (e) => errors.push(`customer (view): ${e.message.split('\n')[0]}`));
-  await expect(viewPopup.getByRole('heading', { level: 1 })).toHaveText(/Заказ № |Ваш заказ/, { timeout: 60000 });
+  await expect(viewPopup.getByRole('heading', { level: 1 })).toHaveText(/Заказ |Ваш заказ/, { timeout: 60000 });
   await expect(page.getByText('Клиент видит этот заказ')).toBeVisible({ timeout: 30000 });
   await expect(viewPopup.getByRole('tab', { selected: true })).toHaveText(/Детали заказа/, { timeout: 20000 });
   await expect(viewPopup.locator('tbody tr[data-row-id]').first()).toBeVisible({ timeout: 20000 });
@@ -380,7 +412,7 @@ try {
   // sees the order; within a minute the customer is back on the splash, without any reload.
   if (process.env.ROLLBACK === '1') {
     await page.getByRole('button', { name: 'Показать клиенту' }).click();
-    await expect(viewPopup.getByRole('heading', { level: 1 })).toHaveText(/Заказ № |Ваш заказ/, { timeout: 30000 });
+    await expect(viewPopup.getByRole('heading', { level: 1 })).toHaveText(/Заказ |Ваш заказ/, { timeout: 30000 });
     const mine = change.outcome().applied;
     const startedAt = Date.now();
     const off = await change.run(async () => {

@@ -73,11 +73,24 @@
 .client-screen__field--focused .client-screen__value,
 .client-screen__cell--focused { outline: 2px solid var(--cs-accent); outline-offset: -1px; background: var(--cs-accent-soft); }
 .client-screen__subtitle { font-weight: 600; font-size: 16px; margin: 0; }
-.client-screen__table-wrap { background: var(--cs-surface); border: 1px solid var(--cs-line); border-radius: 8px; overflow-x: auto; }
+/* No scrolling box of its own: the column headers stick to the window, right under the order header. */
+.client-screen__table-wrap { background: var(--cs-surface); border: 1px solid var(--cs-line); border-radius: 8px; }
 .client-screen__table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 .client-screen__table th,
 .client-screen__table td { padding: 8px 12px; border-bottom: 1px solid var(--cs-line); text-align: left; }
-.client-screen__table th { background: var(--cs-soft); color: var(--cs-muted); font-weight: 500; font-size: 13px; white-space: nowrap; }
+.client-screen__table th {
+  position: sticky;
+  top: var(--cs-head-height, 0px);
+  z-index: 1;
+  background: var(--cs-soft);
+  color: var(--cs-text);
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  box-shadow: inset 0 -1px 0 var(--cs-line);
+}
+.client-screen__table th:first-child { border-top-left-radius: 8px; }
+.client-screen__table th:last-child { border-top-right-radius: 8px; }
 .client-screen__table tbody tr:last-child td { border-bottom: none; }
 .client-screen__num { text-align: right !important; white-space: nowrap; }
 .client-screen__row--focused td { background: #f0f6ff; }

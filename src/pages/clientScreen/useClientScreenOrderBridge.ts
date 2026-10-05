@@ -233,6 +233,7 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
         dowelingLinks: state.dowelingLinks,
         orderNumber: current.orderNumber,
         clientContacts: current.clientContacts,
+        hdfDetails: state.hdfDetails,
         tabs: orderFormMirrorTabs(current.operational),
         names: orderFormNames(current.references, current.sheetMaterialName, current.filmNameById),
         // The manager's own columns, sorting and grouping, once the detail table has been on screen.

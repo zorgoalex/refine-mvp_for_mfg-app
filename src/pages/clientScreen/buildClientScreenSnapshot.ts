@@ -21,7 +21,8 @@ export interface ClientScreenRowSource<F extends string> {
 export interface ClientScreenOrderSource {
   /** Tabs as the manager sees them: their order and their labels. */
   tabs: ReadonlyArray<{ key: ClientScreenTabKey; label: string }>;
-  summary: FieldsOf<'number' | 'client' | 'client_phone' | 'client_phones' | 'parts' | 'area' | 'final' | 'debt'>;
+  /** The order header above the tabs, as the manager's header shows it (no statuses, priority or project). */
+  summary: FieldsOf<'number' | 'order_name' | 'client' | 'client_phone' | 'client_phones' | 'deadline' | 'positions' | 'parts' | 'area' | 'material' | 'milling_type' | 'edge_type' | 'film' | 'final' | 'discount' | 'surcharge' | 'paid' | 'debt'>;
   basic: FieldsOf<'client' | 'order_name' | 'order_date' | 'order_status' | 'payment_status' | 'production_status' | 'manager' | 'priority' | 'doweling' | 'notes'>;
   dates: FieldsOf<'planned' | 'completion' | 'issue'>;
   finance: FieldsOf<'total' | 'discount' | 'surcharge' | 'final' | 'paid' | 'debt'>;
@@ -70,8 +71,9 @@ export function buildClientScreenSnapshot(source: ClientScreenOrderSource, visib
   const tabOn = (key: ClientScreenTabKey) => visible.has(`tab.${key}`) && source.tabs.some((tab) => tab.key === key);
 
   const snapshot: ClientScreenSnapshot = {
-    title: visible.has('summary.number') && source.summary.number ? `Заказ № ${source.summary.number}` : 'Ваш заказ',
-    summary: fields('summary', ['client', 'client_phone', 'client_phones', 'parts', 'area', 'final', 'debt'], source.summary, visible),
+    title: clientScreenTitle(source, visible).text,
+    // The name is a header line of its own only when the title is made of the number.
+    summary: fields('summary', SUMMARY_ORDER.filter((key) => key !== 'order_name' || clientScreenTitle(source, visible).by === 'number'), source.summary, visible),
     tabs: source.tabs
       .filter((tab) => (CLIENT_SCREEN_TAB_KEYS as readonly string[]).includes(tab.key) && tabOn(tab.key))
       .map((tab) => (tab.key === 'details' ? { key: tab.key, label: tab.label, counter: String(source.details.rows.length) } : { key: tab.key, label: tab.label })),
@@ -102,8 +104,11 @@ export function buildClientScreenSnapshot(source: ClientScreenOrderSource, visib
   }
 
   if (tabOn('details')) {
-    const order = source.details.columnOrder.filter((field, index, all) => all.indexOf(field) === index
-      && isClientScreenCodeVisible(`details.${field}`, visible) && available(source.details.rows, field));
+    // The row number is always the first column: the manager and the customer see different amounts
+    // of the list and need a common way to name a row. It needs no tick of its own.
+    const order: DetailField[] = ['n', ...source.details.columnOrder.filter((field, index, all) => field !== 'n' && all.indexOf(field) === index
+      && isClientScreenCodeVisible(`details.${field}`, visible) && available(source.details.rows, field))];
+    // (isClientScreenCodeVisible knows the same rule: `details.n` goes with its tab.)
     const table: ClientScreenTable = {
       columns: order.map((field) => ({
         code: `details.${field}` as ClientScreenCode, label: LABELS.get(`details.${field}`) ?? field, align: RIGHT_ALIGNED.has(field) ? 'right' : 'left',
@@ -136,6 +141,17 @@ export function buildClientScreenSnapshot(source: ClientScreenOrderSource, visib
     };
   }
   return snapshot;
+}
+
+/** Header fields in the order of the manager's header; the number and the name make the title. */
+const SUMMARY_ORDER = ['order_name', 'client', 'client_phone', 'client_phones', 'deadline', 'positions', 'parts', 'area', 'material', 'milling_type', 'edge_type', 'film',
+  'final', 'discount', 'surcharge', 'paid', 'debt'] as const;
+
+/** «Заказ № …» by the number, else «Заказ …» by the name as in the manager's header — each only when ticked. */
+function clientScreenTitle(source: ClientScreenOrderSource, visible: ReadonlySet<string>): { text: string; by: 'number' | 'name' | null } {
+  if (visible.has('summary.number') && source.summary.number) return { text: `Заказ № ${source.summary.number}`, by: 'number' };
+  if (visible.has('summary.order_name') && source.summary.order_name) return { text: `Заказ ${source.summary.order_name}`.slice(0, 200), by: 'name' };
+  return { text: 'Ваш заказ', by: null };
 }
 
 /** A column whose value the manager has for no row at all (no right to see it) is not sent, not even as dashes. */
