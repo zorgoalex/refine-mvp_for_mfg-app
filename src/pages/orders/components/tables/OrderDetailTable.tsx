@@ -3437,7 +3437,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   // orderDetailTableMirror.ts); nothing here changes the table or the order.
   const draftStoreApi = useOrderDraftStoreApi();
   const mirrorColumnKeys = visibleColumns
-    .map((column) => String(column.key ?? getTableColumnDataIndex(column) ?? ''))
+    .map((column) => String(column.key ?? ''))
     .join('\u0001');
   const mirrorSortKey = String(activeSorter.key ?? '');
   const mirrorSortOrder = activeSorter.order ?? null;
