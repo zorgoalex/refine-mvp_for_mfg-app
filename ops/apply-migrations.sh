@@ -2477,14 +2477,17 @@ probe_file() {
     # exists) to resolve the §5.6 engine-history card subject; the guard below
     # requires the post-192 body only when that table (i.e. 141) is present —
     # same conditional-redefinition pattern as 191's seal-guard check above.
+    # 197: later migrations of the same release widen these tables (213, 216, 227 add columns) and replace the kind
+    # check (216 → _v2, 227 → _v3), so the probe asks for "at least" the 197 shape and any version of the check —
+    # otherwise `auto` on a restored end-state schema without a ledger row would call 197 PENDING and stop.
     197_onec_purchase_documents*) probe_all \
       "$(q_tbl onec_documents)" \
       "$(q_tbl onec_document_lines)" \
       "$(q_tbl order_resource_onec_allocations)" \
-      "SELECT count(*)=17 FROM information_schema.columns WHERE table_schema='public' AND table_name='onec_documents';" \
-      "SELECT count(*)=14 FROM information_schema.columns WHERE table_schema='public' AND table_name='onec_document_lines';" \
-      "SELECT count(*)=12 FROM information_schema.columns WHERE table_schema='public' AND table_name='order_resource_onec_allocations';" \
-      "$(q_con_on onec_documents chk_onec_documents_kind)" \
+      "SELECT count(*)>=17 FROM information_schema.columns WHERE table_schema='public' AND table_name='onec_documents';" \
+      "SELECT count(*)>=14 FROM information_schema.columns WHERE table_schema='public' AND table_name='onec_document_lines';" \
+      "SELECT count(*)>=12 FROM information_schema.columns WHERE table_schema='public' AND table_name='order_resource_onec_allocations';" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.onec_documents'::regclass AND conname IN ('chk_onec_documents_kind','chk_onec_documents_kind_v2','chk_onec_documents_kind_v3'));" \
       "$(q_con_on onec_documents chk_onec_documents_number)" \
       "$(q_con_on onec_documents chk_onec_documents_amount)" \
       "$(q_con_on onec_documents uq_onec_documents_ref)" \
@@ -2509,7 +2512,7 @@ probe_file() {
       "$(q_idx idx_orp_alloc_procurement)" ;;
     194_order_resource_procurement*) probe_all \
       "$(q_tbl order_resource_procurement)" \
-      "SELECT count(*)=17 FROM information_schema.columns WHERE table_schema='public' AND table_name='order_resource_procurement';" \
+      "SELECT count(*)>=17 FROM information_schema.columns WHERE table_schema='public' AND table_name='order_resource_procurement';" \
       "$(q_con_on order_resource_procurement chk_orp_resource_kind)" \
       "$(q_con_on order_resource_procurement chk_orp_one_ref)" \
       "$(q_con_on order_resource_procurement chk_orp_origin)" \
