@@ -1,11 +1,29 @@
 import type { RecipientResolverKind } from './notification-event-registry';
 
 export type NotificationLevel = 'info' | 'warning' | 'error';
-export const NOTIFICATION_CHANNELS = ['in_app', 'telegram'] as const;
+export const NOTIFICATION_CHANNELS = ['in_app', 'telegram', 'balloon'] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
+/** Внешние каналы — доставка через очередь доставок (`notification_channel_deliveries`); `in_app` и `balloon` — в приложении. */
+export type ExternalNotificationChannel = Exclude<NotificationChannel, 'in_app' | 'balloon'>;
+export function isExternalChannel(channel: NotificationChannel): channel is ExternalNotificationChannel {
+  return channel !== 'in_app' && channel !== 'balloon';
+}
+/** Исчезновение балуна: `auto` — через 15 с, `persistent` — только крестиком (план 2026-10-03). */
+export const BALLOON_MODES = ['auto', 'persistent'] as const;
+export type BalloonMode = (typeof BALLOON_MODES)[number];
 export type DeadlineNotificationEntityType = 'order' | 'order_stage';
 
+/** Изменения закупа материала заказа (payload `changeType` события `order.resource_procurement_changed`). */
+export const PROCUREMENT_CHANGE_TYPES = ['marked', 'unmarked', 'allocation_added', 'allocation_removed', 'allocation_linked', 'allocation_unlinked'] as const;
+export type ProcurementChangeType = (typeof PROCUREMENT_CHANGE_TYPES)[number];
+export const ALLOCATION_ROLES = ['receipt', 'payment'] as const;
+export type AllocationRole = (typeof ALLOCATION_ROLES)[number];
+
 export interface NotificationRuleConditions {
+  /** Только эти изменения закупа (обязательно для событий закупа — правило не срабатывает на всё подряд). */
+  procurementChangeTypes?: ProcurementChangeType[];
+  /** Только распределения/связи этой роли; событие без роли при заданном условии не совпадает. */
+  allocationRoles?: AllocationRole[];
   allowedFromOrderStatusIds?: number[];
   deadlineEntityTypes?: DeadlineNotificationEntityType[];
   excludeOrderStatusIds?: number[];
@@ -36,6 +54,8 @@ export interface NotificationRule {
   priority: number;
   level: NotificationLevel;
   channels: NotificationChannel[];
+  /** Свойство исчезновения балуна; значимо только при канале `balloon`. */
+  balloonMode: BalloonMode;
   conditions: NotificationRuleConditions;
   recipients: NotificationRuleRecipients;
   titleTemplate: string | null;

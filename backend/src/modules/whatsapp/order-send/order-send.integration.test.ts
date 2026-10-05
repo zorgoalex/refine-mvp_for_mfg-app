@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import ExcelJS from 'exceljs';
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
@@ -13,9 +13,10 @@ import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import type { WahaClient } from '../waha.client';
 import type { WhatsAppRuntimeConfigService } from '../whatsapp-runtime-config.service';
 import { OrderSendActors } from './order-send-actors';
+import { runMigrationFile } from './migration-file.test-util';
 import { OrderSendFileStore } from './order-send-file-store';
 import { readOrderFormData } from './forms/order-form-data';
-import { parseOrderSendSettings } from './order-send.dto';
+import { parseOrderSendSettings, parseOrderSendCommand } from './order-send.dto';
 import { OrderSendRepository } from './order-send.repository';
 import { OrderSendService } from './order-send.service';
 import { OrderSendWorker } from './order-send-worker.service';
@@ -107,6 +108,11 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     await q(await readFile(new URL('../../../../db/migrations/230_whatsapp_order_send.sql', import.meta.url), 'utf8'));
     await q(await readFile(new URL('../../../../db/migrations/233_whatsapp_order_send_queue.sql', import.meta.url), 'utf8'));
     await q(await readFile(new URL('../../../../db/migrations/235_employee_work_contacts.sql', import.meta.url), 'utf8'));
+    await q(await readFile(new URL('../../../../db/migrations/237_whatsapp_order_send_client_phone.sql', import.meta.url), 'utf8'));
+    // Schema 238 (a supplier request as a send): the journal reads the request and the supplier of such rows.
+    await q(`CREATE TABLE suppliers(supplier_id smallint PRIMARY KEY, supplier_name text);
+      CREATE TABLE supplier_requests(supplier_request_id bigint PRIMARY KEY, request_number text)`);
+    await runMigrationFile((sql) => q(sql), await readFile(new URL('../../../../db/migrations/238_whatsapp_supplier_send.sql', import.meta.url), 'utf8'));
     database = {
       isConfigured: true,
       query: <T extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []) => pool.query<T>(text, [...params]),
@@ -191,6 +197,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
 
   beforeEach(async () => {
     await q(`DELETE FROM whatsapp_order_sends`);
+    await q(`DELETE FROM whatsapp_order_send_refusals`);
     await q(`UPDATE whatsapp_order_send_settings SET last_delivery_at = NULL`);
     await q('UPDATE whatsapp_broadcast_control SET paused = false');
     await q('UPDATE users SET is_active = true');
@@ -751,6 +758,304 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     }
   });
 
+  // ---- a chosen phone of the client (04.10): contacts per order, identity by «client + number», never redirected.
+  const PRIMARY = `8 ${PHONE_DIGITS.slice(0, 3)} ${PHONE_DIGITS.slice(3, 6)} ${PHONE_DIGITS.slice(6, 8)} ${PHONE_DIGITS.slice(8)}`;
+  const SECOND = '87771234567';
+  /** Client 501 gets exactly these phones (the first is primary); returns their ids in order. */
+  const clientPhones = async (numbers: string[]): Promise<number[]> => {
+    await q(`DELETE FROM client_phones WHERE client_id = 501`);
+    const ids: number[] = [];
+    for (const [index, number] of numbers.entries()) {
+      ids.push(Number((await q(`INSERT INTO client_phones(client_id, phone_number, is_primary) VALUES (501, $1, $2) RETURNING phone_id`,
+        [number, index === 0])).rows[0].phone_id));
+    }
+    return ids;
+  };
+  /** The client target as the card sends it: a chosen phone goes with the token the contacts endpoint gave for it. */
+  const toClient = async (phoneId?: number) => {
+    if (!phoneId) return { kind: 'client' } as never;
+    const contact = (await service.clientContacts(9001, admin)).contacts.find((item) => item.phoneId === phoneId);
+    return { kind: 'client', phoneId, phoneToken: contact?.token ?? 'f'.repeat(64) } as never;
+  };
+
+  describe('a chosen phone of the client', () => {
+    // The tests run the full release whatever the built-in switch says (the compatible release has it off).
+    beforeEach(() => { repository.clientPhoneChoice = true; });
+    afterEach(async () => { repository.clientPhoneChoice = true; await clientPhones([PRIMARY]); });
+
+    it('lists the phones of the order client for the menu: masks only, the primary first, unreadable and repeated numbers left out', async () => {
+      const [primary, second] = await clientPhones([PRIMARY, SECOND, 'офис 12-34', `+7${PHONE_DIGITS}`]);
+      const contacts = await service.clientContacts(9001, admin);
+      expect(contacts).toEqual({ clientId: 501, contacts: [
+        { phoneId: primary, masked: `7${PHONE_DIGITS.slice(0, 3)}***${PHONE_DIGITS.slice(-4)}`, isPrimary: true, isDefault: true, token: expect.stringMatching(/^[0-9a-f]{64}$/) },
+        { phoneId: second, masked: '7777***4567', isPrimary: false, isDefault: false, token: expect.stringMatching(/^[0-9a-f]{64}$/) },
+      ] });
+      expect(contacts.contacts[0].token).not.toBe(contacts.contacts[1].token);
+      expect(JSON.stringify(contacts)).not.toContain(PHONE_DIGITS);
+      // Another order — its own client: nothing of client 501 leaks into it.
+      expect((await service.clientContacts(9002, admin)).clientId).toBe(502);
+      expect(await code(service.clientContacts(999999, admin))).toBe('ORDER_NOT_FOUND');
+    });
+
+    it('sends to the chosen phone; the default send keeps the old rule; both carry the «client + number» fingerprint', async () => {
+      const [, second] = await clientPhones([PRIMARY, SECOND]);
+      const chosen = (await send(9001, { target: await toClient(second), form: 'order_pdf' })).send;
+      expect(chosen.recipientMasked).toBe('7777***4567');
+      expect(await row(chosen.sendId)).toMatchObject({ target_kind: 'client', client_phone_id: String(second), phone_normalized: '77771234567' });
+      await worker.work();
+      expect(await row(chosen.sendId)).toMatchObject({ state: 'sent', destination_chat_id: '77771234567@c.us' });
+      await slotPassed();
+      const byDefault = (await send(9001, { target: await toClient(), form: 'order_pdf' })).send;
+      const stored = await row(byDefault.sendId);
+      expect(stored).toMatchObject({ client_phone_id: null, phone_normalized: `7${PHONE_DIGITS}` });
+      expect(stored.recipient_fingerprint).toMatch(/^[0-9a-f]{64}$/);
+      expect(stored.recipient_fingerprint).not.toBe((await row(chosen.sendId)).recipient_fingerprint);
+      // A phone of another client, or one that is gone, is never accepted for this order.
+      const foreign = Number((await q(`INSERT INTO client_phones(client_id, phone_number, is_primary) VALUES (502, '87019998877', true) RETURNING phone_id`)).rows[0].phone_id);
+      expect(await code(send(9001, { target: await toClient(foreign), form: 'order_excel' }))).toBe('CLIENT_PHONE_MISSING');
+      // A chosen phone without the token, or a token without the phone, is not a valid command.
+      for (const target of [{ kind: 'client', phoneId: second }, { kind: 'client', phoneToken: 'a'.repeat(64) }]) {
+        expect(await code(Promise.resolve().then(() => parseOrderSendCommand({ target, form: 'order_pdf', idempotencyKey: randomUUID() })))).toBe('VALIDATION_ERROR');
+      }
+      expect(await code(send(9001, { target: await toClient(987654), form: 'order_excel' }))).toBe('CLIENT_PHONE_MISSING');
+      await q(`DELETE FROM client_phones WHERE phone_id = $1`, [foreign]);
+    });
+
+    it('the menu showed one number, the phone row was edited meanwhile: the send is refused, never sent to the new number', async () => {
+      const [, second] = await clientPhones([PRIMARY, SECOND]);
+      const shown = await toClient(second);
+      await q(`UPDATE client_phones SET phone_number = '87770000009' WHERE phone_id = $1`, [second]);
+      expect(await code(send(9001, { target: shown, form: 'order_pdf' }))).toBe('ORDER_SEND_PHONE_CHANGED');
+      expect((await q(`SELECT count(*)::int n FROM whatsapp_order_sends`)).rows[0].n).toBe(0);
+      const refusal = (await q(`SELECT status_code FROM audit_log WHERE event = 'whatsapp.order_send.refused' ORDER BY created_at DESC LIMIT 1`)).rows[0];
+      expect(refusal.status_code).toBe('ORDER_SEND_PHONE_CHANGED');
+      // A fresh menu gives the token of the new number: the user sees it and may send there.
+      expect((await send(9001, { target: await toClient(second), form: 'order_pdf' })).send.recipientMasked).toBe('7777***0009');
+    });
+
+    it('a client whose primary number is unreadable: the only readable phone is offered as a chosen one, not as the default', async () => {
+      const [, second] = await clientPhones(['офис 12-34', SECOND]);
+      const contacts = (await service.clientContacts(9001, admin)).contacts;
+      expect(contacts).toEqual([expect.objectContaining({ phoneId: second, isPrimary: false, isDefault: false })]);
+      expect(await code(send(9001, { target: await toClient(), form: 'order_pdf' }))).toBe('CLIENT_PHONE_INVALID');
+      expect((await send(9001, { target: await toClient(second), form: 'order_pdf' })).send.recipientMasked).toBe('7777***4567');
+    });
+
+    it('rollback to the compatible release: committed chosen-phone commands are replayed and delivered, new ones are refused for good', async () => {
+      const [, second] = await clientPhones([PRIMARY, SECOND]);
+      // The full release committed a chosen-phone command; its answer was lost.
+      const target = await toClient(second);
+      const key = randomUUID();
+      const committed = (await send(9001, { target, form: 'order_pdf', idempotencyKey: key })).send;
+      const uncommitted = { target, form: 'order_excel', idempotencyKey: randomUUID() };
+      // The backend is rolled back to the compatible release.
+      repository.clientPhoneChoice = false;
+      // The browser retries the same command through the same parser: it is replayed, not refused as invalid.
+      const parsed = parseOrderSendCommand({ target, form: 'order_pdf', idempotencyKey: key });
+      const replay = await service.send(9001, parsed as never, admin, 'req-replay-k2a');
+      expect(replay.send.sendId).toBe(committed.sendId);
+      expect((await q(`SELECT count(*)::int n FROM whatsapp_order_sends`)).rows[0].n).toBe(1);
+      // A command that never committed is refused definitely (the browser drops its pending key); the default send works.
+      expect(await code(send(9001, uncommitted))).toBe('ORDER_SEND_PHONE_CHOICE_UNAVAILABLE');
+      expect((await service.clientContacts(9001, admin)).contacts).toEqual([]);
+      expect((await send(9001, { target: await toClient(), form: 'order_excel' })).send.state).toBe('queued');
+      // The row with the chosen phone is delivered by the compatible release to that very phone…
+      await worker.work();
+      expect(await row(committed.sendId)).toMatchObject({ state: 'sent', destination_chat_id: '77771234567@c.us' });
+      // …and cancelled, not redirected, when that phone was edited meanwhile.
+      repository.clientPhoneChoice = true;
+      await q(`DELETE FROM whatsapp_order_sends`);
+      const [, again] = await clientPhones([PRIMARY, SECOND]);
+      const edited = (await send(9001, { target: await toClient(again), form: 'order_pdf' })).send;
+      repository.clientPhoneChoice = false;
+      await q(`UPDATE client_phones SET phone_number = '87770000002' WHERE phone_id = $1`, [again]);
+      await worker.work();
+      expect(await row(edited.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_changed' });
+    });
+
+    it('a final refusal is kept with the command key: the same request later — the number back, another release — is still refused', async () => {
+      const [, second] = await clientPhones([PRIMARY, SECOND]);
+      const target = await toClient(second);
+      const key = randomUUID();
+      // The phone row is edited: the command is refused and the refusal is recorded.
+      await q(`UPDATE client_phones SET phone_number = '87770000003' WHERE phone_id = $1`, [second]);
+      const first = await send(9001, { target, form: 'order_pdf', idempotencyKey: key }).catch((error: ApiError) => error);
+      expect(first).toMatchObject({ code: 'ORDER_SEND_PHONE_CHANGED', details: { final: true } });
+      // The number is put back — the old token fits again — and the delayed first request arrives: still refused, no send.
+      await q(`UPDATE client_phones SET phone_number = $2 WHERE phone_id = $1`, [second, SECOND]);
+      const late = await send(9001, { target, form: 'order_pdf', idempotencyKey: key }).catch((error: ApiError) => error);
+      expect(late).toMatchObject({ code: 'ORDER_SEND_PHONE_CHANGED', details: { final: true } });
+      expect((await q(`SELECT count(*)::int n FROM whatsapp_order_sends`)).rows[0].n).toBe(0);
+      // The same choice under a new key goes through.
+      expect((await send(9001, { target, form: 'order_pdf' })).send.state).toBe('queued');
+      await q(`DELETE FROM whatsapp_order_sends`);
+
+      // The compatible release refused a chosen-phone command; the full release comes back: the late request stays refused.
+      const k2aKey = randomUUID();
+      repository.clientPhoneChoice = false;
+      expect(await send(9001, { target, form: 'order_pdf', idempotencyKey: k2aKey }).catch((error: ApiError) => error))
+        .toMatchObject({ code: 'ORDER_SEND_PHONE_CHOICE_UNAVAILABLE', details: { final: true } });
+      repository.clientPhoneChoice = true;
+      expect(await code(send(9001, { target, form: 'order_pdf', idempotencyKey: k2aKey }))).toBe('ORDER_SEND_PHONE_CHOICE_UNAVAILABLE');
+      expect((await q(`SELECT count(*)::int n FROM whatsapp_order_sends`)).rows[0].n).toBe(0);
+
+      // A chosen phone was deleted before the command committed: refused for good; another phone under a new key is sent.
+      const [, gone] = await clientPhones([PRIMARY, SECOND]);
+      const goneTarget = await toClient(gone);
+      const goneKey = randomUUID();
+      await q(`DELETE FROM client_phones WHERE phone_id = $1`, [gone]);
+      expect(await send(9001, { target: goneTarget, form: 'order_pdf', idempotencyKey: goneKey }).catch((error: ApiError) => error))
+        .toMatchObject({ code: 'CLIENT_PHONE_MISSING', details: { final: true } });
+      expect(await code(send(9001, { target: goneTarget, form: 'order_pdf', idempotencyKey: goneKey }))).toBe('CLIENT_PHONE_MISSING');
+      expect((await send(9001, { target: await toClient(), form: 'order_pdf' })).send.state).toBe('queued');
+      // Other refusals (they may pass later) are not recorded: the same key goes through once the reason is gone.
+      await q(`DELETE FROM whatsapp_order_sends`);
+      const retryKey = randomUUID();
+      await configure({ enabled: false });
+      expect(await send(9001, { target: await toClient(), form: 'order_pdf', idempotencyKey: retryKey }).catch((error: ApiError) => error))
+        .toMatchObject({ code: 'ORDER_SEND_DISABLED' });
+      await configure({ enabled: true });
+      expect((await send(9001, { target: await toClient(), form: 'order_pdf', idempotencyKey: retryKey })).send.state).toBe('queued');
+      // Retention never removes a recorded refusal: long after, with the number back and the full release, the old keys stay refused.
+      await q(`DELETE FROM whatsapp_order_sends`);
+      await q(`UPDATE whatsapp_order_send_refusals SET created_at = now() - interval '60 days'`);
+      await worker.cleanup(new Date(Date.now() + 2 * 60 * 60_000));
+      expect((await q(`SELECT count(*)::int n FROM whatsapp_order_send_refusals`)).rows[0].n).toBe(3);
+      expect(await code(send(9001, { target, form: 'order_pdf', idempotencyKey: key }))).toBe('ORDER_SEND_PHONE_CHANGED');
+      expect(await code(send(9001, { target, form: 'order_pdf', idempotencyKey: k2aKey }))).toBe('ORDER_SEND_PHONE_CHOICE_UNAVAILABLE');
+      expect((await q(`SELECT count(*)::int n FROM whatsapp_order_sends`)).rows[0].n).toBe(0);
+    });
+
+    it('a final refusal is audited in the transaction that records it: both or neither', async () => {
+      const [, second] = await clientPhones([PRIMARY, SECOND]);
+      const target = await toClient(second);
+      await q(`UPDATE client_phones SET phone_number = '87770000004' WHERE phone_id = $1`, [second]);
+      const key = randomUUID();
+      // The audit cannot be written: the refusal is not recorded either, and the command is not answered as final.
+      await q(`ALTER TABLE audit_log RENAME TO audit_log_off`);
+      let failure: unknown;
+      try { failure = await send(9001, { target, form: 'order_pdf', idempotencyKey: key }).catch((error: unknown) => error); }
+      finally { await q(`ALTER TABLE audit_log_off RENAME TO audit_log`); }
+      expect(failure).not.toBeInstanceOf(ApiError);
+      expect((await q(`SELECT count(*)::int n FROM whatsapp_order_send_refusals`)).rows[0].n).toBe(0);
+      // With the audit available: one refusal row and one audit event with the request id, the order and no number or token.
+      const refused = await service.send(9001, { target, form: 'order_pdf', idempotencyKey: key } as never, admin, 'req-final-refusal').catch((error: ApiError) => error);
+      expect(refused).toMatchObject({ code: 'ORDER_SEND_PHONE_CHANGED', details: { final: true } });
+      expect((await q(`SELECT request_id, order_id, error_code FROM whatsapp_order_send_refusals`)).rows).toEqual([
+        { request_id: 'req-final-refusal', order_id: '9001', error_code: 'ORDER_SEND_PHONE_CHANGED' }]);
+      const audits = (await q(`SELECT request_id, related_order_id, status_code, metadata_json FROM audit_log WHERE event = 'whatsapp.order_send.refused'
+        AND status_code = 'ORDER_SEND_PHONE_CHANGED' AND request_id = 'req-final-refusal'`)).rows;
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({ request_id: 'req-final-refusal', related_order_id: '9001',
+        metadata_json: { final: true, targetKind: 'client', clientPhoneId: second, form: 'order_pdf' } });
+      expect(JSON.stringify(audits[0])).not.toMatch(/7777|[0-9a-f]{64}/);
+      // A repeat of the recorded refusal adds no second audit event.
+      const countRefusals = async () => (await q(`SELECT count(*)::int n FROM audit_log WHERE event = 'whatsapp.order_send.refused'
+        AND status_code = 'ORDER_SEND_PHONE_CHANGED'`)).rows[0].n;
+      const before = await countRefusals();
+      await send(9001, { target, form: 'order_pdf', idempotencyKey: key }).catch(() => undefined);
+      expect(await countRefusals()).toBe(before);
+    });
+
+    it('a chosen phone that became unreadable is refused for good as «changed»; another phone is then sent under a new key', async () => {
+      const [, second] = await clientPhones([PRIMARY, SECOND]);
+      const target = await toClient(second);
+      const key = randomUUID();
+      await q(`UPDATE client_phones SET phone_number = '+12025550123' WHERE phone_id = $1`, [second]);
+      expect(await send(9001, { target, form: 'order_pdf', idempotencyKey: key }).catch((error: ApiError) => error))
+        .toMatchObject({ code: 'ORDER_SEND_PHONE_CHANGED', details: { final: true } });
+      expect((await send(9001, { target: await toClient(), form: 'order_pdf' })).send.state).toBe('queued');
+      // The default rule keeps its own answer for an unreadable primary number (not final: the phone may be fixed).
+      await clientPhones(['+12025550123']);
+      expect(await send(9001, { target: await toClient(), form: 'order_excel' }).catch((error: ApiError) => error))
+        .toMatchObject({ code: 'CLIENT_PHONE_INVALID' });
+    });
+
+    it('a send without a chosen phone never names the client_phone_id column (it is written only for a chosen phone)', async () => {
+      await clientPhones([PRIMARY, SECOND]);
+      await q(`ALTER TABLE whatsapp_order_sends DROP COLUMN client_phone_id`);
+      try {
+        const view = (await send(9001, { target: await toClient(), form: 'order_pdf' })).send;
+        expect((await row(view.sendId)).recipient_fingerprint).toMatch(/^[0-9a-f]{64}$/);
+        await worker.work();
+        expect(await row(view.sendId)).toMatchObject({ state: 'sent', destination_chat_id: `7${PHONE_DIGITS}@c.us` });
+      } finally {
+        await q(`ALTER TABLE whatsapp_order_sends ADD COLUMN client_phone_id BIGINT`);
+      }
+    });
+
+    it('the same form to the same number is one recipient however it was chosen; another number is another recipient', async () => {
+      const [primary, second] = await clientPhones([PRIMARY, SECOND]);
+      const waiting = (await send(9001, { target: await toClient(), form: 'order_pdf' })).send;
+      const duplicate = await send(9001, { target: await toClient(primary), form: 'order_pdf' }).catch((error: ApiError) => error);
+      expect(duplicate).toMatchObject({ code: 'ORDER_SEND_ALREADY_QUEUED', details: { sendId: waiting.sendId } });
+      expect((await send(9001, { target: await toClient(second), form: 'order_pdf' })).send.state).toBe('queued');
+    });
+
+    it('history made before fingerprints: the same number or a purged one is the same recipient, a known other number is not', async () => {
+      const [primary, second] = await clientPhones([PRIMARY, SECOND]);
+      const legacy = async (state: string, phone: string | null) => {
+        const view = (await send(9001, { target: await toClient(), form: 'order_pdf' })).send;
+        await q(`UPDATE whatsapp_order_sends SET recipient_fingerprint = NULL, client_phone_id = NULL, state = $2, phone_normalized = $3,
+          error_code = CASE WHEN $2 = 'unknown' THEN 'WAHA_UNCERTAIN' END WHERE send_id = $1`, [view.sendId, state, phone]);
+        return view.sendId;
+      };
+      // A waiting legacy row on the primary number: the primary is a duplicate, the second number is not.
+      const waiting = await legacy('queued', `7${PHONE_DIGITS}`);
+      expect(await code(send(9001, { target: await toClient(primary), form: 'order_pdf' }))).toBe('ORDER_SEND_ALREADY_QUEUED');
+      expect((await send(9001, { target: await toClient(second), form: 'order_pdf' })).send.state).toBe('queued');
+      await q(`DELETE FROM whatsapp_order_sends`);
+      // An unknown legacy outcome on the primary number: a repeat there needs a confirmation, the second number does not.
+      const unknown = await legacy('unknown', `7${PHONE_DIGITS}`);
+      expect(await code(send(9001, { target: await toClient(), form: 'order_pdf' }))).toBe('ORDER_SEND_PREVIOUS_UNKNOWN');
+      expect((await send(9001, { target: await toClient(second), form: 'order_pdf' })).send.state).toBe('queued');
+      await q(`DELETE FROM whatsapp_order_sends WHERE send_id <> $1`, [unknown]);
+      // After retention the legacy number is gone: nobody knows where it went — every number needs the confirmation.
+      await q(`UPDATE whatsapp_order_sends SET phone_normalized = NULL WHERE send_id = $1`, [unknown]);
+      expect(await code(send(9001, { target: await toClient(second), form: 'order_pdf' }))).toBe('ORDER_SEND_PREVIOUS_UNKNOWN');
+      expect((await send(9001, { target: await toClient(second), form: 'order_pdf', confirmAfterUnknown: unknown } as never)).send.state).toBe('queued');
+      expect(waiting).toBeTruthy();
+    });
+
+    it('a fingerprinted unknown outcome still asks for a confirmation after retention removed the number', async () => {
+      const [, second] = await clientPhones([PRIMARY, SECOND]);
+      const view = (await send(9001, { target: await toClient(second), form: 'order_pdf' })).send;
+      await q(`UPDATE whatsapp_order_sends SET state = 'unknown', error_code = 'WAHA_UNCERTAIN', created_at = now() - interval '8 days' WHERE send_id = $1`, [view.sendId]);
+      await worker.cleanup(new Date(Date.now() + 2 * 60 * 60_000));
+      expect((await row(view.sendId)).phone_normalized).toBeNull();
+      expect(await code(send(9001, { target: await toClient(second), form: 'order_pdf' }))).toBe('ORDER_SEND_PREVIOUS_UNKNOWN');
+      // The primary number is another recipient: no confirmation needed.
+      expect((await send(9001, { target: await toClient(), form: 'order_pdf' })).send.state).toBe('queued');
+    });
+
+    it('the worker never redirects a chosen phone: edited or deleted → cancelled; a change of the primary does not touch it', async () => {
+      const [, second] = await clientPhones([PRIMARY, SECOND]);
+      const edited = (await send(9001, { target: await toClient(second), form: 'order_pdf' })).send;
+      await q(`UPDATE client_phones SET phone_number = '87770000001' WHERE phone_id = $1`, [second]);
+      await worker.work();
+      expect(await row(edited.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_changed' });
+      const deleted = (await send(9001, { target: await toClient(second), form: 'order_pdf' })).send;
+      await q(`DELETE FROM client_phones WHERE phone_id = $1`, [second]);
+      await worker.work();
+      expect(await row(deleted.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_changed' });
+      expect(sent).toHaveLength(0);
+      // The chosen phone stays; another phone becomes primary meanwhile: the send still goes to the chosen number.
+      const [first, other] = await clientPhones([PRIMARY, SECOND]);
+      const kept = (await send(9001, { target: await toClient(other), form: 'order_pdf' })).send;
+      await q(`UPDATE client_phones SET is_primary = false WHERE phone_id = $1`, [first]);
+      await q(`INSERT INTO client_phones(client_id, phone_number, is_primary) VALUES (501, '87015550000', true)`);
+      await worker.work();
+      expect(await row(kept.sendId)).toMatchObject({ state: 'sent', destination_chat_id: '77771234567@c.us' });
+      // A default send still follows the primary: changed primary → cancelled, as before.
+      await slotPassed();
+      await clientPhones([PRIMARY, SECOND]);
+      const byDefault = (await send(9001, { target: await toClient(), form: 'order_excel' })).send;
+      await q(`UPDATE client_phones SET is_primary = (phone_number = $1) WHERE client_id = 501`, [SECOND]);
+      await worker.work();
+      expect(await row(byDefault.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_changed' });
+    });
+  });
+
   // ---- an employee as a recipient (03.10): contacts, identity across retention, never redirected.
   const EMPLOYEE_PHONE = '77015550101';
   const setupEmployee = async (opts: { id?: number; phones?: string[]; forms?: string[] } = {}) => {
@@ -769,15 +1074,24 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     const contacts = (await q(`SELECT contact_id, value_normalized FROM employee_work_contacts WHERE employee_id = $1 ORDER BY position`, [id])).rows;
     return { id, recipientKey: recipient.recipientKey, contacts };
   };
-  const toEmployee = (recipientKey: string, contactId?: number) => ({ kind: 'employee', recipientKey, ...(contactId ? { contactId } : {}) }) as never;
+  const toEmployee = (recipientKey: string, contactId?: number, contactToken?: string) =>
+    ({ kind: 'employee', recipientKey, ...(contactId ? { contactId } : {}), ...(contactToken ? { contactToken } : {}) }) as never;
 
   it('the menu offers settings employees as «логин / ФИО» with masked phones; Telegram is refused by the API', async () => {
     const employee = await setupEmployee({ phones: [EMPLOYEE_PHONE, '77015550102'] });
     const menu = await service.menu(admin);
     const item = menu.employees.find((entry) => entry.recipientKey === employee.recipientKey)!;
     expect(item.label).toBe('order-send-manager / Тест Сотрудник Мастер');
-    expect(item.contacts).toEqual([{ contactId: Number(employee.contacts[0].contact_id), masked: '7701***0101', isPrimary: true },
-      { contactId: Number(employee.contacts[1].contact_id), masked: '7701***0102', isPrimary: false }]);
+    expect(item.contacts).toEqual([
+      { contactId: Number(employee.contacts[0].contact_id), masked: '7701***0101', isPrimary: true, token: expect.stringMatching(/^[0-9a-f]{64}$/) },
+      { contactId: Number(employee.contacts[1].contact_id), masked: '7701***0102', isPrimary: false, token: expect.stringMatching(/^[0-9a-f]{64}$/) }]);
+    // The employee's contact row is edited after the menu was built: the token of the shown number no longer fits.
+    const second = item.contacts[1];
+    await q(`UPDATE employee_work_contacts SET value = '87015550199', value_normalized = '77015550199' WHERE contact_id = $1`, [second.contactId]);
+    expect(await code(send(9001, { target: toEmployee(employee.recipientKey, second.contactId, second.token), form: 'order_pdf' as never }))).toBe('ORDER_SEND_PHONE_CHANGED');
+    await q(`UPDATE employee_work_contacts SET value = '77015550102', value_normalized = '77015550102' WHERE contact_id = $1`, [second.contactId]);
+    expect((await send(9001, { target: toEmployee(employee.recipientKey, second.contactId, second.token), form: 'order_pdf' as never })).send.state).toBe('queued');
+    await q(`DELETE FROM whatsapp_order_sends`);
     expect(JSON.stringify(menu)).not.toContain(EMPLOYEE_PHONE);
     // users.username is citext as in the real schema: the directory still returns a real array of logins.
     expect((await service.settings()).employeeDirectory.find((entry) => entry.employeeId === employee.id))

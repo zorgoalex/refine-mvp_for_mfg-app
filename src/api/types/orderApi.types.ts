@@ -59,6 +59,85 @@ export interface OrderResourceDemandQuery {
   filmId?: number;
   supplierId?: number;
   vendorId?: number;
+  /** Только заказы, у которых есть хотя бы один незакупленный материал (капабилити procurement). */
+  unpurchasedOnly?: boolean;
+  /** Только заказы с активным распределением этого документа 1С (капабилити onecDocuments). */
+  onecDocumentId?: number;
+}
+
+export type OrderResourceKind = 'sheet_material' | 'film';
+export type OrderResourceUnit = 'm2' | 'lm';
+/** Откуда взято количество: готовый раскрой, площадь деталей или данных нет. */
+export type OrderResourceSource = 'cut' | 'area' | 'none';
+
+export interface OrderResourceProcurementDto {
+  purchased: boolean;
+  /** 0 — записи закупа ещё нет. */
+  version: number;
+  origin: 'manual' | 'onec' | null;
+  markedAt: IsoDateTimeString | null;
+  markedBy: { userId: number; name: string } | null;
+  quantityAtMark: number | null;
+  unitAtMark: OrderResourceUnit | null;
+  /** Потребность изменилась после отметки «Закуплено». */
+  changedSinceMark: boolean;
+}
+
+/** Ссылка на документ 1С, распределённый на строку потребности (фаза 3). */
+export interface OrderResourceOnecDocRefDto {
+  documentId: number;
+  allocationId: number;
+  kind: 'purchase_receipt' | 'cash_outflow' | 'bank_outflow';
+  number: string;
+  date: DateOnlyString;
+  quantity: number | null;
+  /** null без права finance.view. */
+  amount: number | null;
+  linkOrigin: 'auto' | 'manual' | 'suggested';
+  posted: boolean;
+  deletedInOnec: boolean;
+  /** Состояние документа 1С (нет у старого backend). */
+  documentState?: 'active' | 'conflict' | 'kind_changed' | 'missing' | 'deleted' | 'unposted' | 'line_removed';
+}
+
+export interface OrderResourceDemandLineDto {
+  resourceKey: string;
+  kind: OrderResourceKind;
+  refId: number;
+  name: string;
+  supplierName: string | null;
+  /** null — количество не посчитано (нет готового раскроя у плёнки). */
+  quantity: number | null;
+  unit: OrderResourceUnit;
+  areaM2: number;
+  detailsCount: number;
+  source: OrderResourceSource;
+  demandFingerprint: string;
+  /** Отметка закупа есть, а материал заказу больше не нужен. */
+  orphan: boolean;
+  procurement: OrderResourceProcurementDto;
+  /**
+   * Документы 1С, распределённые на этот закуп (активные распределения).
+   * Отсутствует у backend без фазы 3 (`capabilities.onecDocuments === false`).
+   */
+  onec?: { receipts: OrderResourceOnecDocRefDto[]; payments: OrderResourceOnecDocRefDto[] };
+  /** Снять «Закуплено» нельзя: есть приход из проведённого документа 1С. */
+  lockedByOnec?: boolean;
+}
+
+export interface OrderProcurementSummaryDto {
+  total: number;
+  purchased: number;
+  orphanPurchased: number;
+}
+
+export interface OrderResourceCapabilitiesDto {
+  procurement: boolean;
+  byMaterial: boolean;
+  cardDetails: boolean;
+  onecDocuments: boolean;
+  /** Вкладка «Экран снабжения»; нет в ответе старого backend → false. */
+  supplyWorkspace?: boolean;
 }
 
 export interface OrderSheetMaterialDemandDto {
@@ -92,12 +171,141 @@ export interface OrderResourceDemandDto {
   updatedAt: IsoDateTimeString;
   sheetMaterials: OrderSheetMaterialDemandDto[];
   films: OrderFilmDemandDto[];
+  /** API v2 (capabilities-gated): единые строки потребности. Отсутствует у старого backend. */
+  lines?: OrderResourceDemandLineDto[];
+  procurementSummary?: OrderProcurementSummaryDto;
 }
 
 export interface OrderResourceDemandResponse {
   data: OrderResourceDemandDto[];
   pagination: Pagination;
   refreshedAt: IsoDateTimeString;
+  /** Отсутствует у старого backend (до фазы 2) — FE должен рендерить только фазу 1. */
+  capabilities?: OrderResourceCapabilitiesDto;
+}
+
+export interface OrderResourceDetailRefDto {
+  source: 'detail' | 'hdf';
+  id: number;
+  detailNumber: number | null;
+  name: string | null;
+  heightMm: number | null;
+  widthMm: number | null;
+  quantity: number | null;
+}
+
+export interface OrderResourceCardLineDto extends OrderResourceDemandLineDto {
+  details: OrderResourceDetailRefDto[];
+}
+
+export interface OrderResourceCardDto extends Omit<OrderResourceDemandDto, 'lines'> {
+  lines: OrderResourceCardLineDto[];
+}
+
+export interface OrderResourceCardResponse {
+  data: OrderResourceCardDto;
+  refreshedAt: IsoDateTimeString;
+  capabilities: OrderResourceCapabilitiesDto;
+}
+
+export interface OrderResourceMaterialParticipantDto {
+  orderId: number;
+  orderName: string;
+  purchased: boolean;
+  version: number;
+  demandFingerprint: string;
+}
+
+export interface OrderResourceMaterialAggregateDto {
+  resourceKey: string;
+  kind: OrderResourceKind;
+  refId: number;
+  name: string;
+  supplierName: string | null;
+  unit: OrderResourceUnit;
+  totalQuantity: number;
+  ordersCount: number;
+  detailsCount: number;
+  noDataOrders: number;
+  purchasedOrders: number;
+  participants: OrderResourceMaterialParticipantDto[];
+}
+
+export interface OrderResourceByMaterialQuery {
+  search?: string;
+  dateFrom?: DateOnlyString;
+  dateTo?: DateOnlyString;
+  unpurchasedOnly?: boolean;
+  /** Только заказы с активным распределением этого документа 1С (капабилити onecDocuments). */
+  onecDocumentId?: number;
+}
+
+export interface OrderResourceByMaterialResponse {
+  data: OrderResourceMaterialAggregateDto[];
+  ordersCount: number;
+  refreshedAt: IsoDateTimeString;
+  capabilities: OrderResourceCapabilitiesDto;
+}
+
+/**
+ * Запрос списка документов 1С «Документ 1С»-фильтра: те же условия, что и
+ * `GET orders/resource-demands` (без paging и без onecDocumentId) — backend
+ * возвращает документы, привязанные к заказам ЭТОЙ выборки.
+ */
+export interface OrderResourceDemandOnecDocumentsQuery {
+  search?: string;
+  dateFrom?: DateOnlyString;
+  dateTo?: DateOnlyString;
+  sheetMaterialTypeId?: number;
+  filmId?: number;
+  supplierId?: number;
+  vendorId?: number;
+  unpurchasedOnly?: boolean;
+}
+
+/** Документ 1С, встречающийся среди заказов текущей выборки списка потребностей. */
+export interface OrderResourceDemandOnecDocumentItemDto {
+  documentId: number;
+  kind: 'purchase_receipt' | 'cash_outflow' | 'bank_outflow';
+  number: string;
+  date: DateOnlyString;
+  /** Заказов текущей выборки с активным распределением этого документа. */
+  ordersCount: number;
+}
+
+export interface OrderResourceDemandOnecDocumentsResponse {
+  data: OrderResourceDemandOnecDocumentItemDto[];
+  /** true — найдено больше лимита (200), показаны только первые. */
+  truncated: boolean;
+}
+
+export interface SetOrderResourceProcurementRequest {
+  purchased: boolean;
+  expectedVersion: number;
+  expectedDemandFingerprint: string;
+}
+
+export interface OrderResourceProcurementResultDto {
+  orderId: number;
+  resourceKey: string;
+  changed: boolean;
+  line: OrderResourceDemandLineDto;
+}
+
+export interface BulkOrderResourceProcurementItemDto {
+  orderId: number;
+  expectedVersion: number;
+  expectedDemandFingerprint: string;
+}
+
+export interface BulkOrderResourceProcurementRequest {
+  resourceKey: string;
+  purchased: boolean;
+  items: BulkOrderResourceProcurementItemDto[];
+}
+
+export interface BulkOrderResourceProcurementResponse {
+  results: OrderResourceProcurementResultDto[];
 }
 
 export interface Pagination {

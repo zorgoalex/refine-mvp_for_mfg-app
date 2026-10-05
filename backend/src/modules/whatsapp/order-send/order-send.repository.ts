@@ -7,19 +7,22 @@ import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { CLIENT_PHONE_SQL } from './forms/order-form-data';
-import { maskGroup, maskPhone } from './order-send-phone';
+import { maskGroup, maskPhone, normalizeClientPhone } from './order-send-phone';
 import { deliveryAllowedAt, estimateQueue, nextAllowed, type QueueEstimate } from './order-send-queue';
 import {
   ORDER_FORM_CODES, ORDER_SEND_QUEUE_MAX, ORDER_SEND_QUEUE_MAX_PER_ACTOR, ORDER_SEND_QUEUE_TTL_MS, ORDER_SEND_RETENTION_MS,
   ORDER_SEND_SETTINGS_PERMISSIONS, ORDER_SEND_SUPPORTED_CHANNELS,
   type OrderFormCode, type OrderSendCancelReason, type OrderSendChannel, type OrderSendChat, type OrderSendEmployeeRecipient,
   type OrderSendSettings, type OrderSendSettingsInput,
-  type OrderSendState, type OrderSendView,
+  type OrderSendState, type OrderSendView, ORDER_SEND_CLIENT_PHONE_CHOICE,
+  type OrderSendFormCode, type OrderSendTargetKind,
 } from './order-send.types';
 
 const SOURCE = 'erp_whatsapp_order_send';
 
-interface SettingsRow extends QueryResultRow {
+export interface SettingsRow extends QueryResultRow {
+  /** Schema 238; absent on an older schema reads as off. */
+  supplier_requests_enabled?: boolean;
   version: number; enabled: boolean; min_interval_minutes: number; send_window_minutes: number; client_forms: string[]; client_caption: string;
   last_delivery_at: Date | null; next_delivery_at: Date | null; updated_at: Date; updated_by: string | null; updated_by_username: string | null;
   identity_salt: string;
@@ -32,8 +35,15 @@ interface ChatRow extends QueryResultRow {
   chat_key: string; group_chat_id: string; label: string; forms: string[]; caption: string; position: number; archived_at: Date | null;
 }
 export interface SendRow extends QueryResultRow {
-  send_id: string; order_id: string; client_id: string | null; actor_id: string; request_id: string; idempotency_key: string; fingerprint: string;
-  target_kind: 'client' | 'chat' | 'employee'; chat_key: string | null; form_code: OrderFormCode; destination_chat_id: string | null;
+  /** Null for a supplier request send. */
+  send_id: string; order_id: string | null; client_id: string | null; actor_id: string; request_id: string; idempotency_key: string; fingerprint: string;
+  target_kind: OrderSendTargetKind; chat_key: string | null; form_code: OrderSendFormCode; destination_chat_id: string | null;
+  /** A supplier request send (schema 238): the request, what it was when queued, the supplier, the contact and the text. */
+  supplier_request_id?: string | null; supplier_request_version?: number | null; supplier_key?: string | null; supplier_id?: string | null;
+  supplier_contact_id?: string | null; request_content_sha256?: string | null; text_body?: string | null; text_sha256?: string | null;
+  text_length?: number | null; text_edited?: boolean | null; template_id?: string | null; template_version?: number | null;
+  supplier_request_number?: string | null; supplier_name?: string | null;
+  client_phone_id?: string | null;
   recipient_key?: string | null; employee_id?: string | null; employee_contact_id?: string | null; recipient_fingerprint?: string | null;
   employee_name?: string | null;
   phone_normalized: string | null; recipient_masked: string; file_key: string | null; sha256: string | null; size_bytes: number | null;
@@ -48,6 +58,8 @@ export interface SendRow extends QueryResultRow {
 export interface PartRow extends QueryResultRow {
   send_id: string; part_no: number; file_key: string | null; sha256: string | null; size_bytes: number | null;
   provider_message_id: string | null; sent_at: Date | null; purged_at: Date | null;
+  /** A message of a supplier text (schema 238). */
+  text_body?: string | null;
 }
 
 export interface StoredPart { fileKey: string; sha256: string; sizeBytes: number }
@@ -57,6 +69,16 @@ export interface EnqueueDecision {
   settings: SettingsRow;
   chat: ChatRow | null;
   employee: ResolvedEmployee | null;
+  client: ResolvedClient | null;
+}
+
+/** The client of the order and the phone the send goes to (the chosen one or the default), with its fingerprint. */
+export interface ResolvedClient {
+  clientId: number;
+  /** The client_phones row chosen in the command; null = the default rule (primary, else the smallest). */
+  phoneId: number | null;
+  phoneNormalized: string;
+  fingerprint: string;
 }
 
 /** An employee recipient resolved under the command locks: the contact actually used and its fingerprint. */
@@ -72,13 +94,16 @@ export interface NewSend {
   sendId: string; orderId: number; clientId: number | null; actor: CurrentUser; requestId: string; idempotencyKey: string; fingerprint: string;
   targetKind: 'client' | 'chat' | 'employee'; chatKey: string | null; form: OrderFormCode; destinationChatId: string | null; phoneNormalized: string | null;
   employee: ResolvedEmployee | null;
+  client?: ResolvedClient | null;
   recipientMasked: string; fileKey: string; sha256: string; sizeBytes: number; fileName: string; caption: string;
   /** Pages 2..N of an image form, in order. */
   parts: StoredPart[];
 }
 
 export interface SendIntent {
-  token: string; destinationChatId: string; fileKey: string; sha256: string; fileName: string; caption: string; form: OrderFormCode;
+  token: string; destinationChatId: string; fileKey: string; sha256: string; fileName: string; caption: string; form: OrderSendFormCode;
+  /** A supplier request send: its messages in order (the file fields are empty). */
+  texts: string[] | null;
   /** Pages 2..N (already sent ones are never sent again: there is no retry). */
   parts: Array<StoredPart & { partNo: number }>;
 }
@@ -93,12 +118,17 @@ export interface QueueSnapshot {
 
 /**
  * Lock order everywhere: whatsapp_broadcast_control → settings → chat / employee recipient → send row → order →
- * employees → employee_work_contacts (the contacts command: employees → contacts).
+ * employees → employee_work_contacts (the contacts command: employees → contacts). A supplier request send
+ * (supplier-send.repository.ts): control → settings → send row → actor → request → its orders → supplier → contacts.
  */
 @Injectable()
 export class OrderSendRepository {
   /** Random delay inside the send window, in milliseconds [0, maxExclusive); replaceable in tests. */
   random: (maxExclusive: number) => number = (maxExclusive) => (maxExclusive > 1 ? randomInt(maxExclusive) : 0);
+  /** Sends to a chosen client phone are created (false = the compatible release K2a; tests flip it). */
+  clientPhoneChoice: boolean = ORDER_SEND_CLIENT_PHONE_CHOICE;
+  /** Parts of already purged sends cleared per retention run (the backlog pass; tests lower it). */
+  purgeBacklogLimit = 2000;
 
   constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
 
@@ -126,7 +156,8 @@ export class OrderSendRepository {
    * linked to the employee, the phones of the employee only as masks, the primary one first.
    */
   async menuEmployees(): Promise<Array<{ recipientKey: string; label: string; forms: OrderFormCode[];
-    contacts: Array<{ contactId: number; masked: string; isPrimary: boolean }> }>> {
+    contacts: Array<{ contactId: number; masked: string; isPrimary: boolean; token: string }> }>> {
+    const salt = (await this.settingsRow(this.database, false)).identity_salt;
     const recipients = (await this.database.query<EmployeeRecipientRow & { usernames: string | null }>(`SELECT r.*, e.full_name employee_name,
         (SELECT string_agg(u.username::text, ', ' ORDER BY u.username) FROM users u WHERE u.employee_id = e.employee_id AND u.is_active) usernames
       FROM whatsapp_order_send_employees r JOIN employees e ON e.employee_id = r.employee_id
@@ -141,7 +172,8 @@ export class OrderSendRepository {
       label: row.usernames ? `${row.usernames} / ${row.employee_name ?? ''}` : row.employee_name ?? '',
       forms: knownForms(row.forms),
       contacts: contacts.filter((contact) => contact.employee_id === row.employee_id)
-        .map((contact) => ({ contactId: Number(contact.contact_id), masked: maskPhone(contact.value_normalized), isPrimary: contact.is_primary })),
+        .map((contact) => ({ contactId: Number(contact.contact_id), masked: maskPhone(contact.value_normalized), isPrimary: contact.is_primary,
+          token: phoneToken(salt, 'employee', Number(contact.contact_id), contact.value_normalized) })),
     }));
   }
 
@@ -178,7 +210,7 @@ export class OrderSendRepository {
       [row.recipient_key])).rows[0];
     if (!recipient || recipient.archived_at) return 'recipient_removed';
     if (String(recipient.employee_id) !== String(row.employee_id) || !ORDER_SEND_SUPPORTED_CHANNELS.includes(recipient.channel)) return 'recipient_changed';
-    if (!knownForms(recipient.forms).includes(row.form_code)) return 'form_not_allowed';
+    if (!knownForms(recipient.forms).includes(row.form_code as OrderFormCode)) return 'form_not_allowed';
     const employee = (await tx.query<{ is_active: boolean | null }>('SELECT is_active FROM employees WHERE employee_id = $1 FOR SHARE',
       [row.employee_id])).rows[0];
     if (!employee || employee.is_active === false) return 'recipient_removed';
@@ -194,7 +226,8 @@ export class OrderSendRepository {
    * the active employee, the chosen (or primary) phone of his own and the fingerprint that identifies
    * «this employee on this number» for the duplicate and unknown-outcome guards — it survives retention.
    */
-  async resolveEmployee(tx: TransactionClient, settings: SettingsRow, recipientKey: string, contactId: number | null): Promise<ResolvedEmployee> {
+  async resolveEmployee(tx: TransactionClient, settings: SettingsRow, recipientKey: string, contactId: number | null,
+    contactToken: string | null = null): Promise<ResolvedEmployee> {
     const recipient = (await tx.query<EmployeeRecipientRow>('SELECT * FROM whatsapp_order_send_employees WHERE recipient_key = $1 FOR SHARE',
       [recipientKey])).rows[0];
     if (!recipient || recipient.archived_at) throw new ApiError(409, 'ORDER_SEND_RECIPIENT_UNKNOWN', 'Этого сотрудника больше нет в настройках; обновите страницу');
@@ -209,6 +242,10 @@ export class OrderSendRepository {
     [recipient.employee_id, contactId])).rows[0];
     if (!contact) {
       throw new ApiError(409, 'EMPLOYEE_CONTACT_MISSING', contactId === null ? 'У сотрудника нет основного телефона' : 'Этого телефона у сотрудника больше нет; обновите страницу');
+    }
+    // The menu showed a mask of a number: the contact must still be that number (its row may have been edited since).
+    if (contactToken !== null && contactToken !== phoneToken(settings.identity_salt, 'employee', Number(contact.contact_id), contact.value_normalized)) {
+      throw new ApiError(409, 'ORDER_SEND_PHONE_CHANGED', 'Телефон получателя изменился; обновите страницу и выберите его заново');
     }
     return {
       recipient, employeeName: employee.full_name, contactId: Number(contact.contact_id), phoneNormalized: contact.value_normalized,
@@ -290,18 +327,25 @@ export class OrderSendRepository {
         }
       }
       const cancelled: Array<{ sendId: string; reason: OrderSendCancelReason }> = [];
-      if (archived.length) cancelled.push(...await this.cancelQueued(tx, `chat_key = ANY($1::uuid[])`, [archived], 'recipient_removed', requestId));
+      if (archived.length) cancelled.push(...await this.cancelQueued(tx, `chat_key = ANY($1::uuid[])`, [archived], 'recipient_removed', requestId, actor));
       if (archivedEmployees.length) {
-        cancelled.push(...await this.cancelQueued(tx, `recipient_key = ANY($1::uuid[])`, [archivedEmployees], 'recipient_removed', requestId));
+        cancelled.push(...await this.cancelQueued(tx, `recipient_key = ANY($1::uuid[])`, [archivedEmployees], 'recipient_removed', requestId, actor));
       }
-      if (!input.enabled) cancelled.push(...await this.cancelQueued(tx, 'true', [], 'disabled', requestId));
+      if (!input.enabled) cancelled.push(...await this.cancelQueued(tx, 'true', [], 'disabled', requestId, actor));
+      // Supplier requests: a client of the previous release sends no flag — it stays; switched off — the waiting ones are cancelled.
+      const supplierRequests = input.supplierRequestsEnabled ?? before.supplier_requests_enabled === true;
+      if (input.enabled && !supplierRequests) {
+        cancelled.push(...await this.cancelQueued(tx, `target_kind = 'supplier'`, [], 'disabled', requestId, actor));
+      }
       // A changed threshold or window redraws the pending random delay from the last delivery.
       const timingChanged = before.min_interval_minutes !== input.minIntervalMinutes || before.send_window_minutes !== input.sendWindowMinutes;
       const nextDelivery = timingChanged && before.last_delivery_at
         ? this.nextDeliveryAt(before.last_delivery_at, input.minIntervalMinutes, input.sendWindowMinutes) : before.next_delivery_at;
       await tx.query(`UPDATE whatsapp_order_send_settings SET version = version + 1, enabled = $1, min_interval_minutes = $2, client_forms = $3,
-        client_caption = $4, send_window_minutes = $6, next_delivery_at = $7, updated_at = now(), updated_by = $5 WHERE singleton`,
-      [input.enabled, input.minIntervalMinutes, input.clientForms, input.clientCaption, numericId(actor.id), input.sendWindowMinutes, nextDelivery]);
+        client_caption = $4, send_window_minutes = $6, next_delivery_at = $7, supplier_requests_enabled = $8, updated_at = now(), updated_by = $5
+        WHERE singleton`,
+      [input.enabled, input.minIntervalMinutes, input.clientForms, input.clientCaption, numericId(actor.id), input.sendWindowMinutes, nextDelivery,
+        supplierRequests]);
       if (timingChanged) {
         // Waiting sends are woken for a fresh check against the new gate; their 24-hour life is fixed.
         await tx.query(`UPDATE whatsapp_order_sends SET next_attempt_at = now(), updated_at = now() WHERE state = 'queued'`);
@@ -341,40 +385,58 @@ export class OrderSendRepository {
   async enqueue(params: {
     actorId: string; idempotencyKey: string; fingerprint: string; chatKey: string | null;
     /** An employee recipient: resolved under the locks before the guards (its fingerprint is the identity). */
-    employee?: { recipientKey: string; contactId: number | null } | null;
+    employee?: { recipientKey: string; contactId: number | null; contactToken?: string | null } | null;
+    /** The client target: the chosen phone of the order's client (null = the default rule) and the token of the number the menu showed. */
+    client?: { phoneId: number | null; phoneToken?: string | null } | null;
+    /** Who asks and under which request: a final refusal is audited in the transaction that records it. */
+    actor?: CurrentUser; requestId?: string;
     /** Same order, recipient and form: the latest such send must not be unknown unless confirmed by its id. */
     orderId?: number; form?: OrderFormCode; confirmAfterUnknown?: string | null;
     prepare: (tx: TransactionClient, decision: EnqueueDecision) => Promise<NewSend>;
   }): Promise<{ row: SendRow; replayed: boolean }> {
-    return this.database.transaction(async (tx) => {
+    const outcome = await this.database.transaction<{ row: SendRow; replayed: boolean } | { refusal: ApiError }>(async (tx) => {
       const control = (await tx.query<{ paused: boolean }>('SELECT paused FROM whatsapp_broadcast_control WHERE singleton_id = 1 FOR SHARE')).rows[0];
       const settings = await this.settingsRow(tx, true);
       const committed = await this.findCommand(tx, params.actorId, params.idempotencyKey);
       if (committed) return { row: assertSameCommand(committed, params.fingerprint), replayed: true };
+      // The other half of the ledger: a command that was refused for good stays refused, whatever changed since.
+      const refused = (await tx.query<{ error_code: string }>(
+        'SELECT error_code FROM whatsapp_order_send_refusals WHERE actor_id = $1 AND idempotency_key = $2',
+        [numericId(params.actorId), params.idempotencyKey])).rows[0];
+      if (refused) return { refusal: finalRefusal(refused.error_code) };
       if (control?.paused) throw new ApiError(409, 'ORDER_SEND_PAUSED', 'Все рассылки остановлены («Остановить все рассылки»)');
       if (!settings.enabled) throw new ApiError(409, 'ORDER_SEND_DISABLED', 'Отправка заказа из карточки выключена в настройках');
-      // Under the settings lock every card command is serialized, so the counts and checks cannot race.
-      const counts = (await tx.query<{ total: number; mine: number }>(`SELECT count(*)::int total,
-          count(*) FILTER (WHERE actor_id = $1)::int mine FROM whatsapp_order_sends WHERE state IN ('queued','sending')`,
-      [numericId(params.actorId)])).rows[0] ?? { total: 0, mine: 0 };
-      if (counts.total >= ORDER_SEND_QUEUE_MAX) {
-        throw new ApiError(409, 'ORDER_SEND_QUEUE_FULL', `В очереди уже ${ORDER_SEND_QUEUE_MAX} отправок; повторите позже`, { scope: 'total', limit: ORDER_SEND_QUEUE_MAX });
+      await this.assertQueueRoom(tx, params.actorId);
+      let employee: ResolvedEmployee | null = null;
+      let client: ResolvedClient | null = null;
+      let chat: ChatRow | null = null;
+      try {
+      // After the ledger lookup above: a committed command with a chosen phone is replayed by any release, a new
+      // one is made only where the choice is on (the compatible release answers with a definite refusal).
+      if (params.client?.phoneId != null && !this.clientPhoneChoice) {
+        throw new ApiError(409, 'ORDER_SEND_PHONE_CHOICE_UNAVAILABLE', 'Выбор телефона клиента сейчас недоступен; отправьте на основной телефон');
       }
-      if (counts.mine >= ORDER_SEND_QUEUE_MAX_PER_ACTOR) {
-        throw new ApiError(409, 'ORDER_SEND_QUEUE_FULL', `У вас уже ${ORDER_SEND_QUEUE_MAX_PER_ACTOR} отправок в очереди; дождитесь их или отмените лишние`,
-          { scope: 'actor', limit: ORDER_SEND_QUEUE_MAX_PER_ACTOR });
-      }
-      const employee = params.employee ? await this.resolveEmployee(tx, settings, params.employee.recipientKey, params.employee.contactId) : null;
-      // Who «the same recipient» is: the client, the chat, or the employee on this very number (a fingerprint
-      // that survives retention and a change of the primary contact or of the settings row).
-      const identity = employee
-        ? { sql: `target_kind = 'employee' AND recipient_fingerprint = $3`, value: employee.fingerprint }
-        : params.chatKey ? { sql: `target_kind = 'chat' AND chat_key = $3::uuid`, value: params.chatKey }
-          : { sql: `target_kind = 'client' AND $3::text IS NULL`, value: null };
-      if (params.orderId !== undefined && params.form !== undefined) {
+      employee = params.employee
+        ? await this.resolveEmployee(tx, settings, params.employee.recipientKey, params.employee.contactId, params.employee.contactToken ?? null) : null;
+      client = params.client && params.orderId !== undefined
+        ? await this.resolveClient(tx, settings, params.orderId, params.client.phoneId, params.client.phoneToken ?? null) : null;
+      // Who «the same recipient» is: the chat, or the employee or the client on this very number (a fingerprint
+      // that survives retention and a change of the primary contact or of the settings row). A client send made
+      // before fingerprints existed counts as the same recipient when it went to this number or its number is
+      // already purged (unknown → the careful answer).
+      const identity: { sql: string; values: unknown[] } | null = employee
+        ? { sql: `target_kind = 'employee' AND recipient_fingerprint = $3`, values: [employee.fingerprint] }
+        : params.chatKey ? { sql: `target_kind = 'chat' AND chat_key = $3::uuid`, values: [params.chatKey] }
+          : client ? {
+            sql: `target_kind = 'client' AND (recipient_fingerprint = $3
+              OR (recipient_fingerprint IS NULL AND (phone_normalized IS NULL OR phone_normalized = $4)))`,
+            values: [client.fingerprint, client.phoneNormalized],
+          } : null;
+      // No identity = a client target whose order is gone: «prepare» refuses it as not found.
+      if (identity && params.orderId !== undefined && params.form !== undefined) {
         const waiting = (await tx.query<{ send_id: string }>(`SELECT send_id FROM whatsapp_order_sends WHERE state IN ('queued','sending')
           AND order_id = $1 AND form_code = $2 AND ${identity.sql} ORDER BY created_at LIMIT 1`,
-        [params.orderId, params.form, identity.value])).rows[0];
+        [params.orderId, params.form, ...identity.values])).rows[0];
         if (waiting) {
           const estimate = (await this.queueSnapshot(tx)).estimates.get(waiting.send_id);
           throw new ApiError(409, 'ORDER_SEND_ALREADY_QUEUED', 'Эта форма этому получателю уже ждёт отправки',
@@ -383,27 +445,54 @@ export class OrderSendRepository {
         // Under the settings lock every card command is serialized, so this check cannot race.
         const previous = (await tx.query<{ send_id: string; state: string; created_at: Date }>(`SELECT send_id, state, created_at
           FROM whatsapp_order_sends WHERE order_id = $1 AND form_code = $2 AND ${identity.sql}
-          ORDER BY created_at DESC LIMIT 1`, [params.orderId, params.form, identity.value])).rows[0];
+          ORDER BY created_at DESC LIMIT 1`, [params.orderId, params.form, ...identity.values])).rows[0];
         if (previous?.state === 'unknown' && params.confirmAfterUnknown !== previous.send_id) {
           throw new ApiError(409, 'ORDER_SEND_PREVIOUS_UNKNOWN', 'Результат прежней отправки этой формы неизвестен: проверьте чат и подтвердите повтор',
             { sendId: previous.send_id, createdAt: previous.created_at.toISOString() });
         }
       }
-      let chat: ChatRow | null = null;
       if (params.chatKey) {
         chat = (await tx.query<ChatRow>('SELECT * FROM whatsapp_order_send_chats WHERE chat_key = $1 FOR SHARE', [params.chatKey])).rows[0] ?? null;
         if (!chat || chat.archived_at) throw new ApiError(409, 'ORDER_SEND_CHAT_UNKNOWN', 'Этого чата больше нет в настройках; обновите страницу');
       }
-      const send = await params.prepare(tx, { settings, chat, employee });
+      } catch (error) {
+        // The recipient is not what the user chose any more: nothing was written yet, so the refusal itself is
+        // recorded and committed under the same lock — the browser may drop its key, and a late or repeated
+        // request with it meets this very refusal, never a send.
+        if (!(error instanceof ApiError) || !FINAL_REFUSAL_CODES.has(error.code)) throw error;
+        await tx.query(`INSERT INTO whatsapp_order_send_refusals (actor_id, idempotency_key, fingerprint, error_code, order_id, request_id)
+          VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (actor_id, idempotency_key) DO NOTHING`,
+        [numericId(params.actorId), params.idempotencyKey, params.fingerprint, error.code, params.orderId ?? null, params.requestId ?? null]);
+        // The decision is permanent, so its audit is written with it or not at all (no numbers, no tokens).
+        const employeeId = params.employee
+          ? (await tx.query<{ employee_id: string }>('SELECT employee_id FROM whatsapp_order_send_employees WHERE recipient_key = $1',
+            [params.employee.recipientKey])).rows[0]?.employee_id ?? null : null;
+        await auditService.record(tx, {
+          event: 'whatsapp.order_send.refused', entityType: 'order', entityId: params.orderId ?? 0,
+          actorUserId: numericId(params.actorId), actorUsername: params.actor?.username ?? null, actorRole: params.actor?.role ?? null,
+          requestId: params.requestId ?? `order-send-refusal-${params.idempotencyKey}`, source: 'erp_whatsapp_order_send',
+          ...(params.orderId !== undefined ? { relatedOrderId: params.orderId } : {}), statusCode: error.code,
+          ...(employeeId !== null ? { relatedEntities: [{ entityType: 'employee', entityId: Number(employeeId) }] } : {}),
+          metadata: { final: true, targetKind: params.employee ? 'employee' : params.chatKey ? 'chat' : 'client', chatKey: params.chatKey,
+            recipientKey: params.employee?.recipientKey ?? null, employeeId: employeeId === null ? null : Number(employeeId),
+            clientPhoneId: params.client?.phoneId ?? null, form: params.form ?? null, errorCode: error.code, source: 'order_card' },
+        });
+        return { refusal: new ApiError(error.statusCode, error.code, error.message, { ...(error.details ?? {}), final: true }) };
+      }
+      const send = await params.prepare(tx, { settings, chat, employee, client });
+      // A send without a chosen phone never names client_phone_id: the column is written only for a chosen phone.
+      // (Both releases need migration 237 anyway — the ledger of final refusals comes with it.)
+      const chosenPhone = send.client?.phoneId ?? null;
       const row = (await tx.query<SendRow>(`INSERT INTO whatsapp_order_sends (send_id, order_id, client_id, actor_id, request_id, idempotency_key,
           fingerprint, target_kind, chat_key, form_code, destination_chat_id, phone_normalized, recipient_masked, file_key, sha256, size_bytes,
-          file_name, caption, queue_expires_at, parts_total, recipient_key, employee_id, employee_contact_id, recipient_fingerprint)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) RETURNING *`, [
+          file_name, caption, queue_expires_at, parts_total, recipient_key, employee_id, employee_contact_id, recipient_fingerprint${chosenPhone === null ? '' : ', client_phone_id'})
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24${chosenPhone === null ? '' : ',$25'}) RETURNING *`, [
         send.sendId, send.orderId, send.clientId, numericId(send.actor.id), send.requestId, send.idempotencyKey, send.fingerprint, send.targetKind,
         send.chatKey, send.form, send.destinationChatId, send.phoneNormalized, send.recipientMasked, send.fileKey, send.sha256, send.sizeBytes,
         send.fileName, send.caption, new Date(Date.now() + ORDER_SEND_QUEUE_TTL_MS), 1 + send.parts.length,
         send.employee?.recipient.recipient_key ?? null, send.employee ? Number(send.employee.recipient.employee_id) : null,
-        send.employee?.contactId ?? null, send.employee?.fingerprint ?? null,
+        send.employee?.contactId ?? null, send.employee?.fingerprint ?? send.client?.fingerprint ?? null,
+        ...(chosenPhone === null ? [] : [chosenPhone]),
       ])).rows[0];
       for (const [index, part] of send.parts.entries()) {
         await tx.query(`INSERT INTO whatsapp_order_send_parts (send_id, part_no, file_key, sha256, size_bytes) VALUES ($1, $2, $3, $4, $5)`,
@@ -416,6 +505,23 @@ export class OrderSendRepository {
       });
       return { row, replayed: false };
     });
+    // A final refusal is committed first (see above) and thrown only then.
+    if ('refusal' in outcome) throw outcome.refusal;
+    return outcome;
+  }
+
+  /** Queue limits (whole queue / one author). Under the settings lock every command is serialized, so the counts cannot race. */
+  async assertQueueRoom(tx: TransactionClient, actorId: string): Promise<void> {
+    const counts = (await tx.query<{ total: number; mine: number }>(`SELECT count(*)::int total,
+        count(*) FILTER (WHERE actor_id = $1)::int mine FROM whatsapp_order_sends WHERE state IN ('queued','sending')`,
+    [numericId(actorId)])).rows[0] ?? { total: 0, mine: 0 };
+    if (counts.total >= ORDER_SEND_QUEUE_MAX) {
+      throw new ApiError(409, 'ORDER_SEND_QUEUE_FULL', `В очереди уже ${ORDER_SEND_QUEUE_MAX} отправок; повторите позже`, { scope: 'total', limit: ORDER_SEND_QUEUE_MAX });
+    }
+    if (counts.mine >= ORDER_SEND_QUEUE_MAX_PER_ACTOR) {
+      throw new ApiError(409, 'ORDER_SEND_QUEUE_FULL', `У вас уже ${ORDER_SEND_QUEUE_MAX_PER_ACTOR} отправок в очереди; дождитесь их или отмените лишние`,
+        { scope: 'actor', limit: ORDER_SEND_QUEUE_MAX_PER_ACTOR });
+    }
   }
 
   // ------------------------------------------------------------------ worker
@@ -427,7 +533,7 @@ export class OrderSendRepository {
 
   async setClientDestination(sendId: string, chatId: string): Promise<boolean> {
     const updated = await this.database.query(`UPDATE whatsapp_order_sends SET destination_chat_id = $2, updated_at = now()
-      WHERE send_id = $1 AND state = 'queued' AND target_kind IN ('client','employee') AND destination_chat_id IS NULL`, [sendId, chatId]);
+      WHERE send_id = $1 AND state = 'queued' AND target_kind IN ('client','employee','supplier') AND destination_chat_id IS NULL`, [sendId, chatId]);
     return (updated.rowCount ?? 0) > 0;
   }
 
@@ -469,13 +575,15 @@ export class OrderSendRepository {
       // The verification may have waited on authorization locks: decide TTL and the gate on fresh time.
       const decidedAt = clock();
       if (row.queue_expires_at.getTime() <= decidedAt.getTime()) { await this.finishQueued(tx, row, { state: 'expired' }); return null; }
-      if (!row.destination_chat_id || !row.file_key || !row.sha256) {
+      const text = row.target_kind === 'supplier';
+      if (!row.destination_chat_id || (text ? !row.text_body : !row.file_key || !row.sha256)) {
         await this.finishQueued(tx, row, { state: 'failed', errorCode: 'ORDER_SEND_PAYLOAD_MISSING' });
         return null;
       }
       const parts = (await tx.query<PartRow>(`SELECT * FROM whatsapp_order_send_parts WHERE send_id = $1 AND purged_at IS NULL
         ORDER BY part_no`, [sendId])).rows;
-      if (parts.length !== row.parts_total - 1 || parts.some((part) => !part.file_key || !part.sha256 || !part.size_bytes)) {
+      if (parts.length !== row.parts_total - 1 || parts.some((part, index) => part.part_no !== index + 2
+        || (text ? !part.text_body : !part.file_key || !part.sha256 || !part.size_bytes))) {
         // Never start a delivery that cannot finish: a missing page fails the send before any attempt.
         await this.finishQueued(tx, row, { state: 'failed', errorCode: 'ORDER_SEND_PAYLOAD_MISSING' });
         return null;
@@ -492,14 +600,18 @@ export class OrderSendRepository {
       const updated = (await tx.query<SendRow>(`UPDATE whatsapp_order_sends SET state = 'sending', attempt_count = 1, lock_token = $2,
           send_started_at = $3, error_code = NULL, updated_at = now() WHERE send_id = $1 RETURNING *`, [sendId, token, decidedAt])).rows[0];
       await this.audit(tx, updated, 'intent', null, { from: 'queued', to: 'sending', partsTotal: row.parts_total });
-      return { token, destinationChatId: row.destination_chat_id, fileKey: row.file_key, sha256: row.sha256, fileName: row.file_name,
-        caption: row.caption ?? '', form: row.form_code,
+      if (text) {
+        return { token, destinationChatId: row.destination_chat_id, fileKey: '', sha256: '', fileName: row.file_name, caption: '', form: row.form_code,
+          texts: [row.text_body as string, ...parts.map((part) => part.text_body as string)], parts: [] };
+      }
+      return { token, destinationChatId: row.destination_chat_id, fileKey: row.file_key as string, sha256: row.sha256 as string, fileName: row.file_name,
+        caption: row.caption ?? '', form: row.form_code, texts: null,
         parts: parts.map((part) => ({ partNo: part.part_no, fileKey: part.file_key as string, sha256: part.sha256 as string, sizeBytes: part.size_bytes as number })) };
     });
   }
 
   /**
-   * One page of an image form was accepted by WhatsApp (pages 2..N; page 1 is stored by `settle`).
+   * One page of an image form or one message of a supplier text was accepted by WhatsApp (2..N; the first is stored by `settle`).
    * Fenced by the intent token: a stale worker never writes over a recovered send.
    */
   async recordPartSent(sendId: string, token: string, partNo: number, providerMessageId: string): Promise<boolean> {
@@ -576,33 +688,49 @@ export class OrderSendRepository {
    * the recipient (group id, phone) and the provider id. Returns every file key still referenced.
    */
   async expireAndPurge(now = new Date()): Promise<{ referenced: Set<string>; purgedKeys: string[] }> {
+    // Recorded final refusals are never purged: like the key of an accepted send, they are the ledger of
+    // commands (a row holds no recipient data — only the actor, the key, the code and the order).
     const expired = (await this.database.query<{ send_id: string }>(`SELECT send_id FROM whatsapp_order_sends
       WHERE state = 'queued' AND queue_expires_at <= $1 LIMIT 100`, [now])).rows;
     for (const item of expired) await this.finishBeforeIntent(item.send_id, { state: 'expired' }, now);
-    const purgedKeys = (await this.database.query<{ file_key: string | null }>(`
-      WITH purged AS (
-        SELECT send_id, file_key FROM whatsapp_order_sends
-        WHERE purged_at IS NULL AND state NOT IN ('queued','sending') AND created_at < $1
-        ORDER BY created_at LIMIT 500 FOR UPDATE SKIP LOCKED
-      )
-      UPDATE whatsapp_order_sends s SET file_key = NULL, sha256 = NULL, size_bytes = NULL, destination_chat_id = NULL, phone_normalized = NULL,
-        provider_message_id = NULL, purged_at = now(), updated_at = now()
-      FROM purged WHERE s.send_id = purged.send_id
-      RETURNING purged.file_key`, [new Date(now.getTime() - ORDER_SEND_RETENTION_MS)])).rows
-      .map((row) => row.file_key).filter((key): key is string => key !== null);
-    // Pages 2..N of purged sends lose their file and provider id (it may carry the phone) too.
-    const purgedParts = (await this.database.query<{ file_key: string | null }>(`
+    // One transaction: the chosen sends and ALL their parts lose the file, the text, the recipient and the provider
+    // ids together — a send is never marked purged while a part of it keeps its text.
+    const { purgedKeys, purgedParts } = await this.database.transaction(async (tx) => {
+      const sends = (await tx.query<{ send_id: string; file_key: string | null }>(`
+        WITH purged AS (
+          SELECT send_id, file_key FROM whatsapp_order_sends
+          WHERE purged_at IS NULL AND state NOT IN ('queued','sending') AND created_at < $1
+          ORDER BY created_at LIMIT 500 FOR UPDATE SKIP LOCKED
+        )
+        UPDATE whatsapp_order_sends s SET file_key = NULL, sha256 = NULL, size_bytes = NULL, destination_chat_id = NULL, phone_normalized = NULL,
+          provider_message_id = NULL, text_body = NULL, purged_at = now(), updated_at = now()
+        FROM purged WHERE s.send_id = purged.send_id
+        RETURNING s.send_id, purged.file_key`, [new Date(now.getTime() - ORDER_SEND_RETENTION_MS)])).rows;
+      const parts = sends.length === 0 ? [] : (await tx.query<{ file_key: string | null }>(`
+        WITH purged AS (
+          SELECT send_id, part_no, file_key FROM whatsapp_order_send_parts WHERE send_id = ANY($1::uuid[]) AND purged_at IS NULL FOR UPDATE
+        )
+        UPDATE whatsapp_order_send_parts p SET file_key = NULL, sha256 = NULL, size_bytes = NULL, provider_message_id = NULL, text_body = NULL,
+          purged_at = now()
+        FROM purged WHERE p.send_id = purged.send_id AND p.part_no = purged.part_no
+        RETURNING purged.file_key`, [sends.map((row) => row.send_id)])).rows;
+      const keys = (rows: Array<{ file_key: string | null }>) => rows.map((row) => row.file_key).filter((key): key is string => key !== null);
+      return { purgedKeys: keys(sends), purgedParts: keys(parts) };
+    });
+    // Apart, and bounded: parts left by sends that an earlier release marked purged without them.
+    const backlogParts = (await this.database.query<{ file_key: string | null }>(`
       WITH purged AS (
         SELECT p.send_id, p.part_no, p.file_key FROM whatsapp_order_send_parts p JOIN whatsapp_order_sends s ON s.send_id = p.send_id
-        WHERE p.purged_at IS NULL AND s.purged_at IS NOT NULL LIMIT 2000 FOR UPDATE OF p SKIP LOCKED
+        WHERE p.purged_at IS NULL AND s.purged_at IS NOT NULL LIMIT $1 FOR UPDATE OF p SKIP LOCKED
       )
-      UPDATE whatsapp_order_send_parts p SET file_key = NULL, sha256 = NULL, size_bytes = NULL, provider_message_id = NULL, purged_at = now()
+      UPDATE whatsapp_order_send_parts p SET file_key = NULL, sha256 = NULL, size_bytes = NULL, provider_message_id = NULL, text_body = NULL,
+        purged_at = now()
       FROM purged WHERE p.send_id = purged.send_id AND p.part_no = purged.part_no
-      RETURNING purged.file_key`)).rows.map((row) => row.file_key).filter((key): key is string => key !== null);
+      RETURNING purged.file_key`, [this.purgeBacklogLimit])).rows.map((row) => row.file_key).filter((key): key is string => key !== null);
     const referenced = new Set((await this.database.query<{ file_key: string }>(
       `SELECT file_key FROM whatsapp_order_sends WHERE file_key IS NOT NULL
        UNION SELECT file_key FROM whatsapp_order_send_parts WHERE file_key IS NOT NULL`)).rows.map((row) => row.file_key));
-    return { referenced, purgedKeys: [...purgedKeys, ...purgedParts] };
+    return { referenced, purgedKeys: [...purgedKeys, ...purgedParts, ...backlogParts] };
   }
 
   // ------------------------------------------------------------------ reads
@@ -644,15 +772,86 @@ export class OrderSendRepository {
    * FOR SHARE, the client FOR UPDATE (an INSERT into client_phones needs FOR KEY SHARE on it through
    * the FK, so a new — possibly primary — phone waits) and the existing phones FOR SHARE.
    */
-  async currentClientPhone(tx: DatabaseClient, orderId: number): Promise<{ clientId: number | null; phone: string | null } | null> {
+  /**
+   * The phone a client send goes to, as it is now, under the intent locks. `phoneId` — the phone row chosen in
+   * the command (it must still belong to the order's client); without it — the default rule.
+   */
+  async currentClientPhone(tx: DatabaseClient, orderId: number, phoneId: number | null = null): Promise<{ clientId: number | null; phone: string | null } | null> {
     const order = (await tx.query<{ client_id: string | null }>(`SELECT client_id FROM orders
       WHERE order_id = $1 AND delete_flag = false AND deleted_at IS NULL FOR SHARE`, [orderId])).rows[0];
     if (!order) return null;
     if (order.client_id === null) return { clientId: null, phone: null };
     await tx.query('SELECT 1 FROM clients WHERE client_id = $1 FOR UPDATE', [order.client_id]);
     await tx.query('SELECT 1 FROM client_phones WHERE client_id = $1 FOR SHARE', [order.client_id]);
-    const phone = (await tx.query<{ client_phone: string | null }>(CLIENT_PHONE_SQL, [order.client_id])).rows[0]?.client_phone ?? null;
+    const phone = phoneId === null
+      ? (await tx.query<{ client_phone: string | null }>(CLIENT_PHONE_SQL, [order.client_id])).rows[0]?.client_phone ?? null
+      : (await tx.query<{ phone_number: string }>('SELECT phone_number FROM client_phones WHERE phone_id = $1 AND client_id = $2',
+        [phoneId, order.client_id])).rows[0]?.phone_number ?? null;
     return { clientId: Number(order.client_id), phone };
+  }
+
+  /**
+   * The client target of a command: the order's client and the phone to send to. The order row is share-locked,
+   * so its client cannot change before the command commits. Null when the order is not there («prepare» says so).
+   */
+  async resolveClient(tx: TransactionClient, settings: SettingsRow, orderId: number, phoneId: number | null,
+    phoneToken_: string | null = null): Promise<ResolvedClient | null> {
+    const order = (await tx.query<{ client_id: string | null }>(`SELECT client_id FROM orders
+      WHERE order_id = $1 AND delete_flag = false AND deleted_at IS NULL FOR SHARE`, [orderId])).rows[0];
+    if (!order) return null;
+    if (order.client_id === null) throw new ApiError(409, 'CLIENT_PHONE_MISSING', 'У клиента заказа нет телефона');
+    const clientId = Number(order.client_id);
+    let raw: string | null;
+    if (phoneId === null) {
+      raw = (await tx.query<{ client_phone: string | null }>(CLIENT_PHONE_SQL, [clientId])).rows[0]?.client_phone ?? null;
+    } else {
+      const row = (await tx.query<{ phone_number: string }>('SELECT phone_number FROM client_phones WHERE phone_id = $1 AND client_id = $2',
+        [phoneId, clientId])).rows[0];
+      if (!row) throw new ApiError(409, 'CLIENT_PHONE_MISSING', 'Этого телефона у клиента больше нет; обновите страницу');
+      raw = row.phone_number;
+    }
+    let phoneNormalized: string;
+    try {
+      phoneNormalized = normalizeClientPhone(raw);
+    } catch (error) {
+      // A chosen phone that no longer reads as a number is not the number the menu showed (it only lists readable ones).
+      if (phoneId !== null) throw new ApiError(409, 'ORDER_SEND_PHONE_CHANGED', 'Телефон получателя изменился; обновите страницу и выберите его заново');
+      throw error;
+    }
+    // A chosen phone comes with the token of the number the menu showed: the row may have been edited since, and
+    // a send must never go to a number the user did not see.
+    if (phoneId !== null && phoneToken_ !== phoneToken(settings.identity_salt, 'client', phoneId, phoneNormalized)) {
+      throw new ApiError(409, 'ORDER_SEND_PHONE_CHANGED', 'Телефон получателя изменился; обновите страницу и выберите его заново');
+    }
+    return { clientId, phoneId, phoneNormalized, fingerprint: clientFingerprint(settings.identity_salt, clientId, phoneNormalized) };
+  }
+
+  /** Phones of the order's client for the card menu: only the ones a send can go to, masked, the primary first. */
+  async clientContacts(orderId: number): Promise<{ clientId: number | null;
+    contacts: Array<{ phoneId: number; masked: string; isPrimary: boolean; isDefault: boolean; token: string }> }> {
+    const order = (await this.database.query<{ client_id: string | null }>(`SELECT client_id FROM orders
+      WHERE order_id = $1 AND delete_flag = false AND deleted_at IS NULL`, [orderId])).rows[0];
+    if (!order || order.client_id === null) return { clientId: null, contacts: [] };
+    // The compatible release offers no phones to choose: the card then sends by the default rule.
+    if (!this.clientPhoneChoice) return { clientId: Number(order.client_id), contacts: [] };
+    const rows = (await this.database.query<{ phone_id: string; phone_number: string; is_primary: boolean | null }>(
+      `SELECT phone_id, phone_number, is_primary FROM client_phones WHERE client_id = $1 ORDER BY is_primary DESC NULLS LAST, phone_id`, [order.client_id])).rows;
+    const salt = (await this.settingsRow(this.database, false)).identity_salt;
+    // The phone a send without a choice goes to (primary, else the smallest): the menu must know whether its
+    // only readable phone is that one.
+    const byDefault = (await this.database.query<{ client_phone: string | null }>(CLIENT_PHONE_SQL, [order.client_id])).rows[0]?.client_phone ?? null;
+    const seen = new Set<string>();
+    const contacts: Array<{ phoneId: number; masked: string; isPrimary: boolean; isDefault: boolean; token: string }> = [];
+    for (const row of rows) {
+      let normalized: string;
+      try { normalized = normalizeClientPhone(row.phone_number); } catch { continue; }
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      const phoneId = Number(row.phone_id);
+      contacts.push({ phoneId, masked: maskPhone(normalized), isPrimary: row.is_primary === true, isDefault: row.phone_number === byDefault,
+        token: phoneToken(salt, 'client', phoneId, normalized) });
+    }
+    return { clientId: Number(order.client_id), contacts };
   }
 
   async chat(tx: DatabaseClient, chatKey: string): Promise<ChatRow | null> {
@@ -661,37 +860,45 @@ export class OrderSendRepository {
 
   // ------------------------------------------------------------------ helpers
 
-  private async settingsRow(client: DatabaseClient, forUpdate: boolean): Promise<SettingsRow> {
+  async settingsRow(client: DatabaseClient, forUpdate: boolean): Promise<SettingsRow> {
     const row = (await client.query<SettingsRow>(`SELECT s.*, u.username updated_by_username FROM whatsapp_order_send_settings s
       LEFT JOIN users u ON u.user_id = s.updated_by WHERE s.singleton ${forUpdate ? 'FOR UPDATE OF s' : ''}`)).rows[0];
     if (!row) throw new ApiError(503, 'ORDER_SEND_UNAVAILABLE', 'Отправка заказа из карточки недоступна');
     return row;
   }
 
-  private async cancelQueued(tx: TransactionClient, where: string, params: unknown[], reason: OrderSendCancelReason, requestId: string) {
+  /** Waiting sends cancelled by a settings change: `actor` — who changed the settings (the author of a send is linked apart). */
+  private async cancelQueued(tx: TransactionClient, where: string, params: unknown[], reason: OrderSendCancelReason, requestId: string,
+    actor: CurrentUser) {
     const rows = (await tx.query<SendRow>(`SELECT * FROM whatsapp_order_sends WHERE state = 'queued' AND ${where} FOR UPDATE`, params)).rows;
-    for (const row of rows) await this.finishQueued(tx, row, { state: 'cancelled', reason }, requestId);
+    for (const row of rows) await this.finishQueued(tx, row, { state: 'cancelled', reason }, requestId, actor);
     return rows.map((row) => ({ sendId: row.send_id, reason }));
   }
 
-  private async finishQueued(tx: TransactionClient, row: SendRow,
-    outcome: { state: 'failed'; errorCode: string } | { state: 'cancelled'; reason: OrderSendCancelReason } | { state: 'expired' }, requestId?: string) {
+  async finishQueued(tx: TransactionClient, row: SendRow,
+    outcome: { state: 'failed'; errorCode: string } | { state: 'cancelled'; reason: OrderSendCancelReason } | { state: 'expired' }, requestId?: string,
+    /** Who caused it, when it is not the system (a settings change): never the author of the send by default. */
+    actor: CurrentUser | null = null) {
     const updated = (await tx.query<SendRow>(`UPDATE whatsapp_order_sends SET state = $2, cancel_reason = $3, error_code = $4, updated_at = now()
       WHERE send_id = $1 AND state = 'queued' RETURNING *`, [
       row.send_id, outcome.state, outcome.state === 'cancelled' ? outcome.reason : null, outcome.state === 'failed' ? outcome.errorCode : null,
     ])).rows[0];
     if (!updated) return false;
-    await this.audit(tx, updated, outcome.state, null, {
+    await this.audit(tx, updated, outcome.state, actor, {
       from: 'queued', to: outcome.state,
       ...(outcome.state === 'cancelled' ? { cancelReason: outcome.reason } : {}),
       ...(outcome.state === 'failed' ? { errorCode: outcome.errorCode } : {}),
-    }, requestId);
+    }, requestId, actor ? Number(row.actor_id) : undefined);
     return true;
   }
 
   /** Audit of one send: no phone, chat id, caption or file content — only masks and codes. */
-  private async audit(tx: TransactionClient, row: SendRow, action: string, actor: CurrentUser | null, transition: Record<string, unknown>,
+  async audit(tx: TransactionClient, row: SendRow, action: string, actor: CurrentUser | null, transition: Record<string, unknown>,
     requestId?: string, relatedUserId?: number) {
+    if (row.target_kind === 'supplier') {
+      await this.auditSupplierSend(tx, row, action, actor, transition, requestId, relatedUserId);
+      return;
+    }
     // An employee recipient (schema 235): a normalized link to the employee, also when this release only refuses it.
     const employeeId = (row as SendRow & { employee_id?: string | number | null }).employee_id;
     const employee = employeeId === null || employeeId === undefined ? null : Number(employeeId);
@@ -708,24 +915,135 @@ export class OrderSendRepository {
       },
     });
   }
+
+  /**
+   * Audit of a supplier request send — and, for a transition of the send, its domain event in the outbox, in the
+   * same transaction (one event per send and transition: a repeated command or settle adds nothing).
+   * No number, no token, no text: the mask, the length and the hash of the text.
+   */
+  private async auditSupplierSend(tx: TransactionClient, row: SendRow, action: string, actor: CurrentUser | null,
+    transition: Record<string, unknown>, requestId?: string, relatedUserId?: number) {
+    const supplierRequestId = Number(row.supplier_request_id);
+    const supplierId = Number(row.supplier_id);
+    const actorUserId = actor ? numericId(actor.id) : Number(row.actor_id);
+    const correlationId = requestId ?? row.request_id;
+    // The orders of the request are normalized links of the event: it is found by any of them in the audit.
+    const orderIds = await supplierRequestOrderIds(tx, supplierRequestId);
+    await auditService.record(tx, {
+      event: `whatsapp.supplier_send.${action}`, entityType: 'whatsapp_order_send', entityId: row.send_id,
+      actorUserId, actorUsername: actor?.username ?? null, actorRole: actor?.role ?? null,
+      requestId: correlationId, source: SOURCE, ...(relatedUserId ? { relatedUserId } : {}),
+      statusField: 'order_send_state', statusCode: row.state, ...(orderIds.length === 1 ? { relatedOrderId: orderIds[0] } : {}),
+      relatedEntities: [{ entityType: 'supplier_request', entityId: supplierRequestId }, { entityType: 'supplier', entityId: supplierId },
+        ...orderIds.map((orderId) => ({ entityType: 'order', entityId: orderId }))],
+      metadata: {
+        sendId: row.send_id, targetKind: 'supplier', supplierRequestId, supplierRequestVersion: row.supplier_request_version ?? null,
+        supplierId, supplierContactId: row.supplier_contact_id == null ? null : Number(row.supplier_contact_id),
+        recipientMasked: row.recipient_masked, textLength: row.text_length ?? null, textSha256: row.text_sha256 ?? null,
+        textEdited: row.text_edited ?? null, templateId: row.template_id == null ? null : Number(row.template_id),
+        templateVersion: row.template_version ?? null, partsTotal: row.parts_total,
+        orderIds, sendActorUserId: Number(row.actor_id), correlationId, source: 'procurement_workspace', ...transition,
+      },
+    });
+    if (!SUPPLIER_SEND_EVENTS.has(action)) return;
+    const eventType = `whatsapp.supplier_send.${action}`;
+    await tx.query(`INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+      VALUES ($1, 'whatsapp_supplier_send', $2, $3::jsonb, $4) ON CONFLICT DO NOTHING`, [
+      eventType, row.send_id, JSON.stringify({
+        eventId: randomUUID(), eventType, sendId: row.send_id, state: row.state, errorCode: row.error_code, cancelReason: row.cancel_reason,
+        supplierRequestId, supplierId, orderIds, partsTotal: row.parts_total,
+        ...(typeof transition.partsSent === 'number' ? { partsSent: transition.partsSent } : {}),
+        actorUserId, sendActorUserId: Number(row.actor_id), requestId: correlationId, correlationId, source: SOURCE,
+      }), `whatsapp_supplier_send:${row.send_id}:${action}`,
+    ]);
+  }
+}
+
+/** Transitions of a supplier request send that are domain events (the intent is only audited). */
+const SUPPLIER_SEND_EVENTS = new Set(['requested', 'sent', 'failed', 'unknown', 'cancelled', 'expired']);
+
+/** Every order of the request's lines, also deleted ones, ascending. */
+export async function supplierRequestOrderIds(client: DatabaseClient, supplierRequestId: number): Promise<number[]> {
+  return (await client.query<{ order_id: string }>(`SELECT DISTINCT orp.order_id::text AS order_id
+      FROM supplier_request_line_orders lo
+      JOIN supplier_request_lines l ON l.supplier_request_line_id = lo.supplier_request_line_id
+      JOIN order_resource_procurement orp ON orp.order_resource_procurement_id = lo.order_resource_procurement_id
+     WHERE l.supplier_request_id = $1`, [supplierRequestId])).rows.map((row) => Number(row.order_id)).sort((a, b) => a - b);
 }
 
 function sendSelect() {
-  return `SELECT s.*, u.username actor_username, c.label chat_label, o.order_name, cu.username cancelled_by_username, e.full_name employee_name
+  return `SELECT s.*, u.username actor_username, c.label chat_label, o.order_name, cu.username cancelled_by_username, e.full_name employee_name,
+      sr.request_number supplier_request_number, sup.supplier_name supplier_name
     FROM whatsapp_order_sends s
     LEFT JOIN users u ON u.user_id = s.actor_id LEFT JOIN whatsapp_order_send_chats c ON c.chat_key = s.chat_key
     LEFT JOIN orders o ON o.order_id = s.order_id LEFT JOIN users cu ON cu.user_id = s.cancelled_by
-    LEFT JOIN employees e ON e.employee_id = s.employee_id`;
+    LEFT JOIN employees e ON e.employee_id = s.employee_id
+    LEFT JOIN supplier_requests sr ON sr.supplier_request_id = s.supplier_request_id
+    LEFT JOIN suppliers sup ON sup.supplier_id = s.supplier_id`;
 }
 
 /** «This employee on this number», keyed by the installation salt: the phone itself is not recoverable from it. */
+/**
+ * Refusals that end a command for good: the recipient is not what the user chose (edited, removed, or this
+ * release makes no such sends). They are raised before anything is written and are recorded with the key.
+ */
+export const FINAL_REFUSAL_CODES = new Set(['ORDER_SEND_PHONE_CHANGED', 'ORDER_SEND_PHONE_CHOICE_UNAVAILABLE', 'CLIENT_PHONE_MISSING',
+  'EMPLOYEE_CONTACT_MISSING', 'ORDER_SEND_RECIPIENT_UNKNOWN', 'ORDER_SEND_CHAT_UNKNOWN']);
+
+/** The same for a supplier request send: the request or its recipient is not what the window showed. */
+export const SUPPLIER_FINAL_REFUSAL_CODES = new Set(['ORDER_SEND_PHONE_CHANGED', 'SUPPLIER_CONTACT_MISSING', 'SUPPLIER_NOT_LINKED',
+  'SUPPLIER_INACTIVE', 'SUPPLIER_REQUEST_VERSION_CONFLICT', 'SUPPLIER_REQUEST_NOT_SENDABLE', 'SUPPLIER_SEND_UNAVAILABLE',
+  // «The previous send of this text ended unknown»: the command is closed with its key, and the repeat the user confirms
+  // is another command — a late copy of this one can never become a send after that repeat was delivered.
+  'ORDER_SEND_PREVIOUS_UNKNOWN']);
+
+const FINAL_REFUSAL_TEXT: Record<string, string> = {
+  ORDER_SEND_PHONE_CHANGED: 'Телефон получателя изменился; обновите страницу и выберите его заново',
+  ORDER_SEND_PHONE_CHOICE_UNAVAILABLE: 'Выбор телефона клиента сейчас недоступен; отправьте на основной телефон',
+  CLIENT_PHONE_MISSING: 'У клиента заказа нет этого телефона',
+  EMPLOYEE_CONTACT_MISSING: 'У сотрудника нет этого телефона',
+  ORDER_SEND_RECIPIENT_UNKNOWN: 'Этого сотрудника больше нет в настройках; обновите страницу',
+  ORDER_SEND_CHAT_UNKNOWN: 'Этого чата больше нет в настройках; обновите страницу',
+  SUPPLIER_CONTACT_MISSING: 'У поставщика больше нет этого телефона; обновите страницу',
+  SUPPLIER_NOT_LINKED: 'Поставщик заявки не связан со справочником «Поставщики»',
+  SUPPLIER_INACTIVE: 'Поставщик заявки не активен',
+  SUPPLIER_REQUEST_VERSION_CONFLICT: 'Заявка изменилась — обновите текст и отправьте заново',
+  SUPPLIER_REQUEST_NOT_SENDABLE: 'Отправить можно только черновик или отправленную заявку',
+  SUPPLIER_SEND_UNAVAILABLE: 'Отправка заявок поставщикам в WhatsApp сейчас недоступна',
+  ORDER_SEND_PREVIOUS_UNKNOWN: 'Результат прежней отправки неизвестен: проверьте чат и отправьте заново',
+};
+
+/** The recorded refusal of a command, as every later request with its key gets it. */
+export function finalRefusal(code: string): ApiError {
+  return new ApiError(409, code,
+    FINAL_REFUSAL_TEXT[code] ?? 'Команда уже отклонена; выберите получателя заново', { final: true });
+}
+
+/**
+ * What the menu hands out with a masked phone and the command brings back: «this contact row is this number».
+ * Opaque (salted), so it reveals nothing; a row edited after the menu was built no longer matches.
+ */
+export function phoneToken(salt: string, owner: 'client' | 'employee' | 'supplier', contactId: number, phoneNormalized: string): string {
+  return createHash('sha256').update(`${salt}phone-token:${owner}:${contactId}:${phoneNormalized}`).digest('hex');
+}
+
+/** «This client on this number»: the identity of a client send for the duplicate and unknown-outcome guards. */
+export function clientFingerprint(salt: string, clientId: number, phoneNormalized: string): string {
+  return createHash('sha256').update(`${salt}client:${clientId}:${phoneNormalized}`).digest('hex');
+}
+
+/** «This supplier on this number»: the identity of a supplier request send (with the request and the text hash). */
+export function supplierFingerprint(salt: string, supplierId: number, phoneNormalized: string): string {
+  return createHash('sha256').update(`${salt}supplier:${supplierId}:${phoneNormalized}`).digest('hex');
+}
+
 export function recipientFingerprint(salt: string, employeeId: number, phoneNormalized: string): string {
   return createHash('sha256').update(`${salt}employee:${employeeId}:${phoneNormalized}`).digest('hex');
 }
 
 export { deliveryAllowedAt, nextAllowed };
 
-function assertSameCommand(row: SendRow, fingerprint: string): SendRow {
+export function assertSameCommand(row: SendRow, fingerprint: string): SendRow {
   if (row.fingerprint !== fingerprint) {
     throw new ApiError(409, 'IDEMPOTENCY_KEY_REUSED', 'Ключ запроса уже использован для другой отправки');
   }
@@ -747,6 +1065,7 @@ function mapSettings(row: SettingsRow, chats: ChatRow[], employees: EmployeeReci
       recipientKey: employee.recipient_key, employeeId: Number(employee.employee_id), employeeName: employee.employee_name ?? '',
       channel: employee.channel, forms: knownForms(employee.forms), caption: employee.caption,
     })),
+    supplierRequestsEnabled: row.supplier_requests_enabled === true,
     updatedAt: row.updated_at.toISOString(),
     updatedBy: row.updated_by ? { id: String(row.updated_by), username: row.updated_by_username } : null,
   };
@@ -756,7 +1075,7 @@ function mapSettings(row: SettingsRow, chats: ChatRow[], employees: EmployeeReci
 function settingsAudit(settings: OrderSendSettings) {
   return {
     enabled: settings.enabled, minIntervalMinutes: settings.minIntervalMinutes, sendWindowMinutes: settings.sendWindowMinutes,
-    clientForms: settings.clientForms,
+    clientForms: settings.clientForms, supplierRequestsEnabled: settings.supplierRequestsEnabled,
     clientCaptionLength: settings.clientCaption.length,
     chats: settings.chats.map((chat) => ({ chatKey: chat.chatKey, group: maskGroup(chat.groupChatId), label: chat.label, forms: chat.forms })),
     employees: settings.employees.map((employee) => ({ recipientKey: employee.recipientKey, employeeId: employee.employeeId, channel: employee.channel,

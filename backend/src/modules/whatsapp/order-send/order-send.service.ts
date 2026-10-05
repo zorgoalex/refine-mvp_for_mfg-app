@@ -14,7 +14,7 @@ import { OrderSendRepository, knownForms, nextAllowed, numericId, type NewSend, 
 import type { QueueEstimate } from './order-send-queue';
 import { OrderSendWorker } from './order-send-worker.service';
 import {
-  ORDER_FORMS, ORDER_SEND_FINANCIAL_PERMISSION, orderForm, orderFormTitle,
+  ORDER_FORMS, ORDER_SEND_FINANCIAL_PERMISSION, SUPPLIER_TEXT_FORM, orderForm, orderFormTitle,
   type OrderFormCode, type OrderSendMenu, type OrderSendSettings, type OrderSendSettingsInput, type OrderSendTarget, type OrderSendView,
 } from './order-send.types';
 
@@ -22,7 +22,8 @@ import {
 const REFUSALS = new Set(['ORDER_SEND_ALREADY_QUEUED', 'ORDER_SEND_QUEUE_FULL', 'ORDER_SEND_TOO_LONG', 'ORDER_SEND_DISABLED', 'ORDER_SEND_PAUSED', 'ORDER_SEND_FORM_NOT_ALLOWED',
   'ORDER_SEND_FINANCIALS_REQUIRED', 'ORDER_SEND_CHAT_UNKNOWN', 'CLIENT_PHONE_MISSING', 'CLIENT_PHONE_INVALID', 'ORDER_SEND_STORAGE_FULL',
   'ORDER_SEND_RENDER_FAILED', 'ORDER_SEND_FILE_TOO_LARGE', 'PERMISSION_DENIED', 'ORDER_NOT_FOUND', 'ORDER_SEND_PREVIOUS_UNKNOWN',
-  'ORDER_SEND_RECIPIENT_UNKNOWN', 'ORDER_SEND_CHANNEL_UNSUPPORTED', 'EMPLOYEE_INACTIVE', 'EMPLOYEE_CONTACT_MISSING']);
+  'ORDER_SEND_RECIPIENT_UNKNOWN', 'ORDER_SEND_CHANNEL_UNSUPPORTED', 'EMPLOYEE_INACTIVE', 'EMPLOYEE_CONTACT_MISSING',
+  'ORDER_SEND_PHONE_CHANGED', 'ORDER_SEND_PHONE_CHOICE_UNAVAILABLE']);
 
 @Injectable()
 export class OrderSendService {
@@ -93,6 +94,12 @@ export class OrderSendService {
     return { send: await this.view(row.send_id, row) };
   }
 
+  /** Phones of the order's client the card can send to (masks only; the same access as the sends of the order). */
+  async clientContacts(orderId: number, actor: CurrentUser) {
+    await this.assertOrderAccess(orderId, actor);
+    return this.repository.clientContacts(orderId);
+  }
+
   async listForOrder(orderId: number, actor: CurrentUser): Promise<{ sends: OrderSendView[] }> {
     await this.assertOrderAccess(orderId, actor);
     const rows = await this.repository.listForOrder(orderId, 20);
@@ -117,9 +124,11 @@ export class OrderSendService {
         let kept = false;
         try {
           const outcome = await this.repository.enqueue({
-            actorId: actor.id, idempotencyKey: input.idempotencyKey, fingerprint,
+            actorId: actor.id, actor, requestId, idempotencyKey: input.idempotencyKey, fingerprint,
             chatKey: input.target.kind === 'chat' ? input.target.chatKey : null,
-            employee: input.target.kind === 'employee' ? { recipientKey: input.target.recipientKey, contactId: input.target.contactId ?? null } : null,
+            employee: input.target.kind === 'employee' ? { recipientKey: input.target.recipientKey, contactId: input.target.contactId ?? null,
+              contactToken: input.target.contactToken ?? null } : null,
+            client: input.target.kind === 'client' ? { phoneId: input.target.phoneId ?? null, phoneToken: input.target.phoneToken ?? null } : null,
             orderId, form: input.form, confirmAfterUnknown: input.confirmAfterUnknown ?? null,
             prepare: async (tx, decision): Promise<NewSend> => {
               const data = await readOrderFormData(tx, orderId);
@@ -137,7 +146,8 @@ export class OrderSendService {
               if (!allowed.includes(input.form)) throw new ApiError(409, 'ORDER_SEND_FORM_NOT_ALLOWED', 'Эта форма не разрешена получателю в настройках');
               let phone: string | null = null;
               if (employee) phone = employee.phoneNormalized;
-              else if (!decision.chat) phone = normalizeClientPhone(data.clientPhone);
+              // The client's phone was resolved under the command locks (the chosen one or the default rule).
+              else if (!decision.chat) phone = decision.client ? decision.client.phoneNormalized : normalizeClientPhone(data.clientPhone);
               const generated = await generateOrderForm(data, input.form, financial);
               const stored: StoredPart[] = [];
               for (const page of generated.pages) {
@@ -153,7 +163,7 @@ export class OrderSendService {
               return {
                 sendId: randomUUID(), orderId, clientId: data.clientId, actor, requestId, idempotencyKey: input.idempotencyKey, fingerprint,
                 targetKind: decision.chat ? 'chat' : employee ? 'employee' : 'client', chatKey: decision.chat?.chat_key ?? null, form: input.form,
-                employee,
+                employee, client: decision.chat || employee ? null : decision.client,
                 destinationChatId: decision.chat?.group_chat_id ?? null, phoneNormalized: phone,
                 recipientMasked: decision.chat ? maskGroup(decision.chat.group_chat_id) : maskPhone(phone as string),
                 fileKey: stored[0].fileKey, sha256: stored[0].sha256, sizeBytes: stored[0].sizeBytes, fileName: generated.fileName, caption,
@@ -183,7 +193,10 @@ export class OrderSendService {
       void this.worker.kick();
       return { send: await this.view(result.row.send_id, result.row) };
     } catch (error) {
-      if (error instanceof ApiError && REFUSALS.has(error.code)) await this.recordRefusal(orderId, input, actor, requestId, error);
+      // A final refusal was audited in the transaction that recorded it (or is a repeat of a recorded one).
+      const final = error instanceof ApiError && (error.details as { final?: unknown } | undefined)?.final === true;
+      if (error instanceof ApiError && REFUSALS.has(error.code) && !final) await this.recordRefusal(orderId, input, actor, requestId, error);
+      else if (final) await this.worker.logRefusal((error as ApiError).code, { orderId, targetKind: input.target.kind, form: input.form });
       throw error;
     }
   }
@@ -230,13 +243,16 @@ export class OrderSendService {
 export function toView(row: SendRow, estimate?: QueueEstimate): OrderSendView {
   return {
     sendId: row.send_id,
-    orderId: Number(row.order_id),
+    orderId: row.order_id === null || row.order_id === undefined ? null : Number(row.order_id),
     targetKind: row.target_kind,
     chatKey: row.chat_key,
-    // A recipient kind of a newer release (an employee) reads as such, never as a chat.
-    recipientLabel: row.target_kind === 'client' ? 'Клиент' : row.target_kind === 'chat' ? row.chat_label ?? 'Чат' : row.employee_name ?? 'Сотрудник',
+    // A recipient kind of a newer release reads as such, never as a chat.
+    recipientLabel: row.target_kind === 'client' ? 'Клиент' : row.target_kind === 'chat' ? row.chat_label ?? 'Чат'
+      : row.target_kind === 'supplier' ? row.supplier_name ?? 'Поставщик' : row.employee_name ?? 'Сотрудник',
     recipientMasked: row.recipient_masked,
     form: row.form_code,
+    supplierRequestId: row.supplier_request_id == null ? null : Number(row.supplier_request_id),
+    supplierRequestNumber: row.supplier_request_number ?? null,
     state: row.state,
     errorCode: row.error_code,
     cancelReason: row.cancel_reason,
@@ -256,7 +272,7 @@ function toJournalItem(row: SendRow, estimate: QueueEstimate | undefined) {
   return {
     ...toView(row, estimate),
     orderName: row.order_name ?? null,
-    formTitle: orderFormTitle(row.form_code),
+    formTitle: row.form_code === SUPPLIER_TEXT_FORM ? 'Текст заявки поставщику' : orderFormTitle(row.form_code),
     finishedAt: row.state === 'queued' || row.state === 'sending' ? null : (row.sent_at ?? row.updated_at).toISOString(),
     cancelledBy: row.cancelled_by ? { id: String(row.cancelled_by), username: row.cancelled_by_username ?? null } : null,
   };

@@ -155,6 +155,17 @@ export async function announceWhatsAppSendQueued(id: string, meta: SendMeta, own
 }
 
 /**
+ * The sends of a poll response whose balloon is due — the same set `collectFinished` would return — WITHOUT writing
+ * the state: the balloons are put into the durable balloon queue first, only then marked announced (план 2026-10-03 R2-2).
+ */
+export function finishedDue(items: readonly MyWhatsAppSend[], userId: string, access: FollowAccess): MyWhatsAppSend[] {
+  const base = loadState(userId, access);
+  const announced = new Set(base.announced);
+  const tracked = new Set(base.tracked.filter((id) => !announced.has(id)));
+  return items.filter((item) => !item.active && tracked.has(item.id));
+}
+
+/**
  * Applies one poll response: active sends become tracked (unless already announced); a tracked send
  * that is final is marked announced FIRST and returned once. One read and one write of the state.
  */
@@ -194,7 +205,7 @@ export function fromOrderSendView(view: OrderSendView, userId: string): MyWhatsA
     : view.recipientLabel ? `сотруднику «${view.recipientLabel}»` : 'сотруднику';
   const active = ORDER_SEND_ACTIVE.has(view.state);
   return {
-    kind: 'order_send', id: view.sendId, title: `Заказ #${view.orderId} → ${recipient}, ${FORM_TITLES[view.form] ?? view.form}`,
+    kind: 'order_send', id: view.sendId, title: `Заказ #${view.orderId ?? ''} → ${recipient}, ${FORM_TITLES[view.form] ?? view.form}`,
     state: view.state, active, estimatedAt: null, createdAt: view.createdAt,
     finishedAt: active ? null : view.sentAt ?? view.createdAt, errorCode: view.errorCode, cancelReason: view.cancelReason,
     orderId: view.orderId, targetDate: null,
@@ -232,6 +243,7 @@ const FAILURES: Record<string, string> = {
   ORDER_SEND_CHANNEL_UNSUPPORTED: 'этот канал отправки не поддерживается',
   CLIENT_NOT_ON_WHATSAPP: 'номера клиента нет в WhatsApp',
   EMPLOYEE_NOT_ON_WHATSAPP: 'номера сотрудника нет в WhatsApp',
+  SUPPLIER_NOT_ON_WHATSAPP: 'номера поставщика нет в WhatsApp',
   WAHA_REJECTED: 'WhatsApp не принял файл',
   WAHA_FILE_UNSUPPORTED: 'WhatsApp не принимает файлы такого типа',
   NO_ORDERS: 'на этот день нет заказов',
@@ -250,7 +262,7 @@ export function balloonFor(item: MyWhatsAppSend): WhatsAppBalloon {
       return { type: 'warning', title: 'Отправлено частично', text: item.title };
     case 'unknown':
       return item.errorCode === 'PARTIAL_DELIVERY'
-        ? { type: 'warning', title: 'Ушла только часть изображений', text: `${item.title} — проверьте чат` }
+        ? { type: 'warning', title: 'Ушла только часть отправки', text: `${item.title} — проверьте чат` }
         : { type: 'warning', title: 'Результат отправки неизвестен', text: `${item.title} — проверьте чат` };
     case 'unconfirmed':
       return { type: 'warning', title: 'Не удалось подтвердить отправку', text: `${item.title} — проверьте чат` };
@@ -258,7 +270,8 @@ export function balloonFor(item: MyWhatsAppSend): WhatsAppBalloon {
       if (item.cancelReason === 'manual') {
         return { type: 'warning', title: item.cancelledByOther ? 'Отменено администратором' : 'Отправка отменена', text: item.title };
       }
-      return { type: 'warning', title: 'Отправка не состоялась', text: item.title };
+      return { type: 'warning', title: 'Отправка не состоялась',
+        text: item.cancelReason === 'request_changed' ? `${item.title} — заявка изменилась, отправьте текст заново` : item.title };
     case 'expired':
     case 'skipped':
       return { type: 'warning', title: 'Отправка не состоялась', text: item.title };

@@ -429,3 +429,85 @@ frontend-флаг `RUNTIME_CONFIG_FILM_CATALOG_IMPORT`.
 Права insert/update `films` в Hasura включают колонку `note` (frontend запрашивает её у Hasura).
 Минимальная версия backend для черновиков из файла решений — эта; перед откатом
 backend ниже неё отменить черновики с источником «Файл решений».
+
+## Закупки, экран снабжения и документы 1С
+
+`BACKEND_RESOURCE_PROCUREMENT_ENABLED` (backend, по умолчанию `false`) включает
+отметки «Закуплено» у материалов заказа: команды
+`PUT /api/v1/orders/{orderId}/resource-procurement/{resourceKey}` и
+`POST /api/v1/orders/resource-procurement/bulk`, карточку
+`GET /api/v1/orders/{orderId}/resource-demands` и сводку
+`GET /api/v1/orders/resource-demands/by-material`. Отдельного frontend-флага нет:
+интерфейс включает эти функции по полю `capabilities` в ответе backend, поэтому
+выключение флага возвращает экран к прежнему виду без пересборки frontend.
+Отмечать закуп может роль с правом `procurement.manage`; видимость заказов — по
+scope `orders.view`. Порядок включения:
+
+1. применить миграции `194_order_resource_procurement.sql` и
+   `197_onec_purchase_documents.sql` (197 требует таблицу `onec_sources` из
+   `193_onec_agent_foundation.sql`);
+2. выставить `BACKEND_RESOURCE_PROCUREMENT_ENABLED=true` и пересоздать backend.
+
+`BACKEND_PROCUREMENT_WORKSPACE_ENABLED` (backend, по умолчанию `false`) вместе с
+`BACKEND_RESOURCE_PROCUREMENT_ENABLED` включает на экране «Потребности заказов в
+ресурсах» вторую вкладку «Экран снабжения» — рабочий список «заказ × материал»:
+`GET /api/v1/procurement/worklist` (покрытие приходами 1С и ручной отметкой,
+дефицит, срок «нужно к», срочность, основной поставщик; все фильтры на сервере) и
+сохранённые представления `GET|PUT /api/v1/procurement/worklist/saved-views`.
+Вкладка «Потребность заказов» от флага не зависит. Интерфейс показывает вкладку
+по `capabilities.supplyWorkspace` и праву `procurement.view`; групповая отметка
+«Закуплено» — право `procurement.manage`.
+
+1. `BACKEND_RESOURCE_PROCUREMENT_ENABLED=false`, пересоздать backend (команды
+   закупа отвечают 503, экран работает без отметок);
+2. выложить backend с `204_procurement_workspace.sql` и применить миграцию: она
+   создаёт настройки, реестр поставщиков, колонку сохранённых представлений и
+   помечает отметки, поставленные приходом 1С, как `origin='onec'`;
+3. сверочный запрос: нет отмеченных записей с `origin='manual'`, у которых
+   последнее «ставящее» событие аудита — распределение прихода;
+4. `BACKEND_RESOURCE_PROCUREMENT_ENABLED=true`, затем
+   `BACKEND_PROCUREMENT_WORKSPACE_ENABLED=true`, пересоздать backend.
+
+`BACKEND_SUPPLIER_REQUESTS_ENABLED` (backend, по умолчанию `false`; нужны оба флага
+выше и миграция `214_supplier_requests.sql`) включает раздел «Заявки поставщикам»
+на экране снабжения: `GET /api/v1/procurement/supplier-requests` (список),
+`POST …/drafts` (черновики из выделенных позиций рабочего списка — по заявке на
+поставщика, по строке на материал; повтор с тем же `requestId` возвращает прежний
+результат), `GET|PATCH …/:id` (карточка и правка черновика) и
+`POST …/:id/send|close|cancel`. Чтение — `procurement.view`, команды —
+`procurement.manage`. Номер заявки — `ГГ-NNNN`, счётчик на год. Количество в
+заявке — дефицит позиции плюс запас на обрезки (для потребности по площади),
+листы — целыми, остаток сверх заказов — «на склад». Отправка только меняет статус;
+во внешние системы ничего не уходит. Количество по отправленным заявкам рабочий
+список показывает как «заказано» и не считает дефицитом, пока заявка не закрыта или
+не отменена. При выключенном флаге маршруты отвечают `503 SUPPLIER_REQUESTS_DISABLED`,
+а раздел и кнопка «Сформировать заявки» не показываются.
+
+`BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED` (backend, по умолчанию `false`; работает поверх
+`BACKEND_SUPPLIER_REQUESTS_ENABLED`) — шаблоны текста заявки поставщику. В карточке заявки кнопка «Текст для
+поставщика» открывает окно: выбор шаблона (текст перестраивается сразу), ручная правка текста и копирование; редактор
+«Мои шаблоны…» — там же, на экране снабжения. Шаблоны двух видов:
+
+- общие (миграция `229_supplier_text_templates.sql`, включая «Стандартный» — прежний текст) — только чтение, их можно
+  «Скопировать себе»; маршрут `GET /procurement/supplier-text-templates` отдаёт только их, команды записи на этом
+  маршруте отключены (`409 SUPPLIER_TEXT_TEMPLATE_SHARED_READ_ONLY`);
+- личные (миграция `239_personal_supplier_text_templates.sql`) — у каждого пользователя свои (до 20), видит и меняет
+  только владелец; маршрут `/procurement/my-supplier-text-templates`, достаточно права `procurement.view`. Шаблон
+  «по умолчанию» каждый выбирает для себя (свой или общий); команда выбора передаёт `expectedDefaultRevision` из
+  списка.
+
+Порядок выкладки: миграция 239 → backend → frontend. Прежняя версия backend личные шаблоны не видит (отдельные
+таблицы и маршрут), поэтому откат backend безопасен: новый frontend при этом показывает общие шаблоны только для
+чтения. Флаг выключен — API шаблонов отвечает `503 SUPPLIER_TEXT_TEMPLATES_DISABLED`, карточка заявки сообщает
+`capabilities.supplierTextTemplates=false`, и в окне показывается прежний стандартный текст; данные шаблонов остаются.
+
+`BACKEND_PROCUREMENT_NOTIFICATIONS_ENABLED` (backend, по умолчанию `false`) — уведомления закупа, только в
+приложении (in_app). Миграция `225_procurement_notification_rules.sql` засевает **выключенное** правило
+«Материал пришёл по заказу» (`order.resource_procurement_changed`: распределение прихода 1С на заказ →
+ответственному по заказу); включается на экране правил. Флаг проверяется движком в момент обработки события:
+выключен — событие обрабатывается без уведомлений и после включения не переигрывается; событие старше 24 часов
+(например, реле стояло) тоже пропускается. Для событий закупа правило обязано перечислить
+`procurementChangeTypes`, канал `telegram` не принимается (`422`). Такие уведомления (`source_type`
+`procurement_order_event` / `procurement_digest`) видны в списке, счётчике, «прочитать», «прочитать всё» и
+удалении только при праве `procurement.view` и пока заказ в текущем scope `orders.view` читателя; скрытые строки
+не удаляются и возвращаются при восстановлении доступа.

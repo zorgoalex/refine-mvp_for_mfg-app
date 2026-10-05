@@ -5,6 +5,8 @@ import {
   ORDER_FORM_CODES, ORDER_SEND_MAX_CHATS, ORDER_SEND_MAX_EMPLOYEES, ORDER_SEND_SUPPORTED_CHANNELS,
   type OrderFormCode, type OrderSendSettingsInput, type OrderSendTarget,
 } from './order-send.types';
+import type { SupplierSendCommand } from './supplier-send.repository';
+import { SUPPLIER_TEXT_MAX, normalizeSupplierText, supplierTextProblem, type SupplierTextProblem } from './supplier-send-text';
 
 const GROUP_ID = /^\d{5,24}(?:-\d{5,24})?@g\.us$/;
 const form = z.enum(ORDER_FORM_CODES as [OrderFormCode, ...OrderFormCode[]]);
@@ -32,13 +34,20 @@ const settingsInput = z.object({
     forms,
     caption: z.string().max(1000),
   }).strict()).max(ORDER_SEND_MAX_EMPLOYEES).optional(),
+  // Optional for clients of the previous release (the switch stays as it is).
+  supplierRequestsEnabled: z.boolean().optional(),
 }).strict();
+
+/** The opaque token the menu hands out with a masked phone (sha256 hex). */
+const phoneTokenSchema = z.string().regex(/^[0-9a-f]{64}$/);
 
 const sendInput = z.object({
   target: z.discriminatedUnion('kind', [
-    z.object({ kind: z.literal('client') }).strict(),
+    // A chosen phone always comes with the token of the number the menu showed.
+    z.object({ kind: z.literal('client'), phoneId: z.number().int().positive().nullable().optional(), phoneToken: phoneTokenSchema.nullable().optional() }).strict(),
     z.object({ kind: z.literal('chat'), chatKey: z.string().uuid() }).strict(),
-    z.object({ kind: z.literal('employee'), recipientKey: z.string().uuid(), contactId: z.number().int().positive().nullable().optional() }).strict(),
+    z.object({ kind: z.literal('employee'), recipientKey: z.string().uuid(), contactId: z.number().int().positive().nullable().optional(),
+      contactToken: phoneTokenSchema.nullable().optional() }).strict(),
   ]),
   form,
   idempotencyKey: z.string().uuid(),
@@ -78,7 +87,57 @@ export function parseOrderSendSettings(value: unknown): OrderSendSettingsInput &
 export function parseOrderSendCommand(value: unknown): { target: OrderSendTarget; form: OrderFormCode; idempotencyKey: string; confirmAfterUnknown?: string | null } {
   const parsed = sendInput.safeParse(value);
   if (!parsed.success) throw validation(parsed.error);
+  const target = parsed.data.target;
+  // A chosen client phone always comes with the token of the number the menu showed, and never without the phone.
+  if (target.kind === 'client' && (target.phoneId == null) !== (target.phoneToken == null)) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос', { issues: [{ path: 'target.phoneToken', message: 'phoneId and phoneToken go together' }] });
+  }
+  if (target.kind === 'employee' && target.contactToken != null && target.contactId == null) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос', { issues: [{ path: 'target.contactToken', message: 'contactToken needs contactId' }] });
+  }
   return parsed.data;
+}
+
+const supplierSendInput = z.object({
+  // The window sends its text as it is; the length is checked after the line endings are normalized.
+  text: z.string().max(SUPPLIER_TEXT_MAX * 2),
+  edited: z.boolean(),
+  templateId: z.number().int().positive().nullable(),
+  templateVersion: z.number().int().min(0).nullable(),
+  /** The version of the request the text was built from. */
+  textVersion: z.number().int().min(0),
+  // Always a concrete phone of the supplier with the token of the number the window showed (also the primary one).
+  contactId: z.number().int().positive(),
+  contactToken: phoneTokenSchema,
+  idempotencyKey: z.string().uuid(),
+  confirmAfterUnknown: z.string().uuid().nullable().optional(),
+}).strict();
+
+const SUPPLIER_TEXT_PROBLEMS: Record<SupplierTextProblem, string> = {
+  empty: 'Текст заявки пуст',
+  too_long: `Текст заявки длиннее ${SUPPLIER_TEXT_MAX} символов`,
+  control_characters: 'В тексте заявки есть недопустимые управляющие символы',
+  too_many_messages: 'Текст заявки не помещается в 8 сообщений WhatsApp',
+};
+
+export function parseSupplierSendCommand(supplierRequestId: number, value: unknown): SupplierSendCommand {
+  const parsed = supplierSendInput.safeParse(value);
+  if (!parsed.success) throw validation(parsed.error);
+  const text = normalizeSupplierText(parsed.data.text);
+  const problem = supplierTextProblem(text);
+  if (problem) throw new ApiError(422, 'SUPPLIER_SEND_TEXT_INVALID', SUPPLIER_TEXT_PROBLEMS[problem], { reason: problem });
+  return {
+    supplierRequestId, text, edited: parsed.data.edited, templateId: parsed.data.templateId, templateVersion: parsed.data.templateVersion,
+    textVersion: parsed.data.textVersion, contactId: parsed.data.contactId, contactToken: parsed.data.contactToken,
+    idempotencyKey: parsed.data.idempotencyKey, confirmAfterUnknown: parsed.data.confirmAfterUnknown ?? null,
+  };
+}
+
+export function parseSupplierRequestId(value: string): number {
+  if (!/^[1-9]\d{0,15}$/.test(value)) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный ID заявки');
+  const id = Number(value);
+  if (!Number.isSafeInteger(id)) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный ID заявки');
+  return id;
 }
 
 export function parseOrderId(value: string): number {

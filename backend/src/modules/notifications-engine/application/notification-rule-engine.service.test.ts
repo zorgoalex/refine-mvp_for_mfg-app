@@ -41,6 +41,7 @@ function rule(overrides: Partial<NotificationRule> = {}): NotificationRule {
     priority: 100,
     level: 'info',
     channels: ['in_app'],
+    balloonMode: 'auto',
     conditions: {},
     recipients: { resolvers: ['order_manager'] },
     titleTemplate: null,
@@ -69,7 +70,9 @@ interface Fakes {
   recipientResolver: { resolve: ReturnType<typeof vi.fn> };
   notificationWrite: { insertIfAbsent: ReturnType<typeof vi.fn> };
   channelDelivery: { enqueueIfAbsent: ReturnType<typeof vi.fn> };
-  runtimeConfig?: { isEngineOwnsDeadline(): boolean };
+  runtimeConfig?: { isEngineOwnsDeadline(): boolean; isFeatureEnabled?(flag: string): boolean };
+  now?: () => Date;
+  procurementVisibility?: { filterByBaseVisibility: ReturnType<typeof vi.fn> };
 }
 
 function fakes(overrides: Partial<Fakes> = {}): Fakes {
@@ -263,6 +266,26 @@ describe('NotificationRuleEngineService.processEvent', () => {
     );
   });
 
+  it('balloon (plan 2026-10-03): in_app row carries the rule balloon mode; balloon never goes to external delivery', async () => {
+    const balloonRule = rule({ notificationRuleId: 'rule-balloon', channels: ['in_app', 'balloon', 'telegram'], balloonMode: 'persistent', recipients: { userIds: [42] } });
+    const deps = fakes({
+      ruleRepo: { listEnabledByEvent: vi.fn(async () => [balloonRule]) },
+      recipientResolver: { resolve: vi.fn(async () => [42]) },
+    });
+    await service(deps).processEvent(client, event({ outboxEventId: '00000000-0000-0000-0000-000000000078' }));
+    expect(deps.notificationWrite.insertIfAbsent).toHaveBeenCalledTimes(1);
+    expect(deps.notificationWrite.insertIfAbsent).toHaveBeenCalledWith(client, expect.objectContaining({ userId: 42, balloonMode: 'persistent' }));
+    expect(deps.channelDelivery.enqueueIfAbsent).toHaveBeenCalledTimes(1);
+    expect(deps.channelDelivery.enqueueIfAbsent).toHaveBeenCalledWith(client, expect.objectContaining({ channel: 'telegram' }));
+    // Без канала balloon — без балуна.
+    const plain = fakes({
+      ruleRepo: { listEnabledByEvent: vi.fn(async () => [rule({ channels: ['in_app'], balloonMode: 'persistent', recipients: { userIds: [7] } })]) },
+      recipientResolver: { resolve: vi.fn(async () => [7]) },
+    });
+    await service(plain).processEvent(client, event({ outboxEventId: '00000000-0000-0000-0000-000000000079' }));
+    expect(plain.notificationWrite.insertIfAbsent).toHaveBeenCalledWith(client, expect.objectContaining({ balloonMode: null }));
+  });
+
   it('redacts unknown placeholders: never emits payload/phone/secret values, only whitelisted fields', () => {
     const dangerousCtx = ctx({
       orderId: 777,
@@ -340,6 +363,43 @@ describe('NotificationRuleEngineService.processEvent', () => {
     expect(deps.notificationWrite.insertIfAbsent).toHaveBeenCalledTimes(1);
   });
 
+  it('deadline balloons: a DEADLINE_EXPIRED rule with the balloon channel writes the in_app row with its persistent mode (engine owns deadlines)', async () => {
+    const deadlineEvent = (outboxEventId: string) => event({
+      outboxEventId,
+      eventType: 'deadline.event.created',
+      aggregateType: 'deadline',
+      aggregateId: 'dl-9',
+      payload: { eventType: 'DEADLINE_EXPIRED', orderId: 500, deadlineEventId: 'de-9' },
+    });
+    const run = async (channels: NotificationRule['channels'], ownsDeadline: boolean) => {
+      const deps = fakes({
+        ruleRepo: { listEnabledByEvent: vi.fn(async () => [rule({
+          notificationRuleId: 'rule-deadline-balloon', eventType: 'DEADLINE_EXPIRED', channels, balloonMode: 'persistent',
+          recipients: { resolvers: ['order_manager'] },
+        })]) },
+        contextBuilder: { buildContext: vi.fn(async () => ctx({ eventType: 'DEADLINE_EXPIRED', deadlineInstanceId: 'dl-9' })) },
+        recipientResolver: { resolve: vi.fn(async () => [77]) },
+        runtimeConfig: { isEngineOwnsDeadline: () => ownsDeadline },
+      });
+      await service(deps).processEvent(client, deadlineEvent(`outbox-deadline-balloon-${channels.join('-')}-${ownsDeadline}`));
+      return deps;
+    };
+
+    const withBalloon = await run(['in_app', 'balloon'], true);
+    expect(withBalloon.notificationWrite.insertIfAbsent).toHaveBeenCalledTimes(1);
+    expect(withBalloon.notificationWrite.insertIfAbsent).toHaveBeenCalledWith(client, expect.objectContaining({ userId: 77, balloonMode: 'persistent' }));
+    // Балун — не внешняя доставка.
+    expect(withBalloon.channelDelivery.enqueueIfAbsent).not.toHaveBeenCalled();
+
+    // То же правило без канала балуна — уведомление без балуна (режим правила сам по себе ничего не включает).
+    const plain = await run(['in_app'], true);
+    expect(plain.notificationWrite.insertIfAbsent).toHaveBeenCalledWith(client, expect.objectContaining({ userId: 77, balloonMode: null }));
+
+    // Дедлайнами владеет старый путь — движок ничего не пишет (балунов дедлайнов нет, как и уведомлений движка).
+    const legacy = await run(['in_app', 'balloon'], false);
+    expect(legacy.notificationWrite.insertIfAbsent).not.toHaveBeenCalled();
+  });
+
   it('skips the deadline envelope when ownsDeadline=false (legacy default)', async () => {
     const r = rule({
       notificationRuleId: 'rule-deadline-2',
@@ -394,5 +454,78 @@ describe('NotificationRuleEngineService.processEvent', () => {
 
     expect(result.matched).toBe(1);
     expect(deps.ruleRepo.listEnabledByEvent).toHaveBeenCalledWith(client, 'order.production_status_changed');
+  });
+
+  describe('procurement events (§5.7, phase 4b)', () => {
+    const NOW = new Date('2026-10-01T12:00:00.000Z');
+    const procurementEvent = (overrides: Partial<OutboxEventRecord> = {}) => event({
+      eventType: 'order.resource_procurement_changed',
+      payload: { orderId: 500, changeType: 'allocation_added', role: 'receipt' },
+      createdAt: '2026-10-01T11:00:00.000Z',
+      ...overrides,
+    });
+    const arrived = rule({
+      eventType: 'order.resource_procurement_changed',
+      conditions: { procurementChangeTypes: ['allocation_added'], allocationRoles: ['receipt'] },
+    });
+    const procurementFakes = (enabled: boolean) => fakes({
+      ruleRepo: { listEnabledByEvent: vi.fn(async () => [arrived]) },
+      contextBuilder: { buildContext: vi.fn(async (_client: unknown, record: OutboxEventRecord) => ctx({ eventType: record.eventType, payload: record.payload })) },
+      recipientResolver: { resolve: vi.fn(async () => [7]) },
+      runtimeConfig: { isEngineOwnsDeadline: () => false, isFeatureEnabled: (flag: string) => flag === 'procurementNotifications' && enabled },
+      now: () => NOW,
+      procurementVisibility: { filterByBaseVisibility: vi.fn(async () => [7]) },
+    });
+
+    it('flag off at processing time: skipped_disabled, nothing read or written', async () => {
+      const deps = procurementFakes(false);
+      expect(await service(deps).processEvent(client, procurementEvent())).toEqual({ matched: 0, created: 0, skipped: 'skipped_disabled' });
+      expect(deps.ruleRepo.listEnabledByEvent).not.toHaveBeenCalled();
+      expect(deps.notificationWrite.insertIfAbsent).not.toHaveBeenCalled();
+    });
+
+    it('fails closed without the runtime flag reader', async () => {
+      const deps = { ...procurementFakes(true), runtimeConfig: { isEngineOwnsDeadline: () => false } };
+      expect((await service(deps).processEvent(client, procurementEvent())).skipped).toBe('skipped_disabled');
+    });
+
+    it('flag on: a receipt allocation writes in_app with its own source_type; stale or undated events are skipped', async () => {
+      const deps = procurementFakes(true);
+      expect(await service(deps).processEvent(client, procurementEvent())).toEqual({ matched: 1, created: 1 });
+      expect(deps.notificationWrite.insertIfAbsent).toHaveBeenCalledWith(client, expect.objectContaining({
+        userId: 7, sourceType: 'procurement_order_event', entityType: 'order', entityId: '500',
+      }));
+      expect((await service(deps).processEvent(client, procurementEvent({ createdAt: '2026-09-30T11:59:00.000Z' }))).skipped).toBe('skipped_stale');
+      expect((await service(deps).processEvent(client, procurementEvent({ createdAt: undefined }))).skipped).toBe('skipped_stale');
+    });
+
+    it('recipients go through the procurement visibility (live role matrix); without it nobody is notified (CR1-1)', async () => {
+      const deps = procurementFakes(true);
+      await service(deps).processEvent(client, procurementEvent());
+      expect(deps.recipientResolver.resolve).toHaveBeenCalledWith(client, arrived.recipients, expect.anything(), deps.procurementVisibility);
+      const blind = { ...procurementFakes(true), procurementVisibility: undefined };
+      expect(await service(blind).processEvent(client, procurementEvent())).toEqual({ matched: 1, created: 0 });
+      expect(blind.recipientResolver.resolve).not.toHaveBeenCalled();
+    });
+
+    it('payment, mark and removal do not match the «material arrived» rule', async () => {
+      const deps = procurementFakes(true);
+      for (const payload of [
+        { orderId: 500, changeType: 'allocation_added', role: 'payment' },
+        { orderId: 500, changeType: 'marked' },
+        { orderId: 500, changeType: 'allocation_removed', role: 'receipt' },
+      ]) {
+        expect(await service(deps).processEvent(client, procurementEvent({ payload }))).toEqual({ matched: 0, created: 0 });
+      }
+      expect(deps.notificationWrite.insertIfAbsent).not.toHaveBeenCalled();
+    });
+
+    it('a stored telegram channel is never delivered for a procurement event', async () => {
+      const deps = procurementFakes(true);
+      deps.ruleRepo.listEnabledByEvent = vi.fn(async () => [{ ...arrived, channels: ['in_app', 'telegram'] }]);
+      await service(deps).processEvent(client, procurementEvent());
+      expect(deps.channelDelivery.enqueueIfAbsent).not.toHaveBeenCalled();
+      expect(deps.notificationWrite.insertIfAbsent).toHaveBeenCalledTimes(1);
+    });
   });
 });

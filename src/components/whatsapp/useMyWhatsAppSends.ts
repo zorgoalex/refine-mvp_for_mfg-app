@@ -1,18 +1,26 @@
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { notification } from 'antd';
 import { ApiError } from '../../api/apiError';
 import { authSession } from '../../api/authSession';
 import { broadcastsApi } from '../../api/broadcastsApi';
 import { myWhatsAppSendsApi, type MyWhatsAppSend } from '../../api/myWhatsAppSendsApi';
 import { orderSendApi } from '../../api/orderSendApi';
+import { useBalloonCenter } from '../../notifications/balloons/BalloonCenter';
+import type { LocalBalloon } from '../../notifications/balloons/balloonCenterModel';
 import {
-  WHATSAPP_SEND_QUEUED_EVENT, addedTrackedIds, balloonsFor, browserStorage, collectFinished, emptyFollowState, followStateKey,
+  WHATSAPP_SEND_QUEUED_EVENT, addedTrackedIds, balloonsFor, browserStorage, collectFinished, emptyFollowState, finishedDue, followStateKey,
   LEGACY_FOLLOW_MS, fromBroadcastRun, fromOrderSendView, loadState, nextPollDelay, trackSend, unconfirmedItem, withFollowLock,
-  type FollowAccess, type SendMeta,
+  type FollowAccess, type SendMeta, type WhatsAppBalloon,
 } from './myWhatsAppSendsModel';
 
-/** Own notification container: the app-wide `maxCount: 3` must not cut the 15 s of a balloon short. */
-const BALLOON_MAX = 10;
+/** A WhatsApp balloon (one send or a summary) for the app balloon center (15 s, like before). */
+export function toLocalBalloon(balloon: WhatsAppBalloon & { key: string }): LocalBalloon {
+  return { key: balloon.key, kind: balloon.type, title: balloon.title, text: balloon.text, mode: 'auto' };
+}
+
+/** Balloons are shown by the app balloon center (BalloonCenterProvider); nothing to render here any more. */
+const NO_CONTEXT_HOLDER = React.createElement(React.Fragment);
+/** Повтор постановки балунов, не принятых очередью центра. */
+const UNACCEPTED_RETRY_MS = 30_000;
 
 /**
  * An older backend has no /whatsapp/my-sends: ask its existing endpoints about the followed sends
@@ -57,8 +65,7 @@ async function legacyItems(ids: readonly string[], meta: Record<string, SendMeta
 
 /**
  * The current user's own WhatsApp sends (order card and calendar): follows them while something is
- * pending and announces each finished one with a semi-transparent balloon bottom right (15 s, close
- * cross; newer ones push older ones up). One request at a time; a response of an earlier request or
+ * pending and announces each finished one with a balloon through the app balloon center (15 s). One request at a time; a response of an earlier request or
  * of another session is dropped. Mounted once by WhatsAppSendsProvider, which renders `contextHolder`.
  */
 export function useMyWhatsAppSends(): { items: MyWhatsAppSend[]; refresh: () => void; contextHolder: React.ReactElement;
@@ -71,7 +78,11 @@ export function useMyWhatsAppSends(): { items: MyWhatsAppSend[]; refresh: () => 
   // Any signed-in user: the backend returns only his own sends (an author keeps cancelling his waiting ones
   // even after a right was taken away).
   const allowed = Boolean(userId);
-  const [api, contextHolder] = notification.useNotification({ maxCount: BALLOON_MAX });
+  // Центр балунов — через ref: смена значения контекста не перезапускает слежение (и не зацикливает эффект).
+  const balloonCenter = useBalloonCenter();
+  const centerRef = useRef(balloonCenter);
+  centerRef.current = balloonCenter;
+  const contextHolder = NO_CONTEXT_HOLDER;
   const [items, setItems] = useState<MyWhatsAppSend[]>([]);
   const [supported, setSupported] = useState<boolean | null>(null);
   const access = useRef<FollowAccess>({ storage: browserStorage(), memory: emptyFollowState() });
@@ -95,6 +106,7 @@ export function useMyWhatsAppSends(): { items: MyWhatsAppSend[]; refresh: () => 
     try {
       const followed = loadState(userId, access.current);
       let next: MyWhatsAppSend[] | null = null;
+      let unaccepted = false;
       if (!legacy.current) {
         try {
           next = (await myWhatsAppSendsApi.list(followed.tracked)).items;
@@ -116,25 +128,45 @@ export function useMyWhatsAppSends(): { items: MyWhatsAppSend[]; refresh: () => 
         const items = next;
         setItems(items);
         if (items.some((item) => item.active)) lastActivity.current = Date.now();
-        // The session is re-checked INSIDE the lock, before any write.
-        const due = await withFollowLock(userId, () => (current() ? collectFinished(items, userId, access.current) : null));
-        if (due === null || !current()) return;
-        for (const balloon of balloonsFor(due)) {
-          api[balloon.type]({
-            key: balloon.key, message: balloon.title, description: balloon.text,
-            placement: 'bottomRight', duration: 15, style: { opacity: 0.88 },
-          });
-        }
+        // The session is re-checked INSIDE the lock, before any write. Balloons of finished sends go into the durable
+        // queue of the balloon center FIRST (idempotent by key), only then the sends are marked announced: closing the
+        // tab in between re-queues them (no-op), never loses them (план 2026-10-03 R2-2).
+        await withFollowLock(userId, async () => {
+          if (!current()) return;
+          unaccepted = false;
+          const pending = finishedDue(items, userId, access.current);
+          const center = centerRef.current;
+          // Балуны завершившихся (по одному или один сводный — balloonsFor); ключ → отправки, которые он объявляет.
+          const balloons = balloonsFor(pending);
+          const idsOf = new Map(balloons.map((balloon) => [balloon.key,
+            balloons.length === 1 && pending.length > 1 ? pending.map((due) => due.id) : pending.filter((due) => `whatsapp-send-${due.id}` === balloon.key).map((due) => due.id)]));
+          let acceptedKeys = new Set<string>();
+          if (pending.length > 0 && center) {
+            try {
+              acceptedKeys = new Set(await center.enqueueLocal(userId, balloons.map(toLocalBalloon)));
+            } catch {
+              acceptedKeys = new Set(); // очередь недоступна — отправки остаются отслеживаемыми, повтор на следующем опросе
+            }
+          }
+          const accepted = new Set([...acceptedKeys].flatMap((key) => idsOf.get(key) ?? []));
+          // Объявленными становятся только принятые очередью (R1-3 code review): непринятые остаются в tracked.
+          const keep = items.filter((item) => item.active || !pending.some((due) => due.id === item.id) || accepted.has(item.id));
+          unaccepted = pending.some((due) => !accepted.has(due.id));
+          if (current()) collectFinished(keep, userId, access.current);
+        }).catch(() => undefined);
+        if (!current()) return;
       }
       const pending = loadState(userId, access.current).tracked.length > 0;
-      const delay = legacy.current ? (pending ? 15_000 : null) : next ? nextPollDelay(next, lastActivity.current) : 60_000;
+      const base = legacy.current ? (pending ? 15_000 : null) : next ? nextPollDelay(next, lastActivity.current) : 60_000;
+      // Завершённые отправки, чей балун очередь центра не приняла, повторяются сами (R2-2 code review), пока не примет.
+      const delay = unaccepted ? Math.min(base ?? UNACCEPTED_RETRY_MS, UNACCEPTED_RETRY_MS) : base;
       if (delay !== null && !again.current) timer.current = setTimeout(() => void loadRef.current(), delay);
     } finally {
       running.current = false;
       // A request asked for meanwhile runs now through the CURRENT callback (never the previous session's closure).
       if (again.current) { again.current = false; void loadRef.current(); }
     }
-  }, [allowed, userId, api]);
+  }, [allowed, userId]);
   const loadRef = useRef(load);
   loadRef.current = load;
 
@@ -142,7 +174,6 @@ export function useMyWhatsAppSends(): { items: MyWhatsAppSend[]; refresh: () => 
     // A new session (logout, another user): close the previous user's balloons and forget the state.
     mounted.current = true;
     generation.current += 1;
-    api.destroy();
     setItems([]);
     access.current = { storage: browserStorage(), memory: emptyFollowState() };
     again.current = false;
@@ -178,14 +209,13 @@ export function useMyWhatsAppSends(): { items: MyWhatsAppSend[]; refresh: () => 
     return () => {
       mounted.current = false;
       generation.current += 1;
-      api.destroy();
       if (typeof window !== 'undefined') {
         window.removeEventListener(WHATSAPP_SEND_QUEUED_EVENT, onQueued);
         window.removeEventListener('storage', onStorage);
       }
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [allowed, userId, load, api, session]);
+  }, [allowed, userId, load, session]);
 
   return { items, refresh: () => void loadRef.current(), contextHolder, supported };
 }

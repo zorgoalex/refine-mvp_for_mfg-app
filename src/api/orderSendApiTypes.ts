@@ -48,6 +48,8 @@ export interface OrderSendSettings {
   chats: OrderSendChatSettings[];
   /** Absent on an older backend. */
   employees?: OrderSendEmployeeSettings[];
+  /** Texts of supplier requests may be sent from the procurement screen; absent on an older backend. */
+  supplierRequestsEnabled?: boolean;
   updatedAt: string;
   updatedBy: { id: number | string; username: string | null } | null;
 }
@@ -87,6 +89,8 @@ export interface OrderSendSettingsInput {
   chats: OrderSendChatInput[];
   /** Sent only to a backend that has employee recipients (omitted = the current ones stay). */
   employees?: OrderSendEmployeeInput[];
+  /** Sent only to a backend that has the switch (omitted = it stays). */
+  supplierRequestsEnabled?: boolean;
 }
 
 export interface OrderSendEmployeeInput {
@@ -104,7 +108,8 @@ export interface OrderSendMenuEmployee {
   /** «логин / ФИО» when users are linked. */
   label: string;
   forms: OrderFormCode[];
-  contacts: Array<{ contactId: number; masked: string; isPrimary: boolean }>;
+  /** `token` is absent on an older backend. */
+  contacts: Array<{ contactId: number; masked: string; isPrimary: boolean; token?: string }>;
 }
 
 /** The menu of the order card: no group ids, already filtered by the user's financial visibility. */
@@ -120,9 +125,26 @@ export interface OrderSendMenu {
   runtime: BroadcastRuntime;
 }
 
-export type OrderSendTarget = { kind: 'client' } | { kind: 'chat'; chatKey: string }
+/** A phone of the order client a form can be sent to (masked). */
+export interface OrderSendClientContact {
+  phoneId: number;
+  masked: string;
+  isPrimary: boolean;
+  /** The phone a send without a choice goes to (primary, else the smallest). */
+  isDefault: boolean;
+  /** Opaque: «this row is this number» — sent back with the choice, so an edited row is refused. */
+  token: string;
+}
+
+/** Phones of one order's client (GET /orders/:id/whatsapp-sends/client-contacts). */
+export interface OrderSendClientContacts { clientId: number | null; contacts: OrderSendClientContact[] }
+
+export type OrderSendTarget =
+  /** `phoneId` — one of the client's phones, always with the token the contacts list gave for it; omitted = the default one. */
+  { kind: 'client'; phoneId?: number; phoneToken?: string }
+  | { kind: 'chat'; chatKey: string }
   /** `contactId` — one of the employee's phones; omitted = the primary one. */
-  | { kind: 'employee'; recipientKey: string; contactId?: number };
+  | { kind: 'employee'; recipientKey: string; contactId?: number; /** The token the menu gave for this contact. */ contactToken?: string };
 
 export interface OrderSendCommandInput {
   target: OrderSendTarget;
@@ -132,14 +154,21 @@ export interface OrderSendCommandInput {
   confirmAfterUnknown?: string;
 }
 
+/** The «form» of a supplier request send: its text. */
+export const SUPPLIER_TEXT_FORM = 'supplier_text';
+
 export interface OrderSendView {
   sendId: string;
-  orderId: number;
-  targetKind: 'client' | 'chat' | 'employee';
+  /** Null for a supplier request send. */
+  orderId: number | null;
+  targetKind: 'client' | 'chat' | 'employee' | 'supplier';
   chatKey: string | null;
   recipientLabel: string;
   recipientMasked: string;
-  form: OrderFormCode;
+  form: OrderFormCode | typeof SUPPLIER_TEXT_FORM;
+  /** A supplier request send: the request and its number; absent on an older backend. */
+  supplierRequestId?: number | null;
+  supplierRequestNumber?: string | null;
   state: string;
   errorCode: string | null;
   cancelReason: string | null;

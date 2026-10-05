@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DatabaseClient } from '../../../database/database.types';
+import type { CurrentUser } from '../../../permissions/current-user';
 import { PgNotificationRepository } from './pg-notification-repository';
+
+const viewer: CurrentUser = { id: '42', username: 'u', role: 'manager', roleId: 10, permissions: ['orders.view'] };
+const SOURCES = ['procurement_order_event', 'procurement_digest'];
 
 describe('PgNotificationRepository', () => {
   it('lists current-user notifications with unread filter and unread count', async () => {
@@ -34,7 +38,7 @@ describe('PgNotificationRepository', () => {
     const repository = new PgNotificationRepository(database);
 
     await expect(
-      repository.listForUser({ userId: '42', unreadOnly: true, page: 2, pageSize: 10 }),
+      repository.listForUser({ viewer, unreadOnly: true, page: 2, pageSize: 10 }),
     ).resolves.toEqual({
       data: [
         {
@@ -49,6 +53,7 @@ describe('PgNotificationRepository', () => {
           sourceId: '22222222-2222-4222-8222-222222222222',
           readAt: null,
           createdAt: '2026-05-23T09:00:00.000Z',
+          balloonMode: null,
         },
       ],
       total: 1,
@@ -57,12 +62,12 @@ describe('PgNotificationRepository', () => {
     expect(database.query).toHaveBeenNthCalledWith(
       1,
       expect.stringContaining('count(*) FILTER (WHERE ($2::boolean = false OR is_read = false))'),
-      ['42', true],
+      ['42', true, SOURCES],
     );
     expect(database.query).toHaveBeenNthCalledWith(
       2,
       expect.stringContaining('AND ($2::boolean = false OR is_read = false)'),
-      ['42', true, 10, 10],
+      ['42', true, 10, 10, SOURCES],
     );
   });
 
@@ -74,7 +79,7 @@ describe('PgNotificationRepository', () => {
     const repository = new PgNotificationRepository(database);
 
     await expect(
-      repository.listForUser({ userId: '42', unreadOnly: false, page: 3, pageSize: 10 }),
+      repository.listForUser({ viewer, unreadOnly: false, page: 3, pageSize: 10 }),
     ).resolves.toEqual({
       data: [],
       total: 12,
@@ -91,7 +96,7 @@ describe('PgNotificationRepository', () => {
 
     const result = await repository.markReadForUser({
       notificationId: '11111111-1111-4111-8111-111111111111',
-      userId: '42',
+      viewer,
     });
 
     expect(result?.readAt).toBe('2026-05-23T10:00:00.000Z');
@@ -100,7 +105,7 @@ describe('PgNotificationRepository', () => {
     expect(sql).toContain('SET is_read = true, read_at = COALESCE(read_at, now())');
     expect(database.query).toHaveBeenCalledWith(
       expect.stringContaining('UPDATE notifications'),
-      ['11111111-1111-4111-8111-111111111111', '42'],
+      ['11111111-1111-4111-8111-111111111111', '42', SOURCES],
     );
   });
 
@@ -119,7 +124,7 @@ describe('PgNotificationRepository', () => {
 
     const result = await repository.markReadForUser({
       notificationId: '11111111-1111-4111-8111-111111111111',
-      userId: '42',
+      viewer,
     });
 
     expect(result?.readAt).toBe('2026-05-23T10:00:00.000Z');
@@ -130,11 +135,11 @@ describe('PgNotificationRepository', () => {
     const database = databaseClient([{ rows: [{ updated_count: '3' }] }]);
     const repository = new PgNotificationRepository(database);
 
-    await expect(repository.markAllReadForUser('42')).resolves.toBe(3);
+    await expect(repository.markAllReadForUser(viewer)).resolves.toBe(3);
     const sql = queriedSql(database, 1);
     expect(sql).toContain('SET is_read = true, read_at = COALESCE(read_at, now())');
     expect(sql).toContain('AND is_read = false');
-    expect(database.query).toHaveBeenCalledWith(expect.stringContaining('is_read = false'), ['42']);
+    expect(database.query).toHaveBeenCalledWith(expect.stringContaining('is_read = false'), ['42', SOURCES]);
   });
 
   it('deletes only current-user notification rows', async () => {
@@ -144,13 +149,28 @@ describe('PgNotificationRepository', () => {
     await expect(
       repository.deleteForUser({
         notificationId: '11111111-1111-4111-8111-111111111111',
-        userId: '42',
+        viewer,
       }),
     ).resolves.toBe(true);
     expect(database.query).toHaveBeenCalledWith(
       expect.stringContaining('DELETE FROM notifications'),
-      ['11111111-1111-4111-8111-111111111111', '42'],
+      ['11111111-1111-4111-8111-111111111111', '42', SOURCES],
     );
+  });
+
+  it('procurement notifications: hidden without literal procurement.view; with it — only orders in the current scope', async () => {
+    const without = databaseClient([{ rows: [{ updated_count: '0' }] }]);
+    await new PgNotificationRepository(without).markAllReadForUser(viewer);
+    expect(queriedSql(without, 1)).toContain('AND n.source_type <> ALL($2::text[])');
+    expect(queriedSql(without, 1)).not.toContain('EXISTS');
+
+    const procurementViewer: CurrentUser = { ...viewer, permissions: ['orders.view', 'procurement.view'] };
+    const withView = databaseClient([{ rows: [{ updated_count: '1' }] }]);
+    await new PgNotificationRepository(withView).markAllReadForUser(procurementViewer);
+    const sql = queriedSql(withView, 1);
+    expect(sql).toContain("n.source_type <> ALL($2::text[]) OR n.entity_type IS DISTINCT FROM 'order' OR EXISTS");
+    expect(sql).toContain('o.delete_flag = false');
+    expect(sql).toContain('o.order_id::text = n.entity_id');
   });
 });
 

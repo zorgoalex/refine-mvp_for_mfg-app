@@ -4,6 +4,7 @@ export const LEGACY_CATEGORY_ORDER = [
   'Контрагенты',
   'Финансы',
   'Производство',
+  'Закупки',
   'Материалы',
   'Данные',
   'Справочники',
@@ -12,6 +13,8 @@ export const LEGACY_CATEGORY_ORDER = [
 ] as const;
 
 export const LEGACY_CATEGORY_MAP: Record<string, string> = {
+  order_resource_requirements: 'Производство',
+  onec_purchase_documents: 'Закупки',
   clients: 'Контрагенты',
   bitrix24_incoming_requests: 'Контрагенты',
   clients_analytics_view: 'Контрагенты',
@@ -46,9 +49,10 @@ export const LEGACY_CATEGORY_MAP: Record<string, string> = {
   onec: 'Настройки',
 };
 
-export const EVOLUTION_CATEGORY_ORDER = ['CRM', 'Производство', 'Данные', 'Журналы', 'Настройки'] as const;
+export const EVOLUTION_CATEGORY_ORDER = ['CRM', 'Производство', 'Закупки', 'Данные', 'Журналы', 'Настройки'] as const;
 
 export const EVOLUTION_CATEGORY_LABELS: Record<(typeof EVOLUTION_CATEGORY_ORDER)[number], string> = {
+  Закупки: 'Закупки',
   CRM: 'CRM',
   Производство: 'Производство',
   Данные: 'Данные',
@@ -57,6 +61,7 @@ export const EVOLUTION_CATEGORY_LABELS: Record<(typeof EVOLUTION_CATEGORY_ORDER)
 };
 
 export const EVOLUTION_CATEGORY_MAP: Record<string, (typeof EVOLUTION_CATEGORY_ORDER)[number]> = {
+  onec_purchase_documents: 'Закупки',
   clients: 'CRM',
   bitrix24_incoming_requests: 'CRM',
   clients_analytics_view: 'CRM',

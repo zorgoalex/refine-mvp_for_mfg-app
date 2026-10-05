@@ -1,5 +1,5 @@
-import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
+import { PgNotificationWriteAdapter } from '../../notifications-engine/adapters/pg-notification-write';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type {
   GroupNotificationDelivery,
@@ -11,11 +11,8 @@ type GroupNotificationDatabase = DatabaseClient & {
   transaction<T>(handler: (client: TransactionClient) => Promise<T>): Promise<T>;
 };
 
-interface NotificationRow extends QueryResultRow {
-  notification_id: string;
-}
-
 const SOURCE = 'groups-p8-notifications';
+const notificationWrite = new PgNotificationWriteAdapter();
 
 export class PgGroupNotificationRepository {
   constructor(private readonly database: DatabaseClient | GroupNotificationDatabase) {}
@@ -40,27 +37,20 @@ export class PgGroupNotificationRepository {
       const notificationIds: string[] = [];
 
       for (const delivery of input.deliveries) {
-        const inserted = await tx.query<NotificationRow>(
-          `
-          INSERT INTO notifications (
-            user_id, level, title, message, entity_type, entity_id,
-            source_type, source_id, idempotency_key
-          )
-          VALUES ($1::bigint, 'info', $2, $3, 'group', $4, $5, $6, $7)
-          ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
-          RETURNING notification_id
-          `,
-          [
-            delivery.recipientUserId,
-            delivery.title,
-            delivery.message,
-            input.groupId,
-            input.eventType,
-            `${input.sourceId}:${input.fact.factKey}`,
-            notificationIdempotencyKey(input, delivery.recipientUserId),
-          ],
-        );
-        if (inserted.rows[0]) notificationIds.push(String(inserted.rows[0].notification_id));
+        // Единый адаптер записи уведомлений (план 2026-10-03 §2.1); групповые события — не по правилам, без балуна.
+        const inserted = await notificationWrite.insertIfAbsent(tx, {
+          userId: Number(delivery.recipientUserId),
+          level: 'info',
+          title: delivery.title,
+          message: delivery.message,
+          entityType: 'group',
+          entityId: input.groupId,
+          sourceType: input.eventType,
+          sourceId: `${input.sourceId}:${input.fact.factKey}`,
+          idempotencyKey: notificationIdempotencyKey(input, delivery.recipientUserId),
+          balloonMode: null,
+        });
+        if (inserted.created) notificationIds.push(inserted.notificationId);
       }
 
       await insertOutbox(tx, input, auditId, notificationIds);

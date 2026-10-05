@@ -1,7 +1,9 @@
+import { balloonFor } from './notification-delivery';
+import { isExternalChannel } from '../domain/notification-rule.types';
 import type { DatabaseClient } from '../../../database/database.types';
 import { resolveEffectiveEventType } from '../domain/deadline-event-extractor';
 import { evaluateRuleConditions } from '../domain/notification-condition-evaluator';
-import { getEventDefinition, withOwnerOverride } from '../domain/notification-event-registry';
+import { getEventDefinition, withOwnerOverride, type NotificationFeatureFlag } from '../domain/notification-event-registry';
 import { buildNotificationDeliveryKey } from '../domain/notification-idempotency';
 import type { NotificationEventContext, NotificationRule } from '../domain/notification-rule.types';
 import type { OutboxEventRecord } from '../domain/outbox-event.types';
@@ -9,6 +11,7 @@ import type { NotificationContextBuilderPort } from '../ports/notification-conte
 import type { NotificationChannelDeliveryPort } from '../ports/notification-channel-delivery.port';
 import type { NotificationRuleRepositoryPort } from '../ports/notification-rule-repository.port';
 import type { NotificationWritePort } from '../ports/notification-write.port';
+import type { VisibilityPort } from '../ports/visibility.port';
 import type { RecipientResolverService } from './recipient-resolver.service';
 
 const SOURCE_TYPE = 'notification_rule';
@@ -17,6 +20,8 @@ const DEADLINE_EVENT_TYPES = new Set(['DEADLINE_EXPIRED']);
 
 export interface NotificationRuleEngineRuntimeConfig {
   isEngineOwnsDeadline(): boolean;
+  /** Флаг семейства событий; без реализации — выключен (fail closed). */
+  isFeatureEnabled?(flag: NotificationFeatureFlag): boolean;
 }
 
 export interface NotificationRuleEngineDeps {
@@ -32,6 +37,10 @@ export interface NotificationRuleEngineDeps {
    * `NotificationsRuntimeConfigService` at module wiring time.
    */
   runtimeConfig?: NotificationRuleEngineRuntimeConfig;
+  /** Видимость получателей событий закупа (текущая матрица ролей); без неё такие события никому не доставляются. */
+  procurementVisibility?: VisibilityPort;
+  /** Часы для отсечки устаревших событий (тесты). */
+  now?: () => Date;
 }
 
 export interface ProcessEventResult {
@@ -115,6 +124,20 @@ export class NotificationRuleEngineService {
       return { matched: 0, created: 0, skipped: 'not_engine_owned' };
     }
 
+    // Флаг — в момент обработки (§5.7 R5-3): выключен → событие обработано без уведомлений; включение флага не
+    // переигрывает такие события. Устаревшие события (реле было выключено) тоже не порождают уведомлений.
+    if (definition.featureFlag && this.deps.runtimeConfig?.isFeatureEnabled?.(definition.featureFlag) !== true) {
+      return { matched: 0, created: 0, skipped: 'skipped_disabled' };
+    }
+    if (definition.maxEventAgeHours !== undefined) {
+      const createdAt = event.createdAt ? Date.parse(event.createdAt) : Number.NaN;
+      const now = this.deps.now?.() ?? new Date();
+      if (!Number.isFinite(createdAt) || now.getTime() - createdAt > definition.maxEventAgeHours * 3_600_000) {
+        return { matched: 0, created: 0, skipped: 'skipped_stale' };
+      }
+    }
+    const sourceType = definition.sourceType ?? SOURCE_TYPE;
+
     const ctx = await this.deps.contextBuilder.buildContext(client, event);
     const rules = await this.deps.ruleRepo.listEnabledByEvent(client, effectiveType);
     const groupIds = new Set(ctx.groupIds.map((groupId) => groupId.toLowerCase()));
@@ -129,13 +152,24 @@ export class NotificationRuleEngineService {
     for (const rule of matchingRules) {
       const { matched: ruleMatched } = evaluateRuleConditions(rule.conditions, ctx);
       if (!ruleMatched) continue;
+      // Правило со старым каналом (сохранено до ограничения) не доставляется вне допустимых каналов события.
+      const channels = definition.allowedChannels
+        ? rule.channels.filter((channel) => definition.allowedChannels!.includes(channel))
+        : rule.channels;
       matched += 1;
+      // Балун — свойство in_app-записи (единое решение `balloonFor`), не отдельная доставка.
+      const balloonMode = balloonFor({ channels, balloonMode: rule.balloonMode });
 
       const { title, message } = renderNotificationText(rule, ctx);
-      const recipientUserIds = await this.deps.recipientResolver.resolve(client, rule.recipients, ctx);
+      const recipientUserIds = definition.recipientVisibility === 'procurement'
+        ? (this.deps.procurementVisibility
+          ? await this.deps.recipientResolver.resolve(client, rule.recipients, ctx, this.deps.procurementVisibility)
+          : [])
+        : await this.deps.recipientResolver.resolve(client, rule.recipients, ctx);
 
       for (const userId of recipientUserIds) {
-        for (const channel of rule.channels) {
+        for (const channel of channels) {
+          if (channel === 'balloon') continue;
           const idempotencyKey = buildNotificationDeliveryKey({
             outboxEventId: event.outboxEventId,
             ruleId: rule.notificationRuleId,
@@ -151,13 +185,16 @@ export class NotificationRuleEngineService {
               message,
               entityType: 'order',
               entityId: ctx.orderId != null ? String(ctx.orderId) : null,
-              sourceType: SOURCE_TYPE,
+              sourceType,
               sourceId: rule.notificationRuleId,
               idempotencyKey,
+              balloonMode,
             });
             if (result.created) created += 1;
             continue;
           }
+          // Внешние каналы — только через очередь доставок (балун и in_app сюда не попадают).
+          if (!isExternalChannel(channel)) continue;
 
           const result = await this.deps.channelDelivery.enqueueIfAbsent(client, {
             notificationRuleId: rule.notificationRuleId,

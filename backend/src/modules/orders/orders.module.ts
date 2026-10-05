@@ -1,4 +1,6 @@
-import { Module } from '@nestjs/common';
+import { OnecSyncModule } from '../onec-sync/onec-sync.module';
+import { OnecDocumentsProcurementConsumer } from './application/onec-documents-procurement-consumer';
+import { Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DatabaseModule } from '../../database/database.module';
 import { DatabaseService } from '../../database/database.service';
@@ -48,11 +50,30 @@ import { OrderGroupLinksController } from './http/order-group-links.controller';
 import { MdfBoardManualMoveController } from './http/mdf-board-manual-move.controller';
 import { MdfProductionReturnController } from './http/mdf-production-return.controller';
 import { OrderResourceDemandController } from './http/order-resource-demand.controller';
+import { OrderResourceProcurementController } from './http/order-resource-procurement.controller';
+import { OnecDocumentsController } from './http/onec-documents.controller';
+import { OnecDocumentsService } from './application/onec-documents.service';
+import { PgOnecDocumentsRepository } from './adapters/pg-onec-documents-repository';
+import { PgOrderResourceProcurementRepository } from './adapters/pg-order-resource-procurement-repository';
+import { PgProcurementWorkspaceRepository } from './adapters/pg-procurement-workspace-repository';
+import { PgProcurementHistoryRepository } from './adapters/pg-procurement-history-repository';
+import { ProcurementWorkspaceService } from './application/procurement-workspace.service';
+import { ProcurementWorkspaceController } from './http/procurement-workspace.controller';
+import { PgSupplierRequestsRepository } from './adapters/pg-supplier-requests-repository';
+import { PgRequestLinksRepository } from './adapters/pg-request-links-repository';
+import { SupplierRequestsService } from './application/supplier-requests.service';
+import { SupplierRequestsController } from './http/supplier-requests.controller';
 import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
 import { OrderHdfSettingsController } from './http/order-hdf-settings.controller';
 import { OrderStatusBoardController } from './http/order-status-board.controller';
 import { OrdersRuntimeConfigService } from './http/orders-runtime-config.service';
+import { PgSupplierTextTemplatesRepository } from './adapters/pg-supplier-text-templates-repository';
+import { SupplierTextTemplatesService } from './application/supplier-text-templates.service';
+import { MySupplierTextTemplatesController, SupplierTextTemplatesController } from './http/supplier-text-templates.controller';
+import { PgProcurementNotificationsRepository } from './adapters/pg-procurement-notifications-repository';
+import { ProcurementNotificationsService } from './application/procurement-notifications.service';
+import { ProcurementNotificationsSchedulerService } from './application/procurement-notifications-scheduler.service';
 
 export function shouldEnableOrderDeadlineSync(input: {
   databaseConfigured: boolean;
@@ -69,7 +90,7 @@ export function shouldEnableOrderDeadlineSync(input: {
 }
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, OnecSyncModule],
   controllers: [
     // Register static `/orders/*` routes before the generic `/orders/:orderId`.
     MdfBoardManualMoveController,
@@ -79,10 +100,14 @@ export function shouldEnableOrderDeadlineSync(input: {
     OrderSnapshotController,
     OrderGroupLinksController,
     OrderResourceDemandController,
+    OrderResourceProcurementController,
+    OnecDocumentsController,
+    SupplierRequestsController,
+    ProcurementWorkspaceController,
     OrderHdfSettingsController,
-    OrdersController,
-  ],
+    OrdersController, SupplierTextTemplatesController, MySupplierTextTemplatesController],
   providers: [
+    OnecDocumentsProcurementConsumer,
     OrdersRuntimeConfigService,
     GroupsRuntimeConfigService,
     {
@@ -193,10 +218,67 @@ export function shouldEnableOrderDeadlineSync(input: {
       inject: [DatabaseService],
     },
     {
+      provide: ProcurementWorkspaceService,
+      useFactory: (database: DatabaseService) =>
+        new ProcurementWorkspaceService({
+          repository: new PgProcurementWorkspaceRepository(database),
+          history: new PgProcurementHistoryRepository(database),
+          auditClient: database,
+        }),
+      inject: [DatabaseService],
+    },
+    {
+      // Уведомления закупа по расписанию (ф.4б-2): флаги читаются на каждом проходе; правила-включатели — на экране правил.
+      provide: ProcurementNotificationsSchedulerService,
+      useFactory: (database: DatabaseService, runtimeConfig: OrdersRuntimeConfigService) => {
+        const flags = () => runtimeConfig.getFeatureFlags();
+        return new ProcurementNotificationsSchedulerService(new ProcurementNotificationsService({
+          repository: new PgProcurementNotificationsRepository(database),
+          worklist: new PgProcurementWorkspaceRepository(database),
+          enabled: () => {
+            const current = flags();
+            return current.ordersEnabled && current.resourceProcurementEnabled === true
+              && current.procurementWorkspaceEnabled === true && current.procurementNotificationsEnabled === true;
+          },
+          supplierRequestsEnabled: () => flags().supplierRequestsEnabled === true,
+          logger: new Logger('ProcurementNotificationsService'),
+        }));
+      },
+      inject: [DatabaseService, OrdersRuntimeConfigService],
+    },
+    {
+      provide: SupplierTextTemplatesService,
+      useFactory: (database: DatabaseService) =>
+        new SupplierTextTemplatesService({ repository: new PgSupplierTextTemplatesRepository(database), auditClient: database }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: SupplierRequestsService,
+      useFactory: (database: DatabaseService) =>
+        new SupplierRequestsService({
+          repository: new PgSupplierRequestsRepository(database),
+          auditClient: database,
+        }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: OnecDocumentsService,
+      useFactory: (database: DatabaseService) =>
+        new OnecDocumentsService({
+          documents: new PgOnecDocumentsRepository(database),
+          suggestions: new PgProcurementWorkspaceRepository(database),
+          links: new PgRequestLinksRepository(database),
+          auditClient: database,
+        }),
+      inject: [DatabaseService],
+    },
+    {
       provide: OrderResourceDemandService,
       useFactory: (database: DatabaseService) =>
         new OrderResourceDemandService({
           demands: new PgOrderResourceDemandRepository(database),
+          procurement: new PgOrderResourceProcurementRepository(database),
+          auditClient: database,
         }),
       inject: [DatabaseService],
     },

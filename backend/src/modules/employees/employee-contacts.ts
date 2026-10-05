@@ -31,25 +31,29 @@ export interface EmployeeContactInput {
   note: string | null;
 }
 
+/** Error codes of the contact rules: employees keep theirs, other owners (suppliers, vendors, clients) pass their own. */
+export interface ContactErrorCodes { invalid: string; duplicate: string }
+export const EMPLOYEE_CONTACT_CODES: ContactErrorCodes = { invalid: 'EMPLOYEE_CONTACT_INVALID', duplicate: 'EMPLOYEE_CONTACT_DUPLICATE' };
+
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const TELEGRAM = /^@?([A-Za-z0-9_]{5,32})$/;
 
 /** The comparable form of a contact (unique per employee and kind): phone 7XXXXXXXXXX, email lower case, telegram without «@». */
-export function normalizeContact(kind: EmployeeContactKind, raw: string): string {
+export function normalizeContact(kind: EmployeeContactKind, raw: string, codes: ContactErrorCodes = EMPLOYEE_CONTACT_CODES): string {
   const value = raw.trim();
   if (kind === 'phone') {
     try {
       return normalizeClientPhone(value);
     } catch {
-      throw new ApiError(422, 'EMPLOYEE_CONTACT_INVALID', `Телефон «${value}» не удалось распознать`, { kind });
+      throw new ApiError(422, codes.invalid, `Телефон «${value}» не удалось распознать`, { kind });
     }
   }
   if (kind === 'email') {
-    if (!EMAIL.test(value)) throw new ApiError(422, 'EMPLOYEE_CONTACT_INVALID', `Email «${value}» указан неверно`, { kind });
+    if (!EMAIL.test(value)) throw new ApiError(422, codes.invalid, `Email «${value}» указан неверно`, { kind });
     return value.toLowerCase();
   }
   const match = TELEGRAM.exec(value.replace(/^https?:\/\/t\.me\//i, ''));
-  if (!match) throw new ApiError(422, 'EMPLOYEE_CONTACT_INVALID', `Аккаунт Telegram «${value}» указан неверно (5–32 символа: латиница, цифры, «_»)`, { kind });
+  if (!match) throw new ApiError(422, codes.invalid, `Аккаунт Telegram «${value}» указан неверно (5–32 символа: латиница, цифры, «_»)`, { kind });
   return match[1].toLowerCase();
 }
 
@@ -67,30 +71,31 @@ export function maskContact(kind: EmployeeContactKind, normalized: string): stri
  * Validates and normalizes a whole set: at most 20 contacts, no duplicate value per kind, at most one
  * primary per kind; the first contact of a kind without a primary becomes primary.
  */
-export function prepareContacts(input: readonly EmployeeContactInput[]): Array<EmployeeContactInput & { valueNormalized: string; position: number }> {
+export function prepareContacts(input: readonly EmployeeContactInput[], codes: ContactErrorCodes = EMPLOYEE_CONTACT_CODES,
+  owner = 'сотрудника'): Array<EmployeeContactInput & { valueNormalized: string; position: number }> {
   if (input.length > EMPLOYEE_CONTACTS_MAX) {
-    throw new ApiError(422, 'EMPLOYEE_CONTACT_INVALID', `Не больше ${EMPLOYEE_CONTACTS_MAX} контактов у сотрудника`);
+    throw new ApiError(422, codes.invalid, `Не больше ${EMPLOYEE_CONTACTS_MAX} контактов у ${owner}`);
   }
   const prepared = input.map((contact, position) => ({
     ...contact, value: contact.value.trim(), note: contact.note?.trim() ? contact.note.trim() : null,
-    valueNormalized: normalizeContact(contact.kind, contact.value), position,
+    valueNormalized: normalizeContact(contact.kind, contact.value, codes), position,
   }));
   const ids = new Set<number>();
   for (const contact of input) {
     if (contact.contactId === null) continue;
-    if (ids.has(contact.contactId)) throw new ApiError(422, 'EMPLOYEE_CONTACT_INVALID', 'Один контакт указан в наборе дважды');
+    if (ids.has(contact.contactId)) throw new ApiError(422, codes.invalid, 'Один контакт указан в наборе дважды');
     ids.add(contact.contactId);
   }
   const seen = new Set<string>();
   for (const contact of prepared) {
     const key = `${contact.kind}:${contact.valueNormalized}`;
-    if (seen.has(key)) throw new ApiError(422, 'EMPLOYEE_CONTACT_DUPLICATE', `Контакт «${contact.value}» указан дважды`);
+    if (seen.has(key)) throw new ApiError(422, codes.duplicate, `Контакт «${contact.value}» указан дважды`);
     seen.add(key);
   }
   for (const kind of EMPLOYEE_CONTACT_KINDS) {
     const ofKind = prepared.filter((contact) => contact.kind === kind);
     const primaries = ofKind.filter((contact) => contact.isPrimary);
-    if (primaries.length > 1) throw new ApiError(422, 'EMPLOYEE_CONTACT_INVALID', 'Основным может быть только один контакт каждого типа');
+    if (primaries.length > 1) throw new ApiError(422, codes.invalid, 'Основным может быть только один контакт каждого типа');
     if (ofKind.length && !primaries.length) ofKind[0].isPrimary = true;
   }
   return prepared;

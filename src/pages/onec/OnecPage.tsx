@@ -10,6 +10,7 @@ import { ConfigurationTab } from './ConfigurationTab';
 import { CommandsTab } from './CommandsTab';
 import { EtlTab } from './EtlTab';
 import { DailyJournalTab } from './DailyJournalTab';
+import { CustomerOrdersTab } from './CustomerOrdersTab';
 import { MirrorTab } from './MirrorTab';
 import { MatchingTab } from './MatchingTab';
 import { AlertsIncidentsTab } from './AlertsIncidentsTab';
@@ -115,6 +116,11 @@ export function OnecPage() {
       key: 'journal',
       label: 'Журнал за сутки',
       children: <DailyJournalTab agents={agents} />,
+    },
+    {
+      key: 'customer-orders',
+      label: 'Заказы 1С',
+      children: <CustomerOrdersTab />,
     },
     {
       key: 'mirror',

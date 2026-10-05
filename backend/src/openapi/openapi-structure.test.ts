@@ -105,6 +105,9 @@ describe('OpenAPI document structure', () => {
       ['/api/v1/whatsapp/order-send/menu', 'get', ['orders.view', 'orders.export']],
       ['/api/v1/orders/{orderId}/whatsapp-sends', 'get', ['orders.view', 'orders.export']],
       ['/api/v1/orders/{orderId}/whatsapp-sends', 'post', ['orders.view', 'orders.export']],
+      // Заявка поставщику в WhatsApp: права команд снабжения.
+      ['/api/v1/procurement/supplier-requests/{supplierRequestId}/whatsapp-menu', 'get', ['procurement.view', 'procurement.manage']],
+      ['/api/v1/procurement/supplier-requests/{supplierRequestId}/whatsapp-sends', 'post', ['procurement.view', 'procurement.manage']],
     ] as const) {
       const operation = contract.paths[path]?.[method];
       expect(operation, `${method.toUpperCase()} ${path}`).toBeDefined();

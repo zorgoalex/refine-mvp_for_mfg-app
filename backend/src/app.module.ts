@@ -12,6 +12,7 @@ import { StatusAutomationModule } from './modules/status-automation/status-autom
 import { HealthModule } from './modules/health/health.module';
 import { ClientPhonesModule } from './modules/client-phones/client-phones.module';
 import { EmployeesModule } from './modules/employees/employees.module';
+import { PartyContactsModule } from './modules/party-contacts/party-contacts.module';
 import { CncTelegramModule } from './modules/cnc-telegram/cnc-telegram.module';
 import { CrmSyncModule } from './modules/crm-sync/crm-sync.module';
 import { BazisModule } from './modules/bazis/bazis.module';
@@ -38,6 +39,7 @@ import { RequestContextModule } from './common/request-context/request-context.m
 import { PerformanceModule } from './performance/performance.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { OnecAgentModule } from './modules/onec-agent/onec-agent.module';
+import { OnecSyncModule } from './modules/onec-sync/onec-sync.module';
 import { MdfBoardModule } from './modules/mdf-board/mdf-board.module';
 
 @Module({
@@ -55,6 +57,7 @@ import { MdfBoardModule } from './modules/mdf-board/mdf-board.module';
     AuthModule,
     ClientPhonesModule,
     EmployeesModule,
+    PartyContactsModule,
     CncTelegramModule,
     CrmSyncModule,
     BazisModule,
@@ -83,6 +86,7 @@ import { MdfBoardModule } from './modules/mdf-board/mdf-board.module';
     PermissionsModule,
     WhatsAppModule,
     OnecAgentModule,
+    OnecSyncModule,
     MdfBoardModule,
   ],
 })

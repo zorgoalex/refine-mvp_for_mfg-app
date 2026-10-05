@@ -1,11 +1,12 @@
 import type { DatabaseClient } from '../../../database/database.types';
-import type { NotificationChannel, NotificationLevel } from '../domain/notification-rule.types';
+import type { ExternalNotificationChannel, NotificationLevel } from '../domain/notification-rule.types';
 
 export interface EnqueueNotificationChannelDeliveryInput {
   notificationRuleId: string;
   outboxEventId: string;
   userId: number;
-  channel: Exclude<NotificationChannel, 'in_app'>;
+  /** Только внешние каналы (telegram); `in_app` и `balloon` сюда не попадают (план 2026-10-03 R1-6). */
+  channel: ExternalNotificationChannel;
   level: NotificationLevel;
   title: string;
   message: string;

@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { MyWhatsAppSend } from '../../api/myWhatsAppSendsApi';
 import {
-  addedTrackedIds, balloonFor, balloonsFor, collectFinished, emptyFollowState, estimateText, fromBroadcastRun, fromOrderSendView, loadState, nextPollDelay,
+  addedTrackedIds, balloonFor, balloonsFor, collectFinished, emptyFollowState, finishedDue, estimateText, fromBroadcastRun, fromOrderSendView, loadState, nextPollDelay,
   trackSend, withFollowLock, type FollowAccess,
 } from './myWhatsAppSendsModel';
 
@@ -20,6 +20,20 @@ const item = (id: string, state: string, extra: Partial<MyWhatsAppSend> = {}): M
   estimatedAt: null, createdAt: '2026-10-02T10:00:00Z', finishedAt: null, errorCode: null, cancelReason: null, orderId: 1, targetDate: null, ...extra,
 });
 const META = { kind: 'order_send' as const, orderId: 1 };
+
+describe('finishedDue (план 2026-10-03 R2-2): the same due set as collectFinished, without writing', () => {
+  it('peeks without marking announced; collectFinished afterwards returns the same set', () => {
+    const storage = memory();
+    trackSend('11', 'a', META, access(storage));
+    trackSend('11', 'b', META, access(storage));
+    const writesBefore = storage.writes();
+    const peek = finishedDue([item('a', 'sent'), item('b', 'queued')], '11', access(storage)).map((entry) => entry.id);
+    expect(peek).toEqual(['a']);
+    expect(storage.writes()).toBe(writesBefore);
+    expect(collectFinished([item('a', 'sent'), item('b', 'queued')], '11', access(storage)).map((entry) => entry.id)).toEqual(peek);
+    expect(finishedDue([item('a', 'sent')], '11', access(storage))).toEqual([]);
+  });
+});
 
 describe('following the user\'s own sends', () => {
   it('a send registered at acceptance and finished before the first poll gets its balloon, also from a reloaded page', () => {
@@ -169,7 +183,7 @@ describe('wiring', () => {
     const provider = read('./WhatsAppSendsProvider.tsx');
     expect(provider).toContain('useMyWhatsAppSends()');
     expect(provider).toContain('{contextHolder}');
-    expect(read('../../App.tsx')).toMatch(/<Authenticated[\s\S]*?<WhatsAppSendsProvider>\s*<VariantWorkspaceLayout \/>\s*<\/WhatsAppSendsProvider>\s*<\/Authenticated>/);
+    expect(read('../../App.tsx')).toMatch(/<Authenticated[\s\S]*?<BalloonCenterProvider>\s*<WhatsAppSendsProvider>\s*<VariantWorkspaceLayout \/>\s*<\/WhatsAppSendsProvider>\s*<\/BalloonCenterProvider>\s*<\/Authenticated>/);
     const show = read('../../pages/orders/show.tsx');
     expect(show).toContain("onQueued: (queued) => { void announceWhatsAppSendQueued(queued.sendId, { kind: 'order_send', orderId }, owner); },");
     expect(show.indexOf('const owner = currentOwner();')).toBeLessThan(show.indexOf("announceWhatsAppSendQueued(queued.sendId"));
@@ -177,8 +191,12 @@ describe('wiring', () => {
     const calendar = read('../../pages/calendar/components/CalendarBoard.tsx');
     expect(calendar).toContain("onQueued: (runId) => { void announceWhatsAppSendQueued(runId, { kind: 'calendar_send' }, owner); },");
     const hook = read('./useMyWhatsAppSends.ts');
-    expect(hook).toContain("placement: 'bottomRight', duration: 15, style: { opacity: 0.88 }");
-    expect(hook).toContain('notification.useNotification({ maxCount: BALLOON_MAX })');
+    // Балуны — через единый центр (план 2026-10-03): постановка в сохраняемую очередь ДО отметки «объявлена».
+    expect(hook).toContain("mode: 'auto'");
+    expect(hook).not.toContain('notification.useNotification');
+    const enqueueAt = hook.indexOf('await center.enqueueLocal(userId, balloons.map(toLocalBalloon))');
+    expect(enqueueAt).toBeGreaterThan(-1);
+    expect(enqueueAt).toBeLessThan(hook.indexOf('if (current()) collectFinished(keep, userId, access.current);'));
     expect(hook).toContain('if (!current()) return;');
     expect(hook).toContain('useSyncExternalStore(authSession.subscribe, authSession.getSessionGeneration');
     expect(hook).toContain("window.addEventListener('storage', onStorage);");
@@ -195,7 +213,7 @@ describe('queue balloons', () => {
   it('a manual cancel says who: the author himself or an administrator', () => {
     expect(balloonFor(item('a', 'cancelled', { cancelReason: 'manual', cancelledByOther: false })).title).toBe('Отправка отменена');
     expect(balloonFor(item('a', 'cancelled', { cancelReason: 'manual', cancelledByOther: true })).title).toBe('Отменено администратором');
-    expect(balloonFor(item('a', 'unknown', { errorCode: 'PARTIAL_DELIVERY' })).title).toBe('Ушла только часть изображений');
+    expect(balloonFor(item('a', 'unknown', { errorCode: 'PARTIAL_DELIVERY' })).title).toBe('Ушла только часть отправки');
   });
 
   it('many finished at once → one summary balloon; a few → one each', () => {

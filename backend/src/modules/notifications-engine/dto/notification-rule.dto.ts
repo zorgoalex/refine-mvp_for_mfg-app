@@ -6,7 +6,7 @@ import type {
   NotificationRuleConditions,
   NotificationRuleRecipients,
 } from '../domain/notification-rule.types';
-import { NOTIFICATION_CHANNELS } from '../domain/notification-rule.types';
+import { ALLOCATION_ROLES, BALLOON_MODES, NOTIFICATION_CHANNELS, PROCUREMENT_CHANGE_TYPES, type BalloonMode } from '../domain/notification-rule.types';
 
 /**
  * Structural-only parse result for `recipients`. `resolvers` is kept as
@@ -41,6 +41,7 @@ const nullableTemplateSchema = z.string().nullable();
 const groupIdSchema = z.string().uuid().nullable();
 const deadlineEntityTypesSchema = z.array(z.enum(['order', 'order_stage'])).min(1);
 const channelsSchema = z.array(z.enum(NOTIFICATION_CHANNELS)).min(1).max(10);
+const balloonModeSchema = z.enum(BALLOON_MODES);
 
 const conditionsSchema = z
   .object({
@@ -49,6 +50,8 @@ const conditionsSchema = z
     excludeOrderStatusIds: integerArraySchema.optional(),
     excludeCompletedOrders: z.boolean().optional(),
     requireCurrentDeadlineEvent: z.boolean().optional(),
+    procurementChangeTypes: z.array(z.enum(PROCUREMENT_CHANGE_TYPES)).min(1).max(PROCUREMENT_CHANGE_TYPES.length).optional(),
+    allocationRoles: z.array(z.enum(ALLOCATION_ROLES)).min(1).max(ALLOCATION_ROLES.length).optional(),
   })
   .strict();
 
@@ -68,6 +71,7 @@ const createNotificationRuleSchema = z.object({
   priority: z.number().int().default(100),
   isEnabled: z.boolean().default(true),
   channels: channelsSchema.default(['in_app']),
+  balloonMode: balloonModeSchema.default('auto'),
   conditions: conditionsSchema.default({}),
   recipients: recipientsSchema.default({}),
   titleTemplate: nullableTemplateSchema.optional(),
@@ -80,6 +84,7 @@ const updateNotificationRuleSchema = z
     priority: z.number().int().optional(),
     isEnabled: z.boolean().optional(),
     channels: channelsSchema.optional(),
+    balloonMode: balloonModeSchema.optional(),
     groupId: groupIdSchema.optional(),
     conditions: conditionsSchema.optional(),
     recipients: recipientsSchema.optional(),
@@ -94,6 +99,7 @@ const updateNotificationRuleSchema = z
       value.priority !== undefined ||
       value.isEnabled !== undefined ||
       value.channels !== undefined ||
+      value.balloonMode !== undefined ||
       value.groupId !== undefined ||
       value.conditions !== undefined ||
       value.recipients !== undefined ||
@@ -115,6 +121,7 @@ export interface UpdateNotificationRulePatch {
   priority?: number;
   isEnabled?: boolean;
   channels?: NotificationChannel[];
+  balloonMode?: BalloonMode;
   conditions?: NotificationRuleConditions;
   recipients?: NotificationRuleRecipients;
   titleTemplate?: string | null;
@@ -145,6 +152,7 @@ export function parseCreateNotificationRuleRequest(
     priority: data.priority,
     isEnabled: data.isEnabled,
     channels: data.channels,
+    balloonMode: data.balloonMode,
     conditions: data.conditions,
     recipients: toNotificationRuleRecipients(data.recipients),
   };
@@ -176,6 +184,7 @@ export function parseUpdateNotificationRuleRequest(body: unknown): UpdateNotific
   if (data.priority !== undefined) patch.priority = data.priority;
   if (data.isEnabled !== undefined) patch.isEnabled = data.isEnabled;
   if (data.channels !== undefined) patch.channels = data.channels;
+  if (data.balloonMode !== undefined) patch.balloonMode = data.balloonMode;
   if (data.groupId !== undefined) patch.groupId = data.groupId;
   if (data.conditions !== undefined) patch.conditions = data.conditions;
   if (data.recipients !== undefined) patch.recipients = toNotificationRuleRecipients(data.recipients);

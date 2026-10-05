@@ -12,7 +12,9 @@ describe('PgGroupNotificationRepository', () => {
     const notificationParams = database.queries
       .filter((query) => query.text.includes('INSERT INTO notifications'))
       .map((query) => query.params);
-    expect(notificationParams.map((params) => params[6])).toEqual([
+    // Единый адаптер записи: ключ — 9-й параметр, балун (10-й) — нет (групповые события не по правилам).
+    expect(notificationParams.map((params) => params[9])).toEqual([null, null]);
+    expect(notificationParams.map((params) => params[8])).toEqual([
       `groups:p8:GROUP_ORDER_LINKS_CHANGED:${groupId()}:command-1:order:15:group:${groupId()}:added:1`,
       `groups:p8:GROUP_ORDER_LINKS_CHANGED:${groupId()}:command-1:order:15:group:${groupId()}:added:2`,
     ]);
@@ -241,6 +243,7 @@ function fakeDatabase({
         notificationSequence += 1;
         return { rows: [{ notification_id: `n-${notificationSequence}` }] as T[] };
       }
+      if (text.includes('SELECT notification_id FROM notifications WHERE idempotency_key')) return { rows: [{ notification_id: 'n-existing' }] as T[] };
       return { rows: [] as T[] };
     },
     async transaction<T>(handler: (client: typeof database) => Promise<T>): Promise<T> {

@@ -22,6 +22,8 @@ servers:
     description: Production backend placeholder
 
 tags:
+  - name: Party contacts
+    description: Контакты поставщиков, производителей и клиентов; связь поставщика с контрагентом 1С
   - name: Reference catalog import
     description: Импорт каталога 1С в справочник плёнок
   - name: Films
@@ -964,6 +966,207 @@ paths:
         '200': {description: Menu, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppOrderSendMenu'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/suppliers/{id}/contacts:
+    get:
+      tags: [Party contacts]
+      operationId: getSupplierContacts
+      summary: 'Contacts of a supplier with the set version'
+      security: [{bearerAuth: []}]
+      x-permissions: [suppliers.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/PartyContacts'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'Owner not found'}
+    put:
+      tags: [Party contacts]
+      operationId: replaceSupplierContacts
+      summary: 'Replace the contacts of a supplier'
+      description: 'Version compare-and-swap on the set (also for an empty one). A contact with contactId keeps its id; missing ones are deleted. One primary per kind (the first by default). Audited with masks only. The owner row itself is not updated.'
+      security: [{bearerAuth: []}]
+      x-permissions: [suppliers.manage]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/EmployeeContactsReplace'}}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/PartyContacts'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'Owner not found'}
+        '409': {description: 'PARTY_CONTACTS_VERSION_CONFLICT'}
+        '422': {description: 'PARTY_CONTACT_INVALID, PARTY_CONTACT_DUPLICATE or VALIDATION_ERROR'}
+  /api/v1/supplier-contacts:
+    get:
+      tags: [Party contacts]
+      operationId: listSupplierContacts
+      summary: 'Contacts of several suppliers (the list column)'
+      security: [{bearerAuth: []}]
+      x-permissions: [suppliers.view]
+      parameters:
+        - {name: ids, in: query, required: false, schema: {type: string, description: 'Comma-separated ids, at most 500'}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {type: object, required: [id, contacts], properties: {id: {type: integer}, contacts: {type: array, items: {$ref: '#/components/schemas/EmployeeContact'}}}}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {description: Invalid request}
+  /api/v1/vendors/{id}/contacts:
+    get:
+      tags: [Party contacts]
+      operationId: getVendorContacts
+      summary: 'Contacts of a vendor with the set version'
+      security: [{bearerAuth: []}]
+      x-permissions: [vendors.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/PartyContacts'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'Owner not found'}
+    put:
+      tags: [Party contacts]
+      operationId: replaceVendorContacts
+      summary: 'Replace the contacts of a vendor'
+      description: 'Version compare-and-swap on the set (also for an empty one). A contact with contactId keeps its id; missing ones are deleted. One primary per kind (the first by default). Audited with masks only. The owner row itself is not updated.'
+      security: [{bearerAuth: []}]
+      x-permissions: [vendors.manage]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/EmployeeContactsReplace'}}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/PartyContacts'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'Owner not found'}
+        '409': {description: 'PARTY_CONTACTS_VERSION_CONFLICT'}
+        '422': {description: 'PARTY_CONTACT_INVALID, PARTY_CONTACT_DUPLICATE or VALIDATION_ERROR'}
+  /api/v1/vendor-contacts:
+    get:
+      tags: [Party contacts]
+      operationId: listVendorContacts
+      summary: 'Contacts of several vendors (the list column)'
+      security: [{bearerAuth: []}]
+      x-permissions: [vendors.view]
+      parameters:
+        - {name: ids, in: query, required: false, schema: {type: string, description: 'Comma-separated ids, at most 500'}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {type: object, required: [id, contacts], properties: {id: {type: integer}, contacts: {type: array, items: {$ref: '#/components/schemas/EmployeeContact'}}}}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {description: Invalid request}
+  /api/v1/clients/{id}/contacts:
+    get:
+      tags: [Party contacts]
+      operationId: getClientContacts
+      summary: 'Contacts of a client with the set version (emails and Telegram accounts; phones stay in client phones)'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/PartyContacts'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'Owner not found'}
+    put:
+      tags: [Party contacts]
+      operationId: replaceClientContacts
+      summary: 'Replace the contacts of a client (emails and Telegram accounts; phones stay in client phones)'
+      description: 'Version compare-and-swap on the set (also for an empty one). A contact with contactId keeps its id; missing ones are deleted. One primary per kind (the first by default). Audited with masks only. The owner row itself is not updated.'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.update]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/EmployeeContactsReplace'}}}
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/PartyContacts'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'Owner not found'}
+        '409': {description: 'PARTY_CONTACTS_VERSION_CONFLICT'}
+        '422': {description: 'PARTY_CONTACT_INVALID, PARTY_CONTACT_DUPLICATE or VALIDATION_ERROR'}
+  /api/v1/supplier-counterparties:
+    get:
+      tags: [Party contacts]
+      operationId: listSupplierCounterparties
+      summary: '1C counterparties a supplier can be linked to'
+      description: 'From the 1C mirror when it is loaded (not folders, not marked for deletion, still in the source; suppliers first), else the counterparties seen in procurement documents, else empty. At most 50.'
+      security: [{bearerAuth: []}]
+      x-permissions: [suppliers.view]
+      parameters:
+        - {name: search, in: query, required: false, schema: {type: string, maxLength: 100}}
+      responses:
+        '200': {description: Counterparties, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/SupplierCounterparty'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/suppliers/{id}/counterparty:
+    get:
+      tags: [Party contacts]
+      operationId: getSupplierCounterparty
+      summary: 'The 1C counterparty a supplier is linked to'
+      security: [{bearerAuth: []}]
+      x-permissions: [suppliers.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Link, content: {application/json: {schema: {$ref: '#/components/schemas/SupplierLink'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'SUPPLIER_NOT_FOUND'}
+    put:
+      tags: [Party contacts]
+      operationId: setSupplierCounterparty
+      summary: 'Link, relink or unlink a supplier and a 1C counterparty'
+      description: 'Compare-and-swap on the key the caller saw (expectedRefKey1c). The key already being the new one is a silent repeat. The 1C documents loader applies the link on its next pass (a one-off wave of document revisions for the counterparty). Audited.'
+      security: [{bearerAuth: []}]
+      x-permissions: [suppliers.manage]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [refKey1c, expectedRefKey1c]
+              properties:
+                refKey1c: {type: string, format: uuid, nullable: true, description: 'null = unlink'}
+                expectedRefKey1c: {type: string, format: uuid, nullable: true}
+      responses:
+        '200': {description: Link, content: {application/json: {schema: {$ref: '#/components/schemas/SupplierLink'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'SUPPLIER_NOT_FOUND'}
+        '409': {description: 'SUPPLIER_COUNTERPARTY_CONFLICT (details.refKey1c = the current key) or SUPPLIER_COUNTERPARTY_TAKEN'}
+        '422': {description: 'SUPPLIER_COUNTERPARTY_UNKNOWN or VALIDATION_ERROR'}
+  /api/v1/suppliers/from-counterparty:
+    post:
+      tags: [Party contacts]
+      operationId: createSupplierFromCounterparty
+      summary: 'Add a 1C counterparty to the suppliers directory'
+      description: 'Creates a supplier named after the counterparty with its key. Idempotent by the key: an existing supplier with it is returned (created=false).'
+      security: [{bearerAuth: []}]
+      x-permissions: [suppliers.manage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [refKey1c], properties: {refKey1c: {type: string, format: uuid}}}
+      responses:
+        '200': {description: Supplier, content: {application/json: {schema: {allOf: [{$ref: '#/components/schemas/SupplierLink'}, {type: object, required: [created], properties: {created: {type: boolean}}}]}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: 'SUPPLIER_NAME_TAKEN (details.supplierId)'}
+        '422': {description: 'SUPPLIER_COUNTERPARTY_UNKNOWN or VALIDATION_ERROR'}
   /api/v1/employees/{employeeId}/contacts:
     get:
       tags: [Employees]
@@ -1042,6 +1245,30 @@ paths:
         '404': {description: 'ORDER_SEND_NOT_FOUND'}
         '409': {description: 'ORDER_SEND_NOT_CANCELLABLE'}
         '422': {description: Invalid request}
+  /api/v1/orders/{orderId}/whatsapp-sends/client-contacts:
+    get:
+      tags: [WhatsApp]
+      operationId: listOrderSendClientContacts
+      summary: 'Phones of the order client a form can be sent to'
+      description: 'Only numbers a send can go to (readable, without repeats), masked, the primary first. The same access as the sends of the order.'
+      security: [{bearerAuth: []}]
+      x-permissions: [orders.view, orders.export]
+      parameters:
+        - {name: orderId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200':
+          description: Contacts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [clientId, contacts]
+                properties:
+                  clientId: {type: integer, nullable: true}
+                  contacts: {type: array, items: {type: object, required: [phoneId, masked, isPrimary, isDefault, token], properties: {phoneId: {type: integer}, masked: {type: string}, isPrimary: {type: boolean}, isDefault: {type: boolean, description: 'The phone a send without a choice goes to'}, token: {type: string, description: 'Opaque; sent back as phoneToken'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'ORDER_NOT_FOUND'}
   /api/v1/orders/{orderId}/whatsapp-sends:
     get:
       tags: [WhatsApp]
@@ -1078,6 +1305,42 @@ paths:
         '422': {description: 'Invalid request or CLIENT_PHONE_INVALID'}
         '503': {description: 'BROADCAST_RUNTIME_UNAVAILABLE, ORDER_SEND_BUSY or ORDER_SEND_STORE_UNAVAILABLE'}
         '507': {description: 'ORDER_SEND_STORAGE_FULL'}
+  /api/v1/procurement/supplier-requests/{supplierRequestId}/whatsapp-menu:
+    get:
+      tags: [WhatsApp]
+      operationId: supplierRequestWhatsappMenu
+      summary: 'Recipient of a supplier request in WhatsApp: the supplier and his phones as masks'
+      description: 'The supplier of the directory the request key points at (s:<id> — the row, c:<uuid> — the one supplier linked to that 1C counterparty) and his phones as masks with opaque tokens. The whole scope of the request is required, as for its commands.'
+      security: [{bearerAuth: []}]
+      x-permissions: [procurement.view, procurement.manage]
+      parameters:
+        - {name: supplierRequestId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Menu, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppSupplierSendMenu'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {description: 'PERMISSION_DENIED or SUPPLIER_REQUEST_SCOPE'}
+        '404': {description: 'SUPPLIER_REQUEST_NOT_FOUND'}
+  /api/v1/procurement/supplier-requests/{supplierRequestId}/whatsapp-sends:
+    post:
+      tags: [WhatsApp]
+      operationId: sendSupplierRequestToWhatsapp
+      summary: 'Queue the text of a supplier request for the supplier phone (idempotent)'
+      description: 'The text of the window «Текст для поставщика» goes as it is, through the queue and the frequency gate of the order card sends; a text longer than 4096 characters is split into up to 8 messages. The request status does not change. The same idempotencyKey replays the stored send. A refusal with details.final is recorded against the key for good: the request or its recipient is not what the window showed.'
+      security: [{bearerAuth: []}]
+      x-permissions: [procurement.view, procurement.manage]
+      parameters:
+        - {name: supplierRequestId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppSupplierSendRequest'}}}
+      responses:
+        '202': {description: Queued send, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppOrderSendEnvelope'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {description: 'PERMISSION_DENIED, SUPPLIER_REQUEST_SCOPE or PROCUREMENT_ACTOR_INVALID'}
+        '404': {description: 'SUPPLIER_REQUEST_NOT_FOUND'}
+        '409': {description: 'SUPPLIER_SEND_DISABLED, ORDER_SEND_PAUSED, ORDER_SEND_QUEUE_FULL, ORDER_SEND_ALREADY_QUEUED, ORDER_SEND_PREVIOUS_UNKNOWN (details.sendId, details.createdAt), IDEMPOTENCY_KEY_REUSED; final (details.final): SUPPLIER_REQUEST_VERSION_CONFLICT, SUPPLIER_REQUEST_NOT_SENDABLE, SUPPLIER_NOT_LINKED, SUPPLIER_INACTIVE, SUPPLIER_CONTACT_MISSING, ORDER_SEND_PHONE_CHANGED, SUPPLIER_SEND_UNAVAILABLE'}
+        '422': {description: 'Invalid request or SUPPLIER_SEND_TEXT_INVALID (details.reason: empty, too_long, control_characters, too_many_messages)'}
+        '503': {description: 'BROADCAST_RUNTIME_UNAVAILABLE'}
   /api/v1/whatsapp/broadcasts/{id}:
     get:
       tags: [WhatsApp]
@@ -3962,6 +4225,19 @@ paths:
         - name: vendorId
           in: query
           required: false
+          schema:
+            type: integer
+            minimum: 1
+        - name: unpurchasedOnly
+          in: query
+          required: false
+          description: Только заказы, у которых есть хотя бы один материал без отметки «Закуплено».
+          schema:
+            type: boolean
+        - name: onecDocumentId
+          in: query
+          required: false
+          description: Только заказы, на которые распределён этот документ 1С (при выключенном флаге закупа — пусто).
           schema:
             type: integer
             minimum: 1
@@ -17539,6 +17815,1665 @@ paths:
         '200': {description: At most 10 similar films}
         '400': {description: VALIDATION_FAILED}
 
+  /api/v1/orders/resource-demands/by-material:
+    get:
+      tags:
+        - Orders
+      operationId: listOrderResourceDemandsByMaterial
+      summary: Потребность по материалам по всем отфильтрованным заказам
+      description: Сводит живую потребность по материалам для не более чем 500 заказов фильтра (иначе 422). Участники каждого материала несут версию закупа и отпечаток потребности для групповой отметки.
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema: { type: string, maxLength: 200 }
+        - name: dateFrom
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: unpurchasedOnly
+          in: query
+          required: false
+          schema: { type: boolean }
+        - name: onecDocumentId
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Aggregated demand by material with participants
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/orders/resource-demands/onec-documents:
+    get:
+      tags:
+        - Orders
+      operationId: listOrderResourceOnecDocumentOptions
+      summary: Варианты фильтра «Документ 1С» — документы, распределённые на заказы текущей выборки
+      description: Те же фильтры и scope, что у списка потребностей (onecDocumentId и страницы игнорируются); до 200 самых свежих документов, truncated — если есть ещё. При выключенном флаге закупа — пусто.
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - { name: search, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: dateFrom, in: query, required: false, schema: { type: string, format: date } }
+        - { name: dateTo, in: query, required: false, schema: { type: string, format: date } }
+        - { name: unpurchasedOnly, in: query, required: false, schema: { type: boolean } }
+      responses:
+        '200':
+          description: Document options
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/orders/{orderId}/resource-demands:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Orders
+      operationId: getOrderResourceDemandCard
+      summary: Карточка потребностей заказа с деталями по каждому материалу
+      description: Заказ вне scope пользователя, удалённый или непроизводственный отвечает 404.
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      responses:
+        '200':
+          description: Order resource card
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/{orderId}/resource-procurement/{resourceKey}:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+      - name: resourceKey
+        in: path
+        required: true
+        description: "`sheet_material:<id>` или `film:<id>`"
+        schema:
+          type: string
+          pattern: '^(sheet_material|film):[1-9][0-9]{0,17}$'
+    put:
+      tags:
+        - Orders
+      operationId: setOrderResourceProcurement
+      summary: Отметить материал заказа закупленным или снять отметку
+      description: >-
+        Повтор к текущему состоянию — 200 без изменений. Устаревшая версия — 409 PROCUREMENT_VERSION_CONFLICT,
+        изменившаяся потребность при постановке отметки — 409 PROCUREMENT_DEMAND_CHANGED (details.line — актуальная строка).
+        Требует BACKEND_RESOURCE_PROCUREMENT_ENABLED, иначе 503 PROCUREMENT_DISABLED.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [purchased, expectedVersion, expectedDemandFingerprint]
+              properties:
+                purchased: { type: boolean }
+                expectedVersion: { type: integer, minimum: 0 }
+                expectedDemandFingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
+      responses:
+        '200':
+          description: Purchase mark state after the command
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/history:
+    get:
+      tags:
+        - Orders
+      operationId: getProcurementHistory
+      summary: История закупа материала заказа
+      description: >-
+        События журнала аудита по заказу × материалу, новые сверху: отметки «Закуплено», распределения приходов и
+        оплат 1С, привязки к заявкам поставщикам, создание/правка/отправка/закрытие/отмена заявок (количество —
+        только этого заказа, другие заказы заявки не раскрываются). Сумма и валюта оплаты — только с finance.view.
+        current — текущая потребность и отметка, changedSinceMark — потребность изменилась после отметки
+        (было quantityAtMark). Заказ — в scope orders.view, не в корзине, иначе 404. Требует
+        BACKEND_RESOURCE_PROCUREMENT_ENABLED и BACKEND_PROCUREMENT_WORKSPACE_ENABLED, иначе 503.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      parameters:
+        - { name: orderId, in: query, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: resourceKey, in: query, required: true, schema: { type: string, pattern: '^(sheet_material|film):[1-9][0-9]{0,17}$' } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, required: false, description: Курсор nextCursor предыдущей страницы, schema: { type: string, maxLength: 200 } }
+      responses:
+        '200':
+          description: current, events[], nextCursor
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Заказ не найден или вне scope
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          description: Экран снабжения выключен
+  /api/v1/procurement/worklist:
+    get:
+      tags:
+        - Orders
+      operationId: listProcurementWorklist
+      summary: Экран снабжения — рабочий список «заказ × материал»
+      description: >-
+        Покрытие (пришло/заказано/дефицит), срок «нужно к» (плановая дата − leadDays рабочих дней), срочность,
+        основной поставщик (ручной из справочника, иначе первый по приходам). Все фильтры — на сервере; строки
+        отдаются целиком (до 3000), листание — на клиенте. Заказы — только в scope orders.view, незавершённые и
+        невыданные, в окне плановой даты. С BACKEND_SUPPLIER_REQUESTS_ENABLED строка получает requests[]
+        (черновики и отправленные заявки) и orderedOpen — заказано по отправленным заявкам. Требует
+        BACKEND_RESOURCE_PROCUREMENT_ENABLED и BACKEND_PROCUREMENT_WORKSPACE_ENABLED, иначе 503
+        PROCUREMENT_WORKSPACE_DISABLED.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      parameters:
+        - { name: preset, in: query, required: false, schema: { type: string, enum: [action, urgent, all], default: action } }
+        - { name: search, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: dueFrom, in: query, required: false, schema: { type: string, format: date } }
+        - { name: dueTo, in: query, required: false, schema: { type: string, format: date } }
+        - { name: kind, in: query, required: false, schema: { type: string, enum: [sheet_material, film] } }
+        - { name: supplierKey, in: query, required: false, schema: { type: string, maxLength: 300 } }
+        - { name: coverage, in: query, required: false, description: "Через запятую: covered, partial, ordered, none, no_data", schema: { type: string } }
+        - { name: onecDocumentId, in: query, required: false, schema: { type: integer, minimum: 1 } }
+        - { name: groupBy, in: query, required: false, schema: { type: string, enum: [none, supplier, material], default: none } }
+        - { name: sort, in: query, required: false, schema: { type: string, enum: [due, deficit, order, material], default: due } }
+      responses:
+        '200':
+          description: Строки, группы, счётчики пресетов, итоги дефицита, настройки срока
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/worklist/saved-views:
+    get:
+      tags:
+        - Orders
+      operationId: getProcurementSavedViews
+      summary: Сохранённые представления рабочего списка текущего пользователя
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      responses:
+        '200':
+          description: "{ views: [{ id, name, query }] }"
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      tags:
+        - Orders
+      operationId: replaceProcurementSavedViews
+      summary: Заменить сохранённые представления (не больше 20)
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [views]
+              properties:
+                views:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [id, name, query]
+                    properties:
+                      id: { type: string, format: uuid }
+                      name: { type: string, minLength: 1, maxLength: 60 }
+                      query: { type: string, maxLength: 1000 }
+      responses:
+        '200':
+          description: "{ views: [...] }"
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/settings:
+    get:
+      tags:
+        - Orders
+      operationId: getProcurementSettings
+      summary: Настройки экрана снабжения
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      responses:
+        '200':
+          description: leadDays, criticalDays, soonDays, wastePercent, digestTime, unallocatedAlertDays, overdueWindowDays, version
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      tags:
+        - Orders
+      operationId: updateProcurementSettings
+      summary: Изменить настройки экрана снабжения
+      description: Повтор с теми же значениями — 200 changed=false. Устаревшая версия — 409 PROCUREMENT_SETTINGS_VERSION_CONFLICT (details.settings — актуальные).
+      security:
+        - bearerAuth: []
+      x-permission: settings.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [leadDays, criticalDays, soonDays, wastePercent, digestTime, unallocatedAlertDays, overdueWindowDays, expectedVersion]
+              properties:
+                leadDays: { type: integer, minimum: 0, maximum: 60 }
+                criticalDays: { type: integer, minimum: 0, maximum: 60 }
+                soonDays: { type: integer, minimum: 0, maximum: 60 }
+                wastePercent: { type: number, minimum: 0, maximum: 50 }
+                digestTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+                unallocatedAlertDays: { type: integer, minimum: 1, maximum: 30 }
+                overdueWindowDays: { type: integer, minimum: 1, maximum: 365, description: 'Рабочий список: просроченные заказы не старше стольких дней' }
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Настройки после команды и признак changed
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-requests:
+    get:
+      tags:
+        - Orders
+      operationId: listSupplierRequests
+      summary: Заявки поставщикам — список
+      description: >-
+        Черновики и отправленные — первыми, до 200 заявок; счётчики по статусам. Заказы заявки — только в scope
+        orders.view, остальные — числом hiddenOrdersCount. Требует BACKEND_RESOURCE_PROCUREMENT_ENABLED,
+        BACKEND_PROCUREMENT_WORKSPACE_ENABLED и BACKEND_SUPPLIER_REQUESTS_ENABLED, иначе 503 SUPPLIER_REQUESTS_DISABLED.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      parameters:
+        - { name: status, in: query, required: false, description: "Через запятую: draft, sent, closed, cancelled", schema: { type: string } }
+        - { name: search, in: query, required: false, schema: { type: string, maxLength: 200 } }
+      responses:
+        '200':
+          description: Заявки, счётчики по статусам, truncated
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-requests/drafts:
+    post:
+      tags:
+        - Orders
+      operationId: createSupplierRequestDrafts
+      summary: Сформировать черновики заявок из позиций рабочего списка
+      description: >-
+        По черновику на основного поставщика позиции, по строке на материал; количество — дефицит (+ запас на
+        обрезки для потребности по площади), листы — вверх до 0,001 на заказ и до целого на строку (разница — «на
+        склад»). Позиции без дефицита, закрытые заказы и позиции, уже стоящие в черновике, пропускаются
+        (skipped[]); если пропущено всё — 422 SUPPLIER_REQUEST_NOTHING_TO_ORDER. Повтор с тем же requestId и телом
+        возвращает сохранённый результат; другое тело или пользователь — 409 IDEMPOTENCY_KEY_REUSED.
+        Заказ вне scope → 404.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [requestId, items]
+              properties:
+                requestId: { type: string, format: uuid }
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [orderId, resourceKey]
+                    properties:
+                      orderId: { type: integer, minimum: 1 }
+                      resourceKey: { type: string, pattern: '^(sheet_material|film):[1-9][0-9]{0,15}$' }
+      responses:
+        '200':
+          description: Созданные заявки (номер YY-XXXX) и пропущенные позиции
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-requests/{supplierRequestId}:
+    parameters:
+      - name: supplierRequestId
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    get:
+      tags:
+        - Orders
+      operationId: getSupplierRequest
+      summary: Карточка заявки поставщику
+      description: >-
+        Строки с заказами в scope (остальные — числом), доступные действия; capabilities.supplierTextTemplates —
+        включены ли шаблоны текста поставщику (флаг BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED).
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      responses:
+        '200':
+          description: Карточка заявки
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      tags:
+        - Orders
+      operationId: updateSupplierRequest
+      summary: Изменить черновик заявки
+      description: >-
+        Только черновик (иначе 409 SUPPLIER_REQUEST_NOT_EDITABLE), expectedVersion (иначе 409 с актуальной
+        карточкой). lines — полная замена: строки и заказы, которых нет в списке, удаляются; «на склад» =
+        количество − Σ заказов (≥ 0); листы — целые. Нужны procurement.view и procurement.manage и доступ ко
+        всем заказам заявки, включая заказы в корзине, — иначе 403 SUPPLIER_REQUEST_SCOPE (так же send/close/cancel).
+        Заказы в корзине интерфейс не показывает — сохранение черновика убирает их. То же содержимое — no-op
+        (changed=false).
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+                comment: { type: string, nullable: true, maxLength: 2000 }
+                expectedDate: { type: string, format: date, nullable: true }
+                supplierId: { type: integer, minimum: 1, nullable: true, description: 'null — «Поставщик не указан»' }
+                lines:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [lineId, quantity, orders]
+                    properties:
+                      lineId: { type: integer, minimum: 1 }
+                      quantity: { type: number, exclusiveMinimum: 0 }
+                      orders:
+                        type: array
+                        maxItems: 200
+                        items:
+                          type: object
+                          additionalProperties: false
+                          required: [lineOrderId, quantity]
+                          properties:
+                            lineOrderId: { type: integer, minimum: 1 }
+                            quantity: { type: number, exclusiveMinimum: 0 }
+      responses:
+        '200':
+          description: changed и актуальная карточка заявки
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-requests/{supplierRequestId}/send:
+    parameters:
+      - name: supplierRequestId
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags:
+        - Orders
+      operationId: sendSupplierRequest
+      summary: Отметить заявку отправленной
+      description: >-
+        draft → sent; нужен поставщик (иначе 422 SUPPLIER_REQUEST_SUPPLIER_REQUIRED). Уже sent — no-op. Отправка — только смена статуса, во внешние системы ничего не уходит.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: changed и актуальная карточка заявки
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-requests/{supplierRequestId}/close:
+    parameters:
+      - name: supplierRequestId
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags:
+        - Orders
+      operationId: closeSupplierRequest
+      summary: Закрыть заявку
+      description: >-
+        sent → closed; уже closed — no-op; прочие переходы — 409 SUPPLIER_REQUEST_INVALID_TRANSITION.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: changed и актуальная карточка заявки
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-requests/{supplierRequestId}/cancel:
+    parameters:
+      - name: supplierRequestId
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags:
+        - Orders
+      operationId: cancelSupplierRequest
+      summary: Отменить заявку
+      description: >-
+        draft | sent → cancelled; уже cancelled — no-op; из closed — 409 SUPPLIER_REQUEST_INVALID_TRANSITION.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: changed и актуальная карточка заявки
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-text-templates:
+    get:
+      tags:
+        - Orders
+      operationId: listSupplierTextTemplates
+      summary: Общие шаблоны текста заявки поставщику (только чтение)
+      description: >-
+        Прежний маршрут: только общие шаблоны (по умолчанию — первым), canManage всегда false. Личные шаблоны — /procurement/my-supplier-text-templates. Флаг BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED (иначе 503 SUPPLIER_TEXT_TEMPLATES_DISABLED).
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      responses:
+        '200':
+          description: templates (templateId, name, body, lineTemplate, isDefault, version, updatedAt, scope=shared) и canManage=false
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      tags:
+        - Orders
+      operationId: createSupplierTextTemplate
+      deprecated: true
+      summary: 'Отключено — общие шаблоны только для чтения'
+      description: >-
+        Команда отключена: всегда 409 SUPPLIER_TEXT_TEMPLATE_SHARED_READ_ONLY без записи (после проверки флагов — иначе 503). Личные шаблоны ведутся на /procurement/my-supplier-text-templates.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [commandKey, name, body, lineTemplate]
+              properties:
+                commandKey: { type: string, format: uuid, description: 'Ключ повтора: то же тело — сохранённый результат, другое — 409 IDEMPOTENCY_KEY_REUSED' }
+                name: { type: string, minLength: 1, maxLength: 80 }
+                body: { type: string, minLength: 1, maxLength: 4000, description: 'Поля {номер} {поставщик} {дата} {ожидаем_к} {комментарий} {позиции} {позиций_всего}; {{ и }} — скобки' }
+                lineTemplate: { type: string, minLength: 1, maxLength: 500, description: 'Поля {№} {материал} {количество} {единица} {количество_с_единицей}' }
+      responses:
+        '200':
+          description: changed, шаблон и актуальный список шаблонов
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-text-templates/{templateId}:
+    parameters:
+      - name: templateId
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    patch:
+      tags:
+        - Orders
+      operationId: updateSupplierTextTemplate
+      deprecated: true
+      summary: 'Отключено — общие шаблоны только для чтения'
+      description: >-
+        Команда отключена: всегда 409 SUPPLIER_TEXT_TEMPLATE_SHARED_READ_ONLY без записи (после проверки флагов — иначе 503). Личные шаблоны ведутся на /procurement/my-supplier-text-templates.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [commandKey, expectedVersion]
+              properties:
+                commandKey: { type: string, format: uuid, description: 'Ключ повтора: то же тело — сохранённый результат, другое — 409 IDEMPOTENCY_KEY_REUSED' }
+                expectedVersion: { type: integer, minimum: 1 }
+                name: { type: string, minLength: 1, maxLength: 80 }
+                body: { type: string, minLength: 1, maxLength: 4000, description: 'Поля {номер} {поставщик} {дата} {ожидаем_к} {комментарий} {позиции} {позиций_всего}; {{ и }} — скобки' }
+                lineTemplate: { type: string, minLength: 1, maxLength: 500, description: 'Поля {№} {материал} {количество} {единица} {количество_с_единицей}' }
+      responses:
+        '200':
+          description: changed, шаблон и актуальный список шаблонов
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - Orders
+      operationId: deleteSupplierTextTemplate
+      deprecated: true
+      summary: 'Отключено — общие шаблоны только для чтения'
+      description: >-
+        Команда отключена: всегда 409 SUPPLIER_TEXT_TEMPLATE_SHARED_READ_ONLY без записи (после проверки флагов — иначе 503). Личные шаблоны ведутся на /procurement/my-supplier-text-templates.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [commandKey, expectedVersion]
+              properties:
+                commandKey: { type: string, format: uuid, description: 'Ключ повтора: то же тело — сохранённый результат, другое — 409 IDEMPOTENCY_KEY_REUSED' }
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: changed, шаблон и актуальный список шаблонов
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/supplier-text-templates/{templateId}/default:
+    parameters:
+      - name: templateId
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags:
+        - Orders
+      operationId: setDefaultSupplierTextTemplate
+      deprecated: true
+      summary: 'Отключено — общие шаблоны только для чтения'
+      description: >-
+        Команда отключена: всегда 409 SUPPLIER_TEXT_TEMPLATE_SHARED_READ_ONLY без записи (после проверки флагов — иначе 503). Личные шаблоны ведутся на /procurement/my-supplier-text-templates.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [commandKey, expectedVersion]
+              properties:
+                commandKey: { type: string, format: uuid, description: 'Ключ повтора: то же тело — сохранённый результат, другое — 409 IDEMPOTENCY_KEY_REUSED' }
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: changed, шаблон и актуальный список шаблонов
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/my-supplier-text-templates:
+    get:
+      tags:
+        - Orders
+      operationId: listMySupplierTextTemplates
+      summary: Шаблоны текста поставщику, видимые пользователю
+      description: >-
+        Общие шаблоны (только чтение, scope=shared) и личные шаблоны текущего пользователя (scope=own); чужие личные не возвращаются. isDefault — действует по умолчанию для этого пользователя (личный выбор, иначе общий по умолчанию); defaultRevision — ревизия личного выбора (0 — выбора не было). Рендер текста — на клиенте. Флаг BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED (иначе 503 SUPPLIER_TEXT_TEMPLATES_DISABLED).
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      responses:
+        '200':
+          description: templates (templateId, name, body, lineTemplate, isDefault, version, updatedAt, scope), canEditOwn и defaultRevision
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      tags:
+        - Orders
+      operationId: createMySupplierTextTemplate
+      summary: Создать личный шаблон текста поставщику
+      description: >-
+        Нужно procurement.view (иначе 403 и denied-аудит): личные шаблоны видит и меняет только владелец, владелец — пользователь сессии. Флаг BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED (иначе 503 SUPPLIER_TEXT_TEMPLATES_DISABLED). Аудит без текста шаблона (sha256 и длина). Не больше 20 своих активных (409 SUPPLIER_TEXT_TEMPLATE_LIMIT); имя уникально среди своих без учёта регистра (409 SUPPLIER_TEXT_TEMPLATE_NAME_TAKEN); неизвестные поля и незакрытые скобки — 422 SUPPLIER_TEXT_TEMPLATE_INVALID.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [commandKey, name, body, lineTemplate]
+              properties:
+                commandKey: { type: string, format: uuid, description: 'Ключ повтора: то же тело — сохранённый результат, другое — 409 IDEMPOTENCY_KEY_REUSED' }
+                name: { type: string, minLength: 1, maxLength: 80 }
+                body: { type: string, minLength: 1, maxLength: 4000, description: 'Поля {номер} {поставщик} {дата} {ожидаем_к} {комментарий} {позиции} {позиций_всего}; {{ и }} — скобки' }
+                lineTemplate: { type: string, minLength: 1, maxLength: 500, description: 'Поля {№} {материал} {количество} {единица} {количество_с_единицей}' }
+      responses:
+        '200':
+          description: changed, шаблон, список шаблонов пользователя и defaultRevision на момент команды
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/my-supplier-text-templates/{templateId}:
+    parameters:
+      - name: templateId
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    patch:
+      tags:
+        - Orders
+      operationId: updateMySupplierTextTemplate
+      summary: Изменить личный шаблон текста поставщику
+      description: >-
+        Нужно procurement.view (иначе 403 и denied-аудит): личные шаблоны видит и меняет только владелец, владелец — пользователь сессии. Флаг BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED (иначе 503 SUPPLIER_TEXT_TEMPLATES_DISABLED). Аудит без текста шаблона (sha256 и длина). expectedVersion (иначе 409 SUPPLIER_TEXT_TEMPLATE_VERSION_CONFLICT); без изменений — no-op (changed=false). Общий шаблон — 409 SUPPLIER_TEXT_TEMPLATE_SHARED_READ_ONLY; чужой личный — 404 SUPPLIER_TEXT_TEMPLATE_NOT_FOUND.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [commandKey, expectedVersion]
+              properties:
+                commandKey: { type: string, format: uuid, description: 'Ключ повтора: то же тело — сохранённый результат, другое — 409 IDEMPOTENCY_KEY_REUSED' }
+                expectedVersion: { type: integer, minimum: 1 }
+                name: { type: string, minLength: 1, maxLength: 80 }
+                body: { type: string, minLength: 1, maxLength: 4000, description: 'Поля {номер} {поставщик} {дата} {ожидаем_к} {комментарий} {позиции} {позиций_всего}; {{ и }} — скобки' }
+                lineTemplate: { type: string, minLength: 1, maxLength: 500, description: 'Поля {№} {материал} {количество} {единица} {количество_с_единицей}' }
+      responses:
+        '200':
+          description: changed, шаблон, список шаблонов пользователя и defaultRevision на момент команды
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - Orders
+      operationId: deleteMySupplierTextTemplate
+      summary: Удалить личный шаблон текста поставщику (мягко)
+      description: >-
+        Нужно procurement.view (иначе 403 и denied-аудит): личные шаблоны видит и меняет только владелец, владелец — пользователь сессии. Флаг BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED (иначе 503 SUPPLIER_TEXT_TEMPLATES_DISABLED). Аудит без текста шаблона (sha256 и длина). expectedVersion. Если шаблон был личным выбором по умолчанию — выбор снимается, ревизия выбора растёт. Общий шаблон — 409 SUPPLIER_TEXT_TEMPLATE_SHARED_READ_ONLY; чужой личный — 404.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [commandKey, expectedVersion]
+              properties:
+                commandKey: { type: string, format: uuid, description: 'Ключ повтора: то же тело — сохранённый результат, другое — 409 IDEMPOTENCY_KEY_REUSED' }
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: changed, шаблон, список шаблонов пользователя и defaultRevision на момент команды
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/my-supplier-text-templates/{templateId}/default:
+    parameters:
+      - name: templateId
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags:
+        - Orders
+      operationId: setMyDefaultSupplierTextTemplate
+      summary: Выбрать шаблон по умолчанию для себя
+      description: >-
+        Нужно procurement.view (иначе 403 и denied-аудит): личные шаблоны видит и меняет только владелец, владелец — пользователь сессии. Флаг BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED (иначе 503 SUPPLIER_TEXT_TEMPLATES_DISABLED). Аудит без текста шаблона (sha256 и длина). Цель — свой личный или общий шаблон; выбор личный, версия шаблона не меняется. expectedVersion шаблона (иначе 409 SUPPLIER_TEXT_TEMPLATE_VERSION_CONFLICT) и expectedDefaultRevision — ревизия личного выбора, которую видел пользователь (иначе 409 SUPPLIER_TEXT_TEMPLATE_DEFAULT_CONFLICT); чужой личный — 404.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [commandKey, expectedVersion, expectedDefaultRevision]
+              properties:
+                commandKey: { type: string, format: uuid, description: 'Ключ повтора: то же тело — сохранённый результат, другое — 409 IDEMPOTENCY_KEY_REUSED' }
+                expectedVersion: { type: integer, minimum: 1 }
+                expectedDefaultRevision: { type: integer, minimum: 0, description: 'defaultRevision из списка шаблонов' }
+      responses:
+        '200':
+          description: changed, шаблон, список шаблонов пользователя и defaultRevision на момент команды
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/onec-documents:
+    get:
+      tags:
+        - Orders
+      operationId: listOnecDocuments
+      summary: Документы 1С — приходы или оплаты с заказами, для которых закуплено
+      description: Требует BACKEND_RESOURCE_PROCUREMENT_ENABLED (иначе 503 PROCUREMENT_DISABLED). Суммы — только с finance.view, иначе null. Заказы вне scope orders.view — только счётчиком.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      parameters:
+        - { name: tab, in: query, required: false, schema: { type: string, enum: [receipts, payments], default: receipts } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 10000, default: 1 } }
+        - { name: pageSize, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: search, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: dateFrom, in: query, required: false, schema: { type: string, format: date } }
+        - { name: dateTo, in: query, required: false, schema: { type: string, format: date } }
+        - { name: unlinkedOnly, in: query, required: false, schema: { type: boolean } }
+        - { name: postedOnly, in: query, required: false, schema: { type: boolean } }
+        - { name: allocation, in: query, required: false, description: 'Только tab=receipts (иначе 422): open — не распределён или частично, full — распределён полностью', schema: { type: string, enum: [open, full] } }
+        - { name: withLines, in: query, required: false, description: 'Добавить lineSummary (первые строки: name, quantity, unitName) и lineSummaryMore', schema: { type: boolean } }
+        - { name: knownSupplierOnly, in: query, required: false, description: 'Только документы контрагентов, связанных сейчас с поставщиком справочника ERP (suppliers.ref_key_1c)', schema: { type: boolean } }
+      responses:
+        '200':
+          description: 1C documents page
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/onec-documents/{documentId}:
+    parameters:
+      - { name: documentId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    get:
+      tags:
+        - Orders
+      operationId: getOnecDocument
+      summary: Карточка документа 1С со строками и распределением по заказам
+      security:
+        - bearerAuth: []
+      x-permission: procurement.view
+      responses:
+        '200':
+          description: 1C document card
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/onec-documents/{documentId}/allocation-suggestions:
+    parameters:
+      - name: documentId
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    get:
+      tags:
+        - Orders
+      operationId: getOnecAllocationSuggestions
+      summary: Подобрать заказы для прихода 1С
+      description: >-
+        Для каждой сопоставленной строки проведённого прихода — кандидаты (заказы в scope с непокрытой потребностью
+        в этом материале), ранжированные: указан в 1С → срок цеха → без отметки → поставщик → закрывает целиком;
+        предложенное количество в единице строки (вниз до 0,001) и в единице потребности; общий остаток потребности
+        на весь документ; запас на обрезки — только для потребности по площади. Уже распределённые пары не
+        предлагаются. Только чтение. Права procurement.view + procurement.manage. Требует
+        BACKEND_RESOURCE_PROCUREMENT_ENABLED и BACKEND_PROCUREMENT_WORKSPACE_ENABLED.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      responses:
+        '200':
+          description: Строки прихода с кандидатами и предложенными количествами
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/onec-documents/{documentId}/allocations/batch:
+    parameters:
+      - name: documentId
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags:
+        - Orders
+      operationId: addOnecAllocationsBatch
+      summary: Распределить приход 1С на несколько заказов одной командой
+      description: >-
+        Всё или ничего, до 100 элементов. Повтор элементов, уже распределённых с тем же количеством, — no-op
+        (все no-op → 200 changed=false). Ошибки элементов → 409 ONEC_ALLOCATION_BATCH_CONFLICT с
+        details.failures [{index, code, message}], ничего не записано. Дубликаты и разные версии одного закупа → 422.
+        Заказ вне scope → 404. Отпечаток потребности проверяется для каждого закупа с новым распределением.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [requestId, origin, items]
+              properties:
+                requestId: { type: string, format: uuid }
+                origin: { type: string, enum: [suggested, manual] }
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [lineId, orderId, resourceKey, quantity, expectedVersion, expectedDemandFingerprint, expectedDocUnit, expectedSheetAreaM2]
+                    properties:
+                      lineId: { type: integer, minimum: 1 }
+                      orderId: { type: integer, minimum: 1 }
+                      resourceKey: { type: string, pattern: '^(sheet_material|film):[1-9][0-9]{0,17}$' }
+                      quantity: { type: number, exclusiveMinimum: 0, description: 'В единице строки документа, до 3 знаков' }
+                      expectedVersion: { type: integer, minimum: 0 }
+                      expectedDemandFingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
+                      expectedDocUnit: { type: string, nullable: true, enum: [sheet, m2, lm, pcs, set], description: 'Единица строки, в которой построено предложение' }
+                      expectedSheetAreaM2: { type: number, nullable: true, description: 'Площадь листа, по которой пересчитано предложение; расхождение → failure ONEC_ALLOCATION_UNIT_CHANGED' }
+                      requestLinks:
+                        type: array
+                        maxItems: 20
+                        description: >-
+                          Связи нового распределения с заказами строк ОТПРАВЛЕННЫХ заявок поставщикам (ответ подбора
+                          candidates[].requestLinks); количество — в единице строки заявки. Нужен
+                          BACKEND_SUPPLIER_REQUESTS_ENABLED. Нарушение (заявка не отправлена, другой поставщик, больше
+                          заказанного или распределённого) → failure позиции. Для no-op позиции связи не меняются.
+                        items:
+                          type: object
+                          additionalProperties: false
+                          required: [lineOrderId, quantity]
+                          properties:
+                            lineOrderId: { type: integer, minimum: 1 }
+                            quantity: { type: number, exclusiveMinimum: 0 }
+      responses:
+        '200':
+          description: Результат по элементам и актуальные строки потребности
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/onec-documents/{documentId}/lines/{lineId}/allocations/{allocationId}/request-links:
+    parameters:
+      - { name: documentId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: lineId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: allocationId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    post:
+      tags:
+        - Orders
+      operationId: linkOnecAllocationToRequest
+      summary: Привязать распределение прихода 1С к заказу строки отправленной заявки
+      description: >-
+        Исполнение заявки считается только по таким связям. Проверки под блокировками (заказ → закуп → строка
+        документа → распределение → заявка FOR SHARE): заявка отправлена (иначе 409 SUPPLIER_REQUEST_NOT_SENT), строка
+        заявки того же закупа, поставщик прихода не расходится с поставщиком заявки (422
+        SUPPLIER_REQUEST_SUPPLIER_MISMATCH), единицы пересчитываются, не больше заказанного по заявке и не больше
+        распределённого по приходу. Та же активная связь с тем же количеством — no-op; с другим — 409
+        SUPPLIER_REQUEST_LINK_EXISTS. Оплата (ф.3б-2): только с finance.view, сумма в валюте документа (снимок в связи),
+        сумма связей оплаты не больше распределённой; верхней границы по заявке нет. Версия закупа растёт; аудит и
+        событие order.resource_procurement_changed.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [lineOrderId, expectedVersion]
+              description: Ровно одно из quantity (распределение прихода) или amount (распределение оплаты).
+              oneOf:
+                - required: [quantity]
+                  not: { required: [amount] }
+                - required: [amount]
+                  not: { required: [quantity] }
+              properties:
+                lineOrderId: { type: integer, minimum: 1 }
+                quantity: { type: number, exclusiveMinimum: 0, description: 'Приход: в единице строки заявки, до 3 знаков' }
+                amount: { type: number, exclusiveMinimum: 0, description: 'Оплата: в валюте документа, до 2 знаков; нужен finance.view (иначе 403)' }
+                expectedVersion: { type: integer, minimum: 0, description: 'Версия закупа распределения' }
+      responses:
+        '200':
+          description: changed, linkId, новая версия закупа, supplierCheck (match | unknown)
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/onec-documents/{documentId}/lines/{lineId}/allocations/{allocationId}/request-links/{linkId}:
+    parameters:
+      - { name: documentId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: lineId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: allocationId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: linkId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    delete:
+      tags:
+        - Orders
+      operationId: unlinkOnecAllocationFromRequest
+      summary: Отвязать приход от заявки
+      description: Связь помечается снятой (история сохраняется); уже снятая — no-op. Версия закупа растёт.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: changed и новая версия закупа
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/onec-documents/{documentId}/lines/{lineId}/allocations:
+    parameters:
+      - { name: documentId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: lineId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    post:
+      tags:
+        - Orders
+      operationId: addOnecAllocation
+      summary: Распределить строку документа 1С на материал заказа
+      description: >-
+        Приход — количеством (quantity), оплата — суммой (amount, нужно finance.view). Документ должен быть проведён и не удалён
+        в 1С; строка прихода — сопоставлена с тем же материалом. Привязка прихода ставит «Закуплено» (проверяется отпечаток
+        потребности). Повтор той же пары с той же величиной — 200 без изменений.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [orderId, resourceKey, expectedVersion, expectedDemandFingerprint]
+              properties:
+                orderId: { type: integer, minimum: 1 }
+                resourceKey: { type: string }
+                quantity: { type: number, exclusiveMinimum: 0 }
+                amount: { type: number, exclusiveMinimum: 0 }
+                expectedVersion: { type: integer, minimum: 0 }
+                expectedDemandFingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
+      responses:
+        '200':
+          description: Allocation state after the command
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/procurement/onec-documents/{documentId}/lines/{lineId}/allocations/{allocationId}:
+    parameters:
+      - { name: documentId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: lineId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      - { name: allocationId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    delete:
+      tags:
+        - Orders
+      operationId: removeOnecAllocation
+      summary: Снять распределение строки документа 1С
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: Allocation removed or already removed
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/orders/resource-procurement/bulk:
+    post:
+      tags:
+        - Orders
+      operationId: bulkSetOrderResourceProcurement
+      summary: Отметить один материал закупленным сразу в нескольких заказах
+      description: Всё или ничего; до 100 заказов. Любой заказ вне scope — 404 на весь запрос; конфликты — 409 PROCUREMENT_BULK_CONFLICT без записи.
+      security:
+        - bearerAuth: []
+      x-permission: procurement.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [resourceKey, purchased, items]
+              properties:
+                resourceKey: { type: string }
+                purchased: { type: boolean }
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [orderId, expectedVersion, expectedDemandFingerprint]
+                    properties:
+                      orderId: { type: integer, minimum: 1 }
+                      expectedVersion: { type: integer, minimum: 0 }
+                      expectedDemandFingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
+      responses:
+        '200':
+          description: Per-order results
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/notifications/balloons/claim:
+    post:
+      tags:
+        - Notifications
+      operationId: claimNotificationBalloons
+      summary: Claim notification balloons for a browser tab
+      description: >-
+        Аренда (2 мин) непоказанных непрочитанных видимых уведомлений текущего пользователя с балуном, не старше 24 ч;
+        свои незавершённые аренды этого токена — первыми (повтор после потерянного ответа). FOR UPDATE SKIP LOCKED.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [token, limit]
+              properties:
+                token: { type: string, format: uuid, description: Токен вкладки (sessionStorage) }
+                limit: { type: integer, minimum: 1, maximum: 5 }
+      responses:
+        '200':
+          description: Leased balloons
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v1/notifications/balloons/ack:
+    post:
+      tags:
+        - Notifications
+      operationId: ackNotificationBalloons
+      summary: Acknowledge shown notification balloons
+      description: Подтверждение показа своих арендованных балунов (только аренды этого токена); повтор — no-op.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [token, notificationIds]
+              properties:
+                token: { type: string, format: uuid }
+                notificationIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  items: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  acknowledged: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v1/onec/customer-orders:
+    get:
+      tags:
+        - 1C integration
+      operationId: listOnecCustomerOrders
+      summary: "1C customer orders with paid/shipped totals in the order currency (links resolved at read time)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: search, in: query, required: false, schema: {type: string, maxLength: 100}, description: Number or counterparty substring}
+        - {name: from, in: query, required: false, schema: {type: string, format: date}}
+        - {name: to, in: query, required: false, schema: {type: string, format: date}}
+        - {name: stateRefKey, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0, default: 0}}
+      responses:
+        '200': {description: "{total, limit, offset, states[{refKey,name,count}], items[]}; paid = posted receipts − refunds, shipped = posted shipment lines (NUMERIC strings)"}
+        '400': {description: Invalid filter}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '503': {description: 1C integration is disabled}
+  /api/v1/onec/customer-orders/{documentId}:
+    get:
+      tags:
+        - 1C integration
+      operationId: getOnecCustomerOrder
+      summary: "1C customer order: header, authors, delivery, goods/works lines, linked receipts/refunds and shipments"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: documentId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: "Order with payments[] and shipments[] (each with settlements[]; unresolved 1C refs have documentId null)"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {description: Not a loaded 1C customer order}
+        '503': {description: 1C integration is disabled}
+  /api/v1/onec/documents/{documentId}/links:
+    get:
+      tags:
+        - 1C integration
+      operationId: getOnecDocumentLinks
+      summary: "Links of a 1C document: referenced customer orders and settlement documents, documents settled by it"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: documentId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: "{orders[], settlements[], basis, settledBy[]}"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {description: 1C document not found}
+        '503': {description: 1C integration is disabled}
 components:
   securitySchemes:
     bitrixWidgetSession:
@@ -27513,6 +29448,31 @@ components:
         valueNormalized: {type: string, description: 'phone 7XXXXXXXXXX, email lower case, Telegram username without @'}
         isPrimary: {type: boolean}
         note: {type: string, nullable: true, maxLength: 200}
+    PartyContacts:
+      type: object
+      required: [party, partyId, version, contacts]
+      properties:
+        party: {type: string, enum: [supplier, vendor, client]}
+        partyId: {type: integer}
+        version: {type: integer, minimum: 0, description: 'Version of the whole set (0 = never saved); for a client — of emails and Telegram accounts only'}
+        contacts: {type: array, items: {$ref: '#/components/schemas/EmployeeContact'}}
+    SupplierCounterparty:
+      type: object
+      required: [refKey1c, name, isSupplier, supplierId, supplierName]
+      properties:
+        refKey1c: {type: string, format: uuid}
+        name: {type: string}
+        isSupplier: {type: boolean, nullable: true}
+        supplierId: {type: integer, nullable: true, description: 'The supplier already linked to this counterparty'}
+        supplierName: {type: string, nullable: true}
+    SupplierLink:
+      type: object
+      required: [supplierId, supplierName, refKey1c, counterpartyName]
+      properties:
+        supplierId: {type: integer}
+        supplierName: {type: string}
+        refKey1c: {type: string, format: uuid, nullable: true}
+        counterpartyName: {type: string, nullable: true}
     EmployeeContacts:
       type: object
       required: [employeeId, version, contacts]
@@ -27571,6 +29531,7 @@ components:
         clientCaption: {type: string, maxLength: 1000}
         chats: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/WhatsAppOrderSendChat'}}
         employees: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/WhatsAppOrderSendEmployee'}}
+        supplierRequestsEnabled: {type: boolean, description: 'Texts of supplier requests may be sent from the procurement screen'}
         updatedAt: {type: string, format: date-time}
         updatedBy: {type: object, nullable: true, properties: {id: {type: string}, username: {type: string, nullable: true}}}
     WhatsAppOrderSendSettingsEnvelope:
@@ -27597,6 +29558,7 @@ components:
         sendWindowMinutes: {type: integer, minimum: 0, maximum: 720, description: 'Random extra delay of the next delivery after the threshold, at most half of minIntervalMinutes'}
         clientForms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}
         clientCaption: {type: string, maxLength: 1000}
+        supplierRequestsEnabled: {type: boolean, description: 'Texts of supplier requests may be sent from the procurement screen; omitted — the switch stays. Switching it off cancels the waiting supplier sends.'}
         chats:
           type: array
           maxItems: 20
@@ -27633,7 +29595,7 @@ components:
         forms: {type: array, items: {type: object, properties: {code: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}, title: {type: string}, financial: {type: boolean}}}}
         client: {type: object, properties: {forms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}}}
         chats: {type: array, items: {type: object, properties: {chatKey: {type: string, format: uuid}, label: {type: string}, forms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}}}}
-        employees: {type: array, items: {type: object, properties: {recipientKey: {type: string, format: uuid}, label: {type: string, description: '«логин / ФИО» when users are linked'}, forms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}, contacts: {type: array, items: {type: object, properties: {contactId: {type: integer}, masked: {type: string}, isPrimary: {type: boolean}}}}}}}
+        employees: {type: array, items: {type: object, properties: {recipientKey: {type: string, format: uuid}, label: {type: string, description: '«логин / ФИО» when users are linked'}, forms: {type: array, items: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}}, contacts: {type: array, items: {type: object, properties: {contactId: {type: integer}, masked: {type: string}, isPrimary: {type: boolean}, token: {type: string, description: 'Opaque; sent back as contactToken'}}}}}}}
         nextAllowedAt: {type: string, format: date-time, nullable: true}
         activeSend: {type: boolean}
         runtime: {$ref: '#/components/schemas/WhatsAppBroadcastRuntime'}
@@ -27644,31 +29606,58 @@ components:
       properties:
         target:
           oneOf:
-            - {type: object, additionalProperties: false, required: [kind], properties: {kind: {type: string, enum: [client]}}}
+            - {type: object, additionalProperties: false, required: [kind], properties: {kind: {type: string, enum: [client]}, phoneId: {type: integer, nullable: true, description: 'One of the phones of the order client (GET …/whatsapp-sends/client-contacts); default — the primary one, else the smallest'}, phoneToken: {type: string, pattern: '^[0-9a-f]{64}$', nullable: true, description: 'The token the contacts list gave for this phone; required with phoneId. A phone edited since is refused with 409 ORDER_SEND_PHONE_CHANGED'}}}
             - {type: object, additionalProperties: false, required: [kind, chatKey], properties: {kind: {type: string, enum: [chat]}, chatKey: {type: string, format: uuid}}}
-            - {type: object, additionalProperties: false, required: [kind, recipientKey], properties: {kind: {type: string, enum: [employee]}, recipientKey: {type: string, format: uuid}, contactId: {type: integer, nullable: true, description: 'One of the employee phones; default — the primary one'}}}
+            - {type: object, additionalProperties: false, required: [kind, recipientKey], properties: {kind: {type: string, enum: [employee]}, recipientKey: {type: string, format: uuid}, contactId: {type: integer, nullable: true, description: 'One of the employee phones; default — the primary one'}, contactToken: {type: string, pattern: '^[0-9a-f]{64}$', nullable: true, description: 'The token the menu gave for this contact (optional; with it a contact edited since is refused with 409 ORDER_SEND_PHONE_CHANGED)'}}}
         form: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}
         idempotencyKey: {type: string, format: uuid}
         confirmAfterUnknown: {type: string, format: uuid, nullable: true, description: 'Explicit repeat after the latest send of the same order, recipient and form ended unknown: its sendId from 409 ORDER_SEND_PREVIOUS_UNKNOWN details.'}
+    WhatsAppSupplierSendMenu:
+      type: object
+      required: [enabled, unavailableReason, supplier, contacts, requestVersion, queueLength, runtime]
+      properties:
+        enabled: {type: boolean, description: 'The card sends are on, supplier requests are on and this release makes them'}
+        unavailableReason: {type: string, nullable: true, enum: [disabled, release, not_linked, no_phone, supplier_inactive, status, null]}
+        supplier: {type: object, nullable: true, required: [supplierId, name], properties: {supplierId: {type: integer}, name: {type: string}}}
+        contacts: {type: array, items: {type: object, required: [contactId, masked, isPrimary, token], properties: {contactId: {type: integer}, masked: {type: string}, isPrimary: {type: boolean}, token: {type: string, description: 'Opaque; sent back as contactToken'}}}}
+        requestVersion: {type: integer, minimum: 0}
+        queueLength: {type: integer, minimum: 0}
+        runtime: {$ref: '#/components/schemas/WhatsAppBroadcastRuntime'}
+    WhatsAppSupplierSendRequest:
+      type: object
+      additionalProperties: false
+      required: [text, edited, templateId, templateVersion, textVersion, contactId, contactToken, idempotencyKey]
+      properties:
+        text: {type: string, description: 'The text of the window as it is: not blank, at most 20000 characters after line endings are normalized, no control characters but line breaks and tabs'}
+        edited: {type: boolean, description: 'The text was edited by hand (for the audit)'}
+        templateId: {type: integer, minimum: 1, nullable: true}
+        templateVersion: {type: integer, minimum: 0, nullable: true}
+        textVersion: {type: integer, minimum: 0, description: 'The version of the request the text was built from; must be the current one'}
+        contactId: {type: integer, minimum: 1, description: 'A phone of the supplier from the menu (also for the primary one)'}
+        contactToken: {type: string, pattern: '^[0-9a-f]{64}$', description: 'The token the menu gave for this phone'}
+        idempotencyKey: {type: string, format: uuid}
+        confirmAfterUnknown: {type: string, format: uuid, nullable: true, description: 'Explicit repeat after the latest send of this text to this number ended unknown'}
     WhatsAppOrderSend:
       type: object
       required: [sendId, orderId, targetKind, chatKey, recipientLabel, recipientMasked, form, state, errorCode, cancelReason, createdAt, sentAt, actor,
-        partsTotal, position, estimatedAt, mayExpire, expiresAt]
+        partsTotal, position, estimatedAt, mayExpire, expiresAt, supplierRequestId, supplierRequestNumber]
       properties:
         sendId: {type: string, format: uuid}
-        orderId: {type: integer}
-        targetKind: {type: string, enum: [client, chat, employee]}
+        orderId: {type: integer, nullable: true, description: 'Null for a supplier request send'}
+        targetKind: {type: string, enum: [client, chat, employee, supplier]}
         chatKey: {type: string, format: uuid, nullable: true}
         recipientLabel: {type: string}
         recipientMasked: {type: string, description: 'Phone or group as a mask only'}
-        form: {$ref: '#/components/schemas/WhatsAppOrderFormCode'}
+        form: {type: string, enum: [production_pdf, order_pdf, production_excel, order_excel, production_image, order_image, supplier_text]}
+        supplierRequestId: {type: integer, nullable: true}
+        supplierRequestNumber: {type: string, nullable: true}
         state: {type: string, enum: [queued, sending, sent, failed, unknown, cancelled, expired]}
         errorCode: {type: string, nullable: true}
-        cancelReason: {type: string, nullable: true, enum: [disabled, recipient_removed, recipient_changed, form_not_allowed, permission_revoked, paused, manual, null]}
+        cancelReason: {type: string, nullable: true, enum: [disabled, recipient_removed, recipient_changed, form_not_allowed, permission_revoked, paused, manual, request_changed, null]}
         createdAt: {type: string, format: date-time}
         sentAt: {type: string, format: date-time, nullable: true}
         actor: {type: object, properties: {id: {type: string}, username: {type: string, nullable: true}}}
-        partsTotal: {type: integer, minimum: 1, maximum: 20, description: 'Pictures of an image form (1 for a file)'}
+        partsTotal: {type: integer, minimum: 1, maximum: 20, description: 'Pictures of an image form or messages of a supplier text (1 for a file)'}
         position: {type: integer, minimum: 1, nullable: true, description: 'Place in the queue while waiting'}
         estimatedAt: {type: string, format: date-time, nullable: true, description: 'Approximate start of the delivery while waiting'}
         mayExpire: {type: boolean, description: 'Expected to expire (24 hours from the command) before its turn'}

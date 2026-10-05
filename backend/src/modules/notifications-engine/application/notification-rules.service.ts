@@ -5,7 +5,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { USER_ROLES, type PermissionName } from '../../../permissions/permissions';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import { validateNotificationRuleInput } from '../domain/notification-rule-validation';
-import type { NotificationChannel, NotificationRule } from '../domain/notification-rule.types';
+import type { BalloonMode, NotificationChannel, NotificationRule } from '../domain/notification-rule.types';
 import type {
   CreateNotificationRuleInput,
   NotificationRuleRepositoryPort,
@@ -34,6 +34,7 @@ export interface CreateNotificationRuleCommandInput {
   priority: number;
   isEnabled: boolean;
   channels?: NotificationChannel[];
+  balloonMode?: BalloonMode;
   conditions: NotificationRule['conditions'];
   recipients: NotificationRule['recipients'];
   titleTemplate?: string | null;
@@ -47,6 +48,7 @@ export interface UpdateNotificationRuleCommandInput {
     priority?: number;
     isEnabled?: boolean;
     channels?: NotificationChannel[];
+    balloonMode?: BalloonMode;
     conditions?: NotificationRule['conditions'];
     recipients?: NotificationRule['recipients'];
     titleTemplate?: string | null;
@@ -108,6 +110,7 @@ export class NotificationRulesService {
         priority: input.priority,
         isEnabled: input.isEnabled,
         channels: input.channels ?? ['in_app'],
+        balloonMode: input.balloonMode ?? 'auto',
         conditions: toJsonRecord(input.conditions),
         recipients: toJsonRecord(input.recipients),
         titleTemplate: input.titleTemplate ?? null,
@@ -297,6 +300,7 @@ function serializeRule(rule: NotificationRule): Record<string, unknown> {
     groupId: rule.groupId,
     isEnabled: rule.isEnabled,
     channels: rule.channels,
+    balloonMode: rule.balloonMode,
     priority: rule.priority,
     level: rule.level,
     conditions: rule.conditions,
@@ -314,6 +318,7 @@ const DIFFABLE_FIELDS = [
   'priority',
   'isEnabled',
   'channels',
+  'balloonMode',
   'conditions',
   'recipients',
   'titleTemplate',
@@ -353,6 +358,7 @@ function mergeRuleWithPatch(
     level: patch.level ?? existing.level,
     priority: patch.priority ?? existing.priority,
     channels: patch.channels ?? existing.channels,
+    balloonMode: patch.balloonMode ?? existing.balloonMode,
     conditions: patch.conditions ?? existing.conditions,
     recipients: patch.recipients ?? existing.recipients,
     titleTemplate: patch.titleTemplate !== undefined ? patch.titleTemplate : existing.titleTemplate,

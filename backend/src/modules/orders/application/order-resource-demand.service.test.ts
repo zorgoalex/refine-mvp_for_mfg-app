@@ -28,7 +28,8 @@ describe('OrderResourceDemandService', () => {
     };
 
     await expect(service.list(command)).resolves.toBe(expected);
-    expect(list).toHaveBeenCalledWith(command);
+    // Без явных опций таблица закупа не читается (флаг выключен по умолчанию).
+    expect(list).toHaveBeenCalledWith(command, { procurementEnabled: false });
   });
 });
 

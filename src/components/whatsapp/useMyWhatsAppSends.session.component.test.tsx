@@ -4,15 +4,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../api/apiError';
 import { authSession } from '../../api/authSession';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), orderList: vi.fn(), run: vi.fn(), shown: [] as string[], destroyed: 0 }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), orderList: vi.fn(), run: vi.fn(), shown: [] as string[], destroyed: 0, rejectQueue: false }));
 vi.mock('../../api/myWhatsAppSendsApi', () => ({ myWhatsAppSendsApi: { list: mocks.list } }));
 vi.mock('../../api/orderSendApi', () => ({ orderSendApi: { list: mocks.orderList } }));
 vi.mock('../../api/broadcastsApi', () => ({ broadcastsApi: { run: mocks.run } }));
-vi.mock('antd', () => {
-  const api = { success: (args: { key: string }) => mocks.shown.push(args.key), warning: (args: { key: string }) => mocks.shown.push(args.key), error: () => undefined,
-    destroy: () => { mocks.destroyed += 1; } };
-  return { notification: { useNotification: () => [api, null] } };
-});
+// Балуны показывает центр балунов приложения (план 2026-10-03): здесь — фейковый центр, записывающий поставленные ключи.
+vi.mock('../../notifications/balloons/BalloonCenter', () => ({
+  useBalloonCenter: () => ({
+    // Как настоящая очередь: идемпотентно по ключу, возвращает принятые ключи.
+    enqueueLocal: async (owner: string, balloons: Array<{ key: string }>) => {
+      if (!owner || mocks.rejectQueue) return [];
+      for (const balloon of balloons) if (!mocks.shown.includes(balloon.key)) mocks.shown.push(balloon.key);
+      return balloons.map((balloon) => balloon.key);
+    },
+  }),
+}));
 
 import { useMyWhatsAppSends } from './useMyWhatsAppSends';
 import { WHATSAPP_SEND_QUEUED_EVENT, announceWhatsAppSendQueued, currentOwner, emptyFollowState, trackSend } from './myWhatsAppSendsModel';
@@ -38,6 +44,7 @@ describe('useMyWhatsAppSends with the real auth session', () => {
   beforeEach(() => {
     store.clear();
     mocks.shown.length = 0;
+    mocks.rejectQueue = false;
     mocks.destroyed = 0;
     vi.stubGlobal('window', Object.assign(new EventTarget(), {
       localStorage: { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => { store.set(key, value); },
@@ -47,19 +54,74 @@ describe('useMyWhatsAppSends with the real auth session', () => {
   });
   afterEach(() => { vi.unstubAllGlobals(); mocks.list.mockReset(); mocks.orderList.mockReset(); mocks.run.mockReset(); authSession.clear(); });
 
-  it('a session change (no React update) drops the previous user\'s late response and closes the balloons', async () => {
+  it('a session change (no React update) drops the previous user\'s late response', async () => {
     const first = deferred<{ serverTime: string; items: unknown[] }>();
     mocks.list.mockImplementationOnce(() => first.promise).mockResolvedValue({ serverTime: '', items: [send('b-1', 'queued')] });
     authSession.setUser(user('A'));
     let renderer!: ReturnType<typeof create>;
     await act(async () => { renderer = create(<Probe />); });
-    const destroyedBefore = mocks.destroyed;
     await act(async () => { authSession.setUser(user('B')); });
     await act(async () => { first.resolve({ serverTime: '', items: [send('a-1', 'queued')] }); await first.promise; });
     await flush();
-    expect(mocks.destroyed).toBeGreaterThan(destroyedBefore);
+    // Балуны прежнего пользователя закрывает центр балунов (BalloonCenter) при смене сессии; здесь — ничего не поставлено.
+    expect(mocks.shown).toEqual([]);
     expect(store.get('whatsapp.my-sends.v3.A')).toBeUndefined();
     expect(JSON.parse(store.get('whatsapp.my-sends.v3.B') ?? '{}').tracked).toEqual(['b-1']);
+    await act(async () => { renderer.unmount(); });
+  });
+
+  it('code review R1-3: a balloon the center did not accept (queue full) keeps the send tracked; the next poll queues it once', async () => {
+    mocks.list.mockResolvedValue({ serverTime: '', items: [send('f-1', 'sent')] });
+    authSession.setUser(user('A'));
+    await act(async () => { await announceWhatsAppSendQueued('f-1', { kind: 'order_send', orderId: 1 }, currentOwner()); });
+    mocks.rejectQueue = true;
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => { renderer = create(<Probe />); });
+    await flush();
+    expect(mocks.shown).toEqual([]);
+    expect(JSON.parse(store.get('whatsapp.my-sends.v3.A') ?? '{}').tracked).toEqual(['f-1']);
+    mocks.rejectQueue = false;
+    await act(async () => { last?.refresh(); });
+    await flush();
+    expect(mocks.shown).toEqual(['whatsapp-send-f-1']);
+    expect(JSON.parse(store.get('whatsapp.my-sends.v3.A') ?? '{}').announced).toEqual(['f-1']);
+    await act(async () => { renderer.unmount(); });
+  });
+
+  it('R2-2: an unaccepted balloon is retried by the timer (no manual refresh), even with no active sends', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const tick = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+      mocks.list.mockResolvedValue({ serverTime: '', items: [send('t-1', 'sent')] });
+      authSession.setUser(user('A'));
+      await act(async () => { await announceWhatsAppSendQueued('t-1', { kind: 'order_send', orderId: 1 }, currentOwner()); });
+      mocks.rejectQueue = true;
+      let renderer!: ReturnType<typeof create>;
+      await act(async () => { renderer = create(<Probe />); });
+      await tick(0);
+      expect(mocks.shown).toEqual([]);
+      mocks.rejectQueue = false;
+      await tick(30_000);
+      expect(mocks.shown).toEqual(['whatsapp-send-t-1']);
+      await act(async () => { renderer.unmount(); });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('many finished at once: one summary balloon goes to the center; accepting it announces all its sends', async () => {
+    const ids = ['s-1', 's-2', 's-3', 's-4'];
+    mocks.list.mockResolvedValue({ serverTime: '', items: ids.map((id) => send(id, 'sent')) });
+    authSession.setUser(user('A'));
+    for (const id of ids) await act(async () => { await announceWhatsAppSendQueued(id, { kind: 'order_send', orderId: 1 }, currentOwner()); });
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => { renderer = create(<Probe />); });
+    await flush();
+    expect(mocks.shown).toHaveLength(1);
+    expect(mocks.shown[0]).toMatch(/^whatsapp-send-summary-/);
+    const state = JSON.parse(store.get('whatsapp.my-sends.v3.A') ?? '{}');
+    expect([...state.announced].sort()).toEqual(ids);
+    expect(state.tracked).toEqual([]);
     await act(async () => { renderer.unmount(); });
   });
 

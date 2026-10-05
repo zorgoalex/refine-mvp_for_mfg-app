@@ -10,6 +10,9 @@ import type {
   NotificationRepositoryPort,
 } from './notification.types';
 
+/** Мест на экране балунов вкладки (план 2026-10-03 §2.2): за один claim — не больше. */
+export const MAX_BALLOONS_PER_CLAIM = 5;
+
 const uuidRegex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -24,7 +27,7 @@ export class NotificationService {
     const page = normalizePage(input.query.page);
     const pageSize = normalizePageSize(input.query.pageSize);
     const result = await this.deps.repository.listForUser({
-      userId: currentUser.id,
+      viewer: currentUser,
       unreadOnly: input.query.unreadOnly,
       page,
       pageSize,
@@ -47,7 +50,7 @@ export class NotificationService {
     const notificationId = parseNotificationId(input.notificationId);
     const notification = await this.deps.repository.markReadForUser({
       notificationId,
-      userId: currentUser.id,
+      viewer: currentUser,
     });
 
     if (!notification) {
@@ -59,8 +62,24 @@ export class NotificationService {
 
   async markAllRead(input: { currentUser: CurrentUser | undefined }) {
     const currentUser = requireCurrentUser(input.currentUser);
-    const updatedCount = await this.deps.repository.markAllReadForUser(currentUser.id);
+    const updatedCount = await this.deps.repository.markAllReadForUser(currentUser);
     return { updatedCount };
+  }
+
+  async claimBalloons(input: { currentUser: CurrentUser | undefined; token: string; limit: number }) {
+    const currentUser = requireCurrentUser(input.currentUser);
+    const token = parseNotificationId(input.token);
+    const limit = Math.min(Math.max(Math.trunc(input.limit), 1), MAX_BALLOONS_PER_CLAIM);
+    const items = await this.deps.repository.claimBalloonsForUser({ viewer: currentUser, token, limit });
+    return { items };
+  }
+
+  async ackBalloons(input: { currentUser: CurrentUser | undefined; token: string; notificationIds: string[] }) {
+    const currentUser = requireCurrentUser(input.currentUser);
+    const token = parseNotificationId(input.token);
+    const notificationIds = [...new Set(input.notificationIds.map(parseNotificationId))];
+    const acknowledged = await this.deps.repository.ackBalloonsForUser({ viewer: currentUser, token, notificationIds });
+    return { acknowledged };
   }
 
   async delete(input: {
@@ -71,7 +90,7 @@ export class NotificationService {
     const notificationId = parseNotificationId(input.notificationId);
     const deleted = await this.deps.repository.deleteForUser({
       notificationId,
-      userId: currentUser.id,
+      viewer: currentUser,
     });
 
     if (!deleted) {

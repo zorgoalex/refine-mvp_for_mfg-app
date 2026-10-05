@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, HttpCode, Inject, Param, Patch, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
@@ -27,7 +27,7 @@ const listQuerySchema = z.object({
 export class NotificationsController {
   constructor(
     @Inject(NotificationService)
-    private readonly notifications: Pick<NotificationService, 'list' | 'markRead' | 'markAllRead' | 'delete'>,
+    private readonly notifications: Pick<NotificationService, 'list' | 'markRead' | 'markAllRead' | 'delete' | 'claimBalloons' | 'ackBalloons'>,
   ) {}
 
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -72,6 +72,26 @@ export class NotificationsController {
     return this.notifications.markAllRead({ currentUser: request.user });
   }
 
+  @ApiResponse({ status: 200, description: 'Leased (2 min) unshown balloons of the current user; own unfinished lease first' })
+  @ApiResponse({ status: 422, description: 'Invalid token or limit' })
+  @ApiOperation({ operationId: 'claimNotificationBalloons', summary: 'Claim notification balloons for a browser tab' })
+  @Post('balloons/claim')
+  @HttpCode(200)
+  async claimBalloons(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
+    const input = parseBody(claimBalloonsSchema, body);
+    return this.notifications.claimBalloons({ currentUser: request.user, token: input.token, limit: input.limit });
+  }
+
+  @ApiResponse({ status: 200, description: 'Acknowledged shown balloons of the caller lease' })
+  @ApiResponse({ status: 422, description: 'Invalid token or ids' })
+  @ApiOperation({ operationId: 'ackNotificationBalloons', summary: 'Acknowledge shown notification balloons' })
+  @Post('balloons/ack')
+  @HttpCode(200)
+  async ackBalloons(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
+    const input = parseBody(ackBalloonsSchema, body);
+    return this.notifications.ackBalloons({ currentUser: request.user, token: input.token, notificationIds: input.notificationIds });
+  }
+
   @ApiParam({ name: 'notificationId', type: String, description: 'Notification UUID' })
   @ApiResponse({ status: 200, description: 'Deleted notification' })
   @ApiResponse({ status: 404, description: 'Notification not found' })
@@ -104,6 +124,17 @@ export function parseNotificationListQuery(
     });
   }
 
+  return result.data;
+}
+
+const claimBalloonsSchema = z.object({ token: z.string().uuid(), limit: z.number().int().min(1).max(5) }).strict();
+const ackBalloonsSchema = z.object({ token: z.string().uuid(), notificationIds: z.array(z.string().uuid()).min(1).max(20) }).strict();
+
+function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
+  const result = schema.safeParse(body ?? {});
+  if (!result.success) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid notification balloons request', { issues: result.error.issues });
+  }
   return result.data;
 }
 

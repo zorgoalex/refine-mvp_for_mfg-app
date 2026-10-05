@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { NOTIFICATIONS_CHANGED_EVENT } from '../notifications/balloons/notificationEvents';
 import { notificationsApi } from '../api/notificationsApi';
 import type { BackendNotificationDto } from '../api/types/notificationApi.types';
 import type { NotificationLevel } from '../stores/notificationStore';
@@ -102,6 +103,12 @@ export function useBackendNotifications(enabled: boolean): BackendNotificationsS
     }
 
     void refresh();
+    // Центр балунов показал новые уведомления (или клик отметил прочитанным) — перечитать список колокольчика.
+    const onChanged = () => { void refresh(); };
+    if (typeof window !== 'undefined') window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onChanged);
+    return () => {
+      if (typeof window !== 'undefined') window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onChanged);
+    };
   }, [enabled, refresh]);
 
   const markAsRead = useCallback(async (ids: string | string[]) => {

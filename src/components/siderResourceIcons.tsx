@@ -37,10 +37,12 @@ import {
   TransactionOutlined,
   UserOutlined,
   WalletOutlined,
+  ShoppingOutlined,
 } from '@ant-design/icons';
 
 /** Shared semantic icons for every resource that can appear in desktop/mobile navigation. */
 export const SIDER_RESOURCE_ICONS: Record<string, React.ReactNode> = {
+  onec_purchase_documents: <ShoppingOutlined />,
   orders_view: <FileTextOutlined />,
   calendar: <CalendarOutlined />,
   'order-status-board': <LayoutOutlined />,

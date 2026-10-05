@@ -17,6 +17,8 @@ function memoryStorage(initial: Record<string, string> = {}) {
     getItem: (key: string) => data.get(key) ?? null,
     setItem: (key: string, value: string) => { data.set(key, value); },
     removeItem: (key: string) => { data.delete(key); },
+    get length() { return data.size; },
+    key: (index: number) => [...data.keys()][index] ?? null,
   };
 }
 const apiError = (status: number, code: string, details?: unknown) => new ApiError({ code, message: code, status, details });
@@ -82,15 +84,141 @@ describe('runOrderSend', () => {
     expect(storage.data.has(KEY)).toBe(false);
   });
 
-  it('keys a pending employee send by recipient and phone, apart from other phones', async () => {
+  it('a lost answer is replayed with the stored command exactly — the old token or none — whatever the menu says now', async () => {
+    const T1 = 'a'.repeat(64);
+    const T2 = 'b'.repeat(64);
+    for (const [first, later] of [
+      // an older interface sent an employee contact without a token; the new one would add it
+      [{ kind: 'employee' as const, recipientKey: 'e1', contactId: 7 }, { kind: 'employee' as const, recipientKey: 'e1', contactId: 7, contactToken: T2 }],
+      // the client phone row was edited after the first attempt: the menu now gives another token
+      [{ kind: 'client' as const, phoneId: 12, phoneToken: T1 }, { kind: 'client' as const, phoneId: 12, phoneToken: T2 }],
+    ]) {
+      const storage = memoryStorage();
+      await runOrderSend({ ...base, target: first, send: async () => { throw apiError(500, 'INTERNAL_ERROR'); }, storage });
+      const send = vi.fn(async () => ok);
+      await runOrderSend({ ...base, target: later, send, storage });
+      const body = (send.mock.calls[0] as unknown as [number, { target: unknown; idempotencyKey: string }])[1];
+      expect(body.target).toEqual(first);
+      expect(body.idempotencyKey).toMatch(UUID);
+      expect(readPendingOrderSend(77, later, 'order_pdf', '11', storage)).toBeNull();
+    }
+    // A stored target that is not a valid one is not replayed at all.
     const storage = memoryStorage();
-    const primary = { kind: 'employee' as const, recipientKey: 'e1' };
-    const chosen = { kind: 'employee' as const, recipientKey: 'e1', contactId: 8 };
-    expect(pendingOrderSendKey(77, primary, 'order_pdf')).toContain('employee-e1-primary');
-    expect(pendingOrderSendKey(77, chosen, 'order_pdf')).toContain('employee-e1-8');
-    await runOrderSend({ ...base, target: chosen, send: async () => { throw apiError(500, 'INTERNAL_ERROR'); }, storage });
-    expect(readPendingOrderSend(77, chosen, 'order_pdf', '11', storage)?.payload.target).toEqual(chosen);
-    expect(readPendingOrderSend(77, primary, 'order_pdf', '11', storage)).toBeNull();
+    storage.setItem(pendingOrderSendKey(77, { kind: 'client', phoneId: 12 }, 'order_pdf'), JSON.stringify({ actorId: '11', orderId: 77, ambiguous: true,
+      payload: { target: { kind: 'client', phoneId: 'x' }, form: 'order_pdf', idempotencyKey: '11111111-1111-4111-8111-111111111111' } }));
+    expect(readPendingOrderSend(77, { kind: 'client', phoneId: 12 }, 'order_pdf', '11', storage)).toBeNull();
+  });
+
+  it('a command left by the previous interface in its own slot is settled, not lost: no second command, however many slots', async () => {
+    // The literal keys of the previous interface: one slot per employee contact.
+    const legacy = (contact: string) => `broadcast.pending-order-send.v1.77.employee-e1-${contact}.order_pdf`;
+    const record = (target: unknown, key: string) => JSON.stringify({ actorId: '11', orderId: 77, ambiguous: true,
+      payload: { target, form: 'order_pdf', idempotencyKey: key } });
+    const K1 = '11111111-1111-4111-8111-111111111111';
+    const K2 = '22222222-2222-4222-8222-222222222222';
+    const storage = memoryStorage({
+      [legacy('primary')]: record({ kind: 'employee', recipientKey: 'e1' }, K1),
+      [legacy('8')]: record({ kind: 'employee', recipientKey: 'e1', contactId: 8 }, K2),
+    });
+    // The sends were delivered meanwhile; the new interface clicks the employee with a token.
+    const clicked = { kind: 'employee' as const, recipientKey: 'e1', contactId: 8, contactToken: 'd'.repeat(64) };
+    const sent = { send: { sendId: 's-old', state: 'sent', errorCode: null, cancelReason: null, recipientMasked: '7701***0102' } } as never;
+    const send = vi.fn(async () => sent);
+    await runOrderSend({ ...base, target: clicked, send, storage });
+    await runOrderSend({ ...base, target: clicked, send, storage });
+    const bodies = (send.mock.calls as unknown as Array<[number, { target: unknown; idempotencyKey: string }]>).map(([, body]) => body);
+    // Each click settled one stored command with its own key and its own target (no token added).
+    expect(bodies.map((body) => body.idempotencyKey).sort()).toEqual([K1, K2]);
+    expect(bodies.map((body) => body.target)).toEqual(expect.arrayContaining([{ kind: 'employee', recipientKey: 'e1' }, { kind: 'employee', recipientKey: 'e1', contactId: 8 }]));
+    expect([...storage.data.keys()]).toEqual([]);
+    // Only now a click makes a new command.
+    await runOrderSend({ ...base, target: clicked, send, storage });
+    expect(bodies.length).toBe(2);
+    expect((send.mock.calls[2] as unknown as [number, { target: unknown; idempotencyKey: string }])[1]).toMatchObject({ target: clicked });
+    expect([K1, K2]).not.toContain((send.mock.calls[2] as unknown as [number, { idempotencyKey: string }])[1].idempotencyKey);
+    // Storage that cannot be listed: the well-known slots of the clicked contact and of «primary» are still found.
+    const plain = memoryStorage({ [legacy('8')]: record({ kind: 'employee', recipientKey: 'e1', contactId: 8 }, K2) });
+    const bare = { getItem: plain.getItem, setItem: plain.setItem, removeItem: plain.removeItem };
+    expect(readPendingOrderSend(77, clicked, 'order_pdf', '11', bare)?.payload.idempotencyKey).toBe(K2);
+  });
+
+  it('a replay names the number from the server answer even when the same phone row now shows another number', async () => {
+    const T1 = 'a'.repeat(64);
+    const storage = memoryStorage();
+    const target = { kind: 'client' as const, phoneId: 12, phoneToken: T1 };
+    await runOrderSend({ ...base, target, targetLabel: 'клиенту (7777***0001)', send: async () => { throw apiError(500, 'INTERNAL_ERROR'); }, storage });
+    // The row was edited: the menu shows a new mask and gives a new token; the replay returns the old send.
+    const answer = { send: { sendId: 's1', state: 'sent', errorCode: null, cancelReason: null, recipientMasked: '7777***0001' } } as never;
+    const toast = await runOrderSend({ ...base, target: { kind: 'client', phoneId: 12, phoneToken: 'b'.repeat(64) }, targetLabel: 'клиенту (7777***0009)',
+      send: async () => answer, storage });
+    expect(toast?.text).toContain('клиенту (7777***0001)');
+    expect(toast?.text).not.toContain('0009');
+  });
+
+  it('a lost answer, then a refusal the server recorded as final: the pending command is dropped and a fresh choice makes a new one', async () => {
+    // The phone was edited, removed, or the release makes no chosen-phone sends: the server keeps the refusal with the key.
+    for (const refusal of ['ORDER_SEND_PHONE_CHANGED', 'ORDER_SEND_PHONE_CHOICE_UNAVAILABLE', 'CLIENT_PHONE_MISSING']) {
+      const storage = memoryStorage();
+      const stale = { kind: 'client' as const, phoneId: 12, phoneToken: 'a'.repeat(64) };
+      await runOrderSend({ ...base, target: stale, send: async () => { throw apiError(500, 'INTERNAL_ERROR'); }, storage });
+      const firstKey = readPendingOrderSend(77, stale, 'order_pdf', '11', storage)?.payload.idempotencyKey;
+      const refused = await runOrderSend({ ...base, target: stale, send: async () => { throw apiError(409, refusal, { final: true }); }, storage });
+      expect(refused).toMatchObject({ refreshRecipients: true });
+      expect(readPendingOrderSend(77, stale, 'order_pdf', '11', storage)).toBeNull();
+      // The refreshed menu: another phone or the default one — a new command with a new key and its own target.
+      for (const fresh of [{ kind: 'client' as const, phoneId: 13, phoneToken: 'b'.repeat(64) }, { kind: 'client' as const }]) {
+        const send = vi.fn(async () => ok);
+        await runOrderSend({ ...base, target: fresh, send, storage });
+        const body = (send.mock.calls[0] as unknown as [number, { target: unknown; idempotencyKey: string }])[1];
+        expect(body.target).toEqual(fresh);
+        expect(body.idempotencyKey).not.toBe(firstKey);
+      }
+    }
+    // The same codes without the server's mark (an older backend): the outcome of the first attempt is still
+    // unknown, so the key stays and the stored command is retried.
+    const storage = memoryStorage();
+    await runOrderSend({ ...base, send: async () => { throw apiError(500, 'X'); }, storage });
+    await runOrderSend({ ...base, send: async () => { throw apiError(409, 'CLIENT_PHONE_MISSING'); }, storage });
+    expect(storage.data.has(KEY)).toBe(true);
+    await runOrderSend({ ...base, send: async () => { throw apiError(409, 'ORDER_SEND_DISABLED'); }, storage });
+    expect(storage.data.has(KEY)).toBe(true);
+  });
+
+  it('a stale recipient (phone edited or removed) asks the card to reload its recipients', async () => {
+    const storage = memoryStorage();
+    const stale = await runOrderSend({ ...base, target: { kind: 'client', phoneId: 12, phoneToken: 't' }, storage,
+      send: async () => { throw apiError(409, 'ORDER_SEND_PHONE_CHANGED'); } });
+    expect(stale).toMatchObject({ type: 'warning', refreshRecipients: true });
+    expect(stale?.text).toContain('выберите его заново');
+    const other = await runOrderSend({ ...base, storage, send: async () => { throw apiError(409, 'ORDER_SEND_DISABLED'); } });
+    expect(other?.refreshRecipients).toBeUndefined();
+  });
+
+  it('one pending slot per recipient and form: a lost answer is settled first, whichever phone is picked next', async () => {
+    // The first click went by default while the phones were loading; the answer was lost. The next click picks
+    // the same number from the list: the stored command (its target, its key) is replayed — no second command.
+    const T = 'c'.repeat(64);
+    for (const [first, next] of [
+      [{ kind: 'client' as const }, { kind: 'client' as const, phoneId: 12, phoneToken: T }],
+      [{ kind: 'client' as const, phoneId: 12, phoneToken: T }, { kind: 'client' as const }],
+      [{ kind: 'employee' as const, recipientKey: 'e1' }, { kind: 'employee' as const, recipientKey: 'e1', contactId: 8, contactToken: T }],
+    ]) {
+      const storage = memoryStorage();
+      expect(pendingOrderSendKey(77, first, 'order_pdf')).toBe(pendingOrderSendKey(77, next, 'order_pdf'));
+      await runOrderSend({ ...base, target: first, send: async () => { throw apiError(500, 'INTERNAL_ERROR'); }, storage });
+      const stored = readPendingOrderSend(77, next, 'order_pdf', '11', storage);
+      expect(stored?.payload.target).toEqual(first);
+      const send = vi.fn(async () => ({ send: { ...ok.send, recipientMasked: '7701***2060' } }));
+      const toast = await runOrderSend({ ...base, target: next, targetLabel: 'клиенту (7777***4567)', send, storage });
+      const body = (send.mock.calls[0] as unknown as [number, { target: unknown; idempotencyKey: string }])[1];
+      expect(body).toMatchObject({ target: first, idempotencyKey: stored?.payload.idempotencyKey });
+      expect(send).toHaveBeenCalledTimes(1);
+      // The toast names the number the settled command really went to, not the one just clicked.
+      expect(toast?.text).toContain('(7701***2060)');
+      expect(toast?.text).not.toContain('7777***4567');
+    }
+    // Another employee recipient is another slot.
+    expect(pendingOrderSendKey(77, { kind: 'employee', recipientKey: 'e1' }, 'order_pdf')).not.toBe(pendingOrderSendKey(77, { kind: 'employee', recipientKey: 'e2' }, 'order_pdf'));
   });
 
   it('drops the key on a first-attempt refusal (cooldown) and keeps it after an ambiguous attempt', async () => {

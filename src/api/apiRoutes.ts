@@ -59,6 +59,12 @@ export const apiRoutes = {
     list: backendApiPath('/orders'),
     formData: backendApiPath('/orders/form-data'),
     resourceDemands: backendApiPath('/orders/resource-demands'),
+    resourceDemandsByMaterial: backendApiPath('/orders/resource-demands/by-material'),
+    resourceDemandsOnecDocuments: backendApiPath('/orders/resource-demands/onec-documents'),
+    resourceDemandCard: (orderId: number) => backendApiPath(`/orders/${orderId}/resource-demands`),
+    resourceProcurement: (orderId: number, resourceKey: string) =>
+      backendApiPath(`/orders/${orderId}/resource-procurement/${encodeURIComponent(resourceKey)}`),
+    resourceProcurementBulk: backendApiPath('/orders/resource-procurement/bulk'),
     nameSuggestion: backendApiPath('/orders/name-suggestion'),
     statusBoard: backendApiPath('/orders/status-board'),
     statusBoardMdfManualMoves: backendApiPath('/orders/status-board/mdf-manual-moves'),
@@ -104,6 +110,7 @@ export const apiRoutes = {
       backendApiPath(`/orders/${orderId}/deadline-overrides/${overrideId}`),
     groups: orderGroupsRoute,
     whatsappSends: (orderId: number) => backendApiPath(`/orders/${orderId}/whatsapp-sends`),
+    whatsappSendClientContacts: (orderId: number) => backendApiPath(`/orders/${orderId}/whatsapp-sends/client-contacts`),
   },
   orderDetails: {
     productionStageEvent: (detailId: number, productionStatusId: number) =>
@@ -315,6 +322,8 @@ export const apiRoutes = {
     byId: (notificationId: string) => backendApiPath(`/notifications/${notificationId}`),
     read: (notificationId: string) => backendApiPath(`/notifications/${notificationId}/read`),
     readAll: backendApiPath('/notifications/read-all'),
+    balloonsClaim: backendApiPath('/notifications/balloons/claim'),
+    balloonsAck: backendApiPath('/notifications/balloons/ack'),
   },
   deadlinePolicies: {
     list: backendApiPath('/deadline-policies'),
@@ -358,6 +367,13 @@ export const apiRoutes = {
   employees: {
     contacts: (employeeId: number) => backendApiPath(`/employees/${employeeId}/contacts`),
     contactsList: backendApiPath('/employee-contacts'),
+  },
+  partyContacts: {
+    contacts: (party: 'supplier' | 'vendor' | 'client', id: number) => backendApiPath(`/${party}s/${id}/contacts`),
+    contactsList: (party: 'supplier' | 'vendor') => backendApiPath(`/${party}-contacts`),
+    supplierCounterparties: backendApiPath('/supplier-counterparties'),
+    supplierCounterparty: (supplierId: number) => backendApiPath(`/suppliers/${supplierId}/counterparty`),
+    supplierFromCounterparty: backendApiPath('/suppliers/from-counterparty'),
   },
   whatsapp: {
     preview: backendApiPath('/whatsapp/rules/preview'),
@@ -452,5 +468,48 @@ export const apiRoutes = {
     filterOptions: backendApiPath('/audit/filter-options'),
     orderOptions: backendApiPath('/audit/order-options'),
     participantOptions: backendApiPath('/audit/participant-options'),
+  },
+  procurement: {
+    worklist: backendApiPath('/procurement/worklist'),
+    savedViews: backendApiPath('/procurement/worklist/saved-views'),
+    settings: backendApiPath('/procurement/settings'),
+    history: backendApiPath('/procurement/history'),
+    supplierRequests: {
+      list: backendApiPath('/procurement/supplier-requests'),
+      drafts: backendApiPath('/procurement/supplier-requests/drafts'),
+      byId: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}`),
+      send: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}/send`),
+      close: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}/close`),
+      cancel: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}/cancel`),
+      whatsappMenu: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}/whatsapp-menu`),
+      whatsappSends: (supplierRequestId: number) => backendApiPath(`/procurement/supplier-requests/${supplierRequestId}/whatsapp-sends`),
+    },
+    supplierTextTemplates: {
+      list: backendApiPath('/procurement/supplier-text-templates'),
+      byId: (templateId: number) => backendApiPath(`/procurement/supplier-text-templates/${templateId}`),
+      setDefault: (templateId: number) => backendApiPath(`/procurement/supplier-text-templates/${templateId}/default`),
+    },
+    // Личные шаблоны: отдельный маршрут — старый backend его не знает и не сохранит личный текст как общий.
+    mySupplierTextTemplates: {
+      list: backendApiPath('/procurement/my-supplier-text-templates'),
+      byId: (templateId: number) => backendApiPath(`/procurement/my-supplier-text-templates/${templateId}`),
+      setDefault: (templateId: number) => backendApiPath(`/procurement/my-supplier-text-templates/${templateId}/default`),
+    },
+  },
+  onecDocuments: {
+    list: backendApiPath('/procurement/onec-documents'),
+    card: (documentId: number) => backendApiPath(`/procurement/onec-documents/${documentId}`),
+    allocations: (documentId: number, lineId: number) =>
+      backendApiPath(`/procurement/onec-documents/${documentId}/lines/${lineId}/allocations`),
+    allocation: (documentId: number, lineId: number, allocationId: number) =>
+      backendApiPath(`/procurement/onec-documents/${documentId}/lines/${lineId}/allocations/${allocationId}`),
+    allocationSuggestions: (documentId: number) =>
+      backendApiPath(`/procurement/onec-documents/${documentId}/allocation-suggestions`),
+    allocationsBatch: (documentId: number) =>
+      backendApiPath(`/procurement/onec-documents/${documentId}/allocations/batch`),
+    requestLinks: (documentId: number, lineId: number, allocationId: number) =>
+      backendApiPath(`/procurement/onec-documents/${documentId}/lines/${lineId}/allocations/${allocationId}/request-links`),
+    requestLink: (documentId: number, lineId: number, allocationId: number, linkId: number) =>
+      backendApiPath(`/procurement/onec-documents/${documentId}/lines/${lineId}/allocations/${allocationId}/request-links/${linkId}`),
   },
 } as const;

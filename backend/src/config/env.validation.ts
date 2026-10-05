@@ -112,6 +112,13 @@ export function isWahaBaseUrl(value: string): boolean {
   }
 }
 
+/** Виды документов 1С, допустимые в BACKEND_ONEC_DOCUMENTS_KINDS (совпадает с ALL_DOC_KINDS нормализатора onec-sync). */
+export const ONEC_DOCUMENT_KINDS_ENV = [
+  'purchase_receipt', 'cash_outflow', 'bank_outflow', 'sales_shipment', 'supplier_return', 'inventory_writeoff', 'inventory_transfer',
+  'customer_order', 'cash_receipt', 'bank_receipt', 'cash_refund', 'bank_refund',
+] as const;
+
+
 export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
@@ -280,6 +287,21 @@ export const envSchema = z
     BACKEND_ENABLE_DOWELING_COMMANDS: booleanFromEnv.default(false),
     // Bazis XML import module. Default OFF (fail-closed); no cross-dependency.
     BACKEND_ENABLE_BAZIS: booleanFromEnv.default(false),
+    // Отметки «Закуплено» у материалов заказа (команды и чтение таблицы order_resource_procurement).
+    BACKEND_RESOURCE_PROCUREMENT_ENABLED: booleanFromEnv.default(false),
+    BACKEND_ONEC_DOCUMENTS_LOAD: booleanFromEnv.default(false),
+    // Виды документов 1С загрузчика (план расхода §3.3; заказы/поступления/возвраты — план 2026-10-02 §3.1); виды закупок
+    // действуют только при включённых закупках. Список = ALL_DOC_KINDS нормализатора (тест сверяет).
+    BACKEND_ONEC_DOCUMENTS_KINDS: z.string().trim().default('purchase_receipt,cash_outflow,bank_outflow').refine(
+      (value) => value.split(',').map((name) => name.trim()).filter(Boolean).every((name) => (ONEC_DOCUMENT_KINDS_ENV as readonly string[]).includes(name)),
+      'BACKEND_ONEC_DOCUMENTS_KINDS: unknown 1C document kind',
+    ),
+    BACKEND_PROCUREMENT_WORKSPACE_ENABLED: booleanFromEnv.default(false),
+    BACKEND_SUPPLIER_REQUESTS_ENABLED: booleanFromEnv.default(false),
+    // Уведомления закупа (экран снабжения, ф.4б): только in_app, правила засеяны выключенными; проверяется при обработке.
+    BACKEND_PROCUREMENT_NOTIFICATIONS_ENABLED: booleanFromEnv.default(false),
+    // Шаблоны текста заявки поставщику (миграция 229); выключение — откат функции без заявок.
+    BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED: booleanFromEnv.default(false),
     BACKEND_ENABLE_PDF_IMPORT_LAYOUT_PATTERNS: booleanFromEnv.default(false),
     BACKEND_STATUS_AUTOMATION: booleanFromEnv.default(false),
     BACKEND_ENABLE_NOTIFICATION_ENGINE: booleanFromEnv.default(false),
@@ -435,6 +457,16 @@ export const envSchema = z
     BACKEND_ONEC_MONITOR_INTERVAL_MS: z.coerce.number().int().min(5000).max(3600000).default(60000),
     /** Hour (UTC, 0–23) of the nightly start_full_sync per active agent; -1 = off. Runs in the monitor owner process. */
     BACKEND_ONEC_NIGHTLY_FULL_SYNC_HOUR_UTC: z.coerce.number().int().min(-1).max(23).default(-1),
+    /**
+     * 1C incoming payments (plan 2026-10-04-onec-incoming-payments): the «Поступления 1С» tab and its read API, and
+     * refunds reducing «Оплачено» of a 1C order through the refunded receipt. Read-only; default off.
+     */
+    BACKEND_ONEC_PAYMENT_MATCHING_VIEW: booleanFromEnv.default(false),
+    /**
+     * Number series of the 1C customer orders that are ERP orders (`<series>-<order_name>`), e.g. «Ф25».
+     * Letters and digits only; empty = the rule is off (only manual links resolve an ERP order).
+     */
+    BACKEND_ONEC_ORDER_NUMBER_SERIES: z.string().trim().max(20).regex(/^[\p{L}\p{N}]*$/u).default(''),
     /** 1C agent E3: owner of the ETL batch parser (one process parses). */
     BACKEND_ONEC_ETL_WORKER_OWNER: z.enum(['none', 'in_process']).default('none'),
     /** Durable spool for received ETL batches (a volume; not in DB backups). */

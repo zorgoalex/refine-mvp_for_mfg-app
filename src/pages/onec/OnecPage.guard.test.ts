@@ -369,11 +369,10 @@ describe('Onec (1C integration) UI wiring', () => {
     expect(matchingTab).toMatch(/только для чтения/);
   });
 
-  // Ядро 1С (выборочный релиз в main): API заказов покупателей приходит со следующим релизом (документы 1С),
-  // поэтому вкладка «Заказы 1С» на странице не зарегистрирована; её компонент уже лежит в репозитории.
-  it('does not register the "Заказы 1С" tab yet; the tab component stays read-only and drops stale responses', () => {
-    expect(page).not.toMatch(/customer-orders/);
-    expect(page).not.toMatch(/CustomerOrdersTab/);
+  it('adds a read-only "Заказы 1С" tab (page-level onec.view guard) that drops stale list and order responses', () => {
+    expect(page).toMatch(/key:\s*'customer-orders'/);
+    expect(page).toMatch(/label:\s*'Заказы 1С'/);
+    expect(page).toMatch(/<CustomerOrdersTab \/>/);
     const ordersTab = readFileSync(new URL('./CustomerOrdersTab.tsx', import.meta.url), 'utf8');
     expect(ordersTab).toMatch(/if \(current === generation\.current\) setList\(result\)/);
     expect(ordersTab).toMatch(/if \(current === detailGeneration\.current\) setDetail\(result\)/);

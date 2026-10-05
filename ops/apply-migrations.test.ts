@@ -313,7 +313,52 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       expect(arm).toContain(marker);
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
-    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('233_whatsapp_order_send_queue*|235_employee_work_contacts*');
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('|235_employee_work_contacts*');
+  });
+
+  it('probes party contacts (suppliers, vendors, clients) before ledgering migration 236', () => {
+    const arm = probeFn.slice(probeFn.indexOf('236_party_contacts*)'), probeFn.indexOf('235_employee_work_contacts*)'));
+    for (const marker of ['q_tbl party_contact_versions',
+      'q_tbl supplier_contacts', 'q_tbl vendor_contacts', 'q_tbl client_contacts',
+      'uq_supplier_contacts_primary', 'uq_vendor_contacts_value', 'uq_client_contacts_primary',
+      "conrelid='public.supplier_contacts'::regclass AND confrelid='public.suppliers'::regclass AND confdeltype='r'",
+      "conrelid='public.vendor_contacts'::regclass AND confrelid='public.vendors'::regclass AND confdeltype='r'",
+      "conrelid='public.client_contacts'::regclass AND confrelid='public.clients'::regclass AND confdeltype='r'"])
+      expect(arm).toContain(marker);
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('235_employee_work_contacts*|236_party_contacts*');
+  });
+
+  it('probes the chosen client phone column before ledgering migration 237', () => {
+    const arm = probeFn.slice(probeFn.indexOf('237_whatsapp_order_send_client_phone*)'), probeFn.indexOf('236_party_contacts*)'));
+    expect(arm).toContain('whatsapp_order_sends client_phone_id');
+    expect(arm).toContain('q_tbl whatsapp_order_send_refusals');
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('236_party_contacts*|237_whatsapp_order_send_client_phone*');
+  });
+
+  it('probes the supplier send schema and every validated CHECK before ledgering migration 238', () => {
+    const arm = probeFn.slice(probeFn.indexOf('238_whatsapp_supplier_send*)'), probeFn.indexOf('237_whatsapp_order_send_client_phone*)'));
+    for (const marker of ['whatsapp_order_send_settings supplier_requests_enabled', 'whatsapp_order_sends supplier_request_id',
+      'whatsapp_order_sends request_content_sha256', 'whatsapp_order_sends text_body', 'whatsapp_order_send_parts text_body',
+      'whatsapp_order_send_refusals supplier_request_id', 'idx_whatsapp_order_sends_supplier_request', 'i.indisvalid', "is_nullable='YES'",
+      'convalidated', ') = 7;', ') = 3;']) expect(arm).toContain(marker);
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*');
+  });
+
+  it('probes the supplier phone sync functions and the enabled trigger before ledgering migration 242', () => {
+    const arm = probeFn.slice(probeFn.indexOf('242_supplier_phone_contact_sync*)'), probeFn.indexOf('238_whatsapp_supplier_send*)'));
+    for (const marker of ['supplier_phone_number(text)', 'supplier_phone_contact_sync()', 'trg_supplier_phone_contact_sync', "tgenabled = 'O'",
+      'party_contact_versions saved_by_command', 'party_contact_versions_saved()', 'trg_party_contact_versions_saved']) {
+      expect(arm).toContain(marker);
+    }
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*');
   });
 
   it('requires the complete WhatsApp technical log schema before advancing migration 170', () => {
