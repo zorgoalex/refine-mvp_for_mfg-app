@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { buildClientScreenSnapshot, createClientScreenIdMap } from './buildClientScreenSnapshot';
 import { CLIENT_SCREEN_CODES } from './clientScreenRegistry';
 import { clientScreenSnapshotSchema } from './clientScreenSnapshotSchema';
-import { buildOrderEditSource, DETAIL_COLUMN_FIELDS, GROUPING_FIELDS, type OrderEditSourceInput } from './orderEditSnapshotSource';
+import {
+  buildOrderEditSource, DETAIL_COLUMN_FIELDS, GROUPING_FIELDS, orderEditEditingValues, type OrderEditSourceInput,
+} from './orderEditSnapshotSource';
 
 const map = (entries: Record<number, string>) => (id: number | null | undefined) => (id === null || id === undefined ? undefined : entries[id]);
 
@@ -155,5 +157,64 @@ describe('buildOrderEditSource', () => {
     expect(snapshot.details?.columns.map((column) => column.label)).toContain('Обкат');
     const json = JSON.stringify(snapshot);
     for (const leak of ['detail_id', 'client_id', '"71"', 'id:12', 'payment_id']) expect(json).not.toContain(leak);
+  });
+});
+
+describe('the table of the manager: row order, the row being filled, live editor values', () => {
+  const details = [
+    { detail_id: 1, detail_number: 3, height: 300, width: 100, quantity: 1, area: 0.03 },
+    { detail_id: 2, detail_number: 1, height: 100, width: 100, quantity: 1, area: 0.01 },
+    { detail_id: 3, detail_number: 2, height: 200, width: 100, quantity: 1, area: 0.02 },
+    { temp_id: -9, detail_number: 4, is_placeholder: true },
+  ] as unknown as OrderEditSourceInput['details'];
+  const keys = (over: Partial<OrderEditSourceInput>) => buildOrderEditSource(input({ details, ...over })).details.rows.map((row) => row.key);
+
+  it('without a table order rows go by number, as the table shows them by default', () => {
+    expect(keys({})).toEqual(['2', '3', '1']);
+  });
+
+  it('follows the order of the table of the manager; rows it does not name go after, by number', () => {
+    expect(keys({ detailRowOrder: ['1', 3, '2'] })).toEqual(['1', '3', '2']);
+    expect(keys({ detailRowOrder: ['3', 'unknown'] })).toEqual(['3', '2', '1']);
+  });
+
+  it('an empty grid row is not a detail — until the manager starts filling it', () => {
+    expect(keys({ detailRowOrder: ['2', '3', '1', '-9'] })).toEqual(['2', '3', '1']);
+    const source = buildOrderEditSource(input({ details, detailRowOrder: ['2', '3', '1', '-9'], editingRow: { rowKey: -9, values: {} } }));
+    expect(source.details.rows.map((row) => row.key)).toEqual(['2', '3', '1', '-9']);
+    expect(source.summary.parts).toBe('3');
+  });
+
+  it('editor values become display text, one item per visible known column', () => {
+    const base = input();
+    const detail = base.details[0];
+    const values = orderEditEditingValues(
+      detail,
+      { height: 720, width: '400', quantity: null, film_id: null, milling_type_id: 1, note: 'новая', unknown_field: 'x', detail_number: 99 },
+      base.names,
+      ['detail_number', 'height', 'width', 'quantity', 'film_id', 'milling_type_id', 'note', 'cut_job', 'actions', 'height'],
+    );
+    expect(values).toEqual([
+      { code: 'details.n', value: '1' },
+      { code: 'details.height', value: '720' },
+      { code: 'details.width', value: '400' },
+      { code: 'details.quantity', value: '—' },
+      { code: 'details.film', value: '—' },
+      { code: 'details.milling_type', value: 'Модерн' },
+      { code: 'details.note', value: 'новая' },
+    ]);
+  });
+
+  it('money the manager does not have is not invented by the editor', () => {
+    const base = input();
+    const detail = { ...base.details[0], detail_cost: undefined, milling_cost_per_sqm: undefined } as unknown as OrderEditSourceInput['details'][number];
+    const codes = orderEditEditingValues(detail, { height: 1 }, base.names, ['height', 'detail_cost', 'milling_cost_per_sqm']).map((item) => item.code);
+    expect(codes).toEqual(['details.height']);
+  });
+
+  it('a reference id the form has no name for is shown empty, never as the id', () => {
+    const base = input();
+    const values = orderEditEditingValues(base.details[0], { film_id: 4242 }, base.names, ['film_id']);
+    expect(values).toEqual([{ code: 'details.film', value: '—' }]);
   });
 });

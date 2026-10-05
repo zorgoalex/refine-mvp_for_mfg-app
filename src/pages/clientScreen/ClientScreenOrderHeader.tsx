@@ -1,11 +1,14 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
+import { useStore } from 'zustand';
 import { Button, Space, Tag } from 'antd';
 import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
+import { useFilmNamesWithInactive } from '../../hooks/useFilmNamesWithInactive';
 import { useOrderFormData } from '../../hooks/useOrderFormData';
 import { useSheetMaterialOptions } from '../../hooks/useSheetMaterialOptions';
+import { getOrderDraftStore } from '../../stores/orderFormStore';
 import { can } from '../../utils/permissions';
 import { ClientScreenControl } from './ClientScreenControl';
-import { getClientScreenPresenter } from './clientScreenInstance';
+import { getClientScreenPresenter, useClientScreenView } from './clientScreenInstance';
 import { useClientScreenOrderBridge } from './useClientScreenOrderBridge';
 
 /**
@@ -29,8 +32,14 @@ const Connected: React.FC<Props> = ({ orderKey, orderNumber, activeTab, operatio
     (id: number | null | undefined) => (id === null || id === undefined ? undefined : byId.get(Number(id))?.label),
     [byId],
   );
+  // Films of this order that are no longer offered for new details still have a name on the form;
+  // it is looked up the same way the detail table does, and only while this order is presented.
+  const presentedHere = useClientScreenView().presentedOrderKey === orderKey;
+  const details = useStore(getOrderDraftStore(orderKey), (state) => state.details);
+  const filmIds = useMemo(() => (presentedHere ? details.map((detail) => detail.film_id ?? null) : []), [details, presentedHere]);
+  const filmNameById = useFilmNamesWithInactive(formData.references.filmNameById, filmIds, presentedHere);
   const { provider } = useClientScreenOrderBridge({
-    orderKey, orderNumber, activeTab, operational, references: formData.references, sheetMaterialName,
+    orderKey, orderNumber, activeTab, operational, references: formData.references, sheetMaterialName, filmNameById,
     canViewServiceMoney: can('orders.view_financials'),
     active: keepAlive.isActive,
   });

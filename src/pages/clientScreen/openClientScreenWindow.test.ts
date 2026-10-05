@@ -3,7 +3,7 @@ import { CLIENT_SCREEN_PATH } from './clientScreenPath';
 import { clientScreenWindowFeatures, pickCustomerScreen } from './openClientScreenWindow';
 import { clientScreenControlModel } from './clientScreenControlModel';
 import type { ClientScreenPresenterView } from './clientScreenPresenter';
-import { mirroredTab, orderFormMirrorTabs, orderFormNames } from './useClientScreenOrderBridge';
+import { mirroredEditing, mirroredPage, mirroredTab, orderFormMirrorTabs, orderFormNames } from './useClientScreenOrderBridge';
 
 describe('opening the customer window', () => {
   it('always opens with noopener, so the drafts in sessionStorage are never copied into it', () => {
@@ -70,5 +70,59 @@ describe('customer screen control in the order header', () => {
   it('maps the manager tab to a mirrored tab or to nothing', () => {
     expect(['basic', 'details', 'dates', 'finance', 'services'].map(mirroredTab)).toEqual(['basic', 'details', 'dates', 'finance', 'services']);
     expect(['hdf', 'cut', 'workshops', 'requirements', 'additional', ''].map(mirroredTab)).toEqual([null, null, null, null, null, null]);
+  });
+});
+
+describe('what the detail table shows, for the customer screen', () => {
+  const names = orderFormNames(null, () => undefined, new Map([[8, 'Белый софт (снята)']]));
+  const details = [{ detail_id: 71, detail_number: 1, height: 716, width: 396, quantity: 4, area: 1.13, film_id: 8 }] as never[];
+  const idFor = (scope: string, key: string) => `${scope}${key}`.replace(/[^a-z0-9]/g, '');
+  const table = (editing: { rowKey: string; field: string | null } | null, values: () => Record<string, unknown> = () => ({ height: 800 })) => ({
+    columnKeys: ['detail_number', 'height', 'film_id', 'cut_job'], rowKeys: ['71'], page: { current: 2, size: 50 }, grouping: null, editing,
+    getEditingValues: values, getActiveCell: () => null as { rowKey: string; columnKey: string } | null,
+  });
+
+  it('film names come from the extended list when it is given', () => {
+    expect(names.film(8)).toBe('Белый софт (снята)');
+    expect(orderFormNames({ filmNameById: new Map([[8, 'Белый софт']]) } as never, () => undefined).film(8)).toBe('Белый софт');
+  });
+
+  it('the page is taken only when it is a sane one', () => {
+    expect(mirroredPage({ current: 2, size: 50 })).toEqual({ current: 2, size: 50 });
+    expect(mirroredPage(null)).toBeNull();
+    expect(mirroredPage(undefined)).toBeNull();
+    expect(mirroredPage({ current: 0, size: 50 })).toBeNull();
+    expect(mirroredPage({ current: 1, size: 5000 })).toBeNull();
+    expect(mirroredPage({ current: 1.5, size: 50 })).toBeNull();
+  });
+
+  it('no table on screen or no open editor → nothing', () => {
+    expect(mirroredEditing(null, details, names, idFor)).toEqual({ focus: null, editing: null });
+    expect(mirroredEditing(table(null), details, names, idFor)).toEqual({ focus: null, editing: null });
+    expect(mirroredEditing(table({ rowKey: 'gone', field: 'height' }), details, names, idFor)).toEqual({ focus: null, editing: null });
+  });
+
+  it('the open editor: live values as text and the cell the manager is in', () => {
+    expect(mirroredEditing(table({ rowKey: '71', field: 'height' }), details, names, idFor)).toEqual({
+      focus: { code: 'details.height', rowId: 'detail71' },
+      editing: { rowId: 'detail71', values: [
+        { code: 'details.n', value: '1' }, { code: 'details.height', value: '800' }, { code: 'details.film', value: 'Белый софт (снята)' },
+      ] },
+    });
+  });
+
+  it('a cell the customer screen has no field for gives no focus mark; a failing editor read gives saved values', () => {
+    const result = mirroredEditing(table({ rowKey: '71', field: 'cut_job' }, () => { throw new Error('form is gone'); }), details, names, idFor);
+    expect(result.focus).toBeNull();
+    expect(result.editing?.values.find((item) => item.code === 'details.height')?.value).toBe('716');
+  });
+
+  it('no editor open: the cell the keyboard is in is marked, when the customer screen has such a field', () => {
+    const at = (rowKey: string, columnKey: string) => ({ ...table(null), getActiveCell: () => ({ rowKey, columnKey }) });
+    expect(mirroredEditing(at('71', 'film_id'), details, names, idFor)).toEqual({ focus: { code: 'details.film', rowId: 'detail71' }, editing: null });
+    expect(mirroredEditing(at('71', 'cut_job'), details, names, idFor).focus).toBeNull();
+    expect(mirroredEditing(at('gone', 'height'), details, names, idFor).focus).toBeNull();
+    const broken = { ...table(null), getActiveCell: () => { throw new Error('table is gone'); } };
+    expect(mirroredEditing(broken, details, names, idFor)).toEqual({ focus: null, editing: null });
   });
 });

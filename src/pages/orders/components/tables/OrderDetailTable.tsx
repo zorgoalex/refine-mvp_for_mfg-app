@@ -18,7 +18,12 @@ import { useDragSelection } from '../../../../hooks/useDragSelection';
 import { FilmQuickCreate } from '../modals/FilmQuickCreate';
 import type { ColumnsType } from 'antd/es/table';
 import { getTableColumnDataIndex } from '../../utils/tableCompatibility';
-import { useOrderFormStore } from '../../../../stores/orderFormStore';
+import { useOrderDraftStoreApi, useOrderFormStore } from '../../../../stores/orderFormStore';
+import {
+  clearOrderDetailTableMirror,
+  orderDetailMirrorRows,
+  publishOrderDetailTableMirror,
+} from '../../../clientScreen/orderDetailTableMirror';
 import { OrderLifecycleReadSurface, useSelect } from '../../../../query/orderLifecycleQueries';
 import type { OrderDetail, OrderHdfDetail } from '../../../../types/orders';
 import { TableTopScroll } from '../../../../components/TableTopScroll';
@@ -3426,6 +3431,41 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       : spreadsheetNavigationDetails),
     [groupingActive, realSortedDetails, spreadsheetNavigationDetails, groupField, cutSelectable, groupValueOf, groupLabelOf],
   );
+
+  // Customer screen: what this table shows right now. Write-only for the table (see
+  // orderDetailTableMirror.ts); nothing here changes the table or the order.
+  const draftStoreApi = useOrderDraftStoreApi();
+  const mirrorColumnKeys = visibleColumns
+    .map((column) => String(column.key ?? getTableColumnDataIndex(column) ?? ''))
+    .join('\u0001');
+  useEffect(() => {
+    publishOrderDetailTableMirror(draftStoreApi, {
+      columnKeys: mirrorColumnKeys.split('\u0001').filter(Boolean),
+      ...orderDetailMirrorRows<OrderDetail>(tableRows as any[], {
+        groupField: groupingActive ? groupField : null,
+        keyOf: (detail) => {
+          const key = detail.temp_id ?? detail.detail_id;
+          return key === null || key === undefined ? null : String(key);
+        },
+        labelOf: (detail) => (groupField ? String(groupLabelOf(detail, groupField) ?? '') : ''),
+      }),
+      page: groupingActive ? null : { current: currentPage, size: pageSize },
+      editing: editingKey === null
+        ? null
+        : { rowKey: String(editingKey), field: typeof editingField === 'string' ? editingField : null },
+      getEditingValues: () => form.getFieldsValue(true),
+      getActiveCell: () => {
+        const focused = document.activeElement;
+        return focused instanceof HTMLElement && focused.closest('[data-order-detail-spreadsheet-cell="true"]')
+          ? activeSpreadsheetCellRef.current
+          : null;
+      },
+    });
+  }, [
+    currentPage, draftStoreApi, editingField, editingKey, form, groupField, groupingActive, groupLabelOf,
+    mirrorColumnKeys, pageSize, tableRows,
+  ]);
+  useEffect(() => () => clearOrderDetailTableMirror(draftStoreApi), [draftStoreApi]);
 
   const selectRows = useCallback((predicate: (detail: OrderDetail) => boolean) => {
     if (!onSelectChange) return;

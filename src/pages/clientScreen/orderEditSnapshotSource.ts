@@ -4,7 +4,7 @@ import { formatDate } from '../../utils/dateFormat';
 import { formatNumber } from '../../utils/numberFormat';
 import { calculateOrderTotalArea } from '../../utils/orderArea';
 import { orderCatalogLineAmount, orderCatalogSubtotal, type OrderCatalogLine } from '../../utils/orderCatalogLines';
-import { businessOrderDetails } from '../../utils/orderDetailRows';
+import { isOrderDetailPlaceholder } from '../../utils/orderDetailRows';
 import type { ClientScreenOrderSource, ClientScreenValue, DetailField } from './buildClientScreenSnapshot';
 import { CLIENT_SCREEN_TAB_KEYS, type ClientScreenTabKey } from './clientScreenSnapshotSchema';
 
@@ -35,7 +35,16 @@ export interface OrderEditSourceInput {
   grouping: { field: string; groups: ReadonlyArray<{ key: string; label: string; rowKeys: ReadonlyArray<string | number> }> } | null;
   /** The services table shows prices only with orders.view_financials. */
   canViewServiceMoney: boolean;
-  /** Values of the detail row being edited right now (the table's form), by table column key. */
+  /**
+   * Keys of the detail rows in the order of the manager's table (its sorting and grouping). Rows the
+   * list does not name follow in the order of their numbers; without a list all rows do.
+   */
+  detailRowOrder?: readonly (string | number)[] | null;
+  /**
+   * The detail row whose editor is open, with editor values to show in place of the saved ones
+   * (table column keys). An empty grid row being filled is shown as well: the customer sees a
+   * detail appear the moment the manager starts it.
+   */
   editingRow?: { rowKey: string | number; values: Partial<OrderDetail> } | null;
 }
 
@@ -87,9 +96,13 @@ function detailValues(detail: OrderDetail, names: OrderEditSourceInput['names'])
 export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenOrderSource {
   const { header, names } = input;
   const editing = input.editingRow;
-  // The row being edited is shown with the values of its editor, as the manager sees it.
-  const business = businessOrderDetails(input.details as OrderDetail[]).map((detail) =>
-    (editing && detailRowKey(detail) === String(editing.rowKey) ? { ...detail, ...editing.values } : detail));
+  const editingKey = editing ? String(editing.rowKey) : null;
+  // Empty grid rows are not details; the one being filled right now is. The row being edited is
+  // shown with the values of its editor, as the manager sees it.
+  const business = orderedDetails(
+    (input.details as OrderDetail[]).filter((detail) => !isOrderDetailPlaceholder(detail) || detailRowKey(detail) === editingKey),
+    input.detailRowOrder,
+  ).map((detail) => (editing && detailRowKey(detail) === editingKey ? { ...detail, ...editing.values } : detail));
   const partsCount = business.reduce((sum, detail) => sum + (Number(detail.quantity) || 0), 0);
   const totalArea = calculateOrderTotalArea(business);
   const totalPaid = input.payments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
@@ -177,6 +190,48 @@ export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenO
       },
     })),
   };
+}
+
+/** The manager's table order; rows it does not name go after, by number (the table's own default). */
+function orderedDetails(details: OrderDetail[], order: OrderEditSourceInput['detailRowOrder']): OrderDetail[] {
+  const position = new Map<string, number>((order ?? []).map((key, index) => [String(key), index]));
+  return details
+    .map((detail, index) => ({ detail, index, at: position.get(detailRowKey(detail)) ?? Number.POSITIVE_INFINITY }))
+    .sort((a, b) => (a.at === b.at ? (Number(a.detail.detail_number) || 0) - (Number(b.detail.detail_number) || 0) || a.index - b.index : a.at < b.at ? -1 : 1))
+    .map((item) => item.detail);
+}
+
+const NUMERIC_EDITOR_KEYS = new Set(['height', 'width', 'quantity', 'area', 'milling_cost_per_sqm', 'detail_cost',
+  'sheet_material_type_id', 'milling_type_id', 'edge_type_id', 'film_id', 'production_status_id']);
+
+/**
+ * Display text of the row being edited, from the current values of its editor: one item per visible
+ * table column the customer screen knows. What the customer may see of it is decided later, by the
+ * same settings as the data.
+ */
+export function orderEditEditingValues(
+  detail: OrderDetail,
+  editorValues: Readonly<Record<string, unknown>>,
+  names: OrderEditSourceInput['names'],
+  columnKeys: readonly string[],
+): Array<{ code: `details.${DetailField}`; value: string }> {
+  const merged: Record<string, unknown> = { ...detail };
+  for (const key of Object.keys(DETAIL_COLUMN_FIELDS)) {
+    const value = editorValues[key];
+    if (value === undefined || key === 'detail_number') continue;
+    if (!NUMERIC_EDITOR_KEYS.has(key)) merged[key] = value === null ? null : String(value);
+    else if (value === null || value === '') merged[key] = null;
+    else if (Number.isFinite(Number(value))) merged[key] = Number(value);
+  }
+  const display = detailValues(merged as unknown as OrderDetail, names);
+  const result: Array<{ code: `details.${DetailField}`; value: string }> = [];
+  for (const key of columnKeys) {
+    const field = DETAIL_COLUMN_FIELDS[key];
+    const value = field ? display[field] : undefined;
+    if (!field || value === undefined || result.some((item) => item.code === `details.${field}`)) continue;
+    result.push({ code: `details.${field}`, value: value === null || value === '' ? '—' : value.slice(0, 2000) });
+  }
+  return result;
 }
 
 function serviceMoney(value: string | null | undefined): ClientScreenValue {
