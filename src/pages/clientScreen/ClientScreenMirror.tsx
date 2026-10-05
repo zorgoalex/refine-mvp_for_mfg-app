@@ -54,12 +54,30 @@ export const ClientScreenMirror: React.FC<{ view: MirrorView; bodyRef?: React.Re
     const order = orderRef.current;
     const head = headRef.current;
     if (!order || !head) return undefined;
-    const apply = () => order.style.setProperty('--cs-head-height', `${Math.ceil(head.offsetHeight)}px`);
+    let last = '';
+    const apply = () => {
+      const next = `${Math.ceil(head.offsetHeight)}px`;
+      if (next === last) return;
+      last = next;
+      order.style.setProperty('--cs-head-height', next);
+    };
     apply();
     if (typeof ResizeObserver === 'undefined') return undefined;
-    const observer = new ResizeObserver(apply);
+    // Applied on the next frame: changing layout inside the observer callback makes the browser
+    // report a "ResizeObserver loop" error.
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        apply();
+      });
+    });
     observer.observe(head);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, []);
 
   return (

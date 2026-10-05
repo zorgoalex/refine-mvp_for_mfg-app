@@ -211,14 +211,15 @@ try {
   await expect(page.getByText('Клиент видит этот заказ')).toBeVisible({ timeout: 30000 });
   results.push(`customer window opened and shows: ${(await popup.getByRole('heading', { level: 1 }).innerText()).replace(/\d/g, '#')}`);
   assert.equal(await popup.evaluate(() => sessionStorage.length), 0, 'customer window sessionStorage is empty (noopener)');
-  if (process.env.CLIENT_PHONE === '1') {
+  // The organisation may have ticked the phone itself: the check follows the codes actually in force.
+  if (codes.includes('summary.client_phone')) {
     await expect(popup.locator('.client-screen__chip').filter({ hasText: 'Телефон клиента' })).toHaveCount(1, { timeout: 30000 });
     results.push('the client phone is on the customer screen when ticked');
   } else {
     assert.equal(await popup.locator('.client-screen__chip').filter({ hasText: 'Телефон клиента' }).count(), 0, 'the client phone is not shown unless ticked');
   }
 
-  if (process.env.HEADER === '1') {
+  if (headerCodes.every((code) => codes.includes(code))) {
     const chips = await popup.locator('.client-screen__chip').allInnerTexts();
     for (const label of ['Срок выполнения', 'Позиций', 'Материал', 'Фрезеровка', 'Обкат', 'Плёнка']) {
       assert.ok(chips.some((chip) => chip.startsWith(`${label}:`)), `the header shows «${label}» (header: ${chips.map((chip) => chip.split(':')[0]).join(' | ')})`);
