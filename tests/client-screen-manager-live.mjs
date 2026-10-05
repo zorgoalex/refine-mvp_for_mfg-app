@@ -88,14 +88,21 @@ const restoreSettings = () => {
   })();
   return restoring;
 };
-// A run that is stopped from outside (the host's load guard, Ctrl+C) still puts the setting back.
-for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
-  process.once(signal, () => {
-    void restoreSettings().finally(() => process.exit(1));
+// A run that is stopped from outside (the host's load guard sends SIGINT, then SIGTERM; Ctrl+C)
+// still puts the setting back, then closes its browser and ends.
+let browserToClose = null;
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(signal, () => {
+    void restoreSettings()
+      .then(() => browserToClose?.close().catch(() => undefined))
+      .finally(() => process.exit(1));
   });
 }
 
-const browser = await chromium.launch({ headless: true });
+// Playwright's own signal handlers end the process at once; here the setting has to be put back
+// first, so the signals are handled by this script alone (see restoreSettings above).
+const browser = await chromium.launch({ headless: true, handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false });
+browserToClose = browser;
 try {
   const context = await browser.newContext({ viewport: { width: 1500, height: 900 } });
   const cookies = await vercelBypassCookies(base, bypass);
@@ -179,12 +186,12 @@ try {
     return { ok: response.ok, status: response.status, body: response.ok ? await response.json() : null };
   });
   // SELF_INTERRUPT=during proves the interruption path while the change is still on its way.
-  if (process.env.SELF_INTERRUPT === 'during') process.kill(process.pid, 'SIGTERM');
+  if (process.env.SELF_INTERRUPT === 'during') process.kill(process.pid, 'SIGINT');
   const switched = await switching;
   assert.ok(switched.ok, `PUT client-screen settings → ${switched.status}`);
   results.push('organisation switch turned on for the run');
   // SELF_INTERRUPT=1 proves the interruption path: the run stops itself here, as the load guard would.
-  if (process.env.SELF_INTERRUPT === '1') process.kill(process.pid, 'SIGTERM');
+  if (process.env.SELF_INTERRUPT === '1') process.kill(process.pid, 'SIGINT');
 
   await page.goto(`${base}/orders/edit/${orderId}`, { waitUntil: 'domcontentloaded' });
   const present = page.getByRole('button', { name: 'Показать клиенту' });
@@ -210,6 +217,35 @@ try {
     const headers = await popup.getByRole('columnheader').allInnerTexts();
     assert.ok(headers.includes('Кол-во'), `ticked quantity column is present (columns: ${headers.join(' | ')})`);
     results.push(`details tab mirrored with ${await popup.locator('tbody tr[data-row-id]').count()} rows; hidden columns absent`);
+
+    // The manager's page of the table: the customer sees the same rows, not the whole list.
+    const customerRows = popup.locator('tbody tr[data-row-id]');
+    const managerRows = page.locator('.ant-table-tbody tr[data-row-key]');
+    const pageTwo = page.locator('.ant-pagination-item-2');
+    if (await pageTwo.count()) {
+      const firstPage = await customerRows.count();
+      await pageTwo.first().click();
+      await expect.poll(() => customerRows.count(), { timeout: 20000 }).not.toBe(firstPage);
+      const secondPage = await customerRows.count();
+      await page.locator('.ant-pagination-item-1').first().click();
+      await expect.poll(() => customerRows.count(), { timeout: 20000 }).toBe(firstPage);
+      results.push(`the table page is mirrored: ${firstPage} rows on page 1, ${secondPage} on page 2`);
+    }
+
+    // A value being typed is seen at once, in the same cell, and disappears when the edit is cancelled.
+    // Nothing is saved: the edit is cancelled with Escape and the order is never submitted.
+    const editable = managerRows.first().locator('td[data-order-detail-spreadsheet-cell="true"][aria-keyshortcuts^="Enter"]').first();
+    await editable.dblclick();
+    await expect(page.locator('.ant-table-tbody input:focus')).toHaveCount(1, { timeout: 20000 });
+    await expect(popup.locator('td[data-focused="true"]')).toHaveCount(1, { timeout: 20000 });
+    const before = await popup.locator('td[data-focused="true"]').innerText();
+    await page.keyboard.type('777');
+    await expect(popup.locator('td.client-screen__cell--edited')).toHaveText('777', { timeout: 20000 });
+    await expect(popup.locator('td[data-focused="true"]')).toHaveText('777');
+    await page.keyboard.press('Escape');
+    await expect(popup.locator('td.client-screen__cell--edited')).toHaveCount(0, { timeout: 20000 });
+    await expect(popup.locator('tbody tr[data-row-id]').first().locator('td').filter({ hasText: /^777$/ })).toHaveCount(0);
+    results.push(`live edit mirrored: the cell showed 777 while typing and went back to ${before.replace(/\d/g, '#')} after Escape`);
 
     await managerTab(/Финансы/).click();
     await expect(selectedTab()).toHaveText(/Финансы/, { timeout: 20000 });
