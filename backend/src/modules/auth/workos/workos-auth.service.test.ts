@@ -143,7 +143,8 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
     recordDenied: vi.fn(async () => 'audit-1'),
     canUser: vi.fn((user: CurrentUser | null | undefined, permission: string) => Boolean(user?.permissions.includes(permission))),
     database: {
-      query: vi.fn(),
+      // Target role lookup of the SSO role boundary: no row = an ordinary target.
+      query: vi.fn(async () => ({ rows: [], rowCount: 0 })),
       transaction: vi.fn(),
       ping: vi.fn(),
       onModuleDestroy: vi.fn(),
@@ -888,6 +889,56 @@ describe('WorkosAuthService administrator controls', () => {
     expect(JSON.stringify(harness.ports.createInvitation.mock.calls)).not.toContain(
       rawToken,
     );
+  });
+
+  it('keeps the operator role boundary in SSO administration, whatever users.manage_sso grants say', async () => {
+    const withTargetRole = (roleId: number) => {
+      const harness = createHarness();
+      (harness.ports.database.query as ReturnType<typeof vi.fn>).mockImplementation(async (text: string) =>
+        (/SELECT role_id FROM users/.test(text) ? { rows: [{ role_id: roleId }], rowCount: 1 } : { rows: [], rowCount: 0 }));
+      return harness;
+    };
+    const actor = (role: CurrentUser['role'], roleId: number): CurrentUser =>
+      ({ id: '7', username: role, role, roleId, permissions: ['users.manage_sso'], sessionId: 'session-admin' });
+
+    // A lower role granted users.manage_sso cannot take over an operator account through an SSO invitation…
+    const lower = withTargetRole(32);
+    for (const call of [
+      () => lower.service.adminCreateInvitation({ currentUser: actor('top_manager', 15), targetUserId: '42', requestId: 'req_sso' }),
+      () => lower.service.adminUpdateSettings({ currentUser: actor('manager', 10), targetUserId: '42', passwordLoginEnabled: false } as never),
+      () => lower.service.adminRevokeInvitations({ currentUser: actor('top_manager', 15), targetUserId: '42' }),
+      () => lower.service.adminUnlink({ currentUser: actor('top_manager', 15), targetUserId: '42', identityId: 'ident-1' } as never),
+      () => lower.service.adminListLinks({ currentUser: actor('top_manager', 15), targetUserId: '42' }),
+    ]) {
+      await expect(call()).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+    }
+    expect(lower.ports.createInvitation).not.toHaveBeenCalled();
+    expect(lower.ports.updateSettings).not.toHaveBeenCalled();
+    expect(lower.ports.revokeInvitations).not.toHaveBeenCalled();
+    expect(lower.ports.deleteOne).not.toHaveBeenCalled();
+    expect(lower.ports.recordDenied).toHaveBeenCalledTimes(5);
+    expect(lower.ports.recordDenied.mock.calls[0][1]).toMatchObject({
+      event: 'auth.identity.invitation_create_denied', reason: 'role_hierarchy_denied', relatedUserId: 42, actorRole: 'top_manager',
+    });
+
+    // …and an operator granted the permission administers nobody, administrators included.
+    for (const targetRoleId of [1, 2, 100]) {
+      const harness = withTargetRole(targetRoleId);
+      await expect(
+        harness.service.adminCreateInvitation({ currentUser: actor('onec_operator', 32), targetUserId: '42' }),
+      ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+      expect(harness.ports.createInvitation).not.toHaveBeenCalled();
+    }
+
+    // Admin and superadmin administer an operator account; other targets keep the permission-only rule.
+    for (const [role, roleId] of [['admin', 1], ['superadmin', 2]] as const) {
+      const harness = withTargetRole(32);
+      await harness.service.adminCreateInvitation({ currentUser: actor(role, roleId), targetUserId: '42' });
+      expect(harness.ports.createInvitation).toHaveBeenCalledTimes(1);
+    }
+    const ordinary = withTargetRole(1);
+    await ordinary.service.adminCreateInvitation({ currentUser: actor('top_manager', 15), targetUserId: '42' });
+    expect(ordinary.ports.createInvitation).toHaveBeenCalledTimes(1);
   });
 
   it('revokes active invitations through the live admin-session transaction', async () => {

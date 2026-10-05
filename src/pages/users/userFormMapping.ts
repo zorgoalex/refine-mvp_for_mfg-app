@@ -23,6 +23,7 @@ const ROLE_ID_TO_NAME: Record<number, UserRole> = {
   15: 'top_manager',
   20: 'worker',
   30: 'packer',
+  32: 'onec_operator',
   100: 'viewer',
 };
 
@@ -35,7 +36,18 @@ const ROLE_NAME_TO_ID: Record<string, number> = {
   worker: 20,
   packer: 30,
   viewer: 100,
+  onec_operator: 32,
 };
+
+/**
+ * Roles assigned only when the user is created: the backend (and a database trigger) refuse to switch an existing
+ * user to or from them, so the edit form locks the role field for such accounts and does not offer the role to others.
+ */
+export const CREATION_ONLY_ROLES: readonly UserRole[] = ['onec_operator'];
+
+export function isCreationOnlyRole(role: UserRole | null | undefined): boolean {
+  return typeof role === 'string' && CREATION_ONLY_ROLES.includes(role);
+}
 
 export function mapUserRecordToFormData<T extends Record<string, any>>(
   data: T,

@@ -23,6 +23,7 @@ const roleNames: Record<string, string> = {
   worker: "Работник",
   packer: "Упаковщик",
   viewer: "Наблюдатель",
+  onec_operator: "Оператор интеграции 1С",
 };
 
 const uiVariantOptions: Array<{ label: string; value: UiVariant }> = [

@@ -22,6 +22,7 @@ import type { UserIdentity } from "../../types/auth";
 import { can } from "../../utils/permissions";
 import { WorkosAdminLinksCard } from "./WorkosAdminLinksCard";
 import {
+  isCreationOnlyRole,
   mapBackendUpdateUserRequest,
   mapLegacyUserFormToHasuraPayload,
   mapUserRecordToFormData,
@@ -54,6 +55,8 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
   const [passwordForm] = Form.useForm();
 
   const userId = queryResult?.data?.data?.user_id ?? queryResult?.data?.data?.id;
+  // «Оператор интеграции 1С» назначается только при создании: у такой учётки роль не меняется, другим не предлагается.
+  const roleLocked = isCreationOnlyRole(queryResult?.data?.data?.role);
   const canManageSso = can("users.manage_sso", identity);
 
   const handlePasswordChange = async (values: { new_password: string }) => {
@@ -163,8 +166,12 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
               label="Роль"
               name="role"
               rules={[{ required: true, message: 'Пожалуйста, выберите роль' }]}
+              extra={roleLocked ? 'Роль назначается при создании пользователя и не меняется. Чтобы снять доступ — отключите учётную запись.' : undefined}
             >
-              <Select placeholder="Выберите роль пользователя">
+              <Select placeholder="Выберите роль пользователя" disabled={roleLocked}>
+                {roleLocked && (
+                  <Select.Option value="onec_operator">Оператор интеграции 1С (onec_operator)</Select.Option>
+                )}
                 <Select.Option value="admin">Администратор (admin)</Select.Option>
                 <Select.Option value="manager">Менеджер (manager)</Select.Option>
                 <Select.Option value="operator">Оператор (operator)</Select.Option>

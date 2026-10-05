@@ -181,6 +181,7 @@ export class PgUserRepository implements UserRepositoryPort {
 
       assignments.push(`edited_by = $${params.push(toNullableUserId(command.currentUser.id))}`);
       const userIdIndex = params.push(command.userId);
+      const expectedRoleIndex = params.push(expectedRoleId(command.expectedTargetRole));
 
       try {
         const updated = await tx.query<UserRow>(
@@ -189,6 +190,7 @@ export class PgUserRepository implements UserRepositoryPort {
           SET ${assignments.join(', ')}
           WHERE u.user_id = $${userIdIndex}
             AND u.is_service_account = false
+            AND ($${expectedRoleIndex}::smallint IS NULL OR u.role_id = $${expectedRoleIndex}::smallint)
           RETURNING
             u.user_id, u.username, u.email, u.full_name, u.role_id,
             (SELECT role_code FROM roles WHERE role_id = u.role_id) AS role_code,
@@ -198,7 +200,7 @@ export class PgUserRepository implements UserRepositoryPort {
         );
 
         if (!updated.rows[0]) {
-          throw userNotFound(command.userId);
+          throw await missingOrRoleChanged(tx, command.userId, command.expectedTargetRole);
         }
 
         const user = await this.mapUserRow(updated.rows[0]);
@@ -228,13 +230,14 @@ export class PgUserRepository implements UserRepositoryPort {
         SET password_hash = $1, edited_by = $2
         WHERE user_id = $3
           AND is_service_account = false
+          AND ($4::smallint IS NULL OR role_id = $4::smallint)
         RETURNING user_id
         `,
-        [passwordHash, toNullableUserId(command.currentUser.id), command.userId],
+        [passwordHash, toNullableUserId(command.currentUser.id), command.userId, expectedRoleId(command.expectedTargetRole)],
       );
 
       if (!updated.rows[0]) {
-        throw userNotFound(command.userId);
+        throw await missingOrRoleChanged(tx, command.userId, command.expectedTargetRole);
       }
 
       const revokedSessions = command.dto.revokeExistingSessions
@@ -274,16 +277,17 @@ export class PgUserRepository implements UserRepositoryPort {
         SET is_active = $1, edited_by = $2
         WHERE u.user_id = $3
           AND u.is_service_account = false
+          AND ($4::smallint IS NULL OR u.role_id = $4::smallint)
         RETURNING
           u.user_id, u.username, u.email, u.full_name, u.role_id,
           (SELECT role_code FROM roles WHERE role_id = u.role_id) AS role_code,
           u.employee_id, u.is_active, u.created_at, u.updated_at
         `,
-        [isActive, toNullableUserId(command.currentUser.id), command.userId],
+        [isActive, toNullableUserId(command.currentUser.id), command.userId, expectedRoleId(command.expectedTargetRole)],
       );
 
       if (!updated.rows[0]) {
-        throw userNotFound(command.userId);
+        throw await missingOrRoleChanged(tx, command.userId, command.expectedTargetRole);
       }
 
       const revokedSessions = isActive ? 0 : await revokeActiveSessions(tx, command.userId);
@@ -490,7 +494,37 @@ function sanitizeUserForAudit(user: UserDto): Record<string, unknown> {
   };
 }
 
+function expectedRoleId(role: UserRole | undefined): number | null {
+  return role === undefined ? null : mapRoleToRoleId(role);
+}
+
+/** No row matched the mutation: the user is gone, or his role is no longer the one the policy decided on. */
+async function missingOrRoleChanged(tx: DatabaseClient, userId: number, expectedRole: UserRole | undefined): Promise<ApiError> {
+  if (expectedRole !== undefined) {
+    const current = await tx.query<{ role_id: number | string }>(
+      'SELECT role_id FROM users WHERE user_id = $1 AND is_service_account = false',
+      [userId],
+    );
+    if (current.rows[0] && Number(current.rows[0].role_id) !== mapRoleToRoleId(expectedRole)) {
+      return new ApiError(409, 'USER_ROLE_CHANGED', 'Роль пользователя изменилась, повторите действие', { userId });
+    }
+  }
+  return userNotFound(userId);
+}
+
+/** Messages raised by trg_users_onec_operator_role_guard (migration 245). */
+const ONEC_OPERATOR_ROLE_ERRORS: Record<string, string> = {
+  ONEC_OPERATOR_ROLE_TRANSITION: 'Роль «Оператор интеграции 1С» назначается только при создании пользователя и не меняется',
+  ONEC_OPERATOR_ROLE_DISABLED: 'Роль «Оператор интеграции 1С» отключена',
+};
+
 function mapUniqueViolation(error: unknown): never {
+  const raised = typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'P0001'
+    ? String((error as { message?: unknown }).message ?? '')
+    : '';
+  for (const [code, message] of Object.entries(ONEC_OPERATOR_ROLE_ERRORS)) {
+    if (raised.startsWith(code)) throw new ApiError(409, code, message);
+  }
   if (isPgUniqueViolation(error)) {
     const constraint = String(error.constraint ?? '');
     if (constraint.includes('email')) {

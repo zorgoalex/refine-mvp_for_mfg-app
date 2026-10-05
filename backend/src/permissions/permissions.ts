@@ -7,6 +7,8 @@ export const USER_ROLES = [
   'worker',
   'packer',
   'viewer',
+  // 1C integration operator: only the «Интеграция 1С» section (plan 2026-10-05-onec-operator-role).
+  'onec_operator',
 ] as const;
 
 export type UserRole = (typeof USER_ROLES)[number];
@@ -19,6 +21,7 @@ export const ROLE_ID_TO_ROLE = {
   15: 'top_manager',
   20: 'worker',
   30: 'packer',
+  32: 'onec_operator',
   100: 'viewer',
 } as const satisfies Record<number, UserRole>;
 
@@ -33,6 +36,7 @@ export const ROLE_TO_ROLE_ID = {
   worker: 20,
   packer: 30,
   viewer: 100,
+  onec_operator: 32,
 } as const satisfies Record<UserRole, KnownRoleId>;
 
 export const PERMISSIONS = [
@@ -534,6 +538,16 @@ export const ROLE_PERMISSIONS = {
     'deadlines.view',
     'groups.view',
   ],
+  // Exactly the 1C section and the own profile; nothing of orders, payments, references, users or audit.
+  onec_operator: [
+    'profile.view',
+    'profile.update_own',
+    'sessions.logout_own',
+
+    'onec.view',
+    'onec.manage',
+    'onec.commands.send',
+  ],
 } as const satisfies Record<UserRole, readonly PermissionName[]>;
 
 export const HASURA_ALLOWED_ROLES = {
@@ -554,6 +568,8 @@ export const HASURA_ALLOWED_ROLES = {
   worker: ['worker', 'viewer'],
   packer: ['packer', 'viewer'],
   viewer: ['viewer'],
+  // Not listed for any other role: nobody switches to it; Hasura metadata has no grants for it.
+  onec_operator: ['onec_operator'],
 } as const satisfies Record<UserRole, readonly UserRole[]>;
 
 export function isUserRole(value: unknown): value is UserRole {
@@ -575,3 +591,6 @@ export function getPermissionsForRole(role: UserRole): readonly PermissionName[]
 export function can(role: UserRole, permission: PermissionName): boolean {
   return (ROLE_PERMISSIONS[role] as readonly PermissionName[]).includes(permission);
 }
+
+/** role_id of the 1C integration operator (migration 245); role changes to or from it are forbidden. */
+export const ONEC_OPERATOR_ROLE_ID = 32;

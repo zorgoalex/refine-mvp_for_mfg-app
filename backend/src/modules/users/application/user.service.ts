@@ -94,7 +94,8 @@ export class UserService {
       throw permissionDenied('users.update');
     }
 
-    return this.ports.users.updateUser(command);
+    return this.guardTargetRole('update', command, () =>
+      this.ports.users.updateUser({ ...command, expectedTargetRole: targetUser.role }));
   }
 
   async changePassword(command: ChangeUserPasswordCommand): Promise<ChangePasswordResponseDto> {
@@ -116,7 +117,8 @@ export class UserService {
       throw permissionDenied('users.change_password');
     }
 
-    return this.ports.users.changePassword(command);
+    return this.guardTargetRole('change_password', command, () =>
+      this.ports.users.changePassword({ ...command, expectedTargetRole: targetUser.role }));
   }
 
   async deactivate(command: UserActivationCommand): Promise<UserDto> {
@@ -138,7 +140,8 @@ export class UserService {
       throw permissionDenied('users.deactivate');
     }
 
-    return this.ports.users.deactivateUser(command);
+    return this.guardTargetRole('deactivate', command, () =>
+      this.ports.users.deactivateUser({ ...command, expectedTargetRole: targetUser.role }));
   }
 
   async activate(command: UserActivationCommand): Promise<UserDto> {
@@ -160,7 +163,35 @@ export class UserService {
       throw permissionDenied('users.activate');
     }
 
-    return this.ports.users.activateUser(command);
+    return this.guardTargetRole('activate', command, () =>
+      this.ports.users.activateUser({ ...command, expectedTargetRole: targetUser.role }));
+  }
+
+  /**
+   * The repository applies the mutation only while the target still has the role the policy decided on. A concurrent
+   * role change (409 USER_ROLE_CHANGED) is recorded as a denied attempt: nothing was changed.
+   */
+  private async guardTargetRole<T>(
+    action: 'update' | 'change_password' | 'deactivate' | 'activate',
+    command: { currentUser: UpdateUserCommand['currentUser']; userId: number; requestId?: string },
+    mutate: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await mutate();
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'USER_ROLE_CHANGED') {
+        try {
+          await auditService.recordDenied(this.ports.database, buildUserDeniedEvent({
+            actor: command.currentUser,
+            requestId: command.requestId ?? DEFAULT_REQUEST_ID,
+            action,
+            targetUserId: String(command.userId),
+            reason: 'target_role_changed',
+          }));
+        } catch { /* best-effort */ }
+      }
+      throw error;
+    }
   }
 
   private async getTargetUser(

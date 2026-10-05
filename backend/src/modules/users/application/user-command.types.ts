@@ -35,11 +35,16 @@ export interface CreateUserCommand {
   requestId?: string;
 }
 
+/**
+ * `expectedTargetRole` — the role the access policy decided on. The mutation applies only while the target still has
+ * it (atomic precondition): a concurrent role change answers 409 USER_ROLE_CHANGED instead of acting on a stale check.
+ */
 export interface UpdateUserCommand {
   currentUser: CurrentUser;
   userId: number;
   dto: UpdateUserRequestDto;
   requestId?: string;
+  expectedTargetRole?: UserRole;
 }
 
 export interface ChangeUserPasswordCommand {
@@ -47,12 +52,14 @@ export interface ChangeUserPasswordCommand {
   userId: number;
   dto: ChangePasswordRequestDto;
   requestId?: string;
+  expectedTargetRole?: UserRole;
 }
 
 export interface UserActivationCommand {
   currentUser: CurrentUser;
   userId: number;
   requestId?: string;
+  expectedTargetRole?: UserRole;
 }
 
 export interface UserRepositoryPort {

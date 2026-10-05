@@ -603,6 +603,20 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText.slice(verifyStart, verifyEnd)).toContain('237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*');
   });
 
+  it('probes the operator role, its six permissions, scopes and the enabled guard trigger before ledgering migration 245', () => {
+    const arm = probeFn.slice(probeFn.indexOf('245_onec_operator_role*)'), probeFn.indexOf('242_supplier_phone_contact_sync*)'));
+    for (const marker of ["role_id = 32 AND role_code = 'onec_operator'", "'onec.view','onec.manage','onec.commands.send'", ') = 6;',
+      "scope_value = 'none') = 10;", 'users_onec_operator_role_guard()', 'trg_users_onec_operator_role_guard', "tgenabled = 'O'"]) {
+      expect(arm).toContain(marker);
+    }
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('241_client_screen_settings*|245_onec_operator_role*');
+    // The manual rollback script is never picked up by the runner (side files are excluded from the selection).
+    expect(files).toContain('245_onec_operator_role.sql');
+    expect(files).not.toContain('245_onec_operator_role_rollback.sql');
+  });
+
   it('probes the supplier phone sync functions and the enabled trigger before ledgering migration 242', () => {
     const arm = probeFn.slice(probeFn.indexOf('242_supplier_phone_contact_sync*)'), probeFn.indexOf('238_whatsapp_supplier_send*)'));
     for (const marker of ['supplier_phone_number(text)', 'supplier_phone_contact_sync()', 'trg_supplier_phone_contact_sync', "tgenabled = 'O'",

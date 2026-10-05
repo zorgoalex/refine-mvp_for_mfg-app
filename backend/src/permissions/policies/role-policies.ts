@@ -62,4 +62,9 @@ export const ROLE_POLICIES = {
     payments: { view: 'none', create: 'none', update: 'none', delete: 'none' },
     productionTasks: { view: 'all', update: 'none' },
   },
+  onec_operator: {
+    orders: { view: 'none', update: 'none', export: 'none', delete: 'none' },
+    payments: { view: 'none', create: 'none', update: 'none', delete: 'none' },
+    productionTasks: { view: 'none', update: 'none' },
+  },
 } as const satisfies Record<UserRole, RolePolicy>;

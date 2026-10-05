@@ -289,6 +289,91 @@ describe('PgUserRepository', () => {
     expect(audit?.params[22]).toBe(JSON.stringify({ revokedSessions: 1 })); // $23 metadata_json
   });
 
+  it('applies user mutations only while the target still has the role the policy decided on', async () => {
+    // Password change: the precondition is part of the UPDATE; a role changed meanwhile answers 409, nothing is written.
+    const passwordDatabase = new FakeUserDatabase([], [
+      { match: 'UPDATE users', rows: [] },
+      { match: 'SELECT role_id FROM users', rows: [{ role_id: 32 }] },
+    ]);
+    await expect(
+      new PgUserRepository(passwordDatabase).changePassword({
+        currentUser: currentUser('admin', '1'),
+        userId: 10,
+        expectedTargetRole: 'viewer',
+        dto: { newPassword: 'new-secure-password', revokeExistingSessions: true },
+      }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'USER_ROLE_CHANGED' });
+    expect(passwordDatabase.queries[0].text).toContain('($4::smallint IS NULL OR role_id = $4::smallint)');
+    expect(passwordDatabase.queries[0].params[3]).toBe(100);
+    expect(passwordDatabase.queries).toHaveLength(2);
+
+    // Deactivation and update carry the same precondition.
+    const activationDatabase = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [userRow({ user_id: 10, role_id: 10, role_code: 'manager' })] },
+      { match: 'UPDATE users u', rows: [] },
+      { match: 'SELECT role_id FROM users', rows: [{ role_id: 1 }] },
+    ]);
+    await expect(
+      new PgUserRepository(activationDatabase).deactivateUser({ currentUser: currentUser('admin', '1'), userId: 10, expectedTargetRole: 'manager' }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'USER_ROLE_CHANGED' });
+    expect(activationDatabase.queries[1].text).toContain('($4::smallint IS NULL OR u.role_id = $4::smallint)');
+    expect(activationDatabase.queries[1].params[3]).toBe(10);
+
+    const updateDatabase = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [userRow({ user_id: 10, role_id: 100, role_code: 'viewer' })] },
+      { match: 'UPDATE users u', rows: [] },
+      { match: 'SELECT role_id FROM users', rows: [{ role_id: 1 }] },
+    ]);
+    await expect(
+      new PgUserRepository(updateDatabase).updateUser({ currentUser: currentUser('admin', '1'), userId: 10, expectedTargetRole: 'viewer', dto: { fullName: 'X' } }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'USER_ROLE_CHANGED' });
+    expect(updateDatabase.queries[1].text).toMatch(/\(\$\d+::smallint IS NULL OR u\.role_id = \$\d+::smallint\)/);
+    expect(updateDatabase.queries[1].params.at(-1)).toBe(100);
+
+    // Same role, no row: the user is gone (or is a service account) — still 404. Without an expected role: no precondition.
+    const goneDatabase = new FakeUserDatabase([], [
+      { match: 'UPDATE users', rows: [] },
+      { match: 'SELECT role_id FROM users', rows: [] },
+    ]);
+    await expect(
+      new PgUserRepository(goneDatabase).changePassword({ currentUser: currentUser('admin', '1'), userId: 10, expectedTargetRole: 'viewer', dto: { newPassword: 'new-secure-password', revokeExistingSessions: false } }),
+    ).rejects.toMatchObject({ statusCode: 404, code: 'USER_NOT_FOUND' });
+    const legacyDatabase = new FakeUserDatabase([], [{ match: 'UPDATE users', rows: [{ user_id: 10 }] }]);
+    await new PgUserRepository(legacyDatabase).changePassword({ currentUser: currentUser('admin', '1'), userId: 10, dto: { newPassword: 'new-secure-password', revokeExistingSessions: false } });
+    expect(legacyDatabase.queries[0].params[3]).toBeNull();
+  });
+
+  it('maps the errors of the operator-role guard trigger to 409 API errors', async () => {
+    const raised = (message: string) => Object.assign(new Error(message), { code: 'P0001' });
+    const createDatabase = new FakeUserDatabase([], [
+      { match: 'INSERT INTO users', error: raised('ONEC_OPERATOR_ROLE_DISABLED: role onec_operator is switched off') },
+    ]);
+    await expect(
+      new PgUserRepository(createDatabase).createUser({
+        currentUser: currentUser('admin', '1'),
+        dto: { username: 'operator', email: 'operator@example.test', password: 'secure-password', role: 'onec_operator' },
+      }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'ONEC_OPERATOR_ROLE_DISABLED' });
+    expect(createDatabase.queries[0].params[3]).toBe(32);
+
+    const updateDatabase = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [userRow({ user_id: 10, role_id: 100, role_code: 'viewer' })] },
+      { match: 'UPDATE users u', error: raised('ONEC_OPERATOR_ROLE_TRANSITION: role onec_operator is assigned only at user creation (user_id 10)') },
+    ]);
+    await expect(
+      new PgUserRepository(updateDatabase).updateUser({ currentUser: currentUser('superadmin', '1'), userId: 10, dto: { role: 'onec_operator' } }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'ONEC_OPERATOR_ROLE_TRANSITION' });
+
+    // Any other raised exception is not swallowed.
+    const otherDatabase = new FakeUserDatabase([], [{ match: 'INSERT INTO users', error: raised('something else') }]);
+    await expect(
+      new PgUserRepository(otherDatabase).createUser({
+        currentUser: currentUser('admin', '1'),
+        dto: { username: 'x', email: 'x@example.test', password: 'secure-password', role: 'viewer' },
+      }),
+    ).rejects.toThrow('something else');
+  });
+
   it('blocks service accounts from user-facing update, password, and activation queries', async () => {
     const updateDatabase = new FakeUserDatabase([], [
       { match: 'FROM users u', rows: [] },
