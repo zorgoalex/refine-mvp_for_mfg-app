@@ -1,6 +1,6 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useState, useCallback, useEffect } from "react";
-import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
+import { IResourceComponentsProps, useList, useNavigation } from "@refinedev/core";
 import { List, ShowButton, useSelect } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import {
@@ -15,6 +15,20 @@ import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
 import { HasuraReportError } from "../../api/hasuraReportClient";
 import { countClientsAnalyticsAfter, findClientAnalyticsByName } from "../../api/reports/clientsAnalyticsReportApi";
+import {
+  CLIENTS_PRESETS,
+  applyClientsPreset,
+  clientsPageTotals,
+  clientsPresetFilters,
+  clientsPresetFormValues,
+  formlessFilters,
+  inProgressFormValue,
+  detectClientsPreset,
+  hasInProgressFilter,
+  toggleInProgressFilter,
+  type ClientsPreset,
+} from "./clientsAnalyticsPresets";
+import "./clientsAnalytics.css";
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -38,6 +52,35 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
   });
 
   const { show } = useNavigation();
+
+  // Быстрые наборы над списком: меняют только свои условия, остальные фильтры остаются
+  const todayIso = dayjs().format("YYYY-MM-DD");
+  const activePreset = detectClientsPreset(filters, todayIso);
+  const inProgressOnly = hasInProgressFilter(filters);
+  const choosePreset = (preset: ClientsPreset) => {
+    setFilters(applyClientsPreset(filters, preset, todayIso) as any, "replace");
+    setCurrent(1);
+    // форма фильтров отражает набор: «Применить» в ней пересоберёт те же условия
+    form.setFieldsValue?.(clientsPresetFormValues(preset));
+  };
+  const toggleInProgress = () => {
+    setFilters(toggleInProgressFilter(filters) as any, "replace");
+    setCurrent(1);
+    form.setFieldsValue?.(inProgressFormValue(!inProgressOnly));
+  };
+  // Счётчики наборов — по всей базе клиентов, без учёта остальных фильтров
+  const presetCount = (preset: ClientsPreset) => useList({
+    resource: "clients_analytics_view",
+    filters: clientsPresetFilters(preset, todayIso) as any,
+    pagination: { current: 1, pageSize: 1 },
+  }).data?.total;
+  const presetCounts: Record<ClientsPreset, number | undefined> = {
+    all: presetCount("all"),
+    active: presetCount("active"),
+    debt: presetCount("debt"),
+    new: presetCount("new"),
+  };
+  const pageTotals = clientsPageTotals(tableProps?.dataSource as ReadonlyArray<Record<string, unknown>> | undefined);
 
   // useSelect для статусов заказов
   const { selectProps: orderStatusSelectProps } = useSelect({
@@ -336,6 +379,9 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
     if (hasValue(values.days_since_last_order_max)) {
       newFilters.push({ field: "days_since_last_order", operator: "lte", value: values.days_since_last_order_max });
     }
+
+    // условия без поля в форме (набор «Новые за месяц») переносятся как есть
+    newFilters.push(...formlessFilters(filters as any[]));
 
     setFilters(newFilters, "replace");
     setCurrent(1);
@@ -709,6 +755,32 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
         </Card>
       )}
 
+      <div className="ca-presets" role="group" aria-label="Наборы клиентов">
+        {CLIENTS_PRESETS.map((preset) => (
+          <Tooltip key={preset.key} title={preset.hint}>
+            <button
+              type="button"
+              className="ca-presets__item"
+              aria-pressed={activePreset === preset.key}
+              data-testid={`clients-preset-${preset.key}`}
+              onClick={() => choosePreset(preset.key)}
+            >
+              {preset.label}
+              {presetCounts[preset.key] !== undefined ? <span className="ca-presets__count">{formatNumber(presetCounts[preset.key] as number, 0)}</span> : null}
+            </button>
+          </Tooltip>
+        ))}
+        <span className="ca-presets__sep" aria-hidden />
+        <button
+          type="button"
+          className="ca-presets__item ca-presets__item--chip"
+          aria-pressed={inProgressOnly}
+          data-testid="clients-chip-in-progress"
+          onClick={toggleInProgress}
+        >
+          С заказами в работе
+        </button>
+      </div>
       <Table
         {...tableProps}
         rowKey="client_id"
@@ -918,6 +990,13 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
           )}
         />
       </Table>
+      <div className="ca-totals" data-testid="clients-page-totals">
+        <span>Показано <b>{(tableProps?.dataSource ?? []).length}</b> из {formatNumber(totalRecords, 0)}</span>
+        <span>заказов <b>{formatNumber(pageTotals.orders, 0)}</b></span>
+        <span>сумма <b>{formatNumber(pageTotals.amount, 0)} ₸</b></span>
+        <span>долг <b className={pageTotals.debt > 0 ? "ca-totals__debt" : undefined}>{formatNumber(pageTotals.debt, 0)} ₸</b></span>
+        <span className="ca-totals__note">по строкам на странице</span>
+      </div>
     </List>
   );
 };

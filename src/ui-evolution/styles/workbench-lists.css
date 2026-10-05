@@ -77,3 +77,31 @@
   border-radius: var(--evo-radius-lg);
   box-shadow: none;
 }
+
+/* --- «+Клиенты»: быстрые наборы и итоги страницы в тонах NewLine --- */
+:root[data-ui-variant="workbench"] .wb-list .ca-presets__item {
+  border-color: var(--evo-border);
+  background: var(--evo-surface);
+  color: var(--evo-text-secondary);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-list .ca-presets__item:hover {
+  border-color: var(--evo-border-strong, var(--evo-border));
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-list .ca-presets__item[aria-pressed="true"] {
+  border-color: var(--evo-primary);
+  background: color-mix(in srgb, var(--evo-primary) 10%, var(--evo-surface));
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-list .ca-presets__count,
+:root[data-ui-variant="workbench"] .wb-list .ca-totals {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-list .ca-totals b {
+  color: var(--evo-text);
+}

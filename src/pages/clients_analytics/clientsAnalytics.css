@@ -1,0 +1,63 @@
+/* «+Клиенты (аналитика)»: быстрые наборы над списком и итоги показанных строк. */
+.ca-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.ca-presets__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 1px solid var(--app-border, #d9d9d9);
+  border-radius: 999px;
+  background: var(--app-surface, #fff);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.ca-presets__item:hover { border-color: var(--app-primary, #1677ff); }
+
+.ca-presets__item[aria-pressed="true"] {
+  border-color: var(--app-primary, #1677ff);
+  background: var(--app-selection-bg, #e6f4ff);
+  color: var(--app-primary, #1677ff);
+  font-weight: 600;
+}
+
+.ca-presets__item:focus-visible { outline: 2px solid var(--app-primary, #1677ff); outline-offset: 2px; }
+
+.ca-presets__count {
+  color: var(--app-text-secondary, #8c8c8c);
+  font-size: 12px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.ca-presets__sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--app-border, #d9d9d9);
+}
+
+.ca-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin-top: 10px;
+  color: var(--app-text-secondary, #8c8c8c);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ca-totals b { color: var(--app-text, inherit); font-weight: 600; }
+.ca-totals b.ca-totals__debt { color: #cf1322; }
+.ca-totals__note { margin-left: auto; font-size: 12px; }

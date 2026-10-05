@@ -19205,6 +19205,46 @@ paths:
         '400': {description: "VALIDATION_FAILED — a bad filter, a missing period or a period longer than 366 days"}
         '401': {description: Authentication required}
         '403': {description: "Permission denied (audited as payments.analytics_denied)"}
+  /api/v1/payments-analytics/dashboard:
+    get:
+      tags:
+        - Payments
+      operationId: getPaymentsAnalyticsDashboard
+      summary: "Payments dashboard of a period: by day, by payment type, refunds, receivables by age and the largest debtors (read-only)"
+      security:
+        - {bearerAuth: []}
+      x-permission: finance.analytics.view
+      description: >-
+        The same rights as the summary (finance.analytics.view, payments.view, payment scope «all»). The period covers
+        at most 92 days. Deleted payments and orders are left out. A receivable is an order in the status «Выдан» or
+        «Завершен», dated within the last year, that is not fully paid; its age is counted from the order date.
+      parameters:
+        - {name: dateFrom, in: query, required: true, schema: {type: string, format: date}}
+        - {name: dateTo, in: query, required: true, schema: {type: string, format: date}}
+      responses:
+        '200': {description: "{dateFrom, dateTo, received{count,amount}, refunds{count,amount}, byDay[], byType[], receivables{orders, amount, byAge[{bucket,orders,amount}], topDebtors[{clientId,clientName,orders,amount,oldestOrderDate}]}}"}
+        '400': {description: "VALIDATION_FAILED — a missing period or a period longer than 92 days"}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as payments.analytics_denied)"}
+  /api/v1/clients/list-facts:
+    get:
+      tags:
+        - Client Phones
+      operationId: getClientListFacts
+      summary: "Phone, number of visible orders and the last order of the given clients (one page of the clients list; read-only)"
+      security:
+        - {bearerAuth: []}
+      x-permission: clients.view
+      description: >-
+        Requires clients.view. The order facts follow the order visibility of the user: all orders for the scope «all»,
+        only the user's own (creator or manager) for «own», and null without orders.view or for any other scope.
+      parameters:
+        - {name: ids, in: query, required: true, schema: {type: string, pattern: "^\\d{1,15}(,\\d{1,15})*$"}, description: "Comma-separated client ids, at most 100"}
+      responses:
+        '200': {description: "{data[{clientId, primaryPhone, phonesCount, orders{count, last{orderId, orderName, orderDate}|null}|null}]}"}
+        '400': {description: "VALIDATION_FAILED — a malformed or too long list"}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as clients.list_facts_denied)"}
   /api/v1/onec/customer-orders:
     get:
       tags:

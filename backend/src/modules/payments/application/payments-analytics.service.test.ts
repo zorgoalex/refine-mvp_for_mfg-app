@@ -8,11 +8,12 @@ import { PaymentsAnalyticsService } from './payments-analytics.service';
 
 const query = { dateFrom: '2026-10-01', dateTo: '2026-10-05' };
 const answer = { ...query, count: 0, amount: '0.00', byType: [], byDay: [] };
+const dashboardAnswer = { ...query, received: { count: 0, amount: '0.00' } };
 const user = (role: string, permissions: string[]): CurrentUser =>
   ({ id: 7, username: 'u', role, permissions } as unknown as CurrentUser);
 
 function service() {
-  const read = { summary: vi.fn(async () => answer) };
+  const read = { summary: vi.fn(async () => answer), dashboard: vi.fn(async () => dashboardAnswer) };
   const auditClient = { query: vi.fn() };
   return { read, auditClient, service: new PaymentsAnalyticsService({ read, auditClient: auditClient as never }) };
 }
@@ -48,6 +49,25 @@ describe('PaymentsAnalyticsService', () => {
       requestId: 'req-2',
       reason,
       requiredPermissions: ['finance.analytics.view', 'payments.view'],
+    }));
+  });
+
+  it('the dashboard is open to the same users and refuses the rest with an audited denial', async () => {
+    const allowed = service();
+    await expect(allowed.service.dashboard(user('top_manager', ['finance.analytics.view', 'payments.view']), query, 'req-3')).resolves.toBe(dashboardAnswer);
+    expect(allowed.read.dashboard).toHaveBeenCalledWith(query);
+
+    const refused = service();
+    await expect(refused.service.dashboard(user('manager', ['finance.analytics.view', 'payments.view']), query, 'req-4')).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+    });
+    expect(refused.read.dashboard).not.toHaveBeenCalled();
+    expect(audit.recordDenied).toHaveBeenLastCalledWith(refused.auditClient, expect.objectContaining({
+      event: 'payments.analytics_denied',
+      reason: 'scope_not_all',
+      requestId: 'req-4',
+      metadata: expect.objectContaining({ action: 'dashboard' }),
     }));
   });
 });

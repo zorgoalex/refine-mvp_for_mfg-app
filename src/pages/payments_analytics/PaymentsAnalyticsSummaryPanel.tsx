@@ -29,9 +29,12 @@ type Loaded = { key: string; summary: PaymentsSummary | null; failed: boolean };
 export function PaymentsAnalyticsSummaryPanel({
   filters,
   onDays,
+  onTypes,
 }: {
   filters: readonly AnalyticsFilter[] | undefined;
   onDays?: (days: Record<string, SummaryDay>) => void;
+  /** Payment types present in the period, largest first — for the quick type chips of the list. */
+  onTypes?: (types: readonly string[]) => void;
 }) {
   const today = dayjs().format('YYYY-MM-DD');
   const filtersKey = JSON.stringify(filters ?? []);
@@ -57,6 +60,11 @@ export function PaymentsAnalyticsSummaryPanel({
   const summary = result?.summary ?? null;
   const days = summary?.days ?? NO_DAYS;
   useEffect(() => { onDays?.(days); }, [days, onDays]);
+  const typeNames = useMemo(
+    () => (summary?.parts ?? []).map((part) => part.name).filter((name) => name !== 'Прочие' && name !== 'Без типа'),
+    [summary],
+  );
+  useEffect(() => { onTypes?.(typeNames); }, [typeNames, onTypes]);
 
   const waiting = !backendSession
     ? 'итоги недоступны в этом режиме входа'

@@ -3,13 +3,19 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { rolePolicyForUser } from '../../../permissions/policies/scope';
-import type { PaymentsAnalyticsSummaryDto, PaymentsAnalyticsSummaryQuery } from './payments-analytics.types';
+import type {
+  PaymentsAnalyticsSummaryDto,
+  PaymentsAnalyticsSummaryQuery,
+  PaymentsDashboardDto,
+  PaymentsDashboardQuery,
+} from './payments-analytics.types';
 
 /** Both are required: the analytics right itself and the right to see payments at all. */
 export const PAYMENTS_ANALYTICS_PERMISSIONS = ['finance.analytics.view', 'payments.view'] as const;
 
 export interface PaymentsAnalyticsReadPort {
   summary(query: PaymentsAnalyticsSummaryQuery): Promise<PaymentsAnalyticsSummaryDto>;
+  dashboard(query: PaymentsDashboardQuery): Promise<PaymentsDashboardDto>;
 }
 
 /**
@@ -21,6 +27,17 @@ export class PaymentsAnalyticsService {
   constructor(private readonly ports: { read: PaymentsAnalyticsReadPort; auditClient: DatabaseClient }) {}
 
   async summary(user: CurrentUser, query: PaymentsAnalyticsSummaryQuery, requestId: string): Promise<PaymentsAnalyticsSummaryDto> {
+    await this.authorize(user, 'summary', query, requestId);
+    return this.ports.read.summary(query);
+  }
+
+  /** Dashboard: totals of all payments and receivables of all issued orders — the same rights as the summary. */
+  async dashboard(user: CurrentUser, query: PaymentsDashboardQuery, requestId: string): Promise<PaymentsDashboardDto> {
+    await this.authorize(user, 'dashboard', query, requestId);
+    return this.ports.read.dashboard(query);
+  }
+
+  private async authorize(user: CurrentUser, action: 'summary' | 'dashboard', query: { dateFrom: string; dateTo: string }, requestId: string): Promise<void> {
     const missing = PAYMENTS_ANALYTICS_PERMISSIONS.filter((permission) => !user.permissions.includes(permission));
     const scope = rolePolicyForUser(user).payments.view;
     if (missing.length > 0 || scope !== 'all') {
@@ -35,12 +52,11 @@ export class PaymentsAnalyticsService {
         source: 'backend-payments-analytics',
         reason: missing.length > 0 ? 'missing_permission' : 'scope_not_all',
         requiredPermissions: [...PAYMENTS_ANALYTICS_PERMISSIONS],
-        metadata: { action: 'summary', dateFrom: query.dateFrom, dateTo: query.dateTo },
+        metadata: { action, dateFrom: query.dateFrom, dateTo: query.dateTo },
       });
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра аналитики платежей', {
         requiredPermissions: [...PAYMENTS_ANALYTICS_PERMISSIONS],
       });
     }
-    return this.ports.read.summary(query);
   }
 }
