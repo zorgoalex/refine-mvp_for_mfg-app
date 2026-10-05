@@ -1,6 +1,8 @@
 import { chromium, expect } from '@playwright/test';
 import assert from 'node:assert/strict';
-import { isStageRelayTarget, settingsRestoreRequest, stageTargetProblem, STAGE_SITE } from './helpers/clientScreenLiveGuards.mjs';
+import {
+  createSettingsChange, isForbiddenDataRequest, isStageRelayTarget, settingsRestorePlan, stageTargetProblem, STAGE_SITE,
+} from './helpers/clientScreenLiveGuards.mjs';
 import { printableError } from './helpers/redactSecrets.mjs';
 import { vercelBypassCookies } from './helpers/vercelBypass.mjs';
 
@@ -11,7 +13,7 @@ import { vercelBypassCookies } from './helpers/vercelBypass.mjs';
 // only: a deployment configured for any other backend is refused before logging in.
 // Env: BASE_URL (a built deployment), ORDER_ID (an existing test order), CODEX_PLAYWRIGHT_USERNAME /
 // CODEX_PLAYWRIGHT_PASSWORD, optional VERCEL_AUTOMATION_BYPASS_SECRET, optional LAYOUT=legacy,
-// optional SELF_INTERRUPT=1.
+// optional SELF_INTERRUPT=1 | during.
 // Secrets are never printed.
 const base = (process.env.BASE_URL ?? '').replace(/\/$/, '');
 assert.match(base, /^https:\/\//, 'BASE_URL must be an https URL');
@@ -28,8 +30,8 @@ const errors = [];
 let api = null;
 let token = null;
 let original = null;
-// The server's answer to this run's own change of the setting; null until that change is accepted.
-let applied = null;
+// This run's own change of the setting: what was sent and what the server answered.
+const change = createSettingsChange();
 const settingsRequest = (method, body) => fetch(`${api}/client-screen/settings`, {
   method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
 });
@@ -46,11 +48,19 @@ const settingsCall = async (method, body) => {
 let restoring = null;
 const restoreSettings = () => {
   restoring ??= (async () => {
-    const restore = settingsRestoreRequest(original, applied);
-    if (!restore) {
-      console.log(JSON.stringify({ settingsRestored: 'not needed', reason: 'this run did not change the setting' }));
+    // A change that is still on its way is waited for: its answer decides what to undo.
+    await change.settle(20000);
+    const plan = settingsRestorePlan(original, change.outcome());
+    if (plan.action === 'none') {
+      console.log(JSON.stringify({ settingsRestored: 'not needed', reason: plan.reason }));
       return;
     }
+    if (plan.action !== 'restore') {
+      console.log(JSON.stringify({ settingsRestored: false, reconcile: plan.reason }));
+      process.exitCode = 1;
+      return;
+    }
+    const restore = plan.request;
     let failure = 'not attempted';
     for (let attempt = 1; attempt <= 8; attempt += 1) {
       try {
@@ -105,6 +115,14 @@ try {
     await route.fulfill({ response, json: { ...json, ui, features: { ...(json.features ?? {}), clientScreen: true } } });
   });
 
+  // Data calls of the page go to its own site and to the two stage endpoints, and nowhere else:
+  // whatever address is built into the bundle, nothing authenticated can reach another backend.
+  const pageOriginForData = new URL(base).origin;
+  await context.route((url) => url.origin !== pageOriginForData, (route) => (
+    isForbiddenDataRequest(route.request().url(), route.request().resourceType(), pageOriginForData) ? route.abort() : route.fallback()
+  ));
+  await context.routeWebSocket((url) => isForbiddenDataRequest(url.href, 'websocket', pageOriginForData), (socket) => socket.close());
+
   // The stage backend and Hasura accept browser calls only from the stage site. When the build under
   // test is a preview deployment, its calls to them (and to nothing else) are relayed by this script
   // as if they came from the stage site; on the stage site itself nothing is relayed.
@@ -156,7 +174,14 @@ try {
   for (const code of ['summary.number', 'summary.client', 'tab.basic', 'basic.client', 'tab.details', 'details.n', 'details.quantity', 'tab.finance', 'finance.final']) {
     if (!codes.includes(code)) codes.push(code);
   }
-  applied = await settingsCall('PUT', { enabled: true, visibleCodes: codes, expectedVersion: original.version });
+  const switching = change.run(async () => {
+    const response = await settingsRequest('PUT', { enabled: true, visibleCodes: codes, expectedVersion: original.version });
+    return { ok: response.ok, status: response.status, body: response.ok ? await response.json() : null };
+  });
+  // SELF_INTERRUPT=during proves the interruption path while the change is still on its way.
+  if (process.env.SELF_INTERRUPT === 'during') process.kill(process.pid, 'SIGTERM');
+  const switched = await switching;
+  assert.ok(switched.ok, `PUT client-screen settings → ${switched.status}`);
   results.push('organisation switch turned on for the run');
   // SELF_INTERRUPT=1 proves the interruption path: the run stops itself here, as the load guard would.
   if (process.env.SELF_INTERRUPT === '1') process.kill(process.pid, 'SIGTERM');
