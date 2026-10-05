@@ -251,6 +251,9 @@ try {
   await page.waitForURL((url) => url.pathname === `/orders/edit/${orderId}`, { timeout: 20000 });
   await expect(page.getByText('Клиент видит этот заказ')).toBeVisible({ timeout: 30000 });
   await expect(popup.getByRole('heading', { level: 1 })).toHaveText(shownBefore);
+  // The pointer is still over the eye: move it away so that the panel closes.
+  await page.mouse.move(5, 400);
+  await expect(page.locator('[role="dialog"][aria-label="Экран клиента"]')).toHaveCount(0, { timeout: 10000 });
   results.push('switching to another page keeps the order on the customer screen; «Перейти к заказу» returns to it');
 
   const selectedTab = () => popup.getByRole('tab', { selected: true });
