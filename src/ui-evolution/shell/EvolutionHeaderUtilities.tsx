@@ -32,6 +32,7 @@ const ROLE_NAMES: Record<string, string> = {
   worker: 'Работник',
   packer: 'Упаковщик',
   viewer: 'Наблюдатель',
+  onec_operator: 'Оператор интеграции 1С',
 };
 
 export interface EvolutionHeaderUtilitiesProps {

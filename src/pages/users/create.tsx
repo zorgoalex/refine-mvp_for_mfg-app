@@ -129,6 +129,7 @@ export const UserCreate: React.FC<IResourceComponentsProps> = () => {
             <Select.Option value="worker">Работник (worker)</Select.Option>
             <Select.Option value="packer">Упаковщик (packer)</Select.Option>
             <Select.Option value="viewer">Наблюдатель (viewer)</Select.Option>
+            <Select.Option value="onec_operator">Оператор интеграции 1С (onec_operator) — только раздел «Интеграция 1С»</Select.Option>
           </Select>
         </Form.Item>
 

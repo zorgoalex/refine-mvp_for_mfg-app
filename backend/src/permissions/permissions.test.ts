@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -7,10 +7,12 @@ import {
   HASURA_ALLOWED_ROLES,
   mapRoleToRoleId,
   mapRoleIdToRole,
+  ONEC_OPERATOR_ROLE_ID,
   PERMISSIONS,
   ROLE_PERMISSIONS,
   USER_ROLES,
 } from './permissions';
+import { ROLE_POLICIES } from './policies/role-policies';
 
 describe('permissions foundation', () => {
   it('maps live DB role_id=2 to canonical superadmin', () => {
@@ -344,6 +346,56 @@ function readPermissionNameEnum(contract: string): string[] {
     .split('\n')
     .map((line) => line.trim().replace(/^- /, ''));
 }
+
+describe('onec_operator role', () => {
+  const sourceFiles = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = resolve(dir, entry.name);
+    if (entry.isDirectory()) return entry.name === 'node_modules' ? [] : sourceFiles(path);
+    return /\.ts$/.test(entry.name) && !/\.test\.ts$/.test(entry.name) ? [path] : [];
+  });
+
+  it('is role 32 with exactly the 1C section and the own profile', () => {
+    expect(mapRoleIdToRole(32)).toBe('onec_operator');
+    expect(mapRoleToRoleId('onec_operator')).toBe(32);
+    expect(ONEC_OPERATOR_ROLE_ID).toBe(32);
+    expect([...getPermissionsForRole('onec_operator')].sort()).toEqual([
+      'onec.commands.send', 'onec.manage', 'onec.view', 'profile.update_own', 'profile.view', 'sessions.logout_own',
+    ]);
+    for (const permission of PERMISSIONS) {
+      const expected = ['onec.commands.send', 'onec.manage', 'onec.view', 'profile.update_own', 'profile.view', 'sessions.logout_own'].includes(permission);
+      expect(can('onec_operator', permission), permission).toBe(expected);
+    }
+  });
+
+  it('has no order, payment or production scope', () => {
+    expect(ROLE_POLICIES.onec_operator).toEqual({
+      orders: { view: 'none', update: 'none', export: 'none', delete: 'none' },
+      payments: { view: 'none', create: 'none', update: 'none', delete: 'none' },
+      productionTasks: { view: 'none', update: 'none' },
+    });
+  });
+
+  it('is its own only Hasura role and no other role can switch to it', () => {
+    expect(HASURA_ALLOWED_ROLES.onec_operator).toEqual(['onec_operator']);
+    for (const role of USER_ROLES.filter((name) => name !== 'onec_operator')) {
+      expect(HASURA_ALLOWED_ROLES[role], role).not.toContain('onec_operator');
+    }
+  });
+
+  it('is named by no business module: only the permission maps, the user policy and Hasura claims know the role', () => {
+    const allowed = new Set([
+      resolve(__dirname, 'permissions.ts'),
+      resolve(__dirname, 'policies/role-policies.ts'),
+      resolve(__dirname, 'policies/user-access.policy.ts'),
+      // Maps the errors of the role guard trigger (migration 245) to API errors.
+      resolve(__dirname, '../modules/users/adapters/pg-user-repository.ts'),
+    ]);
+    const mentions = sourceFiles(resolve(__dirname, '..')).filter((file) => readFileSync(file, 'utf8').includes('onec_operator'));
+    expect(mentions.filter((file) => !allowed.has(file))).toEqual([]);
+    // The maintenance bypass of the role guard trigger is used by the manual rollback script only.
+    expect(sourceFiles(resolve(__dirname, '..')).filter((file) => readFileSync(file, 'utf8').includes('onec_operator_role_maintenance'))).toEqual([]);
+  });
+});
 
 describe('org management permissions', () => {
   it('exposes org.view and org.manage in the catalog', () => {

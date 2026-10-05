@@ -51,4 +51,62 @@ describe('UserAccessPolicy', () => {
     expect(p.canUpdateUser({ role:'manager', permissions:['users.update'] } as any, { id:'2', role:'admin' } as any)).toBe('role_hierarchy_denied');
     expect(p.canDeactivate({ id:'1', role:'admin', permissions:['users.deactivate'] } as any, { id:'1', role:'worker' } as any)).toBe('self_target_denied');
   });
+
+  describe('onec_operator: the 1C integration operator role', () => {
+    const withPermissions = (role: CurrentUser['role'], extra: CurrentUser['permissions']): CurrentUser =>
+      ({ ...user(role), permissions: [...getPermissionsForRole(role), ...extra] });
+    const usersAll: CurrentUser['permissions'] = ['users.create', 'users.update', 'users.change_password', 'users.deactivate', 'users.activate'];
+
+    it('is created and managed only by admin and superadmin, even when lower roles are granted users.*', () => {
+      expect(policy.canCreateUser(user('admin'), 'onec_operator')).toBeNull();
+      expect(policy.canCreateUser(user('superadmin'), 'onec_operator')).toBeNull();
+      expect(policy.canChangePassword(user('admin'), { id: '2', role: 'onec_operator' })).toBeNull();
+      expect(policy.canDeactivate(user('admin'), { id: '2', role: 'onec_operator' })).toBeNull();
+
+      for (const role of ['top_manager', 'manager', 'operator', 'worker', 'packer', 'viewer'] as const) {
+        const actor = withPermissions(role, usersAll);
+        expect(policy.canCreateUser(actor, 'onec_operator'), role).toBe('role_assignment_denied');
+        expect(policy.canUpdateUser(actor, { id: '2', role: 'onec_operator' }), role).toBe('role_hierarchy_denied');
+        expect(policy.canChangePassword(actor, { id: '2', role: 'onec_operator' }), role).toBe('role_hierarchy_denied');
+        expect(policy.canDeactivate(actor, { id: '2', role: 'onec_operator' }), role).toBe('role_hierarchy_denied');
+        expect(policy.canActivate(actor, { id: '2', role: 'onec_operator' }), role).toBe('role_hierarchy_denied');
+      }
+    });
+
+    it('manages nobody, even with users.* granted in the matrix', () => {
+      const operator = withPermissions('onec_operator', usersAll);
+      expect(policy.canCreateUser(operator, 'viewer')).toBe('role_assignment_denied');
+      expect(policy.canUpdateUser(operator, { id: '2', role: 'viewer' })).toBe('role_hierarchy_denied');
+      expect(policy.canChangePassword(operator, { id: '2', role: 'packer' })).toBe('role_hierarchy_denied');
+      expect(policy.canDeactivate(operator, { id: '2', role: 'viewer' })).toBe('role_hierarchy_denied');
+      expect(policy.canActivate(operator, { id: '2', role: 'viewer' })).toBe('role_hierarchy_denied');
+      // Without the grant it has no users.* permission at all.
+      expect(policy.canUpdateUser(user('onec_operator'), { id: '2', role: 'viewer' })).toBe('missing_permission');
+    });
+
+    it('keeps the boundary in SSO administration', () => {
+      expect(policy.canManageSso(user('top_manager'), 'onec_operator')).toBe('role_hierarchy_denied');
+      expect(policy.canManageSso(user('manager'), 'onec_operator')).toBe('role_hierarchy_denied');
+      expect(policy.canManageSso(user('admin'), 'onec_operator')).toBeNull();
+      expect(policy.canManageSso(user('superadmin'), 'onec_operator')).toBeNull();
+      for (const target of ['superadmin', 'admin', 'viewer', null] as const) {
+        expect(policy.canManageSso(user('onec_operator'), target)).toBe('role_hierarchy_denied');
+      }
+      // Other targets: unchanged — the users.manage_sso permission alone decides.
+      expect(policy.canManageSso(user('top_manager'), 'admin')).toBeNull();
+      expect(policy.canManageSso(user('admin'), 'superadmin')).toBeNull();
+      expect(policy.canManageSso(user('admin'), null)).toBeNull();
+    });
+
+    it('is assigned only at creation: nobody switches an existing user to or from it', () => {
+      for (const actor of [user('admin'), user('superadmin')]) {
+        expect(policy.canUpdateUser(actor, { id: '2', role: 'viewer' }, 'onec_operator')).toBe('role_assignment_denied');
+        expect(policy.canUpdateUser(actor, { id: '2', role: 'manager' }, 'onec_operator')).toBe('role_assignment_denied');
+        expect(policy.canUpdateUser(actor, { id: '2', role: 'onec_operator' }, 'viewer')).toBe('role_assignment_denied');
+        // Saving the same role (other fields changed) is an ordinary update.
+        expect(policy.canUpdateUser(actor, { id: '2', role: 'onec_operator' }, 'onec_operator')).toBeNull();
+        expect(policy.canUpdateUser(actor, { id: '2', role: 'onec_operator' })).toBeNull();
+      }
+    });
+  });
 });

@@ -21734,6 +21734,7 @@ components:
         - worker
         - packer
         - viewer
+        - onec_operator
 
     PermissionName:
       type: string

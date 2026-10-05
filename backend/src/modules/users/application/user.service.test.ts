@@ -122,6 +122,39 @@ describe('UserService', () => {
     ]);
   });
 
+  it('passes the role the policy decided on to every mutation and records a concurrent role change as denied', async () => {
+    const seen: Array<string | undefined> = [];
+    const recordDenied = vi.spyOn(auditService, 'recordDenied').mockResolvedValue(undefined as never);
+    try {
+      const target = userDto({ id: 10, role: 'viewer' });
+      const service = new UserService({
+        users: createRepository({
+          async getUserById() { return target; },
+          async updateUser(command) { seen.push(command.expectedTargetRole); return target; },
+          async changePassword(command) { seen.push(command.expectedTargetRole); throw new ApiError(409, 'USER_ROLE_CHANGED', 'changed'); },
+          async deactivateUser(command) { seen.push(command.expectedTargetRole); return target; },
+          async activateUser(command) { seen.push(command.expectedTargetRole); return target; },
+        }),
+        database: stubDb,
+      });
+      const admin = currentUser('admin', 'admin-1');
+      await service.update({ currentUser: admin, userId: 10, dto: { fullName: 'X' } });
+      await service.deactivate({ currentUser: admin, userId: 10 });
+      await service.activate({ currentUser: admin, userId: 10 });
+      expect(recordDenied).not.toHaveBeenCalled();
+      await expect(
+        service.changePassword({ currentUser: admin, userId: 10, requestId: 'req_race', dto: { newPassword: 'new-secure-password', revokeExistingSessions: true } }),
+      ).rejects.toMatchObject({ statusCode: 409, code: 'USER_ROLE_CHANGED' });
+      expect(seen).toEqual(['viewer', 'viewer', 'viewer', 'viewer']);
+      expect(recordDenied).toHaveBeenCalledTimes(1);
+      expect(recordDenied.mock.calls[0][1]).toMatchObject({
+        reason: 'target_role_changed', relatedUserId: 10, requestId: 'req_race', requiredPermissions: ['users.change_password'],
+      });
+    } finally {
+      recordDenied.mockRestore();
+    }
+  });
+
   it('blocks self-deactivation through user policy', async () => {
     const service = new UserService({
       users: createRepository({
