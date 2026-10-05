@@ -22,6 +22,7 @@ describe.skipIf(!databaseUrl)('party contacts and the supplier ↔ 1C counterpar
   const q = <T extends QueryResultRow = QueryResultRow>(text: string, params: unknown[] = []) => client.query<T>(text, params);
   const code = (promise: Promise<unknown>) => promise.then(() => 'ok', (error: unknown) => (error instanceof ApiError ? error.code : String(error)));
   const migration = () => readFile(new URL('../../../db/migrations/236_party_contacts.sql', import.meta.url), 'utf8');
+  const syncMigration = () => readFile(new URL('../../../db/migrations/242_supplier_phone_contact_sync.sql', import.meta.url), 'utf8');
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: databaseUrl, max: 4 });
@@ -133,6 +134,64 @@ describe.skipIf(!databaseUrl)('party contacts and the supplier ↔ 1C counterpar
       { contactId: null, kind: 'email' as const, value: 'supplier@test.kz', isPrimary: true, note: null },
     ], admin, 'req-resave');
     expect(saved.contacts).toHaveLength(2);
+  });
+
+  it('the old phone field keeps the copied contact in step until the set is saved by the command (migration 242)', async () => {
+    // Written by the previous form after the copy of 236 and before 242: the one-time resync picks it up.
+    await q(`INSERT INTO suppliers(supplier_id, supplier_name, phone) VALUES (301, 'Тест Синхронизация', '8 701 555 09 01'), (302, 'Тест Без набора', NULL),
+      (303, 'Тест Сохранённый', '8 701 555 09 03')`);
+    await q(`INSERT INTO supplier_contacts(supplier_id, kind, value, value_normalized, is_primary) VALUES (301, 'phone', '8 701 555 00 00', '77015550000', true),
+      (303, 'phone', '8 701 555 09 03', '77015550903', true)`);
+    const keptId = (await q(`SELECT contact_id FROM supplier_contacts WHERE supplier_id = 1`)).rows[0].contact_id;
+    await q(await syncMigration());
+    const phones = async (supplierId: number) => (await q(`SELECT value_normalized FROM supplier_contacts WHERE supplier_id = $1 AND kind = 'phone'`,
+      [supplierId])).rows.map((row) => row.value_normalized);
+    expect(await phones(301)).toEqual(['77015550901']);
+    // A contact that already agrees with the field keeps its row and id (a waiting send to it is not disturbed).
+    expect((await q(`SELECT contact_id FROM supplier_contacts WHERE supplier_id = 1`)).rows[0].contact_id).toBe(keptId);
+    // From now on the previous form (or a tab left open with it) moves the contact with the field.
+    await q(`UPDATE suppliers SET phone = '+7 701 555 09 11' WHERE supplier_id = 301`);
+    expect(await phones(301)).toEqual(['77015550911']);
+    await q(`UPDATE suppliers SET phone = '8 701 555 09 12' WHERE supplier_id = 302`);
+    expect(await phones(302)).toEqual(['77015550912']);
+    await q(`UPDATE suppliers SET phone = 'спросить в офисе' WHERE supplier_id = 301`);
+    expect(await phones(301)).toEqual([]);
+    await q(`UPDATE suppliers SET supplier_name = 'Тест Синхронизация 2' WHERE supplier_id = 302`);
+    expect(await phones(302)).toEqual(['77015550912']);
+    await q(`INSERT INTO suppliers(supplier_id, supplier_name, phone) VALUES (304, 'Тест Новый', '87015550914')`);
+    expect(await phones(304)).toEqual(['77015550914']);
+    // A change made through the old field is a revision of the set, though the set is still «not saved by the command».
+    expect(await contacts.get('supplier', 304)).toMatchObject({ version: 1, contacts: [{ valueNormalized: '77015550914', isPrimary: true }] });
+    expect((await q(`SELECT party_id, version, saved_by_command FROM party_contact_versions WHERE party_id IN (301, 302, 304) ORDER BY party_id`)).rows)
+      .toEqual([{ party_id: '301', version: 4, saved_by_command: false }, { party_id: '302', version: 1, saved_by_command: false },
+        { party_id: '304', version: 1, saved_by_command: false }]);
+    // The new form read an empty set; meanwhile a tab with the previous form saved a phone. The stale form is
+    // refused instead of silently dropping that phone, and after a reload its save keeps it.
+    await q(`INSERT INTO suppliers(supplier_id, supplier_name, phone) VALUES (305, 'Тест Гонка форм', NULL)`);
+    const empty = await contacts.get('supplier', 305);
+    expect(empty).toMatchObject({ version: 0, contacts: [] });
+    await q(`UPDATE suppliers SET phone = '8 701 555 09 15' WHERE supplier_id = 305`);
+    const email = { contactId: null, kind: 'email' as const, value: 'race@test.kz', isPrimary: true, note: null };
+    expect(await code(contacts.replace('supplier', 305, empty.version, [email], admin, 'req-stale'))).toBe('PARTY_CONTACTS_VERSION_CONFLICT');
+    expect(await phones(305)).toEqual(['77015550915']);
+    const fresh = await contacts.get('supplier', 305);
+    await contacts.replace('supplier', 305, fresh.version, [
+      ...fresh.contacts.map((contact) => ({ contactId: contact.contactId, kind: contact.kind, value: contact.value, isPrimary: contact.isPrimary, note: contact.note })),
+      email], admin, 'req-fresh');
+    expect(await phones(305)).toEqual(['77015550915']);
+    expect((await q(`SELECT saved_by_command FROM party_contact_versions WHERE party_id = 305`)).rows[0].saved_by_command).toBe(true);
+    await q(`UPDATE suppliers SET phone = '8 701 555 09 16' WHERE supplier_id = 305`);
+    expect(await phones(305)).toEqual(['77015550915']);
+    // A set saved by the command belongs to the user: the old field no longer touches it, and neither does a rerun.
+    const set = await contacts.get('supplier', 303);
+    await contacts.replace('supplier', 303, set.version, [{ contactId: null, kind: 'phone', value: '8 701 555 77 77', isPrimary: true, note: null }], admin, 'req-own');
+    await q(`UPDATE suppliers SET phone = '8 701 555 09 99' WHERE supplier_id = 303`);
+    expect(await phones(303)).toEqual(['77015557777']);
+    await q(await syncMigration());
+    expect(await phones(303)).toEqual(['77015557777']);
+    expect(await phones(302)).toEqual(['77015550912']);
+    expect((await q(`SELECT saved_by_command FROM party_contact_versions WHERE party_id = 303`)).rows[0].saved_by_command).toBe(true);
+    await q(`DELETE FROM supplier_contacts WHERE supplier_id BETWEEN 301 AND 305; DELETE FROM party_contact_versions WHERE party_id BETWEEN 301 AND 305`);
   });
 
   it('a rerun of the migration never brings back a contact the user removed', async () => {
