@@ -5978,7 +5978,8 @@
                                     "ref_key_1c",
                                     "permissions"
                                 ],
-                                "filter": {}
+                                "filter": {},
+                                "allow_aggregations": true
                             },
                             "comment": ""
                         },
@@ -5998,7 +5999,8 @@
                                     "ref_key_1c",
                                     "permissions"
                                 ],
-                                "filter": {}
+                                "filter": {},
+                                "allow_aggregations": true
                             },
                             "comment": ""
                         },
@@ -6018,7 +6020,8 @@
                                     "ref_key_1c",
                                     "permissions"
                                 ],
-                                "filter": {}
+                                "filter": {},
+                                "allow_aggregations": true
                             },
                             "comment": ""
                         },
@@ -6038,7 +6041,8 @@
                                     "ref_key_1c",
                                     "permissions"
                                 ],
-                                "filter": {}
+                                "filter": {},
+                                "allow_aggregations": true
                             },
                             "comment": ""
                         },
@@ -6058,7 +6062,8 @@
                                     "ref_key_1c",
                                     "permissions"
                                 ],
-                                "filter": {}
+                                "filter": {},
+                                "allow_aggregations": true
                             },
                             "comment": ""
                         }
