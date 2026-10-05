@@ -110,6 +110,48 @@ export function orderDetailMirrorRows<D>(
   };
 }
 
+/**
+ * The table's rows after the sort the table component applies on screen: a stable sort of the whole
+ * data source (empty grid rows included) with the active column's comparator, reversed for a
+ * descending order — the same rule as the Ant Design table.
+ */
+export function orderDetailRowsAsSorted<R>(
+  rows: readonly R[],
+  compare: ((left: R, right: R) => number) | null | undefined,
+  order: 'ascend' | 'descend' | null | undefined,
+): R[] {
+  if (!compare || !order) return [...rows];
+  return rows
+    .map((row, index) => ({ row, index }))
+    .sort((left, right) => {
+      const result = compare(left.row, right.row);
+      if (result !== 0 && !Number.isNaN(result)) return order === 'ascend' ? result : -result;
+      return left.index - right.index;
+    })
+    .map((item) => item.row);
+}
+
+/**
+ * Where the manager's page lies among the customer's rows. `rowKeys` is the table on screen (empty
+ * grid rows included), `shownKeys` the rows the customer gets, in the same order. Rows of the page
+ * that the customer does not get are skipped, so the result is a run of the customer's rows.
+ */
+export function orderDetailPageWindow(
+  rowKeys: readonly string[],
+  page: { current: number; size: number },
+  shownKeys: ReadonlySet<string>,
+): { start: number; count: number } {
+  const from = (page.current - 1) * page.size;
+  let start = 0;
+  let count = 0;
+  rowKeys.forEach((key, index) => {
+    if (!shownKeys.has(key)) return;
+    if (index < from) start += 1;
+    else if (index < from + page.size) count += 1;
+  });
+  return { start, count };
+}
+
 /** Changes of this part need a new snapshot; anything else is interface state only. */
 export function orderDetailMirrorStructure(mirror: OrderDetailTableMirror | null): string {
   if (!mirror) return '';

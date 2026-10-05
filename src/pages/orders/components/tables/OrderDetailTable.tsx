@@ -22,6 +22,7 @@ import { useOrderDraftStoreApi, useOrderFormStore } from '../../../../stores/ord
 import {
   clearOrderDetailTableMirror,
   orderDetailMirrorRows,
+  orderDetailRowsAsSorted,
   publishOrderDetailTableMirror,
 } from '../../../clientScreen/orderDetailTableMirror';
 import { OrderLifecycleReadSurface, useSelect } from '../../../../query/orderLifecycleQueries';
@@ -3438,10 +3439,19 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const mirrorColumnKeys = visibleColumns
     .map((column) => String(column.key ?? getTableColumnDataIndex(column) ?? ''))
     .join('\u0001');
+  const mirrorSortKey = String(activeSorter.key ?? '');
+  const mirrorSortOrder = activeSorter.order ?? null;
   useEffect(() => {
+    const columnKeys = mirrorColumnKeys.split('\u0001').filter(Boolean);
+    // The table component sorts its whole data source by the active visible column (empty grid rows
+    // included); a grouped table is not sorted. The record carries the rows as they end up on screen.
+    const sorter = !groupingActive && mirrorSortOrder && columnKeys.includes(mirrorSortKey)
+      ? cellRuntime.sorterByKey.get(mirrorSortKey)
+      : undefined;
+    const rowsOnScreen = orderDetailRowsAsSorted(tableRows as any[], sorter, mirrorSortOrder);
     publishOrderDetailTableMirror(draftStoreApi, {
-      columnKeys: mirrorColumnKeys.split('\u0001').filter(Boolean),
-      ...orderDetailMirrorRows<OrderDetail>(tableRows as any[], {
+      columnKeys,
+      ...orderDetailMirrorRows<OrderDetail>(rowsOnScreen, {
         groupField: groupingActive ? groupField : null,
         keyOf: (detail) => {
           const key = detail.temp_id ?? detail.detail_id;
@@ -3462,8 +3472,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       },
     });
   }, [
-    currentPage, draftStoreApi, editingField, editingKey, form, groupField, groupingActive, groupLabelOf,
-    mirrorColumnKeys, pageSize, tableRows,
+    cellRuntime, currentPage, draftStoreApi, editingField, editingKey, form, groupField, groupingActive, groupLabelOf,
+    hdfDisplayBySourceDetailId, mirrorColumnKeys, mirrorSortKey, mirrorSortOrder, pageSize, sheetMaterials.byId, tableRows,
   ]);
   useEffect(() => () => clearOrderDetailTableMirror(draftStoreApi), [draftStoreApi]);
 

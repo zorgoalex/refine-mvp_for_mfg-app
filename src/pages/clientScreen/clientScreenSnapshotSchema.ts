@@ -45,7 +45,14 @@ export const clientScreenUiSchema = z.object({
   /** Values of the row the manager is editing right now, before they reach the saved draft. */
   editing: z.object({ rowId: opaqueId, values: z.array(z.object({ code, value: text }).strict()).max(40) }).strict().nullable(),
   scroll: z.object({ ratio: z.number().min(0).max(1), anchorRowId: opaqueId.optional() }).strict().nullable(),
-  page: z.object({ current: z.number().int().min(1).max(100000), size: z.number().int().min(1).max(1000) }).strict().nullable(),
+  /**
+   * The manager's page of the detail table. `start`/`count` give the exact run of the customer's rows
+   * that are on that page (the manager's page may also hold empty grid rows the customer never gets).
+   */
+  page: z.object({
+    current: z.number().int().min(1).max(100000), size: z.number().int().min(1).max(1000),
+    start: z.number().int().min(0).max(5000).optional(), count: z.number().int().min(0).max(1000).optional(),
+  }).strict().nullable(),
 }).strict();
 
 export type ClientScreenSnapshot = z.infer<typeof clientScreenSnapshotSchema>;

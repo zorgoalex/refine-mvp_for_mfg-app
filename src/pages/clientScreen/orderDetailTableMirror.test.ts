@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  clearOrderDetailTableMirror, orderDetailMirrorRows, orderDetailMirrorStructure, publishOrderDetailTableMirror,
+  clearOrderDetailTableMirror, orderDetailMirrorRows, orderDetailMirrorStructure, orderDetailPageWindow, orderDetailRowsAsSorted,
+  publishOrderDetailTableMirror,
   readOrderDetailTableMirror, subscribeOrderDetailTableMirror, type OrderDetailTableMirror,
 } from './orderDetailTableMirror';
 
@@ -91,5 +92,65 @@ describe('what needs a new snapshot', () => {
     expect(orderDetailMirrorStructure(mirror({ editing: { rowKey: '1', field: 'width' } })))
       .toBe(orderDetailMirrorStructure(mirror({ editing: { rowKey: '1', field: 'height' } })));
     expect(orderDetailMirrorStructure(null)).toBe('');
+  });
+});
+
+describe('rows as the table component sorts them', () => {
+  type Row = { id: string; n: number | undefined };
+  // 15 filled rows and 5 empty grid rows at the end, as the table hands them to the component.
+  const rows: Row[] = [
+    ...Array.from({ length: 15 }, (_, index) => ({ id: `d${index + 1}`, n: index + 1 })),
+    ...Array.from({ length: 5 }, (_, index) => ({ id: `p${index + 1}`, n: undefined })),
+  ];
+  const byNumber = (left: Row, right: Row) => (left.n as number) - (right.n as number);
+  const byNumberOrZero = (left: Row, right: Row) => (left.n || 0) - (right.n || 0);
+
+  it('no active sort: the order is kept', () => {
+    expect(orderDetailRowsAsSorted(rows, undefined, 'ascend')).toEqual(rows);
+    expect(orderDetailRowsAsSorted(rows, byNumberOrZero, null)).toEqual(rows);
+  });
+
+  it('descending: filled rows turn round; empty rows go where the comparator puts them', () => {
+    const sorted = orderDetailRowsAsSorted(rows, byNumberOrZero, 'descend').map((row) => row.id);
+    expect(sorted.slice(0, 3)).toEqual(['d15', 'd14', 'd13']);
+    expect(sorted.slice(15)).toEqual(['p1', 'p2', 'p3', 'p4', 'p5']);
+    const ascending = orderDetailRowsAsSorted(rows, byNumberOrZero, 'ascend').map((row) => row.id);
+    expect(ascending.slice(0, 6)).toEqual(['p1', 'p2', 'p3', 'p4', 'p5', 'd1']);
+  });
+
+  it('a comparator that cannot compare empty rows (NaN) leaves them where they are; the sort is stable', () => {
+    const sorted = orderDetailRowsAsSorted(rows, byNumber, 'descend').map((row) => row.id);
+    expect(sorted).toHaveLength(20);
+    expect(new Set(sorted).size).toBe(20);
+    const equal = orderDetailRowsAsSorted([{ id: 'a', n: 1 }, { id: 'b', n: 1 }, { id: 'c', n: 1 }], byNumber, 'descend').map((row) => row.id);
+    expect(equal).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('the page of the manager among the rows of the customer', () => {
+  const filled = Array.from({ length: 15 }, (_, index) => `d${index + 1}`);
+  const empty = ['p1', 'p2', 'p3', 'p4', 'p5'];
+  const shown = new Set(filled);
+
+  it('empty rows last: pages are plain runs', () => {
+    const rowKeys = [...filled, ...empty];
+    expect(orderDetailPageWindow(rowKeys, { current: 1, size: 10 }, shown)).toEqual({ start: 0, count: 10 });
+    expect(orderDetailPageWindow(rowKeys, { current: 2, size: 10 }, shown)).toEqual({ start: 10, count: 5 });
+  });
+
+  it('empty rows first (ascending sort): page 1 holds five empty rows and five details', () => {
+    const rowKeys = [...empty, ...filled];
+    expect(orderDetailPageWindow(rowKeys, { current: 1, size: 10 }, shown)).toEqual({ start: 0, count: 5 });
+    expect(orderDetailPageWindow(rowKeys, { current: 2, size: 10 }, shown)).toEqual({ start: 5, count: 10 });
+  });
+
+  it('a page of empty rows only, and a page past the end: nothing of the customer is on it', () => {
+    expect(orderDetailPageWindow([...filled.slice(0, 10), ...empty, ...empty], { current: 2, size: 10 }, new Set(filled.slice(0, 10)))).toEqual({ start: 10, count: 0 });
+    expect(orderDetailPageWindow([...filled, ...empty], { current: 9, size: 10 }, shown)).toEqual({ start: 15, count: 0 });
+  });
+
+  it('the empty row being filled is a row of the customer as well', () => {
+    const rowKeys = [...filled, ...empty];
+    expect(orderDetailPageWindow(rowKeys, { current: 2, size: 10 }, new Set([...filled, 'p1']))).toEqual({ start: 10, count: 6 });
   });
 });

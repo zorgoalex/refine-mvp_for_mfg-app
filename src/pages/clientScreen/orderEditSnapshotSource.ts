@@ -203,6 +203,8 @@ function orderedDetails(details: OrderDetail[], order: OrderEditSourceInput['det
 
 const NUMERIC_EDITOR_KEYS = new Set(['height', 'width', 'quantity', 'area', 'milling_cost_per_sqm', 'detail_cost',
   'sheet_material_type_id', 'milling_type_id', 'edge_type_id', 'film_id', 'production_status_id']);
+/** Money the manager may not have at all: an editor without a value for it does not make it "empty". */
+const MONEY_EDITOR_KEYS = new Set(['milling_cost_per_sqm', 'detail_cost']);
 
 /**
  * Display text of the row being edited, from the current values of its editor: one item per visible
@@ -217,12 +219,18 @@ export function orderEditEditingValues(
 ): Array<{ code: `details.${DetailField}`; value: string }> {
   const merged: Record<string, unknown> = { ...detail };
   for (const key of Object.keys(DETAIL_COLUMN_FIELDS)) {
+    // A field the editor does not have keeps its saved value. A field the editor has without a
+    // value was cleared by the manager (a cleared select holds `undefined`): it is empty.
+    if (key === 'detail_number' || !Object.prototype.hasOwnProperty.call(editorValues, key)) continue;
     const value = editorValues[key];
-    if (value === undefined || key === 'detail_number') continue;
-    if (!NUMERIC_EDITOR_KEYS.has(key)) merged[key] = value === null ? null : String(value);
+    if (value === undefined) {
+      if (!MONEY_EDITOR_KEYS.has(key) || merged[key] !== undefined) merged[key] = null;
+    } else if (!NUMERIC_EDITOR_KEYS.has(key)) merged[key] = value === null ? null : String(value);
     else if (value === null || value === '') merged[key] = null;
     else if (Number.isFinite(Number(value))) merged[key] = Number(value);
   }
+  // The saved material name belongs to the saved material only.
+  if (merged.sheet_material_type_id !== detail.sheet_material_type_id) merged.material_name_resolved = null;
   const display = detailValues(merged as unknown as OrderDetail, names);
   const result: Array<{ code: `details.${DetailField}`; value: string }> = [];
   for (const key of columnKeys) {

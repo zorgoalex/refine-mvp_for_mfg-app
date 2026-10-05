@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { OrderFormDataReferences } from '../../query/orderFormDataReferences';
 import { getOrderDraftStore } from '../../stores/orderFormStore';
+import { isOrderDetailPlaceholder } from '../../utils/orderDetailRows';
 import type { ClientScreenIdFor } from './buildClientScreenSnapshot';
 import { getClientScreenPresenter } from './clientScreenInstance';
 import type { ClientScreenOrderProvider } from './clientScreenPresenter';
@@ -9,7 +10,8 @@ import {
   buildOrderEditSource, DETAIL_COLUMN_FIELDS, detailRowKey, orderEditEditingValues, type OrderEditSourceInput,
 } from './orderEditSnapshotSource';
 import {
-  orderDetailMirrorStructure, readOrderDetailTableMirror, subscribeOrderDetailTableMirror, type OrderDetailTableMirror,
+  orderDetailMirrorStructure, orderDetailPageWindow, readOrderDetailTableMirror, subscribeOrderDetailTableMirror,
+  type OrderDetailTableMirror,
 } from './orderDetailTableMirror';
 
 /**
@@ -109,11 +111,25 @@ const activeCellOf = (mirror: OrderDetailTableMirror): { rowKey: string; columnK
   }
 };
 
-/** The table's page, when it is one the customer screen can take. */
-export function mirroredPage(page: OrderDetailTableMirror['page'] | undefined): ClientScreenUi['page'] {
-  if (!page || !Number.isSafeInteger(page.current) || !Number.isSafeInteger(page.size)) return null;
+/**
+ * The table's page, when it is one the customer screen can take, with the exact run of the
+ * customer's rows on it: the manager's page may hold empty grid rows, which the customer never gets
+ * (except the one being filled).
+ */
+export function mirroredPage(
+  mirror: Pick<OrderDetailTableMirror, 'page' | 'rowKeys' | 'editing'> | null | undefined,
+  details: ReadonlyArray<OrderEditSourceInput['details'][number]>,
+): ClientScreenUi['page'] {
+  const page = mirror?.page;
+  if (!mirror || !page || !Number.isSafeInteger(page.current) || !Number.isSafeInteger(page.size)) return null;
   if (page.current < 1 || page.current > 100000 || page.size < 1 || page.size > 1000) return null;
-  return { current: page.current, size: page.size };
+  const fillingKey = mirror.editing?.rowKey ?? null;
+  const shown = new Set(details
+    .filter((detail) => !isOrderDetailPlaceholder(detail) || detailRowKey(detail) === fillingKey)
+    .map(detailRowKey));
+  const { start, count } = orderDetailPageWindow(mirror.rowKeys, page, shown);
+  if (start > 5000) return null;
+  return { current: page.current, size: page.size, start, count };
 }
 
 /**
@@ -187,7 +203,7 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
         tab: mirroredTab(current.activeTab),
         ...mirroredEditing(mirror, store.getState().details, names, idFor),
         scroll: { ratio: scrollRatio.current },
-        page: mirroredPage(mirror?.page),
+        page: mirroredPage(mirror, store.getState().details),
       };
     },
   }), []);

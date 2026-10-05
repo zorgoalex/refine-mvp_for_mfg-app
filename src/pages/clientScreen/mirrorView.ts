@@ -39,6 +39,9 @@ function mirrorTable(table: ClientScreenTable, ui: ClientScreenUi | null, option
     const grouped = groups.flatMap((group) => group.rowIds.map((id) => byId.get(id)).filter((row): row is ClientScreenTable['rows'][number] => Boolean(row)));
     const inGroups = new Set(grouped.map((row) => row.id));
     rows = [...grouped, ...table.rows.filter((row) => !inGroups.has(row.id))];
+  } else if (options.paged && ui?.page && ui.page.start !== undefined && ui.page.count !== undefined) {
+    // Exactly the rows of the manager's page, even when none of them is the customer's to see.
+    rows = table.rows.slice(ui.page.start, ui.page.start + ui.page.count);
   } else if (options.paged && ui?.page) {
     const start = (ui.page.current - 1) * ui.page.size;
     const page = table.rows.slice(start, start + ui.page.size);

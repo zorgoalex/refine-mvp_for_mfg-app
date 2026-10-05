@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildClientScreenSnapshot, createClientScreenIdMap } from './buildClientScreenSnapshot';
+import { buildClientScreenSnapshot, createClientScreenIdMap, filterClientScreenUi } from './buildClientScreenSnapshot';
+import { buildMirrorView } from './mirrorView';
 import { CLIENT_SCREEN_CODES } from './clientScreenRegistry';
 import { clientScreenSnapshotSchema } from './clientScreenSnapshotSchema';
 import {
@@ -217,4 +218,43 @@ describe('the table of the manager: row order, the row being filled, live editor
     const values = orderEditEditingValues(base.details[0], { film_id: 4242 }, base.names, ['film_id']);
     expect(values).toEqual([{ code: 'details.film', value: '—' }]);
   });
+
+  it('a select cleared with its cross holds undefined: the customer sees it empty, not the saved name', () => {
+    const base = input();
+    const detail = { ...base.details[0], material_name_resolved: 'МДФ 16 мм' } as OrderEditSourceInput['details'][number];
+    const cleared = orderEditEditingValues(
+      detail, { film_id: undefined, sheet_material_type_id: undefined, milling_type_id: undefined, note: undefined },
+      base.names, ['film_id', 'sheet_material_type_id', 'milling_type_id', 'note', 'height'],
+    );
+    expect(cleared).toEqual([
+      { code: 'details.film', value: '—' }, { code: 'details.material', value: '—' }, { code: 'details.milling_type', value: '—' },
+      { code: 'details.note', value: '—' }, { code: 'details.height', value: '716' },
+    ]);
+    // A field the editor does not have at all keeps what is saved.
+    expect(orderEditEditingValues(detail, {}, base.names, ['film_id', 'sheet_material_type_id']))
+      .toEqual([{ code: 'details.film', value: 'Белый софт' }, { code: 'details.material', value: 'МДФ 16 мм' }]);
+  });
+
+  it('money the manager has can be cleared; money the manager does not have stays unavailable', () => {
+    const base = input();
+    expect(orderEditEditingValues(base.details[0], { detail_cost: undefined }, base.names, ['detail_cost']))
+      .toEqual([{ code: 'details.cost', value: '—' }]);
+    const noMoney = { ...base.details[0], detail_cost: undefined } as unknown as OrderEditSourceInput['details'][number];
+    expect(orderEditEditingValues(noMoney, { detail_cost: undefined }, base.names, ['detail_cost'])).toEqual([]);
+  });
+
+  it('a cleared film goes through the settings filter like any value and is gone when the edit is cancelled', () => {
+    const base = input();
+    const idFor = createClientScreenIdMap(() => `id${Math.random().toString(36).slice(2, 10)}`);
+    const codes = ['tab.details', 'details.n', 'details.film'];
+    const snapshot = buildClientScreenSnapshot(buildOrderEditSource(base), codes, idFor);
+    const rowId = idFor('detail', '71');
+    const values = orderEditEditingValues(base.details[0], { film_id: undefined, note: 'секрет' }, base.names, ['detail_number', 'film_id', 'note']);
+    const ui = filterClientScreenUi({ tab: 'details', focus: null, editing: { rowId, values }, scroll: null, page: null }, snapshot, codes);
+    expect(ui.editing).toEqual({ rowId, values: [{ code: 'details.n', value: '1' }, { code: 'details.film', value: '—' }] });
+    expect(buildMirrorView(snapshot, ui).table!.rows[0].cells.map((cell) => cell.text)).toEqual(['1', '—']);
+    // Escape: no editor any more, the saved film is back.
+    expect(buildMirrorView(snapshot, { ...ui, editing: null }).table!.rows[0].cells.map((cell) => cell.text)).toEqual(['1', 'Белый софт']);
+  });
 });
+

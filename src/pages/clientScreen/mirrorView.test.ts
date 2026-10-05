@@ -48,6 +48,12 @@ describe('buildMirrorView', () => {
     expect(view.table!.rows[0]).toMatchObject({ focused: false, editing: false, cells: [{ text: 'Фасад' }, { text: '4' }] });
   });
 
+  it('an exact run of rows for the page of the manager wins over plain paging, even when it is empty', () => {
+    const all = buildMirrorView(snapshot, ui({ page: null })).table!.rows.map((row) => row.id);
+    expect(buildMirrorView(snapshot, ui({ page: { current: 2, size: 2, start: 1, count: 2 } })).table!.rows.map((row) => row.id)).toEqual(all.slice(1, 3));
+    expect(buildMirrorView(snapshot, ui({ page: { current: 1, size: 2, start: 0, count: 0 } })).table!.rows).toEqual([]);
+  });
+
   it('shows the manager page of the detail table; a page that no longer exists falls back to all rows', () => {
     expect(buildMirrorView(snapshot, ui({ page: { current: 2, size: 2 } })).table!.rows.map((row) => row.id)).toEqual(['rowcccccc']);
     expect(buildMirrorView(snapshot, ui({ page: { current: 9, size: 2 } })).table!.rows).toHaveLength(3);

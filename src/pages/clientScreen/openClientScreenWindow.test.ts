@@ -87,13 +87,22 @@ describe('what the detail table shows, for the customer screen', () => {
     expect(orderFormNames({ filmNameById: new Map([[8, 'Белый софт']]) } as never, () => undefined).film(8)).toBe('Белый софт');
   });
 
-  it('the page is taken only when it is a sane one', () => {
-    expect(mirroredPage({ current: 2, size: 50 })).toEqual({ current: 2, size: 50 });
-    expect(mirroredPage(null)).toBeNull();
-    expect(mirroredPage(undefined)).toBeNull();
-    expect(mirroredPage({ current: 0, size: 50 })).toBeNull();
-    expect(mirroredPage({ current: 1, size: 5000 })).toBeNull();
-    expect(mirroredPage({ current: 1.5, size: 50 })).toBeNull();
+  it('the page is taken only when it is a sane one, with the exact run of customer rows on it', () => {
+    const rows = [{ detail_id: 1 }, { detail_id: 2 }, { detail_id: 3 }, { temp_id: -1, is_placeholder: true }, { temp_id: -2, is_placeholder: true }] as never[];
+    const at = (page: { current: number; size: number } | null, rowKeys: string[], editing: { rowKey: string; field: string | null } | null = null) =>
+      mirroredPage({ page, rowKeys, editing }, rows);
+    expect(at({ current: 1, size: 2 }, ['1', '2', '3', '-1', '-2'])).toEqual({ current: 1, size: 2, start: 0, count: 2 });
+    expect(at({ current: 2, size: 2 }, ['1', '2', '3', '-1', '-2'])).toEqual({ current: 2, size: 2, start: 2, count: 1 });
+    // Sorted so that the empty grid rows come first: page 1 has nothing of the customer.
+    expect(at({ current: 1, size: 2 }, ['-1', '-2', '3', '2', '1'])).toEqual({ current: 1, size: 2, start: 0, count: 0 });
+    expect(at({ current: 2, size: 2 }, ['-1', '-2', '3', '2', '1'])).toEqual({ current: 2, size: 2, start: 0, count: 2 });
+    // The empty row being filled counts.
+    expect(at({ current: 2, size: 2 }, ['1', '2', '3', '-1', '-2'], { rowKey: '-1', field: 'height' })).toEqual({ current: 2, size: 2, start: 2, count: 2 });
+    expect(mirroredPage(null, rows)).toBeNull();
+    expect(at(null, ['1'])).toBeNull();
+    expect(at({ current: 0, size: 50 }, ['1'])).toBeNull();
+    expect(at({ current: 1, size: 5000 }, ['1'])).toBeNull();
+    expect(at({ current: 1.5, size: 50 }, ['1'])).toBeNull();
   });
 
   it('no table on screen or no open editor → nothing', () => {
