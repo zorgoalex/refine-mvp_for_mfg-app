@@ -27,7 +27,7 @@ export function DateBarsChart({
   // with many bars every second label is dropped so that the rest stay readable
   const labelEvery = bars.length > 32 ? 2 : 1;
   return (
-    <div className="date-bars" data-grain={grain} data-tone={tone} role="img" aria-label={`${ariaLabel}, ${GRAIN_TEXT[grain]}`}>
+    <div className="date-bars" data-grain={grain} data-bar-tone={tone} role="img" aria-label={`${ariaLabel}, ${GRAIN_TEXT[grain]}`}>
       <div className="date-bars__plot" style={{ gridTemplateColumns: `repeat(${Math.max(1, bars.length)}, minmax(0, 1fr))` }}>
         {bars.map((bar, index) => (
           <Tooltip key={bar.key} title={`${barRangeText(bar)}: ${formatValue(bar.value)}${unit ? ` · ${bar.count} ${unit}` : ''}`}>

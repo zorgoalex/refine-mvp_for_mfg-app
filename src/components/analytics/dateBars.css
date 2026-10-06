@@ -18,9 +18,9 @@
 }
 
 .date-bars__track i { display: block; width: 100%; border-radius: 3px 3px 0 0; background: #2f6ee5; }
-.date-bars[data-tone="b"] .date-bars__track i { background: #d9952b; }
-.date-bars[data-tone="c"] .date-bars__track i { background: #1f9d8a; }
-.date-bars[data-tone="d"] .date-bars__track i { background: #8a63d2; }
+.date-bars[data-bar-tone="b"] .date-bars__track i { background: #d9952b; }
+.date-bars[data-bar-tone="c"] .date-bars__track i { background: #1f9d8a; }
+.date-bars[data-bar-tone="d"] .date-bars__track i { background: #8a63d2; }
 .date-bars__col:hover .date-bars__track i { filter: brightness(0.86); }
 
 .date-bars__label,

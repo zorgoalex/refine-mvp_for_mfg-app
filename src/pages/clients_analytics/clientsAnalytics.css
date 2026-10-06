@@ -86,6 +86,12 @@
 .ca-dash [data-recency="lost"], .ca-card [data-recency="lost"] { background: #cf1322; }
 .ca-dash [data-recency="no_orders"], .ca-card [data-recency="no_orders"] { background: #9aa3b2; }
 .ca-table td:last-child b { color: inherit; }
+/* the payment-type marks of the client card use the same tones as the dashboards */
+.ca-card [data-tone="a"] { background: #2f6ee5; }
+.ca-card [data-tone="b"] { background: #d9952b; }
+.ca-card [data-tone="c"] { background: #1f9d8a; }
+.ca-card [data-tone="d"] { background: #8a63d2; }
+.ca-card [data-tone="e"] { background: #9aa3b2; }
 .ca-table a { cursor: pointer; }
 
 /* --- кликабельное имя клиента в списке --- */
