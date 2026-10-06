@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-07", title: "Интеграция 1С: ожидаемое молчание агента",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "Интеграция 1С → агент → «Редактировать»: поле «Ожидаемое ежедневное молчание (UTC)». Если агент планово выключается каждый день в одно и то же время (например, перед ночной перезагрузкой компьютера 1С), в этот интервал оповещение «агент молчит» больше не поднимается. Молчание, которое началось раньше интервала или продолжается после его конца, оповещается как прежде.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-06", title: "Видимость экранов для отдельных пользователей",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

@@ -125,6 +125,8 @@ export interface OnecAgentView {
   status: OnecAgentStatus;
   version: number;
   minimumAgentVersion: string;
+  /** Ожидаемое ежедневное молчание, UTC «ЧЧ:ММ-ЧЧ:ММ»; null — не задано. */
+  expectedSilenceUtc: string | null;
   source: OnecAgentSource;
   connection: OnecConnectionState;
   lastHeartbeatAt: string | null;
