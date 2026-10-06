@@ -998,3 +998,28 @@ export function onecItemTypeBreakdownLabel(byType: Array<{ type: string; total: 
     .map((entry) => `${entry.type} ${entry.total}`)
     .join(' · ');
 }
+
+/** Ожидаемое ежедневное молчание агента: «ЧЧ:ММ-ЧЧ:ММ» по UTC, может переходить через полночь, не длиннее 120 минут. */
+const EXPECTED_SILENCE_PATTERN = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;
+export const EXPECTED_SILENCE_MAX_MINUTES = 120;
+
+/** Текст ошибки для поля формы; null — значение допустимо (пустое = «не задано»). */
+export function expectedSilenceError(value: string | null | undefined): string | null {
+  const text = (value ?? '').trim();
+  if (!text) return null;
+  if (!EXPECTED_SILENCE_PATTERN.test(text)) return 'Формат: ЧЧ:ММ-ЧЧ:ММ по UTC, например 23:45-00:25';
+  const [start, end] = text.split('-').map((part) => {
+    const [hours, minutes] = part.split(':').map(Number);
+    return hours * 60 + minutes;
+  });
+  const length = (end - start + 1440) % 1440;
+  if (length === 0) return 'Начало и конец интервала совпадают';
+  if (length > EXPECTED_SILENCE_MAX_MINUTES) return `Интервал не может быть длиннее ${EXPECTED_SILENCE_MAX_MINUTES} минут`;
+  return null;
+}
+
+/** Значение для API: пустое поле снимает настройку (null). */
+export function normalizeExpectedSilence(value: string | null | undefined): string | null {
+  const text = (value ?? '').trim();
+  return text ? text : null;
+}

@@ -9,6 +9,7 @@ import { attemptFiles, removeQuietly } from './onec-etl-spool';
 import { PgOnecRepository } from '../adapters/pg-onec-repository';
 import { OnecRuntimeConfigService } from '../onec-runtime-config.service';
 import { buildOnecEvent } from '../domain/onec-events';
+import { isSilenceExpected, parseExpectedSilence } from '../domain/onec-expected-silence';
 import { OnecAlertProjector } from './onec-alert-projector';
 import { OnecAuditWriter } from './onec-audit';
 import { OnecEtlRevocationService } from './onec-etl-revocation.service';
@@ -96,6 +97,9 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
     for (const row of await this.repository.listAgentsForMonitor()) {
       const receivedAt: Date | null = row.received_at ?? null;
       if (receivedAt && now.getTime() - receivedAt.getTime() <= silentAfterMs) continue;
+      // A planned daily stop (onec_agents.expected_silence_utc): no alert while the interval explains the silence;
+      // if the agent is still silent when the interval ends, the next tick reports it with the same silentSince.
+      if (isSilenceExpected(parseExpectedSilence(row.expected_silence_utc), now, receivedAt, silentAfterMs)) continue;
       // One event per silence period: keyed by the last heartbeat time.
       const silentSince = receivedAt ? receivedAt.toISOString() : 'never';
       await this.repository.insertOutboxEvent(
