@@ -2605,6 +2605,15 @@ probe_file() {
       "SELECT (SELECT count(*) FROM role_policy_scopes WHERE role_id = 32 AND scope_value = 'none') = 10;" \
       "SELECT to_regprocedure('public.users_onec_operator_role_guard()') IS NOT NULL;" \
       "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_users_onec_operator_role_guard' AND tgrelid = 'public.users'::regclass AND tgenabled = 'O' AND NOT tgisinternal);" ;;
+    # 246: clients_analytics_view counts production orders only and tells «в работе» by the order status.
+    # The end state is all of it: the order kind in each of the three CTEs (orders, payments of orders, the
+    # last order) and each counter bound to its own status expression. A view fixed only in part is PENDING.
+    246_clients_analytics_view_real_orders*) probe_all \
+      "SELECT to_regclass('public.clients_analytics_view') IS NOT NULL;" \
+      "SELECT (length(d) - length(replace(d, 'production_order', ''))) / length('production_order') = 3 FROM (SELECT pg_get_viewdef('public.clients_analytics_view'::regclass) AS d) v;" \
+      "SELECT regexp_replace(pg_get_viewdef('public.clients_analytics_view'::regclass), '[[:space:]]+', ' ', 'g') ~ 'FILTER \\(WHERE [^;]{0,120}<> ALL \\(ARRAY\\[''legacy_7''::text, ''legacy_8''::text\\]\\)\\)+ AS orders_in_progress_count';" \
+      "SELECT regexp_replace(pg_get_viewdef('public.clients_analytics_view'::regclass), '[[:space:]]+', ' ', 'g') ~ 'FILTER \\(WHERE [^;]{0,60}= ANY \\(ARRAY\\[''legacy_7''::text, ''legacy_8''::text\\]\\)\\)+ AS orders_completed_count';" \
+      "SELECT pg_get_viewdef('public.clients_analytics_view'::regclass) NOT LIKE '%completion_date IS%';" ;;
     # 242: the old supplier phone field keeps the copied phone contact in step until the set is saved.
     242_supplier_phone_contact_sync*) probe_all \
       "$(q_col party_contact_versions saved_by_command)" \
@@ -3089,7 +3098,7 @@ verify_applied_effect() {
     205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|240_payment_onec_matches*|241_client_screen_settings*|245_onec_operator_role*)
+    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|240_payment_onec_matches*|241_client_screen_settings*|245_onec_operator_role*|246_clients_analytics_view_real_orders*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

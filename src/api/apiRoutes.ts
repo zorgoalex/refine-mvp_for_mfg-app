@@ -148,6 +148,8 @@ export const apiRoutes = {
   },
   clientsRead: {
     listFacts: backendApiPath('/clients/list-facts'),
+    analyticsDashboard: backendApiPath('/clients-analytics/dashboard'),
+    analyticsCard: (clientId: number) => backendApiPath(`/clients-analytics/clients/${clientId}`),
   },
   paymentsAnalytics: {
     summary: backendApiPath('/payments-analytics/summary'),

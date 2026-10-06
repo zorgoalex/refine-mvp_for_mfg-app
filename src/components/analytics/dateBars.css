@@ -1,0 +1,52 @@
+/* Столбцы по шкале дат: под каждым столбцом — дата, под началом месяца — его название. */
+.date-bars { padding: 4px 16px 10px; }
+
+.date-bars__plot {
+  display: grid;
+  align-items: end;
+  gap: 0 2px;
+}
+
+.date-bars__col { min-width: 0; }
+.date-bars__col[data-month-start="true"] { box-shadow: inset 1px 0 0 var(--app-border, #d9d9d9); }
+
+.date-bars__track {
+  display: flex;
+  align-items: flex-end;
+  height: 150px;
+  border-bottom: 1px solid var(--app-border-soft, #f0f0f0);
+}
+
+.date-bars__track i { display: block; width: 100%; border-radius: 3px 3px 0 0; background: #2f6ee5; }
+.date-bars[data-tone="b"] .date-bars__track i { background: #d9952b; }
+.date-bars[data-tone="c"] .date-bars__track i { background: #1f9d8a; }
+.date-bars[data-tone="d"] .date-bars__track i { background: #8a63d2; }
+.date-bars__col:hover .date-bars__track i { filter: brightness(0.86); }
+
+.date-bars__label,
+.date-bars__caption {
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.date-bars__label {
+  margin-top: 4px;
+  color: var(--app-text-secondary, #8c8c8c);
+  font-size: 11px;
+}
+
+.date-bars__col[data-empty="true"] .date-bars__label { opacity: 0.6; }
+
+.date-bars__caption {
+  min-height: 15px;
+  overflow: visible;
+  color: var(--app-text, inherit);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.date-bars[data-grain="week"] .date-bars__label { font-size: 10.5px; }

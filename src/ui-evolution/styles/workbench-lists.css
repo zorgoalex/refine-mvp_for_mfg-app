@@ -105,3 +105,52 @@
 :root[data-ui-variant="workbench"] .wb-list .ca-totals b {
   color: var(--evo-text);
 }
+
+/* --- дашборды и карточка клиента в тонах NewLine --- */
+:root[data-ui-variant="workbench"] .pa-panel,
+:root[data-ui-variant="workbench"] .ca-card__money {
+  border-color: var(--evo-border);
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .pa-panel__head span,
+:root[data-ui-variant="workbench"] .pa-dash__range,
+:root[data-ui-variant="workbench"] .pa-dash__state,
+:root[data-ui-variant="workbench"] .pa-rows__note,
+:root[data-ui-variant="workbench"] .ca-dash__legend,
+:root[data-ui-variant="workbench"] .ca-card__muted,
+:root[data-ui-variant="workbench"] .date-bars__label {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .pa-dash__period {
+  border-color: var(--evo-border);
+  background: var(--evo-surface);
+  color: var(--evo-text-secondary);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .pa-dash__period[aria-pressed="true"] {
+  border-color: var(--evo-primary);
+  background: color-mix(in srgb, var(--evo-primary) 10%, var(--evo-surface));
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .pa-rows__bar,
+:root[data-ui-variant="workbench"] .ca-card__paid {
+  background: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .date-bars__track,
+:root[data-ui-variant="workbench"] .ca-months__track {
+  border-bottom-color: var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .pa-debtors td {
+  border-top-color: var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .ca-card__tag:not([data-recency]) {
+  background: var(--evo-surface-muted);
+}

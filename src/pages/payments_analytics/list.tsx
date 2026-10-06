@@ -374,7 +374,7 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
     <List
       title="+Платежи (аналитика)"
       wrapperProps={{ className: 'payments-analytics' }}
-      headerButtons={() => (
+      headerButtons={() => (screenTab !== "list" ? null : (
         <>
           <Space.Compact style={{ marginRight: 8 }}>
             <Input
@@ -401,7 +401,7 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
             {filtersVisible ? "Скрыть фильтры" : "Фильтры"}
           </Button>
         </>
-      )}
+      ))}
     >
       <Tabs
         className="pa-tabs"

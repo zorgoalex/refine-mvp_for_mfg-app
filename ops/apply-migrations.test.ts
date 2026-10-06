@@ -603,6 +603,24 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText.slice(verifyStart, verifyEnd)).toContain('237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*');
   });
 
+  it('probes the end state of the clients analytics view before ledgering migration 246', () => {
+    const arm = probeFn.slice(probeFn.indexOf('246_clients_analytics_view_real_orders*)'), probeFn.indexOf('242_supplier_phone_contact_sync*)'));
+    // the whole end state: the order kind in all three CTEs and each counter bound to its own status rule —
+    // a view fixed only in part (verified on the stage database: without the kind in pay_agg or last_order,
+    // with one counter left on completion_date, with the two rules swapped) stays PENDING
+    for (const marker of ["to_regclass('public.clients_analytics_view') IS NOT NULL",
+      "/ length('production_order') = 3 FROM", ")+ AS orders_in_progress_count'", ")+ AS orders_completed_count'",
+      "<> ALL", "= ANY", "NOT LIKE '%completion_date IS%'"]) {
+      expect(arm).toContain(marker);
+    }
+    expect(arm.match(/^\s+"SELECT /gm)).toHaveLength(5);
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('245_onec_operator_role*|246_clients_analytics_view_real_orders*');
+    expect(files).toContain('246_clients_analytics_view_real_orders.sql');
+    expect(files).not.toContain('246_clients_analytics_view_real_orders_rollback.sql');
+  });
+
   it('probes the operator role, its six permissions, scopes and the enabled guard trigger before ledgering migration 245', () => {
     const arm = probeFn.slice(probeFn.indexOf('245_onec_operator_role*)'), probeFn.indexOf('242_supplier_phone_contact_sync*)'));
     for (const marker of ["role_id = 32 AND role_code = 'onec_operator'", "'onec.view','onec.manage','onec.commands.send'", ') = 6;',

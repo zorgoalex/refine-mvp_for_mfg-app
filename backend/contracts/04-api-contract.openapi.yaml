@@ -19245,6 +19245,45 @@ paths:
         '400': {description: "VALIDATION_FAILED — a malformed or too long list"}
         '401': {description: Authentication required}
         '403': {description: "Permission denied (audited as clients.list_facts_denied)"}
+  /api/v1/clients-analytics/dashboard:
+    get:
+      tags:
+        - Client Phones
+      operationId: getClientsAnalyticsDashboard
+      summary: "Clients dashboard of a period: new and buying clients, orders by day, segments, the largest and the sleeping clients (read-only)"
+      security:
+        - {bearerAuth: []}
+      x-permission: clients.analytics.view
+      description: >-
+        Requires clients.analytics.view, clients.view, orders.view, orders.view_financials and payments.view, and the
+        visibility scope «all» of both orders and payments (a user limited to their own orders or payments is refused). The period covers at most 366 days. Only real
+        orders are counted (not deleted, not CRM requests or drafts).
+      parameters:
+        - {name: dateFrom, in: query, required: true, schema: {type: string, format: date}}
+        - {name: dateTo, in: query, required: true, schema: {type: string, format: date}}
+        - {name: personType, in: query, required: false, schema: {type: string, enum: [individual, legal]}}
+      responses:
+        '200': {description: "{dateFrom, dateTo, personType, totals{clients,newClients,buyers,repeatBuyers,orders,amount,paid}, byDay[], byRecency[], byFrequency[], byPersonType[], topClients[], toReactivate[]}"}
+        '400': {description: "VALIDATION_FAILED — a missing or too long period, an unknown person type"}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as clients.analytics_denied)"}
+  /api/v1/clients-analytics/clients/{clientId}:
+    get:
+      tags:
+        - Client Phones
+      operationId: getClientAnalyticsCard
+      summary: "Analytics card of one client: profile, totals, the last twelve months, payment types, latest orders and payments (read-only)"
+      security:
+        - {bearerAuth: []}
+      x-permission: clients.analytics.view
+      description: The same rights as the clients dashboard.
+      parameters:
+        - {name: clientId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: "{client{...phones[]}, totals{...}, byMonth[12], paymentTypes[], orders[<=30], payments[<=30]}"}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as clients.analytics_denied)"}
+        '404': {description: "CLIENT_NOT_FOUND"}
   /api/v1/onec/customer-orders:
     get:
       tags:

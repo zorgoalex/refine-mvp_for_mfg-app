@@ -4,7 +4,7 @@ import { IResourceComponentsProps, useList, useNavigation } from "@refinedev/cor
 import { List, ShowButton, useSelect } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import {
-  Space, Badge, Input, Button, message, Typography, Form, Row, Col, Select, DatePicker, InputNumber, Card, Checkbox } from "antd";
+  Space, Badge, Input, Button, message, Typography, Form, Row, Col, Select, DatePicker, InputNumber, Card, Checkbox, Tabs } from "antd";
 import {
   SearchOutlined,
   FilterOutlined,
@@ -16,18 +16,25 @@ import { formatNumber } from "../../utils/numberFormat";
 import { HasuraReportError } from "../../api/hasuraReportClient";
 import { countClientsAnalyticsAfter, findClientAnalyticsByName } from "../../api/reports/clientsAnalyticsReportApi";
 import {
+  CLIENTS_CHIPS,
   CLIENTS_PRESETS,
   applyClientsPreset,
+  clientsChipFormValues,
   clientsPageTotals,
   clientsPresetFilters,
   clientsPresetFormValues,
-  formlessFilters,
-  inProgressFormValue,
   detectClientsPreset,
-  hasInProgressFilter,
-  toggleInProgressFilter,
+  formlessFilters,
+  isClientsChipOn,
+  toggleClientsChip,
+  type ClientsChip,
   type ClientsPreset,
 } from "./clientsAnalyticsPresets";
+import { ClientsDashboard } from "./ClientsDashboard";
+import { ClientCardDrawer } from "./ClientCardDrawer";
+import { CLIENTS_ANALYTICS_ACCESS_TEXT, clientsAnalyticsAccess } from "./clientsAnalyticsAccess";
+import { authSession } from "../../api/authSession";
+import { featureFlags } from "../../config/featureFlags";
 import "./clientsAnalytics.css";
 
 const { RangePicker } = DatePicker;
@@ -56,18 +63,24 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
   // Быстрые наборы над списком: меняют только свои условия, остальные фильтры остаются
   const todayIso = dayjs().format("YYYY-MM-DD");
   const activePreset = detectClientsPreset(filters, todayIso);
-  const inProgressOnly = hasInProgressFilter(filters);
   const choosePreset = (preset: ClientsPreset) => {
     setFilters(applyClientsPreset(filters, preset, todayIso) as any, "replace");
     setCurrent(1);
     // форма фильтров отражает набор: «Применить» в ней пересоберёт те же условия
     form.setFieldsValue?.(clientsPresetFormValues(preset));
   };
-  const toggleInProgress = () => {
-    setFilters(toggleInProgressFilter(filters) as any, "replace");
+  const toggleChip = (chip: ClientsChip) => {
+    const on = !isClientsChipOn(filters, chip);
+    setFilters(toggleClientsChip(filters, chip) as any, "replace");
     setCurrent(1);
-    form.setFieldsValue?.(inProgressFormValue(!inProgressOnly));
+    form.setFieldsValue?.(clientsChipFormValues(chip, on));
   };
+  // Вкладки экрана и карточка клиента, выезжающая справа
+  const [screenTab, setScreenTab] = useState<"list" | "dashboard">("list");
+  const [cardClientId, setCardClientId] = useState<number | null>(null);
+  // Дашборд и карточку предлагаем только тому, кому сервер их отдаст (то же правило, что на backend)
+  const analyticsAccess = clientsAnalyticsAccess(authSession.getUser() as any, featureFlags);
+  const analyticsAllowed = analyticsAccess === "allowed";
   // Счётчики наборов — по всей базе клиентов, без учёта остальных фильтров
   const presetCount = (preset: ClientsPreset) => useList({
     resource: "clients_analytics_view",
@@ -77,6 +90,8 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
   const presetCounts: Record<ClientsPreset, number | undefined> = {
     all: presetCount("all"),
     active: presetCount("active"),
+    sleeping: presetCount("sleeping"),
+    lost: presetCount("lost"),
     debt: presetCount("debt"),
     new: presetCount("new"),
   };
@@ -408,7 +423,7 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
     <List
       title="+Клиенты (аналитика)"
       wrapperProps={{ className: 'wb-list' }}
-      headerButtons={() => (
+      headerButtons={() => (screenTab !== "list" ? null : (
         <>
           <Space.Compact style={{ marginRight: 8 }}>
             <Input
@@ -435,8 +450,18 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
             {filtersVisible ? "Скрыть фильтры" : "Фильтры"}
           </Button>
         </>
-      )}
+      ))}
     >
+      <Tabs
+        className="pa-tabs"
+        activeKey={screenTab}
+        onChange={(key) => setScreenTab(key === "dashboard" ? "dashboard" : "list")}
+        items={[
+          {
+            key: "list",
+            label: "Клиенты",
+            children: (
+              <>
       {filtersVisible && (
         <Card style={{ marginBottom: 16, padding: '8px 12px' }}>
           <style>{`
@@ -771,15 +796,19 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
           </Tooltip>
         ))}
         <span className="ca-presets__sep" aria-hidden />
-        <button
-          type="button"
-          className="ca-presets__item ca-presets__item--chip"
-          aria-pressed={inProgressOnly}
-          data-testid="clients-chip-in-progress"
-          onClick={toggleInProgress}
-        >
-          С заказами в работе
-        </button>
+        {CLIENTS_CHIPS.map((chip) => (
+          <Tooltip key={chip.key} title={chip.hint}>
+            <button
+              type="button"
+              className="ca-presets__item ca-presets__item--chip"
+              aria-pressed={isClientsChipOn(filters, chip.key)}
+              data-testid={`clients-chip-${chip.key}`}
+              onClick={() => toggleChip(chip.key)}
+            >
+              {chip.label}
+            </button>
+          </Tooltip>
+        ))}
       </div>
       <Table
         {...tableProps}
@@ -800,6 +829,9 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
           title="Клиент"
           sorter
           width={180}
+          render={(value, record: any) => (analyticsAllowed
+            ? <a className="ca-name-link" onClick={() => setCardClientId(Number(record.client_id))}>{value}</a>
+            : value)}
         />
         <Table.Column
           dataIndex="primary_phone"
@@ -997,6 +1029,19 @@ export const ClientsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
         <span>долг <b className={pageTotals.debt > 0 ? "ca-totals__debt" : undefined}>{formatNumber(pageTotals.debt, 0)} ₸</b></span>
         <span className="ca-totals__note">по строкам на странице</span>
       </div>
+              </>
+            ),
+          },
+          {
+            key: "dashboard",
+            label: "Дашборд",
+            children: screenTab !== "dashboard" ? null : analyticsAllowed
+              ? <ClientsDashboard onOpenClient={setCardClientId} />
+              : <div className="pa-dash__state" data-testid="clients-dashboard-denied">{CLIENTS_ANALYTICS_ACCESS_TEXT[analyticsAccess]}</div>,
+          },
+        ]}
+      />
+      {analyticsAllowed ? <ClientCardDrawer clientId={cardClientId} onClose={() => setCardClientId(null)} /> : null}
     </List>
   );
 };

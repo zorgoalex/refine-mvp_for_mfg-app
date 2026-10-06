@@ -1,8 +1,9 @@
-import { Tooltip } from '../../ui/tooltipDelay';
 import React, { useEffect, useMemo, useState } from 'react';
 import dayjs from 'dayjs';
 import { useNavigation } from '@refinedev/core';
 import { paymentsAnalyticsApi } from '../../api/paymentsAnalyticsApi';
+import { DateBarsChart } from '../../components/analytics/DateBarsChart';
+import { GRAIN_TEXT, barGrain } from '../../components/analytics/dateBars';
 import { featureFlags } from '../../config/featureFlags';
 import { formatNumber } from '../../utils/numberFormat';
 import { DASHBOARD_PERIODS, dashboardRange, dashboardView, type DashboardPeriod, type DashboardView } from './paymentsDashboard';
@@ -10,7 +11,6 @@ import './paymentsAnalytics.css';
 
 const TONES = ['a', 'b', 'c', 'd', 'e'] as const;
 const money = (value: number) => `${formatNumber(value, 0)} ₸`;
-const shortDay = (date: string) => dayjs(date).format('DD.MM');
 
 type Loaded = { key: string; view: DashboardView | null };
 
@@ -81,17 +81,13 @@ export function PaymentsDashboard() {
           </section>
 
           <section className="pa-panel">
-            <header className="pa-panel__head"><h3>Поступления по дням</h3><span>{period} дней · лучший день = полная высота</span></header>
-            <div className="pa-days" role="img" aria-label="Поступления по дням">
-              {view.days.map((day) => (
-                <Tooltip key={day.date} title={`${dayjs(day.date).format('DD.MM.YYYY')}: ${money(day.amount)} · ${day.count} пл.`}>
-                  <span className="pa-days__col" data-empty={day.amount === 0 ? 'true' : undefined}>
-                    <i style={{ height: `${Math.max(day.amount > 0 ? 3 : 0, day.share * 100)}%` }} />
-                  </span>
-                </Tooltip>
-              ))}
-            </div>
-            <div className="pa-days__axis"><span>{shortDay(range.dateFrom)}</span><span>{shortDay(range.dateTo)}</span></div>
+            <header className="pa-panel__head"><h3>Поступления</h3><span>{GRAIN_TEXT[barGrain(view.days.length)]} · {period} дней</span></header>
+            <DateBarsChart
+              days={view.days.map((day) => ({ date: day.date, value: day.amount, count: day.count }))}
+              formatValue={money}
+              unit="пл."
+              ariaLabel="Поступления"
+            />
           </section>
 
           <div className="pa-dash__two">
