@@ -12,7 +12,7 @@ import {
   buildOrderEditSource, DETAIL_COLUMN_FIELDS, detailRowKey, orderEditEditingValues, type OrderEditSourceInput,
 } from './orderEditSnapshotSource';
 import {
-  orderDetailMirrorStructure, orderDetailPageWindow, readOrderDetailTableMirror, subscribeOrderDetailTableMirror,
+  orderDetailPageWindow, readOrderDetailTableMirror, subscribeOrderDetailTableMirror,
   type OrderDetailTableMirror,
 } from './orderDetailTableMirror';
 
@@ -234,6 +234,7 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
         orderNumber: current.orderNumber,
         clientContacts: current.clientContacts,
         hdfDetails: state.hdfDetails,
+        cutJobLabelsOf: mirror?.getCutJobLabels ?? null,
         tabs: orderFormMirrorTabs(current.operational),
         names: orderFormNames(current.references, current.sheetMaterialName, current.filmNameById),
         // The manager's own columns, sorting and grouping, once the detail table has been on screen.
@@ -288,15 +289,12 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
     if (!presenter) return undefined;
     const store = getOrderDraftStore(orderKey);
     const presented = () => presenter.getView().presentedOrderKey === orderKey;
-    let structure = '';
     let editorValues = '';
     const unsubscribe = subscribeOrderDetailTableMirror(store, () => {
       if (!presented()) return;
-      const next = orderDetailMirrorStructure(readOrderDetailTableMirror(store));
-      if (next !== structure) {
-        structure = next;
-        presenter.notifyChanged(orderKey);
-      } else presenter.notifyUi(orderKey);
+      // Anything the table republishes may change a cell (its cut job labels as well as its columns,
+      // order and groups): a new snapshot, built once per frame, and the interface state with it.
+      presenter.notifyChanged(orderKey);
     });
     const timer = window.setInterval(() => {
       if (!presented()) return;

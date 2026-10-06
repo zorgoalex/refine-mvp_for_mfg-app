@@ -29,7 +29,7 @@ const table = z.object({
 
 export const clientScreenSnapshotSchema = z.object({
   title: label,
-  summary: z.array(field).max(20),
+  summary: z.array(field).max(40),
   tabs: z.array(z.object({ key: z.enum(CLIENT_SCREEN_TAB_KEYS), label, counter: z.string().max(20).optional() }).strict()).max(20),
   basic: z.array(field).max(40).optional(),
   dates: z.array(field).max(40).optional(),

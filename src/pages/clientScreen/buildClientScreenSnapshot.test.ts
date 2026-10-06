@@ -7,7 +7,8 @@ import { clientScreenSnapshotSchema, clientScreenUiSchema, type ClientScreenUi }
 
 /** Every value is a sentinel naming its code, so a leak is visible in the serialized snapshot. */
 const S = (code: string, row = '') => `<<${code}${row}>>`;
-const DETAIL_FIELDS: DetailField[] = ['n', 'name', 'height', 'width', 'quantity', 'area', 'material', 'milling_type', 'edge_type', 'film', 'price_per_sqm', 'cost', 'note', 'production_status'];
+const DETAIL_FIELDS: DetailField[] = ['n', 'name', 'height', 'width', 'quantity', 'area', 'material', 'milling_type', 'edge_type', 'film', 'price_per_sqm', 'cost', 'note', 'production_status',
+  'hdf_parameter', 'doweling', 'cut_job', 'bath_cut_job', 'bazis_cut_sets', 'priority', 'basis_project', 'basis_product', 'basis_data', 'basis_designation'];
 const group = <F extends string>(prefix: string, keys: readonly F[], row = '') => Object.fromEntries(keys.map((key) => [key, S(`${prefix}.${key}`, row)])) as Record<F, string>;
 
 function source(over: Partial<ClientScreenOrderSource> = {}): ClientScreenOrderSource {
@@ -17,7 +18,8 @@ function source(over: Partial<ClientScreenOrderSource> = {}): ClientScreenOrderS
       { key: 'finance', label: 'Финансы' }, { key: 'services', label: 'Услуги/товары' },
     ],
     summary: group('summary', ['number', 'order_name', 'client', 'client_phone', 'client_phones', 'deadline', 'positions', 'parts', 'area', 'material', 'milling_type',
-      'edge_type', 'film', 'final', 'discount', 'surcharge', 'paid', 'debt']),
+      'edge_type', 'film', 'final', 'discount', 'surcharge', 'paid', 'debt', 'designer', 'basis_project', 'project', 'order_status', 'payment_status',
+      'production_status', 'priority', 'created_by']),
     basic: group('basic', ['client', 'order_name', 'order_date', 'order_status', 'payment_status', 'production_status', 'manager', 'priority', 'doweling', 'notes']),
     dates: group('dates', ['planned', 'completion', 'issue']),
     finance: group('finance', ['total', 'discount', 'surcharge', 'final', 'paid', 'debt']),

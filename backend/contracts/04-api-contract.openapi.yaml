@@ -21137,6 +21137,14 @@ components:
         - summary.surcharge
         - summary.paid
         - summary.debt
+        - summary.designer
+        - summary.basis_project
+        - summary.project
+        - summary.order_status
+        - summary.payment_status
+        - summary.production_status
+        - summary.priority
+        - summary.created_by
         - tab.basic
         - basic.client
         - basic.order_name
@@ -21163,6 +21171,16 @@ components:
         - details.cost
         - details.note
         - details.production_status
+        - details.hdf_parameter
+        - details.doweling
+        - details.cut_job
+        - details.bath_cut_job
+        - details.bazis_cut_sets
+        - details.priority
+        - details.basis_project
+        - details.basis_product
+        - details.basis_data
+        - details.basis_designation
         - tab.dates
         - dates.planned
         - dates.completion

@@ -3263,6 +3263,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     productionStatus: (id: number) => productionStatusesById.get(id)?.name,
     materialOf: (detail: any) => resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap),
   }), [clientScreenPaymentTypes, edgeTypesMap, filmsMap, materialsMap, millingTypesMap, productionStatusesById, resolvedNameByDetailId]);
+  const clientScreenEmployeeName = useCallback(
+    (id: number) => {
+      const found = (employeesData?.data || []).find((item: any) => Number(item.employee_id) === Number(id));
+      return typeof found?.full_name === 'string' ? found.full_name : undefined;
+    },
+    [employeesData],
+  );
+  const clientScreenDowelingSource = backendOrder?.dowelingLinks ?? dowelingLinksData?.data;
+  const clientScreenDowelingLinks = useMemo(() => (clientScreenDowelingSource ?? []) as any[], [clientScreenDowelingSource]);
   const clientScreenPaymentsSource = backendOrder?.payments ?? paymentsData?.data;
   const clientScreenPayments = useMemo(() => (clientScreenPaymentsSource ?? []) as any[], [clientScreenPaymentsSource]);
   const clientScreenGroupField = groupingActive ? grouping.state.field ?? null : null;
@@ -3285,6 +3294,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       columnKeys={visibleDetailColumns.map((column) => String(column.key ?? ''))}
       payments={clientScreenPayments}
       hdfDetails={hdfDetails}
+      cutJobByDetailId={cutJobByDetailId}
+      bathCutJobByDetailId={bathCutJobByDetailId}
+      dowelingLinks={clientScreenDowelingLinks}
+      employeeName={clientScreenEmployeeName}
+      projectLabel={featureFlags.projects && projectId ? projectLabel : null}
       names={clientScreenNames}
       canViewFinancials={canViewFinancials}
     />

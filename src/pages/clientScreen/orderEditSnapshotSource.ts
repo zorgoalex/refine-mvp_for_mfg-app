@@ -5,7 +5,10 @@ import { formatNumber } from '../../utils/numberFormat';
 import { calculateOrderTotalArea } from '../../utils/orderArea';
 import { orderCatalogLineAmount, orderCatalogSubtotal, type OrderCatalogLine } from '../../utils/orderCatalogLines';
 import { resolveHeaderMaterialName } from '../../utils/materialDisplayName';
+import { resolveOrderBasisProject } from '../../utils/orderBasisProject';
 import { isOrderDetailPlaceholder } from '../../utils/orderDetailRows';
+import { collectOrderBasisProjects } from '../orders/components/sections/orderBasisProjects';
+import { formatBazisCutSetsGroupLabel, formatCutJobGroupLabel } from '../orders/detailGrouping';
 import { buildOrderHeaderMaterialSummaryItems } from '../orders/orderMaterialsSummary';
 import type { ClientScreenOrderSource, ClientScreenValue, DetailField } from './buildClientScreenSnapshot';
 import { CLIENT_SCREEN_TAB_KEYS, type ClientScreenTabKey } from './clientScreenSnapshotSchema';
@@ -38,6 +41,8 @@ export interface OrderEditSourceInput {
     client: NameOf; orderStatus: NameOf; paymentStatus: NameOf; productionStatus: NameOf; employee: NameOf;
     sheetMaterial: NameOf; millingType: NameOf; edgeType: NameOf; film: NameOf; paymentType: NameOf;
   };
+  /** Labels of the cut jobs the detail table shows for a row, when the table is on screen. */
+  cutJobLabelsOf?: ((rowKey: string) => { cut_job: string | null; bath_cut_job: string | null } | null) | null;
   /** Keys of the visible detail table columns in the manager's order (table column keys). */
   detailColumnOrder: readonly string[];
   /** Current grouping of the detail table, if any: the grouping field of detailGrouping.ts and its groups. */
@@ -103,12 +108,16 @@ export const DETAIL_COLUMN_FIELDS: Readonly<Record<string, DetailField>> = {
   detail_number: 'n', detail_name: 'name', height: 'height', width: 'width', quantity: 'quantity', area: 'area',
   sheet_material_type_id: 'material', milling_type_id: 'milling_type', edge_type_id: 'edge_type', film_id: 'film',
   milling_cost_per_sqm: 'price_per_sqm', detail_cost: 'cost', note: 'note', production_status_id: 'production_status',
+  hdf_parameter_override_mm: 'hdf_parameter', doweling: 'doweling', cut_job: 'cut_job', bath_cut_job: 'bath_cut_job', bazis_cut_sets: 'bazis_cut_sets',
+  priority: 'priority', basis_project: 'basis_project', basis_product: 'basis_product', basis_data: 'basis_data', basis_designation: 'basis_designation',
 };
 
 /** Grouping field of the detail table → registry field. A grouping without an entry sends no group headers. */
 export const GROUPING_FIELDS: Readonly<Record<string, DetailField>> = {
   detail_number: 'n', area: 'area', milling: 'milling_type', edge: 'edge_type', material: 'material', note: 'note',
   price: 'price_per_sqm', detail_cost: 'cost', film: 'film', production_status: 'production_status',
+  hdf_parameter: 'hdf_parameter', doweling: 'doweling', cut_job: 'cut_job', bath_cut_job: 'bath_cut_job', basis_project: 'basis_project',
+  bazis_cut_sets: 'bazis_cut_sets',
 };
 
 /** Money the manager does not have (undefined) stays unavailable; it is never turned into a zero. */
@@ -124,9 +133,14 @@ const amount = (value: number | null | undefined): ClientScreenValue =>
 export const detailRowKey = (detail: OrderDetail): string => String(detail.temp_id ?? detail.detail_id ?? 0);
 
 /** One detail as display text: names instead of ids, the formats of the order screens. */
+const dashless = (label: string): ClientScreenValue => (label === '' || label === '—' ? null : label);
+const plain = (value: unknown): ClientScreenValue => (typeof value === 'string' && value.trim() !== '' ? value : null);
+
 export function orderDetailDisplayValues(
   detail: OrderDetail,
   names: Pick<OrderEditSourceInput['names'], 'sheetMaterial' | 'millingType' | 'edgeType' | 'film' | 'productionStatus'>,
+  /** Cut job labels as the table shows them; without them the detail's own references are used. */
+  cutJobs?: { cut_job: string | null; bath_cut_job: string | null } | null,
 ): Record<DetailField, ClientScreenValue> {
   return {
     n: detail.detail_number === null || detail.detail_number === undefined ? null : String(detail.detail_number),
@@ -144,6 +158,41 @@ export function orderDetailDisplayValues(
     cost: amount(detail.detail_cost),
     note: detail.note ?? null,
     production_status: named(detail.production_status_id, names.productionStatus),
+    hdf_parameter: detail.hdf_parameter_override_mm === null || detail.hdf_parameter_override_mm === undefined
+      ? null
+      : formatNumber(Number(detail.hdf_parameter_override_mm), 2),
+    doweling: detail.doweling === true ? 'Да' : null,
+    cut_job: cutJobs ? cutJobs.cut_job : dashless(formatCutJobGroupLabel(detail.cut_job ?? undefined)),
+    bath_cut_job: cutJobs ? cutJobs.bath_cut_job : dashless(formatCutJobGroupLabel(detail.bath_cut_job ?? undefined)),
+    bazis_cut_sets: dashless(formatBazisCutSetsGroupLabel(detail.bazis_cut_sets)),
+    priority: detail.priority === null || detail.priority === undefined ? null : formatNumber(Number(detail.priority), 0),
+    basis_project: plain(resolveOrderBasisProject(detail as never).name),
+    basis_product: plain(detail.basis_product),
+    basis_data: plain(detail.basis_data),
+    basis_designation: plain(detail.basis_designation),
+  };
+}
+
+/**
+ * The basis project and the designer lines of the order header, by the manager's header rule: the
+ * basis projects of the details, else the name of the latest doweling order; the designer is named
+ * only when there is no basis project — of the latest doweling order, else the order's own.
+ */
+export function clientScreenHeaderPeople(input: {
+  details: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  dowelingLinks: ReadonlyArray<{ doweling_order?: { doweling_order_name?: string | null; design_engineer_id?: number | null } | null }>;
+  header: { doweling_order_name?: string | null; design_engineer_id?: number | null };
+  employeeName: (id: number) => string | undefined;
+}): { basis_project: ClientScreenValue; designer: ClientScreenValue } {
+  const basisProjects = collectOrderBasisProjects(input.details as never);
+  const latest = input.dowelingLinks.length ? input.dowelingLinks[input.dowelingLinks.length - 1] : null;
+  const fallback = plain(latest?.doweling_order?.doweling_order_name) ?? plain(input.header.doweling_order_name);
+  const designerId = basisProjects.length > 0
+    ? null
+    : latest ? latest.doweling_order?.design_engineer_id ?? null : input.header.design_engineer_id ?? null;
+  return {
+    basis_project: basisProjects.length > 0 ? basisProjects.join(', ') : fallback,
+    designer: designerId === null || designerId === undefined ? null : input.employeeName(Number(designerId)) ?? null,
   };
 }
 
@@ -210,7 +259,10 @@ export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenO
   const columnOrder = input.detailColumnOrder.map((key) => DETAIL_COLUMN_FIELDS[key]).filter((field): field is DetailField => Boolean(field));
   const groupingField = input.grouping ? GROUPING_FIELDS[input.grouping.field] ?? null : null;
 
-  const detailRows = business.map((detail) => ({ key: detailRowKey(detail), values: orderDetailDisplayValues(detail, names) }));
+  const detailRows = business.map((detail) => {
+    const key = detailRowKey(detail);
+    return { key, values: orderDetailDisplayValues(detail, names, input.cutJobLabelsOf?.(key)) };
+  });
   return {
     tabs: input.tabs.filter((tab): tab is { key: ClientScreenTabKey; label: string } => (CLIENT_SCREEN_TAB_KEYS as readonly string[]).includes(tab.key)),
     summary: {
@@ -229,6 +281,17 @@ export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenO
       surcharge: clientScreenExtraMoney(header.surcharge, totalKnown),
       paid: totalKnown ? clientScreenMoney(paidAmount) : undefined,
       debt: totalKnown ? clientScreenMoney(remaining) : undefined,
+      order_status: named(header.order_status_id, names.orderStatus),
+      payment_status: named(header.payment_status_id, names.paymentStatus),
+      production_status: named(header.production_status_id, names.productionStatus),
+      priority: header.priority === null || header.priority === undefined ? null : formatNumber(header.priority, 0),
+      ...clientScreenHeaderPeople({
+        details: business as never, dowelingLinks: input.dowelingLinks as never, header: header as never,
+        employeeName: (id) => names.employee(id),
+      }),
+      // The edit form's header shows neither the project nor who created the order.
+      project: undefined,
+      created_by: undefined,
     },
     basic: {
       client: named(header.client_id, names.client),
@@ -314,6 +377,9 @@ export function orderEditEditingValues(
   names: OrderEditSourceInput['names'],
   columnKeys: readonly string[],
 ): Array<{ code: `details.${DetailField}`; value: string }> {
+  // Cells the table fills from its own knowledge (the last ready cut job) are not the editor's:
+  // the snapshot already has them as the table shows them.
+  const TABLE_OWNED = new Set<DetailField>(['cut_job', 'bath_cut_job']);
   const merged: Record<string, unknown> = { ...detail };
   for (const key of Object.keys(DETAIL_COLUMN_FIELDS)) {
     // A field the editor does not have keeps its saved value. A field the editor has without a
@@ -333,7 +399,7 @@ export function orderEditEditingValues(
   for (const key of columnKeys) {
     const field = DETAIL_COLUMN_FIELDS[key];
     const value = field ? display[field] : undefined;
-    if (!field || value === undefined || result.some((item) => item.code === `details.${field}`)) continue;
+    if (!field || TABLE_OWNED.has(field) || value === undefined || result.some((item) => item.code === `details.${field}`)) continue;
     result.push({ code: `details.${field}`, value: value === null || value === '' ? '—' : value.slice(0, 2000) });
   }
   return result;

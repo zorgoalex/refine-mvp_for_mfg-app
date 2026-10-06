@@ -22,7 +22,8 @@ export interface ClientScreenOrderSource {
   /** Tabs as the manager sees them: their order and their labels. */
   tabs: ReadonlyArray<{ key: ClientScreenTabKey; label: string }>;
   /** The order header above the tabs, as the manager's header shows it (no statuses, priority or project). */
-  summary: FieldsOf<'number' | 'order_name' | 'client' | 'client_phone' | 'client_phones' | 'deadline' | 'positions' | 'parts' | 'area' | 'material' | 'milling_type' | 'edge_type' | 'film' | 'final' | 'discount' | 'surcharge' | 'paid' | 'debt'>;
+  summary: FieldsOf<'number' | 'order_name' | 'client' | 'client_phone' | 'client_phones' | 'deadline' | 'positions' | 'parts' | 'area' | 'material' | 'milling_type' | 'edge_type' | 'film' | 'final' | 'discount' | 'surcharge' | 'paid' | 'debt'
+    | 'designer' | 'basis_project' | 'project' | 'order_status' | 'payment_status' | 'production_status' | 'priority' | 'created_by'>;
   basic: FieldsOf<'client' | 'order_name' | 'order_date' | 'order_status' | 'payment_status' | 'production_status' | 'manager' | 'priority' | 'doweling' | 'notes'>;
   dates: FieldsOf<'planned' | 'completion' | 'issue'>;
   finance: FieldsOf<'total' | 'discount' | 'surcharge' | 'final' | 'paid' | 'debt'>;
@@ -38,13 +39,15 @@ export interface ClientScreenOrderSource {
 }
 
 export type DetailField = 'n' | 'name' | 'height' | 'width' | 'quantity' | 'area' | 'material' | 'milling_type' | 'edge_type' | 'film'
-  | 'price_per_sqm' | 'cost' | 'note' | 'production_status';
+  | 'price_per_sqm' | 'cost' | 'note' | 'production_status'
+  | 'hdf_parameter' | 'doweling' | 'cut_job' | 'bath_cut_job' | 'bazis_cut_sets' | 'priority' | 'basis_project' | 'basis_product' | 'basis_data'
+  | 'basis_designation';
 
 /** Issues opaque ids for rows and groups; the manager window keeps one per presentation. */
 export type ClientScreenIdFor = (scope: 'detail' | 'detail-group' | 'payment' | 'service', key: string) => string;
 
 const EMPTY = '—';
-const RIGHT_ALIGNED = new Set(['height', 'width', 'quantity', 'area', 'price_per_sqm', 'cost', 'amount', 'price', 'sum']);
+const RIGHT_ALIGNED = new Set(['height', 'width', 'quantity', 'area', 'price_per_sqm', 'cost', 'amount', 'price', 'sum', 'hdf_parameter', 'priority']);
 const LABELS = new Map<string, string>(CLIENT_SCREEN_GROUPS.flatMap((group) => group.fields.map((field) => [field.code, field.label] as const)));
 /** The longest text the wire takes for one value; longer text is cut, visibly, instead of failing the whole snapshot. */
 export const CLIENT_SCREEN_TEXT_LIMIT = 2000;
@@ -150,7 +153,8 @@ export function buildClientScreenSnapshot(source: ClientScreenOrderSource, visib
 
 /** Header fields in the order of the manager's header; the number and the name make the title. */
 const SUMMARY_ORDER = ['order_name', 'client', 'client_phone', 'client_phones', 'deadline', 'positions', 'parts', 'area', 'material', 'milling_type', 'edge_type', 'film',
-  'final', 'discount', 'surcharge', 'paid', 'debt'] as const;
+  'final', 'discount', 'surcharge', 'paid', 'debt', 'order_status', 'payment_status', 'production_status', 'priority', 'designer', 'basis_project', 'project',
+  'created_by'] as const;
 
 /** «Заказ № …» by the number, else «Заказ …» by the name as in the manager's header — each only when ticked. */
 function clientScreenTitle(source: ClientScreenOrderSource, visible: ReadonlySet<string>): { text: string; by: 'number' | 'name' | null } {

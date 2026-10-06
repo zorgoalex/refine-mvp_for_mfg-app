@@ -3465,6 +3465,18 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         ? null
         : { rowKey: String(editingKey), field: typeof editingField === 'string' ? editingField : null },
       getEditingValues: () => form.getFieldsValue(true),
+      // Cut jobs as this table shows them: by its own maps of the last ready jobs, else by the detail.
+      getCutJobLabels: (rowKey) => {
+        const detail = (details as OrderDetail[]).find((item) => String(item.temp_id ?? item.detail_id) === rowKey);
+        if (!detail) return null;
+        const detailId = Number(detail.detail_id);
+        const known = Number.isInteger(detailId);
+        const label = (value: string) => (value === '—' ? null : value);
+        return {
+          cut_job: label(formatCutJobGroupLabel((known ? cutJobByDetailId?.get(detailId) : undefined) ?? detail.cut_job ?? undefined)),
+          bath_cut_job: label(formatCutJobGroupLabel((known ? bathCutJobByDetailId?.get(detailId) : undefined) ?? detail.bath_cut_job ?? undefined)),
+        };
+      },
       getActiveCell: () => {
         const focused = document.activeElement;
         return focused instanceof HTMLElement && focused.closest('[data-order-detail-spreadsheet-cell="true"]')
@@ -3473,7 +3485,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       },
     });
   }, [
-    cellRuntime, currentPage, draftStoreApi, editingField, editingKey, form, groupField, groupingActive, groupLabelOf,
+    bathCutJobByDetailId, cellRuntime, currentPage, cutJobByDetailId, details, draftStoreApi, editingField, editingKey, form, groupField,
+    groupingActive, groupLabelOf,
     hdfDisplayBySourceDetailId, mirrorColumnKeys, mirrorSortKey, mirrorSortOrder, pageSize, sheetMaterials.byId, tableRows,
   ]);
   useEffect(() => () => clearOrderDetailTableMirror(draftStoreApi), [draftStoreApi]);

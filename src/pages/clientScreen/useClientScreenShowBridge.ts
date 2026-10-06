@@ -53,7 +53,8 @@ export function useClientScreenShowBridge(input: ClientScreenShowBridgeInput): {
   }, [
     orderKey, input.record, input.clientName, input.clientContacts, input.details, input.groupedRows, input.groupField, columns, input.payments,
     input.names.millingType, input.names.edgeType, input.names.film, input.names.paymentType, input.names.productionStatus,
-    input.names.materialOf, input.canViewFinancials, input.hdfDetails, input.liveProductionStatusByDetailId, input.groupLabelOf,
+    input.names.materialOf, input.canViewFinancials, input.hdfDetails, input.cutJobByDetailId, input.bathCutJobByDetailId, input.dowelingLinks,
+    input.employeeName, input.projectLabel, input.liveProductionStatusByDetailId, input.groupLabelOf,
   ]);
 
   useEffect(() => {

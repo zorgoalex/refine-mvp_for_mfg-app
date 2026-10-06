@@ -41,8 +41,8 @@ describe('buildOrderShowSource', () => {
     expect(source.tabs.map((tab) => tab.key)).toEqual(['details', 'finance']);
     expect(source.summary).toMatchObject({ number: null, client: 'Садыков Арман', parts: '6' });
     expect(source.summary.final).toMatch(/^115\s000,00 /);
-    expect(source.details.columnOrder).toEqual(['n', 'height', 'width', 'quantity', 'area', 'milling_type', 'edge_type', 'material', 'note',
-      'price_per_sqm', 'cost', 'film', 'production_status']);
+    expect(source.details.columnOrder).toEqual(['n', 'height', 'width', 'quantity', 'area', 'milling_type', 'hdf_parameter', 'edge_type', 'material', 'note',
+      'price_per_sqm', 'cost', 'film', 'production_status', 'doweling', 'cut_job', 'basis_project']);
     expect(source.details.rows[0]).toMatchObject({
       key: '71',
       values: { n: '1', name: 'Фасад', height: '716', width: '396,50', quantity: '4', material: 'МДФ 16 мм', milling_type: 'Модерн', edge_type: 'R2',
@@ -113,7 +113,7 @@ describe('buildOrderShowSource', () => {
       field: 'film', groups: [{ key: '0', title: 'Белый софт', rowKeys: ['71'] }, { key: '1', title: 'Плёнка снята', rowKeys: ['72'] }],
     });
     // A grouping the customer screen has no field for sends no titles.
-    const byCut = buildOrderShowSource(input({ groupedRows, groupField: 'cut_job', groupLabelOf: () => 'Раскрой 12' }));
+    const byCut = buildOrderShowSource(input({ groupedRows, groupField: 'unknown_grouping', groupLabelOf: () => 'Раскрой 12' }));
     expect(byCut.details.grouping?.field).toBeNull();
     const snapshot = buildClientScreenSnapshot(byCut, ALL, createClientScreenIdMap(() => `id${Math.random().toString(36).slice(2, 10)}`));
     expect(snapshot.details!.groups).toBeUndefined();
@@ -150,6 +150,29 @@ describe('buildOrderShowSource', () => {
     expect(buildOrderShowSource(input({ record, details: [] })).summary.material).toBe('МДФ 19 мм (шапка)');
     expect(buildOrderShowSource(input({ record })).summary.material).toBe('МДФ 16 мм');
     expect(buildOrderShowSource(input({ details: [] })).summary.material).toBeNull();
+  });
+
+  it('the view page: extra columns, statuses, priority, project, who created, basis project and designer', () => {
+    const base = input();
+    const record = { ...base.record, payment_status_name: 'Частично оплачен', production_status_name: 'Фрезеровка', priority: 80, created_by_label: 'Алия К.' };
+    const details = [{ ...base.details[0], hdf_parameter_override_mm: 3, doweling: true, bazis_cut_sets: [{ bazisCutSetId: 5, name: 'x' }] }];
+    const source = buildOrderShowSource(input({
+      record, details, projectLabel: 'ПР-12',
+      columnKeys: ['detail_number', 'hdf_parameter_override_mm', 'doweling', 'cut_job', 'bath_cut_job', 'basis_project', 'bazis_cut_sets'],
+      cutJobByDetailId: new Map([[71, { cutJobId: 12, name: 'Раскрой кухни', cutNumber: 'Р-12' }]]),
+      dowelingLinks: [{ doweling_order: { doweling_order_name: 'П-17', design_engineer_id: 9 } }],
+      employeeName: (id) => ({ 9: 'Тимур С.' } as Record<number, string>)[id],
+    }));
+    expect(source.details.columnOrder).toEqual(['n', 'hdf_parameter', 'doweling', 'cut_job', 'bath_cut_job', 'basis_project', 'bazis_cut_sets']);
+    expect(source.details.rows[0].values).toMatchObject({ hdf_parameter: '3,00', doweling: 'Да', cut_job: 'Р-12: Раскрой кухни', bath_cut_job: null, bazis_cut_sets: 'БР-5' });
+    expect(source.summary).toMatchObject({
+      order_status: 'В работе', payment_status: 'Частично оплачен', production_status: 'Фрезеровка', priority: '80', created_by: 'Алия К.',
+      project: 'ПР-12', basis_project: 'П-17', designer: 'Тимур С.',
+    });
+    // The page shows no project line: none is sent; nothing of the new lines without its tick.
+    expect(buildOrderShowSource(input({ record })).summary.project).toBeUndefined();
+    const wire = JSON.stringify(buildClientScreenSnapshot(source, ['tab.details', 'summary.client'], createClientScreenIdMap(() => `id${Math.random().toString(36).slice(2, 10)}`)));
+    for (const hidden of ['ПР-12', 'П-17', 'Тимур С.', 'Алия К.', 'Р-12', 'БР-5', 'Фрезеровка', 'Частично']) expect(wire, hidden).not.toContain(hidden);
   });
 
   it('every view column key maps to a field of the registry', () => {
@@ -204,7 +227,7 @@ describe('view page: what the reviewer asked to pin down', () => {
       { kind: 'separator', groupIndex: 1, key: 's1', selectionKeys: [72], label: 'Раскрой 12' },
       { kind: 'detail', detail: details[1], groupIndex: 1 },
     ];
-    const unsupported = buildOrderShowSource(input({ details, groupedRows, groupField: 'cut_job', groupLabelOf: () => 'Раскрой 7' }));
+    const unsupported = buildOrderShowSource(input({ details, groupedRows, groupField: 'unknown_grouping', groupLabelOf: () => 'Раскрой 7' }));
     expect(unsupported.details.rows.map((row) => row.key)).toEqual(['71', '73', '72']);
     const snapshot = buildClientScreenSnapshot(unsupported, ALL, createClientScreenIdMap(() => `id${Math.random().toString(36).slice(2, 10)}`));
     expect(snapshot.details!.groups).toBeUndefined();

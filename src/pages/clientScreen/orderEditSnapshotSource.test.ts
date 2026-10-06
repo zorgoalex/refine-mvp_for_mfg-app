@@ -4,7 +4,7 @@ import { buildMirrorView } from './mirrorView';
 import { CLIENT_SCREEN_CODES, CLIENT_SCREEN_DEFAULT_VISIBLE_CODES } from './clientScreenRegistry';
 import { clientScreenSnapshotSchema } from './clientScreenSnapshotSchema';
 import {
-  buildOrderEditSource, clientScreenClientContacts, clientScreenPhone, clientScreenPhonesOf, DETAIL_COLUMN_FIELDS, GROUPING_FIELDS, orderEditEditingValues,
+  buildOrderEditSource, clientScreenClientContacts, clientScreenHeaderPeople, clientScreenPhone, clientScreenPhonesOf, DETAIL_COLUMN_FIELDS, GROUPING_FIELDS, orderEditEditingValues,
   type OrderEditSourceInput,
 } from './orderEditSnapshotSource';
 
@@ -67,10 +67,12 @@ describe('buildOrderEditSource', () => {
   });
 
   it('maps only known tabs, columns and grouping fields; everything else is left out', () => {
-    const source = buildOrderEditSource(input({ grouping: { field: 'hdf_parameter', groups: [{ key: '__sep__:hdf:8:0', label: 'ХДФ 8', rowKeys: [71] }] } }));
+    const source = buildOrderEditSource(input({ grouping: { field: 'unknown_grouping', groups: [{ key: '__sep__:x:8:0', label: 'Нечто 8', rowKeys: [71] }] } }));
     expect(source.tabs.map((tab) => tab.key)).toEqual(['basic', 'details', 'dates', 'finance', 'services']);
     expect(source.tabs[1].label).toBe('Детали заказа');
-    expect(source.details.columnOrder).toEqual(['n', 'height', 'width', 'quantity', 'area', 'milling_type', 'edge_type', 'material', 'note', 'price_per_sqm', 'cost', 'film', 'production_status', 'name']);
+    // Every column of the manager's table has a field; only «Действия» has none.
+    expect(source.details.columnOrder).toEqual(['n', 'height', 'width', 'quantity', 'area', 'milling_type', 'hdf_parameter', 'edge_type', 'material', 'note',
+      'doweling', 'price_per_sqm', 'cost', 'film', 'cut_job', 'production_status', 'name']);
     expect(source.details.grouping?.field).toBeNull();
     const byFilm = buildOrderEditSource(input({ grouping: { field: 'film', groups: [{ key: 'k', label: 'Белый софт', rowKeys: [71] }] } }));
     expect(byFilm.details.grouping).toEqual({ field: 'film', groups: [{ key: 'k', title: 'Белый софт', rowKeys: ['71'] }] });
@@ -105,8 +107,9 @@ describe('buildOrderEditSource', () => {
     }));
     const idFor = createClientScreenIdMap((() => { let n = 0; return () => `id${String(++n).padStart(6, '0')}`; })());
     for (const code of ['summary.number', 'basic.order_name', 'basic.notes', 'basic.order_status', 'basic.payment_status', 'basic.manager']) {
-      // The order name is shown by two codes (the header and the «Основное» tab): both off hide it.
-      const same = code === 'basic.order_name' ? ['basic.order_name', 'summary.order_name'] : [code];
+      // Some values are shown by two codes (the header and the «Основное» tab): both off hide them.
+      const twins: Record<string, string> = { 'basic.order_name': 'summary.order_name', 'basic.order_status': 'summary.order_status', 'basic.payment_status': 'summary.payment_status' };
+      const same = twins[code] ? [code, twins[code]] : [code];
       const others = CLIENT_SCREEN_CODES.filter((item) => !same.includes(item));
       expect(JSON.stringify(buildClientScreenSnapshot(src, others, idFor)), code).not.toContain(`<<${code}>>`);
       expect(JSON.stringify(buildClientScreenSnapshot(src, CLIENT_SCREEN_CODES, idFor)), code).toContain(`<<${code}>>`);
@@ -330,7 +333,7 @@ describe('contact data of the client', () => {
 });
 
 describe('the order header for the customer', () => {
-  it('has what the header of the manager has, except statuses, priority and project', () => {
+  it('has what the header of the manager has', () => {
     const summary = buildOrderEditSource(input()).summary;
     expect(summary).toMatchObject({
       number: '2418', order_name: 'Кухня — фасады', client: 'Садыков Арман', deadline: '16.10.2026', positions: '2', parts: '6',
@@ -341,8 +344,9 @@ describe('the order header for the customer', () => {
     expect(summary.discount).toMatch(/^5\s000,00 /);
     expect(summary.surcharge).toBeUndefined();
     expect(summary.paid).toMatch(/^40\s000,00 /);
-    expect(Object.keys(summary)).not.toEqual(expect.arrayContaining(['order_status']));
-    for (const key of Object.keys(summary)) expect(key).not.toMatch(/status|priority|project/);
+    // Statuses, priority, basis project and designer are header lines as well — each with its own tick, off by default.
+    for (const code of ['summary.order_status', 'summary.payment_status', 'summary.production_status', 'summary.priority', 'summary.project',
+      'summary.basis_project', 'summary.designer', 'summary.created_by']) expect(CLIENT_SCREEN_DEFAULT_VISIBLE_CODES).not.toContain(code);
   });
 
   it('different values across the details give a dash; no details — no material and no common parameters', () => {
@@ -405,3 +409,81 @@ describe('the order header for the customer', () => {
     expect(clientScreenSnapshotSchema.safeParse(noted).success).toBe(true);
   });
 });
+
+describe('every element of the manager screen is available as a tick', () => {
+  const idFor = () => createClientScreenIdMap((() => { let n = 0; return () => `id${String(++n).padStart(6, '0')}`; })());
+  const base = input();
+  const rich = {
+    ...base.details[0], hdf_parameter_override_mm: 3.2, doweling: true, priority: 80, basis_project: 'Проект-А', basis_product: 'Изделие-7',
+    basis_data: 'ДАННЫЕ-Б', basis_designation: 'ОБОЗН-9', cut_job: { cutJobId: 12, name: 'Раскрой кухни', cutNumber: 'Р-12' },
+    bath_cut_job: null, bazis_cut_sets: [{ bazisCutSetId: 5, name: 'x' }],
+  } as unknown as OrderEditSourceInput['details'][number];
+
+  it('the extra columns of the detail table: display text as the table shows it', () => {
+    const src = buildOrderEditSource(input({
+      details: [rich] as OrderEditSourceInput['details'],
+      detailColumnOrder: ['detail_number', 'hdf_parameter_override_mm', 'doweling', 'cut_job', 'bath_cut_job', 'bazis_cut_sets', 'priority', 'basis_project',
+        'basis_product', 'basis_data', 'basis_designation'],
+    }));
+    expect(src.details.rows[0].values).toMatchObject({
+      hdf_parameter: '3,20', doweling: 'Да', cut_job: 'Р-12: Раскрой кухни', bath_cut_job: null, bazis_cut_sets: 'БР-5', priority: '80',
+      basis_project: 'Проект-А', basis_product: 'Изделие-7', basis_data: 'ДАННЫЕ-Б', basis_designation: 'ОБОЗН-9',
+    });
+    expect(src.details.columnOrder).toEqual(['n', 'hdf_parameter', 'doweling', 'cut_job', 'bath_cut_job', 'bazis_cut_sets', 'priority', 'basis_project',
+      'basis_product', 'basis_data', 'basis_designation']);
+  });
+
+  it('cut jobs come from the table when it is on screen (it knows the last ready job), else from the detail', () => {
+    const fromTable = buildOrderEditSource(input({
+      details: [rich] as OrderEditSourceInput['details'],
+      cutJobLabelsOf: (rowKey) => (rowKey === '71' ? { cut_job: 'Р-15: Новый раскрой', bath_cut_job: 'В-3' } : null),
+    }));
+    expect(fromTable.details.rows[0].values).toMatchObject({ cut_job: 'Р-15: Новый раскрой', bath_cut_job: 'В-3' });
+  });
+
+  it('none of the new values leaves without its own tick', () => {
+    const src = buildOrderEditSource(input({
+      details: [rich] as OrderEditSourceInput['details'],
+      detailColumnOrder: Object.keys(DETAIL_COLUMN_FIELDS),
+      dowelingLinks: [{ order_id: 1, doweling_order_id: 2, doweling_order: { doweling_order_id: 2, doweling_order_name: 'П-17', design_engineer_id: 9 } }] as never,
+    }));
+    const old = CLIENT_SCREEN_CODES.filter((code) => !/^(details\.(hdf_parameter|doweling|cut_job|bath_cut_job|bazis_cut_sets|priority|basis_)|summary\.(designer|basis_project|project|order_status|payment_status|production_status|priority|created_by))/.test(code));
+    const wire = JSON.stringify(buildClientScreenSnapshot(src, old, idFor()));
+    for (const hidden of ['3,20', 'Р-12', 'Раскрой кухни', 'БР-5', 'Проект-А', 'Изделие-7', 'ДАННЫЕ-Б', 'ОБОЗН-9']) expect(wire, hidden).not.toContain(hidden);
+    const all = buildClientScreenSnapshot(src, CLIENT_SCREEN_CODES, idFor());
+    for (const shown of ['3,20', 'Р-12: Раскрой кухни', 'БР-5', 'Проект-А', 'Изделие-7', 'ДАННЫЕ-Б', 'ОБОЗН-9']) expect(JSON.stringify(all), shown).toContain(shown);
+    expect(clientScreenSnapshotSchema.safeParse(all).success).toBe(true);
+    // Each new header line alone shows only itself.
+    const only = (code: string) => buildClientScreenSnapshot(src, [code], idFor()).summary;
+    expect(only('summary.order_status')).toEqual([{ code: 'summary.order_status', label: 'Статус заказа', value: 'В работе' }]);
+    expect(only('summary.priority')).toEqual([{ code: 'summary.priority', label: 'Приоритет', value: '100' }]);
+    expect(only('summary.basis_project')).toEqual([{ code: 'summary.basis_project', label: 'Базис-проект', value: 'Проект-А' }]);
+  });
+
+  it('the designer and the basis project follow the rule of the manager header', () => {
+    const employee = (id: number) => ({ 9: 'Алия К.', 4: 'Тимур С.' } as Record<number, string>)[id];
+    const link = (name: string, designer: number | null) => ({ doweling_order: { doweling_order_name: name, design_engineer_id: designer } });
+    // Basis projects of the details: they are named, and no designer line.
+    expect(clientScreenHeaderPeople({ details: [{ basis_project: 'Проект-А' }, { basis_project: 'Проект-Б' }, { basis_project: 'Проект-А' }],
+      dowelingLinks: [link('П-17', 9)], header: { design_engineer_id: 4 }, employeeName: employee }))
+      .toEqual({ basis_project: 'Проект-А, Проект-Б', designer: null });
+    // No basis project: the latest doweling order gives the name and the designer.
+    expect(clientScreenHeaderPeople({ details: [{}], dowelingLinks: [link('П-16', 4), link('П-17', 9)], header: { design_engineer_id: 4 }, employeeName: employee }))
+      .toEqual({ basis_project: 'П-17', designer: 'Алия К.' });
+    // A doweling order without a designer: no designer, even if the order has its own.
+    expect(clientScreenHeaderPeople({ details: [], dowelingLinks: [link('П-17', null)], header: { design_engineer_id: 4 }, employeeName: employee }).designer).toBeNull();
+    // No doweling order at all: the order's own designer.
+    expect(clientScreenHeaderPeople({ details: [], dowelingLinks: [], header: { design_engineer_id: 4, doweling_order_name: 'П-9' }, employeeName: employee }))
+      .toEqual({ basis_project: 'П-9', designer: 'Тимур С.' });
+    // An employee the form has no name for is never shown as an id.
+    expect(clientScreenHeaderPeople({ details: [], dowelingLinks: [], header: { design_engineer_id: 777 }, employeeName: employee }).designer).toBeNull();
+  });
+
+  it('the edit form header has no project and no «создал заказ» line: nothing is sent for them', () => {
+    const summary = buildOrderEditSource(input()).summary;
+    expect(summary.project).toBeUndefined();
+    expect(summary.created_by).toBeUndefined();
+    expect(summary).toMatchObject({ order_status: 'В работе', payment_status: 'Частично оплачен', production_status: 'Фрезеровка', priority: '100' });
+  });
+});
+

@@ -122,7 +122,7 @@ describe('what the detail table shows, for the customer screen', () => {
   });
 
   it('a cell the customer screen has no field for gives no focus mark; a failing editor read gives saved values', () => {
-    const result = mirroredEditing(table({ rowKey: '71', field: 'cut_job' }, () => { throw new Error('form is gone'); }), details, names, idFor);
+    const result = mirroredEditing(table({ rowKey: '71', field: 'actions' }, () => { throw new Error('form is gone'); }), details, names, idFor);
     expect(result.focus).toBeNull();
     expect(result.editing?.values.find((item) => item.code === 'details.height')?.value).toBe('716');
   });
@@ -130,7 +130,8 @@ describe('what the detail table shows, for the customer screen', () => {
   it('no editor open: the cell the keyboard is in is marked, when the customer screen has such a field', () => {
     const at = (rowKey: string, columnKey: string) => ({ ...table(null), getActiveCell: () => ({ rowKey, columnKey }) });
     expect(mirroredEditing(at('71', 'film_id'), details, names, idFor)).toEqual({ focus: { code: 'details.film', rowId: 'detail71' }, editing: null });
-    expect(mirroredEditing(at('71', 'cut_job'), details, names, idFor).focus).toBeNull();
+    expect(mirroredEditing(at('71', 'actions'), details, names, idFor).focus).toBeNull();
+    expect(mirroredEditing(at('71', 'cut_job'), details, names, idFor).focus).toEqual({ code: 'details.cut_job', rowId: 'detail71' });
     expect(mirroredEditing(at('gone', 'height'), details, names, idFor).focus).toBeNull();
     const broken = { ...table(null), getActiveCell: () => { throw new Error('table is gone'); } };
     expect(mirroredEditing(broken, details, names, idFor)).toEqual({ focus: null, editing: null });

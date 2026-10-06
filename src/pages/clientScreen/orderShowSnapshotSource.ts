@@ -4,9 +4,10 @@ import { formatNumber } from '../../utils/numberFormat';
 import { calculateOrderTotalArea } from '../../utils/orderArea';
 import type { ClientScreenOrderSource, ClientScreenValue, DetailField } from './buildClientScreenSnapshot';
 import type { ClientScreenTabKey } from './clientScreenSnapshotSchema';
+import { formatCutJobGroupLabel } from '../orders/detailGrouping';
 import { orderDetailMirrorRows } from './orderDetailTableMirror';
 import {
-  clientScreenDate, clientScreenExtraMoney, clientScreenHeaderFromDetails, clientScreenMoney, GROUPING_FIELDS, orderDetailDisplayValues,
+  clientScreenDate, clientScreenExtraMoney, clientScreenHeaderFromDetails, clientScreenHeaderPeople, clientScreenMoney, GROUPING_FIELDS, orderDetailDisplayValues,
   type ClientScreenClientContacts,
 } from './orderEditSnapshotSource';
 
@@ -33,6 +34,14 @@ export interface OrderShowSourceInput {
   /** Keys of the visible detail table columns, left to right (the view page's column keys). */
   columnKeys: readonly string[];
   payments: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  /** The last ready cut jobs the page shows per detail id (plain and bath). */
+  cutJobByDetailId?: ReadonlyMap<number, unknown>;
+  bathCutJobByDetailId?: ReadonlyMap<number, unknown>;
+  /** Doweling links of the order and employee names: the header's basis project and designer lines. */
+  dowelingLinks?: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  employeeName?: (id: number) => string | undefined;
+  /** The project line of the page header, when the page shows one. */
+  projectLabel?: string | null;
   /** HDF details of the order, for the header's material line. */
   hdfDetails?: readonly OrderHdfDetail[];
   names: {
@@ -55,6 +64,8 @@ export const SHOW_DETAIL_COLUMN_FIELDS: Readonly<Record<string, DetailField>> = 
   detail_number: 'n', detail_name: 'name', height: 'height', width: 'width', quantity: 'quantity', area: 'area',
   material: 'material', milling_type: 'milling_type', edge_type: 'edge_type', film: 'film',
   milling_cost_per_sqm: 'price_per_sqm', detail_cost: 'cost', note: 'note', production_status_id: 'production_status',
+  hdf_parameter_override_mm: 'hdf_parameter', doweling: 'doweling', cut_job: 'cut_job', bath_cut_job: 'bath_cut_job', basis_project: 'basis_project',
+  bazis_cut_sets: 'bazis_cut_sets',
 };
 
 const SHOW_TABS: ReadonlyArray<{ key: ClientScreenTabKey; label: string }> = [
@@ -143,7 +154,20 @@ export function buildOrderShowSource(input: OrderShowSourceInput): ClientScreenO
   const columnOrder = input.columnKeys.map((key) => SHOW_DETAIL_COLUMN_FIELDS[key]).filter((field): field is DetailField => Boolean(field));
   const client = textOrNull(input.clientName) ?? textOrNull(record.client_name);
 
-  const detailRows = details.map((detail, index) => ({ key: orderShowDetailKey(sourceDetails[index]), values: orderDetailDisplayValues(detail, detailNames) }));
+  const cutLabel = (map: ReadonlyMap<number, unknown> | undefined, detail: Readonly<Record<string, unknown>>, own: unknown): string | null => {
+    const id = idOf(detail.detail_id);
+    const label = formatCutJobGroupLabel(((id !== null ? map?.get(id) : undefined) ?? own ?? undefined) as never);
+    return label === '—' ? null : label;
+  };
+  const detailRows = details.map((detail, index) => {
+    const raw = sourceDetails[index];
+    return {
+      key: orderShowDetailKey(raw),
+      values: orderDetailDisplayValues(detail, detailNames, {
+        cut_job: cutLabel(input.cutJobByDetailId, raw, raw.cut_job), bath_cut_job: cutLabel(input.bathCutJobByDetailId, raw, raw.bath_cut_job),
+      }),
+    };
+  });
   return {
     tabs: SHOW_TABS.filter((tab) => tab.key !== 'finance' || input.canViewFinancials),
     summary: {
@@ -162,6 +186,17 @@ export function buildOrderShowSource(input: OrderShowSourceInput): ClientScreenO
       surcharge: clientScreenExtraMoney(record.surcharge, totalKnown),
       paid: totalKnown ? money(paidAmount) : undefined,
       debt: totalKnown ? money(Math.max(0, finalAmount - paidAmount)) : undefined,
+      order_status: textOrNull(record.order_status_name),
+      payment_status: textOrNull(record.payment_status_name),
+      production_status: textOrNull(record.production_status_name),
+      priority: record.priority === null || record.priority === undefined ? null : formatNumber(Number(record.priority) || 0, 0),
+      ...clientScreenHeaderPeople({
+        details: sourceDetails, dowelingLinks: (input.dowelingLinks ?? []) as never, header: record as never,
+        employeeName: (id) => input.employeeName?.(id),
+      }),
+      // A project line only when the page has one; who created the order as the page names them.
+      project: input.projectLabel === undefined ? undefined : textOrNull(input.projectLabel),
+      created_by: textOrNull(record.created_by_label),
     },
     // The view page has no such tabs; nothing of them is sent.
     basic: {},
