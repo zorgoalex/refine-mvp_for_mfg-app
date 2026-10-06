@@ -1934,7 +1934,7 @@
   /* начинается под блоками во всю ширину (заголовок, подбор, фильтры), сколько бы их ни было */
   grid-row: span 80;
   position: sticky;
-  top: calc(var(--wb-order-sticky-top, 48px) + var(--wb-order-bar-height, 52px) + 12px);
+  top: calc(var(--wb-order-sticky-top, 84px) + var(--wb-order-bar-height, 52px) + 12px);
 }
 
 :root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-page-modern__jobs > .ant-card-head {
@@ -1953,7 +1953,7 @@
 }
 
 :root[data-ui-variant="workbench"] .cut-page-modern--wb-split .wb-cut-jobs__grid {
-  max-height: calc(100vh - var(--wb-order-sticky-top, 48px) - var(--wb-order-bar-height, 52px) - 330px);
+  max-height: calc(100vh - var(--wb-order-sticky-top, 84px) - var(--wb-order-bar-height, 52px) - 330px);
   min-height: 160px;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -2094,4 +2094,14 @@
   border-color: var(--evo-border);
   background: var(--evo-surface);
   color: var(--evo-text-tertiary, #a3a8b3);
+}
+
+/* Строка «фоновая загрузка заказа» резервировала 24px над карточкой и формой заказа — из-за неё
+   отступ под верхней панелью выглядел увеличенным. В NewLine она живёт в самом отступе оболочки
+   (20px над содержимым) и места не занимает. */
+:root[data-ui-variant="workbench"] .evolution-shell__content [data-order-loading] {
+  min-height: 20px !important;
+  height: 20px;
+  margin-top: -20px;
+  font-size: 12px;
 }

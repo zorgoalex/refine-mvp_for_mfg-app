@@ -376,8 +376,9 @@ test.describe('Workbench orders polish', () => {
             bar: Math.round(document.querySelector('.wb-topbar')!.getBoundingClientRect().height),
             tabs: Math.round(document.querySelector('.workspace-tabs')!.getBoundingClientRect().height),
         }));
-        expect(heights.bar).toBe(48);
-        expect(heights.tabs).toBe(48);
+        // utilities row 44 + one row of tabs 32 + 8 below; the tabs block is the whole bar
+        expect(heights.bar).toBe(84);
+        expect(heights.tabs).toBe(84);
 
         const sider = page.locator('.evolution-sider');
         await sider.getByRole('button', { name: 'Открыть быстрый переход' }).click();
@@ -437,7 +438,7 @@ test.describe('Workbench orders polish', () => {
 
         expect(state.rows).toBeGreaterThanOrEqual(3);
         // все строки вкладок лежат внутри панели с фоном, экран начинается под ней
-        expect(state.barHeight).toBeGreaterThan(48 + 32);
+        expect(state.barHeight).toBeGreaterThan(84 + 32);
         expect(state.lastTabBottom).toBeLessThanOrEqual(state.barBottom);
         expect(state.contentTop).toBeGreaterThanOrEqual(state.barBottom);
         expect(state.background).not.toBe('rgba(0, 0, 0, 0)');

@@ -94,6 +94,27 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
   // «NewLine» on desktop: one top bar — workspace tabs on the left, utilities on the right.
   const isWorkbenchDesktop = variant === 'workbench' && !isMobile && !isTablet;
 
+  // NewLine: the height of the top bar (utilities row + however many rows of tabs) as a CSS variable,
+  // for full-height screens (boards) that must end exactly at the bottom of the window.
+  const workbenchTopbarRef = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    const root = document.documentElement;
+    const bar = workbenchTopbarRef.current;
+    if (!isWorkbenchDesktop || !bar) {
+      root.style.removeProperty('--wb-chrome-height');
+      return undefined;
+    }
+    const publish = () => root.style.setProperty('--wb-chrome-height', `${Math.round(bar.getBoundingClientRect().height)}px`);
+    publish();
+    if (typeof ResizeObserver === 'undefined') return () => root.style.removeProperty('--wb-chrome-height');
+    const observer = new ResizeObserver(publish);
+    observer.observe(bar);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty('--wb-chrome-height');
+    };
+  }, [isWorkbenchDesktop]);
+
   useTabSync();
   useGlobalUnloadGuard();
 
@@ -186,7 +207,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
       ) : null}
       <Layout className="evolution-shell__main">
         {isWorkbenchDesktop ? (
-          <div className="wb-topbar">
+          <div className="wb-topbar" ref={workbenchTopbarRef}>
             <EvolutionWorkspaceTabs />
             <div className="wb-topbar__actions">
               <EvolutionHeaderUtilities hideSearch />

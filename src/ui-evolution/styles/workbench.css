@@ -76,27 +76,22 @@
   position: sticky;
   top: 0;
   z-index: 30;
-  /* одна строка вкладок — 48px; когда вкладки переносятся на новые строки, панель растёт
-     вместе с ними, и содержимое экрана начинается под последней строкой */
-  min-height: 48px;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding-right: 16px;
-  /* линия снизу — тенью, а не рамкой: высота панели равна высоте вкладок, от неё страницы считают липкие отступы */
+  /* Две строки: сверху — утилиты (сканер, уведомления, тема, профиль), под ними — вкладки на всю
+     ширину. Вкладки не делят строку с утилитами, поэтому при переносе занимают всю ширину экрана. */
+  min-height: 44px;
+  /* линия снизу — тенью, а не рамкой: высоту панели страницы берут из высоты блока вкладок */
   box-shadow: 0 1px 0 var(--evo-border);
   background: color-mix(in srgb, var(--evo-canvas) 94%, transparent);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
 }
 
+/* Блок вкладок — вся панель: место под строку утилит заложено его верхним отступом, поэтому его
+   высота и есть высота панели (от неё страницы считают липкие отступы). */
 :root[data-ui-variant="workbench"] .wb-topbar > .evolution-workspace-tabs.workspace-tabs {
   position: static;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 48px;
-  /* вкладки высотой 32px: 8px сверху и снизу, между строками — 4px */
-  padding: 8px 0 8px 16px;
+  /* строка утилит 44px; вкладки высотой 32px, между строками — 4px, снизу — 8px */
+  padding: 44px 16px 8px;
   border-bottom: 0;
   background: transparent;
 }
@@ -106,10 +101,11 @@
 }
 
 :root[data-ui-variant="workbench"] .wb-topbar__actions {
-  flex: 0 0 auto;
-  /* остаются справа и тогда, когда ни одной вкладки не открыто; при нескольких строках — в первой */
-  margin-left: auto;
-  height: 48px;
+  /* в верхней строке справа; остаются на месте и когда ни одной вкладки не открыто */
+  position: absolute;
+  top: 0;
+  right: 16px;
+  height: 44px;
   display: flex;
   align-items: center;
 }

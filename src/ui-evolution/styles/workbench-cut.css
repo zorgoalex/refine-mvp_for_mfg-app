@@ -472,7 +472,7 @@
 
 /* список заданий занимает высоту экрана и прокручивается сам */
 :root[data-ui-variant="workbench"] .cut-page-modern--wb-split.cut-page-modern--standalone .wb-cut-jobs__grid {
-  max-height: calc(100vh - var(--wb-order-sticky-top, 48px) - 330px);
+  max-height: calc(100vh - var(--wb-order-sticky-top, 84px) - 330px);
 }
 
 /* ---------- шапка задания: действия; прежняя строка «Создать карточку…» не нужна ---------- */
@@ -723,9 +723,9 @@
 :root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item--open > .wb-cut-sheet-parts {
   position: sticky;
   /* под верхней панелью и под липкой строкой заголовка группы */
-  top: calc(var(--wb-cut-sticky-top, 48px) + var(--wb-cut-group-head, 104px) + 10px);
+  top: calc(var(--wb-cut-sticky-top, 84px) + var(--wb-cut-group-head, 104px) + 10px);
   align-self: start;
-  max-height: calc(100vh - var(--wb-cut-sticky-top, 48px) - var(--wb-cut-group-head, 104px) - 70px);
+  max-height: calc(100vh - var(--wb-cut-sticky-top, 84px) - var(--wb-cut-group-head, 104px) - 70px);
   border: 1px solid var(--evo-border);
 }
 

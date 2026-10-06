@@ -3,8 +3,9 @@
    МДФ-доска (`--cnc`) этими правилами не затрагивается. */
 
 :root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) {
-  /* верхняя панель 48 + отступы оболочки + нижняя строка: страница целиком на экране, без общей прокрутки */
-  height: calc(100vh - 136px);
+  /* верхняя панель (её высоту оболочка кладёт в --wb-chrome-height) + отступы оболочки + нижняя строка:
+     страница целиком на экране, без общей прокрутки */
+  height: calc(100vh - var(--wb-chrome-height, 84px) - 88px);
   padding: 18px 24px 16px;
 }
 
@@ -176,7 +177,7 @@
 :root[data-ui-variant="workbench"] .status-board-page.status-board-page--cnc {
   /* верхняя панель (48px, с переносом вкладок — выше; её высоту страница кладёт в переменную)
      + отступы оболочки + нижняя строка: страница целиком на экране, без общей прокрутки */
-  height: calc(100vh - var(--status-board-toolbar-sticky-top, 48px) - 88px);
+  height: calc(100vh - var(--wb-chrome-height, var(--status-board-toolbar-sticky-top, 84px)) - 88px);
   padding: 18px 24px 16px;
 }
 

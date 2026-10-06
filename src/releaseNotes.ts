@@ -29,6 +29,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-07", title: "NewLine: вкладки на всю ширину, меньше отступ над заказом",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Вариант NewLine: сканер, уведомления, переключатель темы и профиль вынесены в отдельную верхнюю строку, вкладки идут под ней на всю ширину экрана. Раньше вкладки делили строку с этими кнопками и при переносе скапливались слева, из-за чего область вкладок становилась слишком высокой.",
+    ],
+    fixed: [
+      "Вариант NewLine: над карточкой и формой заказа убран лишний пустой отступ в 24px под областью вкладок.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-06", title: "Видимость экранов для отдельных пользователей",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
