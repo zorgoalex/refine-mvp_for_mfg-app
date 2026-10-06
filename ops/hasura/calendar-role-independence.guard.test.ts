@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import { USER_ROLES } from '../../backend/src/permissions/permissions';
+import { HASURA_DATA_ROLES } from '../../backend/src/permissions/permissions';
 
 interface SelectPermission {
   role: string;
@@ -21,7 +21,8 @@ const metadata = JSON.parse(
   readFileSync(new URL('./metadata.json', import.meta.url), 'utf8'),
 ) as { sources: Array<{ name: string; tables: TableMetadata[] }> };
 const tables = metadata.sources.find((source) => source.name === 'default')?.tables ?? [];
-const calendarRoles = USER_ROLES.filter((role) => role !== 'admin').sort();
+// Roles without Hasura grants (the 1C integration operator) are not calendar users: see HASURA_DATA_ROLES.
+const calendarRoles = HASURA_DATA_ROLES.filter((role) => role !== 'admin').sort();
 
 const calendarResources = [
   'orders_view',
