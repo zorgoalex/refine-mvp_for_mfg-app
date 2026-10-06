@@ -531,5 +531,52 @@ describe('every element of the manager screen is available as a tick', () => {
     expect(clientScreenHeaderPeople({ details: [], dowelingLinks: [{ doweling_order: { doweling_order_name: 'П-1', design_engineer_id: null } }],
       header: { design_engineer: 'Алия К. (из записи)' }, employeeName: employee }).designer).toBeNull();
   });
+
+  it('a cut grouping never names a job the manager\'s table does not show: no column — no titles; a job that is gone — no name', () => {
+    const second = { ...rich, detail_id: 72, detail_number: 2, cut_job: { cutJobId: 13, name: 'Раскрой шкафа', cutNumber: 'Р-13' } } as OrderEditSourceInput['details'][number];
+    const grouping = { field: 'cut_job', groups: [
+      { key: '0', label: 'Р-12: Раскрой кухни', rowKeys: [71] }, { key: '1', label: 'Р-13: Раскрой шкафа', rowKeys: [72] },
+    ] };
+    const details = [rich, second] as OrderEditSourceInput['details'];
+    // The manager has no cut column (no right to see cut jobs, or the column is switched off): everything is ticked, nothing of the jobs goes.
+    const noColumn = buildClientScreenSnapshot(
+      buildOrderEditSource(input({ details, grouping, detailColumnOrder: ['detail_number', 'height'], tableCellsOf: () => ({ cut_job: null, bath_cut_job: null, hdf_parameter: null }) })),
+      CLIENT_SCREEN_CODES, idFor(),
+    );
+    expect(noColumn.details!.groups).toBeUndefined();
+    for (const hidden of ['Р-12', 'Р-13', 'Раскрой кухни', 'Раскрой шкафа']) expect(JSON.stringify(noColumn), hidden).not.toContain(hidden);
+    // The column is on screen and the first job is archived (gone from the table's list): its group has no name any more.
+    const archived = buildClientScreenSnapshot(
+      buildOrderEditSource(input({
+        details, grouping, detailColumnOrder: ['detail_number', 'cut_job'],
+        tableCellsOf: (rowKey) => ({ cut_job: rowKey === '72' ? 'Р-13: Раскрой шкафа' : null, bath_cut_job: null, hdf_parameter: null }),
+      })),
+      CLIENT_SCREEN_CODES, idFor(),
+    );
+    expect(archived.details!.groups!.map((group) => group.title)).toEqual(['—', 'Р-13: Раскрой шкафа']);
+    expect(JSON.stringify(archived)).not.toContain('Раскрой кухни');
+    expect(JSON.stringify(archived)).not.toContain('Р-12');
+    // Bath jobs take the same path.
+    const bath = buildClientScreenSnapshot(
+      buildOrderEditSource(input({
+        details, grouping: { field: 'bath_cut_job', groups: [{ key: '0', label: 'В-7: Старая ванна', rowKeys: [71, 72] }] },
+        detailColumnOrder: ['detail_number', 'bath_cut_job'], tableCellsOf: () => ({ cut_job: null, bath_cut_job: null, hdf_parameter: null }),
+      })),
+      CLIENT_SCREEN_CODES, idFor(),
+    );
+    expect(JSON.stringify(bath)).not.toContain('Старая ванна');
+  });
+
+  it('any grouping names its groups only when that column is on the customer table', () => {
+    const grouping = { field: 'film', groups: [{ key: '0', label: 'Белый софт', rowKeys: [71] }] };
+    const hiddenColumn = buildClientScreenSnapshot(
+      buildOrderEditSource(input({ grouping, detailColumnOrder: ['detail_number', 'height'] })), CLIENT_SCREEN_CODES, idFor(),
+    );
+    expect(hiddenColumn.details!.groups).toBeUndefined();
+    const shownColumn = buildClientScreenSnapshot(
+      buildOrderEditSource(input({ grouping, detailColumnOrder: ['detail_number', 'film_id'] })), CLIENT_SCREEN_CODES, idFor(),
+    );
+    expect(shownColumn.details!.groups!.map((group) => group.title)).toEqual(['Белый софт']);
+  });
 });
 

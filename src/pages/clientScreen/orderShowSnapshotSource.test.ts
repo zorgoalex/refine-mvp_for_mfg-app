@@ -186,6 +186,36 @@ describe('buildOrderShowSource', () => {
     for (const hidden of ['ПР-12', 'П-17', 'Тимур С.', 'Алия К.', 'Р-12', 'БР-5', 'Фрезеровка', 'Частично']) expect(wire, hidden).not.toContain(hidden);
   });
 
+  it('view page, cut grouping: without the cut column nothing of the jobs goes; a job gone from the page map has no group name', () => {
+    const base = input();
+    const details = [
+      { ...base.details[0], cut_job: { cutJobId: 12, name: 'Раскрой кухни', cutNumber: 'Р-12' } },
+      { ...base.details[1], cut_job: { cutJobId: 13, name: 'Раскрой шкафа', cutNumber: 'Р-13' } },
+    ];
+    const groupedRows = [
+      { kind: 'separator', groupIndex: 0, key: 's0', selectionKeys: [71], label: 'Р-12: Раскрой кухни' },
+      { kind: 'detail', detail: details[0], groupIndex: 0 },
+      { kind: 'separator', groupIndex: 1, key: 's1', selectionKeys: [72], label: 'Р-13: Раскрой шкафа' },
+      { kind: 'detail', detail: details[1], groupIndex: 1 },
+    ];
+    const ids = () => createClientScreenIdMap(() => `id${Math.random().toString(36).slice(2, 10)}`);
+    // The page shows no cut column (no right to see cut jobs): all codes ticked, nothing of the jobs on the wire.
+    const noColumn = buildClientScreenSnapshot(
+      buildOrderShowSource(input({ details, groupedRows, groupField: 'cut_job', columnKeys: ['detail_number', 'height'], cutJobByDetailId: new Map() })), ALL, ids(),
+    );
+    expect(noColumn.details!.groups).toBeUndefined();
+    for (const hidden of ['Р-12', 'Р-13', 'Раскрой кухни', 'Раскрой шкафа']) expect(JSON.stringify(noColumn), hidden).not.toContain(hidden);
+    // The column is shown; the first job left the page's map (archived).
+    const archived = buildClientScreenSnapshot(
+      buildOrderShowSource(input({
+        details, groupedRows, groupField: 'cut_job', columnKeys: ['detail_number', 'cut_job'],
+        cutJobByDetailId: new Map([[72, { cutJobId: 13, name: 'Раскрой шкафа', cutNumber: 'Р-13' }]]),
+      })), ALL, ids(),
+    );
+    expect(archived.details!.groups!.map((group) => group.title)).toEqual(['—', 'Р-13: Раскрой шкафа']);
+    expect(JSON.stringify(archived)).not.toContain('Раскрой кухни');
+  });
+
   it('every view column key maps to a field of the registry', () => {
     const fields = new Set(CLIENT_SCREEN_CODES.filter((code) => code.startsWith('details.')).map((code) => code.slice('details.'.length)));
     for (const field of Object.values(SHOW_DETAIL_COLUMN_FIELDS)) expect(fields.has(field)).toBe(true);

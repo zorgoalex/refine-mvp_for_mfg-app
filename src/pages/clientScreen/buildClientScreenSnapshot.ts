@@ -124,16 +124,24 @@ export function buildClientScreenSnapshot(source: ClientScreenOrderSource, visib
       rows: source.details.rows.map((row) => ({ id: idFor('detail', row.key), cells: order.map((field) => text(row.values[field])) })),
     };
     const grouping = source.details.grouping;
-    // Group headers carry the value of the grouping field, so they go only when that field may be
-    // seen: ticked, and a value the manager has at all (not money without the right to see it).
-    if (grouping?.field && isClientScreenCodeVisible(`details.${grouping.field}`, visible) && available(source.details.rows, grouping.field)
+    // Group headers carry the value of the grouping field, so they go only when that very column is
+    // on the customer's table: ticked, a value the manager has at all (not money without the right
+    // to see it), and a column the manager's own table shows (a column withheld from the manager by
+    // a permission or by the column settings never names its values in a group title either).
+    if (grouping?.field && order.includes(grouping.field) && available(source.details.rows, grouping.field)
       && source.details.rows.some((row) => row.values[grouping.field as DetailField] !== undefined)) {
-      const known = new Set(source.details.rows.map((row) => row.key));
-      table.groups = grouping.groups.map((group) => ({
-        id: idFor('detail-group', group.key),
-        title: text(group.title),
-        rowIds: group.rowKeys.filter((key) => known.has(key)).map((key) => idFor('detail', key)),
-      }));
+      const field = grouping.field;
+      const rowByKey = new Map(source.details.rows.map((row) => [row.key, row]));
+      table.groups = grouping.groups.map((group) => {
+        const rowKeys = group.rowKeys.filter((key) => rowByKey.has(key));
+        return {
+          id: idFor('detail-group', group.key),
+          // Cut jobs are named by the table's cells (its list of the last ready jobs is the
+          // authority), not by the grouping label, which may still carry a job that is gone.
+          title: TITLE_FROM_CELL.has(field) ? text(rowKeys.length ? rowByKey.get(rowKeys[0])!.values[field] : null) : text(group.title),
+          rowIds: rowKeys.map((key) => idFor('detail', key)),
+        };
+      });
     }
     snapshot.details = table;
   }
@@ -150,6 +158,9 @@ export function buildClientScreenSnapshot(source: ClientScreenOrderSource, visib
   }
   return snapshot;
 }
+
+/** Groupings whose titles are taken from the cells of their rows. */
+const TITLE_FROM_CELL: ReadonlySet<DetailField> = new Set<DetailField>(['cut_job', 'bath_cut_job']);
 
 /** Header fields in the order of the manager's header; the number and the name make the title. */
 const SUMMARY_ORDER = ['order_name', 'client', 'client_phone', 'client_phones', 'deadline', 'positions', 'parts', 'area', 'material', 'milling_type', 'edge_type', 'film',
