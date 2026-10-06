@@ -9,7 +9,7 @@ import { Table } from '../../../ui/tooltipDelay';
 import { getLoadedRuntimeConfig } from '../../../config/runtimeConfig';
 import { filmCatalogImportApi } from '../../../api/filmCatalogImportApi';
 import type { CatalogDecisionsFile, CatalogImportAction, CatalogImportBatchDto, CatalogImportMatchDto, CatalogImportRowDto, CatalogSourceKind } from '../../../api/types/filmCatalogImportApi.types';
-import { catalogImportActions, catalogImportErrorMessage, catalogMatchQuery, catalogRowsQuery, importManageAllowed, inspectCatalogSheets, onecMirrorAllowed, resolveIdempotencyKey, sha256File, vendorMappingAction, type CatalogSheetPreview, serverPagination, DECISIONS_SKIP_LABELS, decisionsDownloadName, isDecisionsBatch, readDecisionsFile, sourceLabel } from './catalogImportHelpers';
+import { catalogImportActions, catalogImportErrorMessage, catalogMatchQuery, catalogRowsQuery, importManageAllowed, inspectCatalogSheets, onecMirrorAllowed, resolveIdempotencyKey, sha256File, vendorMappingAction, type CatalogSheetPreview, serverPagination, DECISIONS_SKIP_LABELS, decisionsDownloadName, isDecisionsBatch, readDecisionsFile, sourceLabel, batchSourceName, counterLabel, formatCounter, matchStatusLabel, rowStatusLabel } from './catalogImportHelpers';
 
 const PAGE_SIZE = 50;
 const STATUS_LABELS: Record<string, string> = { draft: 'Черновик', applied: 'Применён', cancelled: 'Отменён', reverted: 'Откатан' };
@@ -204,7 +204,7 @@ export const CatalogImportPage: React.FC = () => {
   };
 
   const matchColumns = useMemo(() => [
-    { title: 'Плёнка ERP', dataIndex: 'filmName', key: 'film', render: (_: unknown, row: CatalogImportMatchDto) => <>{row.filmName}<br /><Typography.Text type="secondary">{row.vendorName ?? '—'} · {row.matchStatus}</Typography.Text></> },
+    { title: 'Плёнка ERP', dataIndex: 'filmName', key: 'film', render: (_: unknown, row: CatalogImportMatchDto) => <>{row.filmName}<br /><Typography.Text type="secondary">{row.vendorName ?? '—'} · {matchStatusLabel(row.matchStatus)}</Typography.Text></> },
     { title: 'Использование', dataIndex: ['usage', 'details'], key: 'usage' },
     { title: 'Сопоставление', key: 'action', render: (_: unknown, row: CatalogImportMatchDto) => <Space>
       {row.matchStatus === 'suggested' && <Select style={{ width: 300 }} placeholder="Выберите строку каталога" options={[{ value: 0, label: 'Нет соответствия' }, ...row.candidates.map((item) => ({ value: item.rowId, label: `${item.targetName} · ${Math.round(item.score * 100)}%` }))]} onChange={(value: number) => void mutate([catalogImportActions.setMatch(row.filmId, value === 0 ? null : value)], `match:${row.filmId}:${value || 'none'}`)} />}
@@ -225,7 +225,7 @@ export const CatalogImportPage: React.FC = () => {
 
   const rowColumns = [
     { title: 'Строка', dataIndex: 'rowNo' }, { title: 'Наименование', dataIndex: 'targetName' },
-    { title: 'Статус', dataIndex: 'rowStatus', render: (status: string, row: CatalogImportRowDto) => <>{status}{row.issue && <Typography.Text type="danger"> — {row.issue}</Typography.Text>}</> },
+    { title: 'Статус', dataIndex: 'rowStatus', render: (status: string, row: CatalogImportRowDto) => <>{rowStatusLabel(status)}{row.issue && <Typography.Text type="danger"> — {row.issue}</Typography.Text>}</> },
     { title: 'Сопоставленные плёнки', dataIndex: 'matchedFilmIds', render: (_: unknown, row: CatalogImportRowDto) => <Space>
       {row.matchedFilmIds.map((filmId) => <Tag key={filmId}>{filmId}</Tag>)}
       {row.matchedFilmIds.length > 1 && <Select style={{ width: 220 }} placeholder="Выбрать канон" value={row.canonicalFilmId ?? undefined} options={row.matchedFilmIds.map((filmId) => ({ value: filmId, label: matches.find((match) => match.filmId === filmId)?.filmName ?? filmSelectProps.options?.find((option) => option.value === filmId)?.label ?? `Плёнка ${filmId}` }))} onChange={(filmId: number) => void mutate([catalogImportActions.setCanonical(row.rowId, filmId)], `canonical:${row.rowId}:${filmId}`)} />}
@@ -262,7 +262,7 @@ export const CatalogImportPage: React.FC = () => {
   </Card>;
 
   if (!batch) return <Card loading={busy}>Пакет импорта не найден</Card>;
-  const sourceName = batch.fileName ?? batch.onecCategoryName ?? `Пакет ${batch.id}`;
+  const sourceName = batchSourceName(batch);
   return <Card title={`Пакет ${batch.id} · ${sourceName}`} extra={<Space><Tag color={batch.status === 'applied' ? 'green' : 'blue'}>{STATUS_LABELS[batch.status]}</Tag><Button icon={<ReloadOutlined />} onClick={() => void loadBatch(batch.id)}>Обновить</Button></Space>}>
     <Spin spinning={busy}>
       {batch.options.decisions && <Alert style={{ marginBottom: 12 }} type="info" showIcon
@@ -277,15 +277,15 @@ export const CatalogImportPage: React.FC = () => {
           { title: 'Поставщик ERP', render: (_: unknown, item) => <Select style={{ width: 320 }} disabled={Boolean(batch.options.decisions)} showSearch placeholder="Выбрать ERP или создать" {...vendorSelectProps} options={[...(vendorSelectProps.options ?? []), { value: 0, label: 'Создать нового поставщика' }]} value={item.createVendor ? 0 : item.vendorId ?? undefined} onChange={(vendorId: number) => void mutate([vendorMappingAction(item.supplierNorm, vendorId === 0 ? null : vendorId)], `vendor:${item.supplierNorm}:${vendorId || 'create'}`)} /> },
         ]} /> },
         { key: 'matches', label: `Сопоставления (${totalMatches})`, children: <Space direction="vertical" style={{ width: '100%' }}>
-          <Space wrap><Select allowClear placeholder="Статус" style={{ width: 160 }} value={matchStatus} onChange={(value) => { setMatchStatus(value); setMatchOffset(0); }} options={['linked','auto','suggested','confirmed','manual','none','unchanged'].map((value) => ({ value, label: value }))} /><Select allowClear placeholder="Поставщик" style={{ width: 220 }} {...vendorSelectProps} value={matchVendorId} onChange={(value) => { setMatchVendorId(value); setMatchOffset(0); }} /><Input.Search placeholder="Поиск плёнки" onSearch={(value) => { setMatchSearch(value); setMatchOffset(0); }} style={{ width: 240 }} />{!batch.options.decisions && <Button onClick={() => void mutate([catalogImportActions.acceptAllAuto()], 'accept-all-auto')}>Принять все уверенные</Button>}</Space>
+          <Space wrap><Select allowClear placeholder="Статус" style={{ width: 160 }} value={matchStatus} onChange={(value) => { setMatchStatus(value); setMatchOffset(0); }} options={['linked','auto','suggested','confirmed','manual','none','unchanged'].map((value) => ({ value, label: matchStatusLabel(value) }))} /><Select allowClear placeholder="Поставщик" style={{ width: 220 }} {...vendorSelectProps} value={matchVendorId} onChange={(value) => { setMatchVendorId(value); setMatchOffset(0); }} /><Input.Search placeholder="Поиск плёнки" onSearch={(value) => { setMatchSearch(value); setMatchOffset(0); }} style={{ width: 240 }} />{!batch.options.decisions && <Button onClick={() => void mutate([catalogImportActions.acceptAllAuto()], 'accept-all-auto')}>Принять все уверенные</Button>}</Space>
           <Table rowKey="filmId" dataSource={matches} columns={matchColumns} pagination={serverPagination(matchOffset, matchPageSize, totalMatches, setMatchOffset, setMatchPageSize)} />
         </Space> },
         { key: 'rows', label: `Позиции каталога (${totalRows})`, children: <Space direction="vertical" style={{ width: '100%' }}>
-          <Space wrap><Select allowClear placeholder="Статус строки" style={{ width: 180 }} value={rowStatus} onChange={(value) => { setRowStatus(value); setRowOffset(0); }} options={['ok','invalid','skipped'].map((value) => ({ value, label: value }))} /><Checkbox checked={conflictOnly} onChange={(event) => { setConflictOnly(event.target.checked); setRowOffset(0); }}>Разногласия свойств</Checkbox><Input.Search placeholder="Поиск строки каталога" onSearch={(value) => { setRowSearch(value); setRowOffset(0); }} style={{ width: 260 }} /></Space>
+          <Space wrap><Select allowClear placeholder="Статус строки" style={{ width: 180 }} value={rowStatus} onChange={(value) => { setRowStatus(value); setRowOffset(0); }} options={['ok','invalid','skipped'].map((value) => ({ value, label: rowStatusLabel(value) }))} /><Checkbox checked={conflictOnly} onChange={(event) => { setConflictOnly(event.target.checked); setRowOffset(0); }}>Разногласия свойств</Checkbox><Input.Search placeholder="Поиск строки каталога" onSearch={(value) => { setRowSearch(value); setRowOffset(0); }} style={{ width: 260 }} /></Space>
           <Table rowKey="rowId" dataSource={rows} columns={rowColumns} pagination={serverPagination(rowOffset, rowPageSize, totalRows, setRowOffset, setRowPageSize)} />
         </Space> },
         { key: 'summary', label: 'Итог и действия', children: <Space direction="vertical" style={{ width: '100%' }}>
-          <Row gutter={12}>{Object.entries(batch.counters).map(([key, value]) => <Col key={key} xs={12} md={6}><Statistic title={key} value={value} /></Col>)}</Row>
+          <Row gutter={12}>{Object.entries(batch.counters).map(([key, value]) => <Col key={key} xs={12} md={6}><Statistic title={counterLabel(key)} value={formatCounter(value)} /></Col>)}</Row>
           {batch.blockers.length > 0 && <Result status="warning" title="Нужно устранить блокеры" subTitle={<ul>{batch.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>} />}
           {batch.status === 'draft' && !batch.options.decisions && <Checkbox checked={batch.options.createMissing} onChange={(event) => void mutate([catalogImportActions.setCreateMissing(event.target.checked)], `create-missing:${event.target.checked}`)}>Создавать отсутствующие позиции</Checkbox>}
           <Space wrap><Button onClick={() => void openExport()}>Выгрузить в Excel</Button>{batch.status === 'applied' && <Button onClick={() => void downloadDecisions()}>Выгрузить файл решений (для переноса на прод)</Button>}{batch.status === 'draft' && <><Button danger onClick={() => void command('cancel', (key) => filmCatalogImportApi.cancel(batch.id, batch.version, key))}>Отменить черновик</Button><Button type="primary" disabled={!batch.canApply} onClick={() => void command('apply', (key) => filmCatalogImportApi.apply(batch.id, batch.version, key))}>Применить</Button></>}</Space>
