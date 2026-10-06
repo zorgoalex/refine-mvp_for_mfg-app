@@ -2598,6 +2598,10 @@ probe_file() {
       "$(q_con_on client_screen_settings chk_client_screen_settings_singleton)" \
       "$(q_con_on client_screen_settings chk_client_screen_settings_codes)" \
       "SELECT EXISTS (SELECT 1 FROM client_screen_settings WHERE config_id = 1);" ;;
+    # 247: expected daily silence of a 1C agent (column + format check).
+    247_onec_agent_expected_silence*) probe_all \
+      "$(q_col onec_agents expected_silence_utc)" \
+      "$(q_con_on onec_agents chk_onec_agents_expected_silence_utc)" ;;
     # 245: login role of the 1C integration operator + the guard trigger (no role change to or from it).
     245_onec_operator_role*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM roles WHERE role_id = 32 AND role_code = 'onec_operator');" \
@@ -3098,7 +3102,7 @@ verify_applied_effect() {
     205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|240_payment_onec_matches*|241_client_screen_settings*|245_onec_operator_role*|246_clients_analytics_view_real_orders*)
+    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|240_payment_onec_matches*|241_client_screen_settings*|245_onec_operator_role*|246_clients_analytics_view_real_orders*|247_onec_agent_expected_silence*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

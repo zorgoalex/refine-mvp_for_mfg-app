@@ -32,6 +32,8 @@ import {
   onecRelativeTime,
   onecStateBadge,
   onecFormatHistorySummary,
+  expectedSilenceError,
+  normalizeExpectedSilence,
 } from './onecFormat';
 
 const { Text } = Typography;
@@ -190,6 +192,7 @@ export function AgentDetailsDrawer({ agentId, canManage, onClose, onChanged }: A
             <Descriptions.Item label="Версия записи">{agent.version}</Descriptions.Item>
             <Descriptions.Item label="Версия агента (ПО)">{agent.agentVersion ?? '—'}</Descriptions.Item>
             <Descriptions.Item label="Минимальная версия">{agent.minimumAgentVersion}</Descriptions.Item>
+            <Descriptions.Item label="Ожидаемое молчание (UTC)">{agent.expectedSilenceUtc ?? 'не задано'}</Descriptions.Item>
             <Descriptions.Item label="Подключение">
               {connectionBadge && <Tag>{connectionBadge.text}</Tag>}
             </Descriptions.Item>
@@ -302,14 +305,19 @@ function AgentEditModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [form] = Form.useForm<{ siteId: string; displayName: string; minimumAgentVersion: string }>();
+  const [form] = Form.useForm<{ siteId: string; displayName: string; minimumAgentVersion: string; expectedSilenceUtc?: string }>();
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async () => {
     try {
       const values = await form.validateFields();
       setSubmitting(true);
-      await onecApi.updateAgent(agent.agentId, { version: agent.version, ...values });
+      const { expectedSilenceUtc, ...rest } = values;
+      const silence = normalizeExpectedSilence(expectedSilenceUtc);
+      // Sent only when changed: a backend that does not know the field yet (frontend deployed first) keeps
+      // accepting ordinary edits of the agent.
+      const silenceChanged = silence !== (agent.expectedSilenceUtc ?? null);
+      await onecApi.updateAgent(agent.agentId, { version: agent.version, ...rest, ...(silenceChanged ? { expectedSilenceUtc: silence } : {}) });
       message.success('Агент обновлён');
       onSaved();
     } catch (error) {
@@ -342,6 +350,7 @@ function AgentEditModal({
           siteId: agent.siteId,
           displayName: agent.displayName,
           minimumAgentVersion: agent.minimumAgentVersion,
+          expectedSilenceUtc: agent.expectedSilenceUtc ?? '',
         }}
       >
         <Form.Item name="siteId" label="Площадка" rules={[{ required: true, message: 'Укажите площадку' }]}>
@@ -352,6 +361,14 @@ function AgentEditModal({
         </Form.Item>
         <Form.Item name="minimumAgentVersion" label="Минимальная версия агента">
           <Input placeholder="1.0" />
+        </Form.Item>
+        <Form.Item
+          name="expectedSilenceUtc"
+          label="Ожидаемое ежедневное молчание (UTC)"
+          extra="Интервал, когда агент планово выключен (например, остановка перед ночной перезагрузкой компьютера 1С): в это время оповещение «агент молчит» не поднимается. Формат ЧЧ:ММ-ЧЧ:ММ по UTC, не длиннее 120 минут; пусто — не задано."
+          rules={[{ validator: (_, value) => (expectedSilenceError(value) ? Promise.reject(new Error(expectedSilenceError(value)!)) : Promise.resolve()) }]}
+        >
+          <Input placeholder="23:45-00:25" allowClear />
         </Form.Item>
       </Form>
     </Modal>

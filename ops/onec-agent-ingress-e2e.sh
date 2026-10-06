@@ -61,6 +61,7 @@ FP="$(openssl x509 -in "$WORK/certs/registered.crt" -outform DER | sha256sum | c
   cat "$REPO_DIR/backend/db/migrations/196_onec_agent_commands.sql"
   cat "$REPO_DIR/backend/db/migrations/198_onec_etl.sql"
   cat "$REPO_DIR/backend/db/migrations/200_onec_etl_snapshots_revocation.sql"
+  cat "$REPO_DIR/backend/db/migrations/247_onec_agent_expected_silence.sql"
   echo "INSERT INTO onec_sources(code, display_name) VALUES ('e2e','E2E-Тест источник');"
   echo "INSERT INTO onec_agents(agent_id, source_id, site_id, display_name) SELECT '$AGENT_ID', source_id, 'e2e', 'E2E-Тест агент' FROM onec_sources;"
   echo "INSERT INTO onec_agent_certificates(agent_id, sha256_fingerprint) VALUES ('$AGENT_ID', decode('$FP','hex'));"
