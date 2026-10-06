@@ -141,7 +141,7 @@ describe('cut detail column', () => {
     const requiredDisabled = [
       "disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}", // profile Select
       'disabled={!canManage || selected.length === 0 || isArchivedJob}',                 // Добавить выбранные
-      'disabled={!canManage || job.items.length === 0 || isArchivedJob}',                // Рассчитать
+      'disabled={!canManage || job.items.length === 0 || isArchivedJob || isImportedCutJob(job)}', // Рассчитать (импортированный раскрой не пересчитывается)
       'disabled={busy || isArchivedJob}',                                                // per-item Убрать
     ];
     for (const fragment of requiredDisabled) {
