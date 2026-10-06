@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-06", title: "Импорт каталога плёнок: форма на русском",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "В мастере «Импорт каталога 1С» счётчики на вкладке «Итог и действия», статусы сопоставлений и строк (в списках и фильтрах) и название источника пакета показываются по-русски; числа — в русской записи.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-07", title: "Интеграция 1С: ожидаемое молчание агента",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
