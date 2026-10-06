@@ -320,6 +320,17 @@ function formatOrderShowHdfDimension(value: number | null): string {
   return formatNumber(value, value % 1 === 0 ? 0 : 1);
 }
 
+/** The text of the HDF cell, as the cell below draws it; null for the empty cell. */
+export function orderShowHdfCellText(display: OrderShowHdfDisplay | null, parameterMm: unknown): string | null {
+  if (display?.status === 'ok' && !display.isStale && display.heightMm !== null && display.widthMm !== null) {
+    const quantity = display.quantity === null ? '—' : formatNumber(display.quantity, display.quantity % 1 === 0 ? 0 : 1);
+    return `${formatOrderShowHdfDimension(display.heightMm)}×${formatOrderShowHdfDimension(display.widthMm)}, ${quantity} шт.`;
+  }
+  if (display) return display.isStale ? 'устар.' : ORDER_SHOW_HDF_STATUS_LABELS[display.status] ?? display.status;
+  const parameter = orderShowNullableFiniteNumber(parameterMm);
+  return parameter === null ? null : `${formatNumber(parameter, parameter % 1 === 0 ? 0 : 2)} мм`;
+}
+
 function renderOrderShowHdfCell(
   display: OrderShowHdfDisplay | null,
   parameterMm: unknown,
@@ -3263,6 +3274,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     productionStatus: (id: number) => productionStatusesById.get(id)?.name,
     materialOf: (detail: any) => resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap),
   }), [clientScreenPaymentTypes, edgeTypesMap, filmsMap, materialsMap, millingTypesMap, productionStatusesById, resolvedNameByDetailId]);
+  const clientScreenHdfTextOf = useCallback(
+    (detail: any) => orderShowHdfCellText(getOrderShowHdfDisplay(hdfDetailBySourceDetailId, detail), detail?.hdf_parameter_override_mm),
+    [hdfDetailBySourceDetailId],
+  );
   const clientScreenEmployeeName = useCallback(
     (id: number) => {
       const found = (employeesData?.data || []).find((item: any) => Number(item.employee_id) === Number(id));
@@ -3295,6 +3310,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       payments={clientScreenPayments}
       hdfDetails={hdfDetails}
       cutJobByDetailId={cutJobByDetailId}
+      hdfTextOf={clientScreenHdfTextOf}
       bathCutJobByDetailId={bathCutJobByDetailId}
       dowelingLinks={clientScreenDowelingLinks}
       employeeName={clientScreenEmployeeName}

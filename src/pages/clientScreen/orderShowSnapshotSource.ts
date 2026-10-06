@@ -34,7 +34,9 @@ export interface OrderShowSourceInput {
   /** Keys of the visible detail table columns, left to right (the view page's column keys). */
   columnKeys: readonly string[];
   payments: ReadonlyArray<Readonly<Record<string, unknown>>>;
-  /** The last ready cut jobs the page shows per detail id (plain and bath). */
+  /** The text of the page's HDF cell for a detail (calculated size or its state). */
+  hdfTextOf?: (detail: Readonly<Record<string, unknown>>) => string | null;
+  /** The last ready cut jobs the page shows per detail id (plain and bath); the maps are the authority. */
   cutJobByDetailId?: ReadonlyMap<number, unknown>;
   bathCutJobByDetailId?: ReadonlyMap<number, unknown>;
   /** Doweling links of the order and employee names: the header's basis project and designer lines. */
@@ -156,7 +158,8 @@ export function buildOrderShowSource(input: OrderShowSourceInput): ClientScreenO
 
   const cutLabel = (map: ReadonlyMap<number, unknown> | undefined, detail: Readonly<Record<string, unknown>>, own: unknown): string | null => {
     const id = idOf(detail.detail_id);
-    const label = formatCutJobGroupLabel(((id !== null ? map?.get(id) : undefined) ?? own ?? undefined) as never);
+    // A job that left the page's map is not shown, whatever the detail record still carries.
+    const label = formatCutJobGroupLabel((map ? (id !== null ? map.get(id) : undefined) : own ?? undefined) as never);
     return label === '—' ? null : label;
   };
   const detailRows = details.map((detail, index) => {
@@ -165,6 +168,7 @@ export function buildOrderShowSource(input: OrderShowSourceInput): ClientScreenO
       key: orderShowDetailKey(raw),
       values: orderDetailDisplayValues(detail, detailNames, {
         cut_job: cutLabel(input.cutJobByDetailId, raw, raw.cut_job), bath_cut_job: cutLabel(input.bathCutJobByDetailId, raw, raw.bath_cut_job),
+        ...(input.hdfTextOf ? { hdf_parameter: input.hdfTextOf(raw) } : {}),
       }),
     };
   });

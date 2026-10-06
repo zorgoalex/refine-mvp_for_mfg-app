@@ -10,6 +10,7 @@ import { isOrderDetailPlaceholder } from '../../utils/orderDetailRows';
 import { collectOrderBasisProjects } from '../orders/components/sections/orderBasisProjects';
 import { formatBazisCutSetsGroupLabel, formatCutJobGroupLabel } from '../orders/detailGrouping';
 import { buildOrderHeaderMaterialSummaryItems } from '../orders/orderMaterialsSummary';
+import type { OrderDetailTableCells } from './orderDetailTableMirror';
 import type { ClientScreenOrderSource, ClientScreenValue, DetailField } from './buildClientScreenSnapshot';
 import { CLIENT_SCREEN_TAB_KEYS, type ClientScreenTabKey } from './clientScreenSnapshotSchema';
 
@@ -41,8 +42,8 @@ export interface OrderEditSourceInput {
     client: NameOf; orderStatus: NameOf; paymentStatus: NameOf; productionStatus: NameOf; employee: NameOf;
     sheetMaterial: NameOf; millingType: NameOf; edgeType: NameOf; film: NameOf; paymentType: NameOf;
   };
-  /** Labels of the cut jobs the detail table shows for a row, when the table is on screen. */
-  cutJobLabelsOf?: ((rowKey: string) => { cut_job: string | null; bath_cut_job: string | null } | null) | null;
+  /** Cells only the detail table knows (cut jobs, the HDF cell), when the table is on screen. */
+  tableCellsOf?: ((rowKey: string) => OrderDetailTableCells | null) | null;
   /** Keys of the visible detail table columns in the manager's order (table column keys). */
   detailColumnOrder: readonly string[];
   /** Current grouping of the detail table, if any: the grouping field of detailGrouping.ts and its groups. */
@@ -133,14 +134,19 @@ const amount = (value: number | null | undefined): ClientScreenValue =>
 export const detailRowKey = (detail: OrderDetail): string => String(detail.temp_id ?? detail.detail_id ?? 0);
 
 /** One detail as display text: names instead of ids, the formats of the order screens. */
+/** The HDF parameter itself, as its editor and the bare cell show it. */
+export const clientScreenHdfParameter = (value: unknown): ClientScreenValue => {
+  const number = value === null || value === undefined || value === '' ? null : Number(value);
+  return number === null || !Number.isFinite(number) ? null : `${formatNumber(number, number % 1 === 0 ? 0 : 2)} мм`;
+};
 const dashless = (label: string): ClientScreenValue => (label === '' || label === '—' ? null : label);
 const plain = (value: unknown): ClientScreenValue => (typeof value === 'string' && value.trim() !== '' ? value : null);
 
 export function orderDetailDisplayValues(
   detail: OrderDetail,
   names: Pick<OrderEditSourceInput['names'], 'sheetMaterial' | 'millingType' | 'edgeType' | 'film' | 'productionStatus'>,
-  /** Cut job labels as the table shows them; without them the detail's own references are used. */
-  cutJobs?: { cut_job: string | null; bath_cut_job: string | null } | null,
+  /** Cells as the screen's table shows them; without them the detail's own data is used. */
+  tableCells?: Partial<OrderDetailTableCells> | null,
 ): Record<DetailField, ClientScreenValue> {
   return {
     n: detail.detail_number === null || detail.detail_number === undefined ? null : String(detail.detail_number),
@@ -158,12 +164,12 @@ export function orderDetailDisplayValues(
     cost: amount(detail.detail_cost),
     note: detail.note ?? null,
     production_status: named(detail.production_status_id, names.productionStatus),
-    hdf_parameter: detail.hdf_parameter_override_mm === null || detail.hdf_parameter_override_mm === undefined
-      ? null
-      : formatNumber(Number(detail.hdf_parameter_override_mm), 2),
+    hdf_parameter: tableCells && tableCells.hdf_parameter !== undefined ? tableCells.hdf_parameter : clientScreenHdfParameter(detail.hdf_parameter_override_mm),
     doweling: detail.doweling === true ? 'Да' : null,
-    cut_job: cutJobs ? cutJobs.cut_job : dashless(formatCutJobGroupLabel(detail.cut_job ?? undefined)),
-    bath_cut_job: cutJobs ? cutJobs.bath_cut_job : dashless(formatCutJobGroupLabel(detail.bath_cut_job ?? undefined)),
+    cut_job: tableCells && tableCells.cut_job !== undefined ? tableCells.cut_job : dashless(formatCutJobGroupLabel(detail.cut_job ?? undefined)),
+    bath_cut_job: tableCells && tableCells.bath_cut_job !== undefined
+      ? tableCells.bath_cut_job
+      : dashless(formatCutJobGroupLabel(detail.bath_cut_job ?? undefined)),
     bazis_cut_sets: dashless(formatBazisCutSetsGroupLabel(detail.bazis_cut_sets)),
     priority: detail.priority === null || detail.priority === undefined ? null : formatNumber(Number(detail.priority), 0),
     basis_project: plain(resolveOrderBasisProject(detail as never).name),
@@ -181,19 +187,22 @@ export function orderDetailDisplayValues(
 export function clientScreenHeaderPeople(input: {
   details: ReadonlyArray<Readonly<Record<string, unknown>>>;
   dowelingLinks: ReadonlyArray<{ doweling_order?: { doweling_order_name?: string | null; design_engineer_id?: number | null } | null }>;
-  header: { doweling_order_name?: string | null; design_engineer_id?: number | null };
+  /** `design_engineer` is the ready-made name the view page's record carries. */
+  header: { doweling_order_name?: string | null; design_engineer_id?: number | null; design_engineer?: unknown };
   employeeName: (id: number) => string | undefined;
 }): { basis_project: ClientScreenValue; designer: ClientScreenValue } {
   const basisProjects = collectOrderBasisProjects(input.details as never);
   const latest = input.dowelingLinks.length ? input.dowelingLinks[input.dowelingLinks.length - 1] : null;
   const fallback = plain(latest?.doweling_order?.doweling_order_name) ?? plain(input.header.doweling_order_name);
-  const designerId = basisProjects.length > 0
-    ? null
-    : latest ? latest.doweling_order?.design_engineer_id ?? null : input.header.design_engineer_id ?? null;
-  return {
-    basis_project: basisProjects.length > 0 ? basisProjects.join(', ') : fallback,
-    designer: designerId === null || designerId === undefined ? null : input.employeeName(Number(designerId)) ?? null,
-  };
+  const byId = (id: number | null | undefined): ClientScreenValue => (id === null || id === undefined ? null : input.employeeName(Number(id)) ?? null);
+  let designer: ClientScreenValue = null;
+  if (basisProjects.length === 0) {
+    designer = latest
+      ? byId(latest.doweling_order?.design_engineer_id)
+      // No doweling order: the order's own designer — the name the record already has, else by id.
+      : plain(input.header.design_engineer) ?? byId(input.header.design_engineer_id);
+  }
+  return { basis_project: basisProjects.length > 0 ? basisProjects.join(', ') : fallback, designer };
 }
 
 /**
@@ -261,7 +270,7 @@ export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenO
 
   const detailRows = business.map((detail) => {
     const key = detailRowKey(detail);
-    return { key, values: orderDetailDisplayValues(detail, names, input.cutJobLabelsOf?.(key)) };
+    return { key, values: orderDetailDisplayValues(detail, names, input.tableCellsOf?.(key)) };
   });
   return {
     tabs: input.tabs.filter((tab): tab is { key: ClientScreenTabKey; label: string } => (CLIENT_SCREEN_TAB_KEYS as readonly string[]).includes(tab.key)),
@@ -376,10 +385,13 @@ export function orderEditEditingValues(
   editorValues: Readonly<Record<string, unknown>>,
   names: OrderEditSourceInput['names'],
   columnKeys: readonly string[],
+  /** The table column whose editor is open, when known. */
+  activeColumnKey?: string | null,
 ): Array<{ code: `details.${DetailField}`; value: string }> {
   // Cells the table fills from its own knowledge (the last ready cut job) are not the editor's:
-  // the snapshot already has them as the table shows them.
-  const TABLE_OWNED = new Set<DetailField>(['cut_job', 'bath_cut_job']);
+  // the snapshot already has them as the table shows them. The HDF cell is the editor's only while
+  // its own editor is open (then the manager sees the bare parameter); otherwise it is the table's.
+  const TABLE_OWNED = new Set<DetailField>(activeColumnKey === 'hdf_parameter_override_mm' ? ['cut_job', 'bath_cut_job'] : ['cut_job', 'bath_cut_job', 'hdf_parameter']);
   const merged: Record<string, unknown> = { ...detail };
   for (const key of Object.keys(DETAIL_COLUMN_FIELDS)) {
     // A field the editor does not have keeps its saved value. A field the editor has without a

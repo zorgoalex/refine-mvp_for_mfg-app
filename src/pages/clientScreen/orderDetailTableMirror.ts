@@ -17,10 +17,19 @@ export interface OrderDetailTableMirror {
   editing: { rowKey: string; field: string | null } | null;
   /** Current values of that editor, by table column key. */
   getEditingValues: () => Record<string, unknown>;
-  /** Labels of the cut jobs the table shows for a row (it knows the jobs; the detail may not). */
-  getCutJobLabels?: (rowKey: string) => { cut_job: string | null; bath_cut_job: string | null } | null;
+  /**
+   * Cells whose text only the table knows: the last ready cut jobs (its maps are the authority — a
+   * job that is no longer there is not shown) and the HDF cell (calculated size or its state).
+   */
+  getTableCells?: (rowKey: string) => OrderDetailTableCells | null;
   /** The cell the keyboard is in right now (no editor needed); null when it is outside the table. */
   getActiveCell: () => { rowKey: string; columnKey: string } | null;
+}
+
+export interface OrderDetailTableCells {
+  cut_job: string | null;
+  bath_cut_job: string | null;
+  hdf_parameter: string | null;
 }
 
 const records = new WeakMap<object, OrderDetailTableMirror>();

@@ -429,6 +429,16 @@ function formatOrderDetailHdfDimension(value: number | null): string {
   return formatNumber(value, value % 1 === 0 ? 0 : 1);
 }
 
+/** The text of the HDF cell, as the cell below draws it; null for the empty cell. */
+export function orderDetailHdfCellText(display: OrderDetailHdfDisplay | null, parameterMm: unknown): string | null {
+  if (display?.status === 'ok' && !display.isStale && display.heightMm !== null && display.widthMm !== null) {
+    return `${formatOrderDetailHdfDimension(display.heightMm)}×${formatOrderDetailHdfDimension(display.widthMm)}`;
+  }
+  if (display) return display.isStale ? 'устар.' : ORDER_DETAIL_HDF_STATUS_LABELS[display.status] ?? display.status;
+  const parameter = nullableFiniteNumber(parameterMm);
+  return parameter === null ? null : `${formatNumber(parameter, parameter % 1 === 0 ? 0 : 2)} мм`;
+}
+
 function OrderDetailHdfDisplayCell({
   display,
   parameterMm,
@@ -3450,6 +3460,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       ? cellRuntime.sorterByKey.get(mirrorSortKey)
       : undefined;
     const rowsOnScreen = orderDetailRowsAsSorted(tableRows as any[], sorter, mirrorSortOrder);
+    // One lookup per publish, so that asking for a row's cells costs nothing per row.
+    const mirrorDetailByKey = new Map<string, OrderDetail>((details as OrderDetail[]).map((item) => [String(item.temp_id ?? item.detail_id), item]));
     publishOrderDetailTableMirror(draftStoreApi, {
       columnKeys,
       ...orderDetailMirrorRows<OrderDetail>(rowsOnScreen, {
@@ -3465,16 +3477,20 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         ? null
         : { rowKey: String(editingKey), field: typeof editingField === 'string' ? editingField : null },
       getEditingValues: () => form.getFieldsValue(true),
-      // Cut jobs as this table shows them: by its own maps of the last ready jobs, else by the detail.
-      getCutJobLabels: (rowKey) => {
-        const detail = (details as OrderDetail[]).find((item) => String(item.temp_id ?? item.detail_id) === rowKey);
+      // Cells only this table knows, exactly as it draws them. Its maps of the last ready cut jobs
+      // are the authority: a job that left the map is not shown, whatever the detail still carries.
+      getTableCells: (rowKey) => {
+        const detail = mirrorDetailByKey.get(rowKey);
         if (!detail) return null;
         const detailId = Number(detail.detail_id);
         const known = Number.isInteger(detailId);
         const label = (value: string) => (value === '—' ? null : value);
+        const cutJob = (map: ReadonlyMap<number, CutDetailLastReadyJobRef> | undefined, own: OrderDetail['cut_job']) =>
+          label(formatCutJobGroupLabel(map ? (known ? map.get(detailId) : undefined) : own ?? undefined));
         return {
-          cut_job: label(formatCutJobGroupLabel((known ? cutJobByDetailId?.get(detailId) : undefined) ?? detail.cut_job ?? undefined)),
-          bath_cut_job: label(formatCutJobGroupLabel((known ? bathCutJobByDetailId?.get(detailId) : undefined) ?? detail.bath_cut_job ?? undefined)),
+          cut_job: cutJob(cutJobByDetailId, detail.cut_job),
+          bath_cut_job: cutJob(bathCutJobByDetailId, detail.bath_cut_job),
+          hdf_parameter: orderDetailHdfCellText(getOrderDetailHdfDisplay(hdfDisplayBySourceDetailId, detail), detail.hdf_parameter_override_mm),
         };
       },
       getActiveCell: () => {

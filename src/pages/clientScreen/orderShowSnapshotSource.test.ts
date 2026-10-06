@@ -164,7 +164,18 @@ describe('buildOrderShowSource', () => {
       employeeName: (id) => ({ 9: 'Тимур С.' } as Record<number, string>)[id],
     }));
     expect(source.details.columnOrder).toEqual(['n', 'hdf_parameter', 'doweling', 'cut_job', 'bath_cut_job', 'basis_project', 'bazis_cut_sets']);
-    expect(source.details.rows[0].values).toMatchObject({ hdf_parameter: '3,00', doweling: 'Да', cut_job: 'Р-12: Раскрой кухни', bath_cut_job: null, bazis_cut_sets: 'БР-5' });
+    expect(source.details.rows[0].values).toMatchObject({ hdf_parameter: '3 мм', doweling: 'Да', cut_job: 'Р-12: Раскрой кухни', bath_cut_job: null, bazis_cut_sets: 'БР-5' });
+    // The page's own maps and HDF cell are the authority: a job that left the map is gone, although the detail still carries it.
+    const stale = [{ ...details[0], cut_job: { cutJobId: 9, name: 'Старый раскрой', cutNumber: 'Р-9' }, bath_cut_job: { cutJobId: 8, name: 'Старая ванна' } }];
+    const authoritative = buildOrderShowSource(input({
+      record, details: stale, cutJobByDetailId: new Map(), bathCutJobByDetailId: new Map(), hdfTextOf: () => 'устар.',
+      columnKeys: ['detail_number', 'hdf_parameter_override_mm', 'cut_job', 'bath_cut_job'],
+    }));
+    expect(authoritative.details.rows[0].values).toMatchObject({ cut_job: null, bath_cut_job: null, hdf_parameter: 'устар.' });
+    // Without the maps (the page has not loaded them) the detail's own reference is what the page shows.
+    expect(buildOrderShowSource(input({ record, details: stale })).details.rows[0].values.cut_job).toBe('Р-9: Старый раскрой');
+    // The record's ready-made designer name is used when there is no doweling order and no employee list.
+    expect(buildOrderShowSource(input({ record: { ...record, design_engineer: 'Алия К. (из записи)' }, dowelingLinks: [] })).summary.designer).toBe('Алия К. (из записи)');
     expect(source.summary).toMatchObject({
       order_status: 'В работе', payment_status: 'Частично оплачен', production_status: 'Фрезеровка', priority: '80', created_by: 'Алия К.',
       project: 'ПР-12', basis_project: 'П-17', designer: 'Тимур С.',

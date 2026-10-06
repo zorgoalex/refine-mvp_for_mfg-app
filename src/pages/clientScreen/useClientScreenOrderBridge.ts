@@ -142,8 +142,14 @@ export function releaseClientScreenSource(orderKey: string, provider: ClientScre
   else presenter.hide(orderKey);
 }
 
-/** Detail columns in the form's default order, used until the detail table has been on screen. */
-const DEFAULT_DETAIL_COLUMNS = Object.keys(DETAIL_COLUMN_FIELDS);
+/**
+ * Detail columns used until the detail table has been on screen. Only the plain columns every
+ * manager's table has: a column the table shows by a permission, a feature or the manager's own
+ * column settings (cut jobs, HDF, basis data…) is passed on only once the table itself says it is
+ * on screen.
+ */
+export const DEFAULT_DETAIL_COLUMNS: readonly string[] = ['detail_number', 'height', 'width', 'quantity', 'area', 'milling_type_id', 'edge_type_id',
+  'sheet_material_type_id', 'note', 'milling_cost_per_sqm', 'detail_cost', 'film_id', 'production_status_id', 'detail_name'];
 /** How often the open row editor is looked at for new values while the order is presented. */
 const EDITOR_POLL_MS = 200;
 
@@ -207,7 +213,7 @@ export function mirroredEditing(
     const cell = activeCellOf(mirror);
     return { focus: cell ? cellFocus(cell.rowKey, cell.columnKey) : null, editing: null };
   }
-  const values = orderEditEditingValues(detail, editorValuesOf(mirror), names, mirror.columnKeys);
+  const values = orderEditEditingValues(detail, editorValuesOf(mirror), names, mirror.columnKeys, editing.field);
   return {
     focus: cellFocus(editing.rowKey, editing.field),
     editing: values.length ? { rowId: idFor('detail', editing.rowKey), values } : null,
@@ -234,7 +240,7 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
         orderNumber: current.orderNumber,
         clientContacts: current.clientContacts,
         hdfDetails: state.hdfDetails,
-        cutJobLabelsOf: mirror?.getCutJobLabels ?? null,
+        tableCellsOf: mirror?.getTableCells ?? null,
         tabs: orderFormMirrorTabs(current.operational),
         names: orderFormNames(current.references, current.sheetMaterialName, current.filmNameById),
         // The manager's own columns, sorting and grouping, once the detail table has been on screen.

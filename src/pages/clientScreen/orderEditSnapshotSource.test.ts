@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildClientScreenSnapshot, createClientScreenIdMap, filterClientScreenUi } from './buildClientScreenSnapshot';
 import { buildMirrorView } from './mirrorView';
 import { CLIENT_SCREEN_CODES, CLIENT_SCREEN_DEFAULT_VISIBLE_CODES } from './clientScreenRegistry';
+import { DEFAULT_DETAIL_COLUMNS } from './useClientScreenOrderBridge';
 import { clientScreenSnapshotSchema } from './clientScreenSnapshotSchema';
 import {
   buildOrderEditSource, clientScreenClientContacts, clientScreenHeaderPeople, clientScreenPhone, clientScreenPhonesOf, DETAIL_COLUMN_FIELDS, GROUPING_FIELDS, orderEditEditingValues,
@@ -426,7 +427,7 @@ describe('every element of the manager screen is available as a tick', () => {
         'basis_product', 'basis_data', 'basis_designation'],
     }));
     expect(src.details.rows[0].values).toMatchObject({
-      hdf_parameter: '3,20', doweling: 'Да', cut_job: 'Р-12: Раскрой кухни', bath_cut_job: null, bazis_cut_sets: 'БР-5', priority: '80',
+      hdf_parameter: '3,20 мм', doweling: 'Да', cut_job: 'Р-12: Раскрой кухни', bath_cut_job: null, bazis_cut_sets: 'БР-5', priority: '80',
       basis_project: 'Проект-А', basis_product: 'Изделие-7', basis_data: 'ДАННЫЕ-Б', basis_designation: 'ОБОЗН-9',
     });
     expect(src.details.columnOrder).toEqual(['n', 'hdf_parameter', 'doweling', 'cut_job', 'bath_cut_job', 'bazis_cut_sets', 'priority', 'basis_project',
@@ -436,9 +437,18 @@ describe('every element of the manager screen is available as a tick', () => {
   it('cut jobs come from the table when it is on screen (it knows the last ready job), else from the detail', () => {
     const fromTable = buildOrderEditSource(input({
       details: [rich] as OrderEditSourceInput['details'],
-      cutJobLabelsOf: (rowKey) => (rowKey === '71' ? { cut_job: 'Р-15: Новый раскрой', bath_cut_job: 'В-3' } : null),
+      tableCellsOf: (rowKey) => (rowKey === '71' ? { cut_job: 'Р-15: Новый раскрой', bath_cut_job: 'В-3', hdf_parameter: '716×396,5' } : null),
     }));
-    expect(fromTable.details.rows[0].values).toMatchObject({ cut_job: 'Р-15: Новый раскрой', bath_cut_job: 'В-3' });
+    expect(fromTable.details.rows[0].values).toMatchObject({ cut_job: 'Р-15: Новый раскрой', bath_cut_job: 'В-3', hdf_parameter: '716×396,5' });
+    // The table is the authority: a job that is no longer its last ready one is not shown, although the detail still carries it.
+    const archived = buildOrderEditSource(input({
+      details: [rich] as OrderEditSourceInput['details'],
+      tableCellsOf: () => ({ cut_job: null, bath_cut_job: null, hdf_parameter: 'устар.' }),
+    }));
+    expect(archived.details.rows[0].values).toMatchObject({ cut_job: null, bath_cut_job: null, hdf_parameter: 'устар.' });
+    const wire = JSON.stringify(buildClientScreenSnapshot(archived, CLIENT_SCREEN_CODES, idFor()));
+    expect(wire).not.toContain('Раскрой кухни');
+    expect(wire).not.toContain('Р-12');
   });
 
   it('none of the new values leaves without its own tick', () => {
@@ -451,7 +461,7 @@ describe('every element of the manager screen is available as a tick', () => {
     const wire = JSON.stringify(buildClientScreenSnapshot(src, old, idFor()));
     for (const hidden of ['3,20', 'Р-12', 'Раскрой кухни', 'БР-5', 'Проект-А', 'Изделие-7', 'ДАННЫЕ-Б', 'ОБОЗН-9']) expect(wire, hidden).not.toContain(hidden);
     const all = buildClientScreenSnapshot(src, CLIENT_SCREEN_CODES, idFor());
-    for (const shown of ['3,20', 'Р-12: Раскрой кухни', 'БР-5', 'Проект-А', 'Изделие-7', 'ДАННЫЕ-Б', 'ОБОЗН-9']) expect(JSON.stringify(all), shown).toContain(shown);
+    for (const shown of ['3,20 мм', 'Р-12: Раскрой кухни', 'БР-5', 'Проект-А', 'Изделие-7', 'ДАННЫЕ-Б', 'ОБОЗН-9']) expect(JSON.stringify(all), shown).toContain(shown);
     expect(clientScreenSnapshotSchema.safeParse(all).success).toBe(true);
     // Each new header line alone shows only itself.
     const only = (code: string) => buildClientScreenSnapshot(src, [code], idFor()).summary;
@@ -484,6 +494,42 @@ describe('every element of the manager screen is available as a tick', () => {
     expect(summary.project).toBeUndefined();
     expect(summary.created_by).toBeUndefined();
     expect(summary).toMatchObject({ order_status: 'В работе', payment_status: 'Частично оплачен', production_status: 'Фрезеровка', priority: '100' });
+  });
+
+  it('before the detail table has been on screen only the plain columns go: nothing the table may gate by a right or a setting', () => {
+    const restricted = ['hdf_parameter', 'doweling', 'cut_job', 'bath_cut_job', 'bazis_cut_sets', 'priority', 'basis_project', 'basis_product', 'basis_data',
+      'basis_designation'];
+    for (const key of DEFAULT_DETAIL_COLUMNS) {
+      expect(DETAIL_COLUMN_FIELDS[key], key).toBeDefined();
+      expect(restricted).not.toContain(DETAIL_COLUMN_FIELDS[key]);
+    }
+    // Presented from the first tab, the table never mounted: every code ticked, and still no cut job, HDF or basis data.
+    const src = buildOrderEditSource(input({ details: [rich] as OrderEditSourceInput['details'], detailColumnOrder: DEFAULT_DETAIL_COLUMNS, tableCellsOf: null }));
+    const snapshot = buildClientScreenSnapshot(src, CLIENT_SCREEN_CODES, idFor());
+    const codes = snapshot.details!.columns.map((column) => column.code);
+    for (const field of restricted) expect(codes).not.toContain(`details.${field}`);
+    const wire = JSON.stringify(snapshot.details);
+    for (const hidden of ['Р-12', 'Раскрой кухни', 'БР-5', 'Изделие-7', 'ДАННЫЕ-Б', 'ОБОЗН-9', '3,20']) expect(wire, hidden).not.toContain(hidden);
+  });
+
+  it('the editor overlay leaves table-owned cells alone; the HDF cell is the editor\'s only while its own editor is open', () => {
+    const columns = ['detail_number', 'height', 'hdf_parameter_override_mm', 'cut_job', 'bath_cut_job'];
+    const codesOf = (active: string | null) => orderEditEditingValues(rich, { height: 720, hdf_parameter_override_mm: 4 }, base.names, columns, active);
+    expect(codesOf('height').map((item) => item.code)).toEqual(['details.n', 'details.height']);
+    expect(codesOf(null).map((item) => item.code)).toEqual(['details.n', 'details.height']);
+    expect(codesOf('hdf_parameter_override_mm')).toEqual([
+      { code: 'details.n', value: '1' }, { code: 'details.height', value: '720' }, { code: 'details.hdf_parameter', value: '4 мм' },
+    ]);
+  });
+
+  it('the designer of an order without a doweling order: the name the record has, else by id', () => {
+    const employee = (id: number) => ({ 4: 'Тимур С.' } as Record<number, string>)[id];
+    expect(clientScreenHeaderPeople({ details: [], dowelingLinks: [], header: { design_engineer: 'Алия К. (из записи)', design_engineer_id: 4 }, employeeName: () => undefined }).designer)
+      .toBe('Алия К. (из записи)');
+    expect(clientScreenHeaderPeople({ details: [], dowelingLinks: [], header: { design_engineer: '', design_engineer_id: 4 }, employeeName: employee }).designer).toBe('Тимур С.');
+    // With a doweling order the record's own name is not used, as in the manager's header.
+    expect(clientScreenHeaderPeople({ details: [], dowelingLinks: [{ doweling_order: { doweling_order_name: 'П-1', design_engineer_id: null } }],
+      header: { design_engineer: 'Алия К. (из записи)' }, employeeName: employee }).designer).toBeNull();
   });
 });
 
