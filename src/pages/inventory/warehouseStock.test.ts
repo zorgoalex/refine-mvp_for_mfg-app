@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SheetMaterialTypeDto } from '../../api/sheetMaterialsApi';
 import type { WarehouseStockDto, WarehouseStockItemDto } from '../../api/types/inventoryApi.types';
 import {
+  stockQuantityTone,
   canLinkRow, isStockUnsupported, linkDecision, linkInput, nextStockSupport, onecNotices, pageTitle, resolveGroup, stockExportRows, stockTabs,
 } from './warehouseStock';
 
@@ -86,5 +87,12 @@ describe('warehouse stock screen helpers', () => {
         { Вкладка: 'Не сопоставлено с ERP', Наименование: 'МДФ 10 мм', 'Код 1С': 'НФ-1', 'Поставщик / категория 1С': 'Раходные материалы', Остаток: 4.352, 'Ед.': 'л.', Источник: '1С' },
         { Вкладка: 'Плёнка', Наименование: 'Айвори; Алер', 'Код 1С': '', 'Поставщик / категория 1С': 'Алер', Остаток: 12.5, 'Ед.': 'пог. м', Источник: 'ERP' },
       ]);
+  });
+
+  it('tones the stock number: zero is muted, a negative one stands out', () => {
+    expect(stockQuantityTone(0)).toBe('zero');
+    expect(stockQuantityTone(null)).toBe('zero');
+    expect(stockQuantityTone(-1.1)).toBe('negative');
+    expect(stockQuantityTone(7.3)).toBe('ok');
   });
 });

@@ -9,6 +9,12 @@ export const FILM_GROUP = 'film';
 export const NO_CATEGORY = 'none';
 const STORAGE_KEY = 'erp.inventory.stockGroup';
 
+/** Тон числа остатка: ноль приглушается, минус выделяется (оформление задаёт вариант интерфейса). */
+export function stockQuantityTone(quantity: number | null | undefined): 'negative' | 'zero' | 'ok' {
+  if (quantity == null || quantity === 0) return 'zero';
+  return quantity < 0 ? 'negative' : 'ok';
+}
+
 export function pageTitle(warehouseName: string | undefined): string {
   return warehouseName ? `Остатки · ${warehouseName}` : 'Остатки на складах';
 }

@@ -39,6 +39,7 @@ import '../styles/workbench-board.css';
 import '../styles/workbench-procurement.css';
 import '../styles/workbench-payments.css';
 import '../styles/workbench-lists.css';
+import '../styles/workbench-stock.css';
 
 const EvolutionRouteSkeleton: React.FC = () => (
   <div

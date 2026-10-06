@@ -137,7 +137,7 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <LocalizedList title="Плёнки">
-      <div className="films-list" style={{ '--films-list-bottom': `${footerHeight}px` } as CSSProperties}>
+      <div className="films-list wb-list" style={{ '--films-list-bottom': `${footerHeight}px` } as CSSProperties}>
       <div ref={headRef} className="films-list__head" style={{ top: tabsHeight }}>
       <Space wrap style={{ width: "100%" }}>
         {getLoadedRuntimeConfig()?.features?.filmCatalogImport === true && canManageCatalog && <Button onClick={() => navigate('/films/catalog-import')}>Импорт каталога 1С</Button>}

@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-07", title: "NewLine: остатки на складах, справочник складов и плёнки",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Вариант NewLine: «Остатки на складах», «Справочник складов» и «Плёнки» оформлены в новом стиле — таблица в одной карточке, плотные строки (на экран помещается в полтора раза больше позиций), тонкая справочная строка о данных 1С. Вкладки, фильтры, действия и колонки остались прежними.",
+      "Вариант NewLine: остаток — главное число строки; нулевой остаток приглушён, отрицательный выделен красным.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-07", title: "NewLine: вкладки на всю ширину, меньше отступ над заказом",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

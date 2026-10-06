@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Table } from '../../ui/tooltipDelay';
 import { sheetMaterialsApi } from '../../api/sheetMaterialsApi';
 import type { WarehouseStockDto, WarehouseStockItemDto } from '../../api/types/inventoryApi.types';
-import { canLinkRow, linkDecision, linkInput, onecNotices } from './warehouseStock';
+import { canLinkRow, linkDecision, linkInput, onecNotices, stockQuantityTone } from './warehouseStock';
 
 const { Text } = Typography;
 const formatQuantity = (value: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 }).format(value);
@@ -83,7 +83,7 @@ export const WarehouseStockTable: React.FC<Props> = ({ group, data, loading, cat
       ? [{ title: 'Поставщик / категория 1С', key: 'origin', render: (_: unknown, item: WarehouseStockItemDto) => item.vendorName ?? item.categoryName ?? '—' }]
       : [{ title: 'Код 1С', dataIndex: 'code', key: 'code', render: (value: string | null) => value ?? '—' },
         { title: 'Категория 1С', dataIndex: 'categoryName', key: 'categoryName', render: (value: string | null) => value ?? '—' }]),
-    { title: 'Остаток', dataIndex: 'quantity', key: 'quantity', align: 'right' as const, render: (value: number) => formatQuantity(value) },
+    { title: 'Остаток', dataIndex: 'quantity', key: 'quantity', align: 'right' as const, render: (value: number) => <span className="stock-qty" data-stock={stockQuantityTone(value)}>{formatQuantity(value)}</span> },
     { title: 'Ед.', dataIndex: 'unitName', key: 'unitName', render: (value: string | null) => value ?? '—' },
     ...(group === 'all' ? [{ title: 'Источник', dataIndex: 'source', key: 'source', render: (value: 'erp' | '1c') => value === 'erp' ? <Tag color="blue">ERP</Tag> : <Tag>1С</Tag> }] : []),
     ...(canLink && (group === 'unlinked' || group === 'all')
