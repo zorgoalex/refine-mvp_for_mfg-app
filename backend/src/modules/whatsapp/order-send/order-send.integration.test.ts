@@ -371,6 +371,35 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     expect(confirmed.send.state).toBe('queued');
   });
 
+  it('the «previous outcome unknown» refusal closes its command: a late copy of it never becomes a send after the confirmed repeat', async () => {
+    sendBehaviour = async () => ({});
+    const first = (await send(9001, { target: { kind: 'client' }, form: 'order_pdf' as never })).send;
+    await worker.work();
+    expect((await row(first.sendId)).state).toBe('unknown');
+    // The answer to this command is lost on its way to the browser; the refusal is recorded with its key and audit.
+    const lost = { target: { kind: 'client' as const }, form: 'order_pdf' as const, idempotencyKey: randomUUID() };
+    const refused = await service.send(9001, lost, admin, 'req-lost').catch((error: ApiError) => error);
+    expect(refused).toMatchObject({ code: 'ORDER_SEND_PREVIOUS_UNKNOWN', details: { final: true, sendId: first.sendId } });
+    expect((await q(`SELECT error_code FROM whatsapp_order_send_refusals WHERE idempotency_key = $1`, [lost.idempotencyKey])).rows)
+      .toEqual([{ error_code: 'ORDER_SEND_PREVIOUS_UNKNOWN' }]);
+    expect((await q(`SELECT count(*)::int n FROM audit_log WHERE event = 'whatsapp.order_send.refused' AND request_id = 'req-lost'
+      AND status_code = 'ORDER_SEND_PREVIOUS_UNKNOWN'`)).rows[0].n).toBe(1);
+    // The user confirms; the repeat is another command and is delivered.
+    sendBehaviour = async () => ({ messageId: `true_7${PHONE_DIGITS}@c.us_REPEAT` });
+    await q(`UPDATE whatsapp_order_send_settings SET last_delivery_at = NULL, next_delivery_at = NULL`);
+    const confirmed = (await service.send(9001, { target: { kind: 'client' }, form: 'order_pdf', idempotencyKey: randomUUID(), confirmAfterUnknown: first.sendId },
+      admin, 'req-confirm')).send;
+    await worker.work();
+    expect((await row(confirmed.sendId)).state).toBe('sent');
+    // The delayed copy of the first command arrives now: the latest send is «sent», yet the command stays refused.
+    expect(await service.send(9001, lost, admin, 'req-late').catch((error: ApiError) => error))
+      .toMatchObject({ code: 'ORDER_SEND_PREVIOUS_UNKNOWN', details: { final: true } });
+    expect((await q(`SELECT count(*)::int n FROM whatsapp_order_sends WHERE order_id = 9001 AND form_code = 'order_pdf'`)).rows[0].n).toBe(2);
+    // The recorded refusal is audited once, with the command that met it first; its late copy adds nothing.
+    expect((await q(`SELECT count(*)::int n FROM audit_log WHERE event = 'whatsapp.order_send.refused' AND request_id IN ('req-lost', 'req-late')`)).rows[0].n)
+      .toBe(1);
+  });
+
   it('the send window: the next delivery waits threshold + a random delay drawn once at the last delivery', async () => {
     await configure({ minIntervalMinutes: 10, sendWindowMinutes: 5 });
     // The request validation refuses a window over half the threshold; the DB CHECK is the last line.

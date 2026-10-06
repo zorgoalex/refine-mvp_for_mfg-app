@@ -988,7 +988,10 @@ function sendSelect() {
  * release makes no such sends). They are raised before anything is written and are recorded with the key.
  */
 export const FINAL_REFUSAL_CODES = new Set(['ORDER_SEND_PHONE_CHANGED', 'ORDER_SEND_PHONE_CHOICE_UNAVAILABLE', 'CLIENT_PHONE_MISSING',
-  'EMPLOYEE_CONTACT_MISSING', 'ORDER_SEND_RECIPIENT_UNKNOWN', 'ORDER_SEND_CHAT_UNKNOWN']);
+  'EMPLOYEE_CONTACT_MISSING', 'ORDER_SEND_RECIPIENT_UNKNOWN', 'ORDER_SEND_CHAT_UNKNOWN',
+  // «The previous send of this form ended unknown»: the command is closed with its key. The repeat the user
+  // confirms is another command, so a late copy of this one never becomes a send after that repeat went out.
+  'ORDER_SEND_PREVIOUS_UNKNOWN']);
 
 /** The same for a supplier request send: the request or its recipient is not what the window showed. */
 export const SUPPLIER_FINAL_REFUSAL_CODES = new Set(['ORDER_SEND_PHONE_CHANGED', 'SUPPLIER_CONTACT_MISSING', 'SUPPLIER_NOT_LINKED',
