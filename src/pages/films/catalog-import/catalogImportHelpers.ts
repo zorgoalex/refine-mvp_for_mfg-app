@@ -150,3 +150,56 @@ export function sourceLabel(batch: { sourceKind: string; fileName: string | null
   if (batch.sourceKind === 'file' && batch.fileName?.startsWith('decisions:')) return 'Файл решений';
   return batch.sourceKind === 'file' ? 'Файл' : 'Зеркало 1С';
 }
+
+/** Подписи счётчиков пакета на вкладке «Итог и действия» (ключи приходят с backend). */
+export const COUNTER_LABELS: Record<string, string> = {
+  rows: 'Строк каталога',
+  rowsOk: 'Строк без ошибок',
+  rowsInvalid: 'Строк с ошибками',
+  rowsSkipped: 'Строк пропущено',
+  films: 'Плёнок справочника',
+  linked: 'Уже связано с каталогом',
+  auto: 'Сопоставлено уверенно',
+  suggested: 'На выбор',
+  confirmed: 'Подтверждено',
+  manual: 'Выбрано вручную',
+  none: 'Нет соответствия',
+  unchanged: 'Без изменений',
+  toRename: 'К переименованию',
+  toMerge: 'К объединению (дубли)',
+  toCreate: 'К созданию',
+  unresolvedGroups: 'Неразрешённых групп',
+  decisionsSkipped: 'Пропущено решений',
+  appliedFilms: 'Изменено плёнок',
+};
+
+/** Подпись счётчика; неизвестный ключ показывается как есть, чтобы новый счётчик backend не пропал. */
+export const counterLabel = (key: string): string => COUNTER_LABELS[key] ?? key;
+
+/** Число в русской записи: 2 052, а не 2,052. */
+export const formatCounter = (value: unknown): string =>
+  typeof value === 'number' && Number.isFinite(value) ? new Intl.NumberFormat('ru-RU').format(value) : String(value ?? '—');
+
+/** Название источника пакета: служебное имя файла решений `decisions:7.json` — по-русски. */
+export function batchSourceName(batch: { id: number; fileName?: string | null; onecCategoryName?: string | null }): string {
+  const decisions = /^decisions:(\d+)\.json$/.exec(batch.fileName ?? '');
+  if (decisions) return `файл решений пакета №${decisions[1]}`;
+  return batch.fileName ?? batch.onecCategoryName ?? `Пакет ${batch.id}`;
+}
+
+/** Статус сопоставления плёнки справочника с позицией каталога. */
+export const MATCH_STATUS_LABELS: Record<string, string> = {
+  linked: 'Уже связана',
+  auto: 'Уверенно',
+  suggested: 'На выбор',
+  confirmed: 'Подтверждено',
+  manual: 'Выбрано вручную',
+  none: 'Нет соответствия',
+  unchanged: 'Без изменений',
+};
+export const matchStatusLabel = (status: string): string => MATCH_STATUS_LABELS[status] ?? status;
+
+/** Статус строки каталога. */
+export const ROW_STATUS_LABELS: Record<string, string> = { ok: 'Без ошибок', invalid: 'Ошибка', skipped: 'Пропущена' };
+export const rowStatusLabel = (status: string): string => ROW_STATUS_LABELS[status] ?? status;
+

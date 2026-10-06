@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { catalogImportActions, catalogImportErrorMessage, filmReferenceViewAllowed, importManageAllowed, inspectCatalogSheets, catalogMatchQuery, catalogRowsQuery, onecMirrorAllowed, resolveIdempotencyKey, sha256File, vendorMappingAction, serverPagination, DECISIONS_SKIP_LABELS, decisionsDownloadName, isDecisionsBatch, readDecisionsFile, sourceLabel } from './catalogImportHelpers';
+import { catalogImportActions, catalogImportErrorMessage, filmReferenceViewAllowed, importManageAllowed, inspectCatalogSheets, catalogMatchQuery, catalogRowsQuery, onecMirrorAllowed, resolveIdempotencyKey, sha256File, vendorMappingAction, serverPagination, DECISIONS_SKIP_LABELS, decisionsDownloadName, isDecisionsBatch, readDecisionsFile, sourceLabel, batchSourceName, counterLabel, formatCounter, matchStatusLabel, rowStatusLabel } from './catalogImportHelpers';
 
 describe('film catalog import helpers', () => {
   it('inspects matching sheets from browser cell arrays and reports invalid rows', () => {
@@ -97,4 +97,32 @@ describe('decisions file helpers', () => {
     expect(Object.keys(DECISIONS_SKIP_LABELS).sort()).toEqual(['canonical_skipped', 'changed', 'exists', 'missing', 'no_films']);
     expect(decisionsDownloadName(3)).toBe('решения-каталога-1С-пакет-3.json');
   });
+
+  it('shows the batch counters in Russian with Russian digit grouping; an unknown counter stays visible', () => {
+    // Every counter the backend writes has a Russian label.
+    for (const key of ['rows', 'rowsOk', 'rowsInvalid', 'rowsSkipped', 'films', 'linked', 'auto', 'suggested', 'confirmed', 'manual', 'none', 'unchanged', 'toRename', 'toMerge', 'toCreate', 'unresolvedGroups', 'decisionsSkipped', 'appliedFilms']) {
+      expect(counterLabel(key), key).toMatch(/[А-Яа-я]/);
+      expect(counterLabel(key), key).not.toBe(key);
+    }
+    expect(counterLabel('toMerge')).toBe('К объединению (дубли)');
+    expect(counterLabel('futureCounter')).toBe('futureCounter');
+    expect(formatCounter(2052).replace(/\s/g, ' ')).toBe('2 052');
+    expect(formatCounter(0)).toBe('0');
+    expect(formatCounter(undefined)).toBe('—');
+  });
+
+  it('names the decisions file source in Russian instead of the technical file name', () => {
+    expect(batchSourceName({ id: 1, fileName: 'decisions:7.json' })).toBe('файл решений пакета №7');
+    expect(batchSourceName({ id: 2, fileName: 'Пленка_ПВХ_1С.xlsx' })).toBe('Пленка_ПВХ_1С.xlsx');
+    expect(batchSourceName({ id: 3, fileName: null, onecCategoryName: 'ПЛЕНКА ПВХ ДЛЯ МДФ' })).toBe('ПЛЕНКА ПВХ ДЛЯ МДФ');
+    expect(batchSourceName({ id: 4 })).toBe('Пакет 4');
+  });
+
+  it('shows match and row statuses in Russian (lists, filters); an unknown status stays visible', () => {
+    for (const status of ['linked', 'auto', 'suggested', 'confirmed', 'manual', 'none', 'unchanged']) expect(matchStatusLabel(status), status).toMatch(/[А-Яа-я]/);
+    for (const status of ['ok', 'invalid', 'skipped']) expect(rowStatusLabel(status), status).toMatch(/[А-Яа-я]/);
+    expect(matchStatusLabel('future')).toBe('future');
+    expect(rowStatusLabel('future')).toBe('future');
+  });
 });
+

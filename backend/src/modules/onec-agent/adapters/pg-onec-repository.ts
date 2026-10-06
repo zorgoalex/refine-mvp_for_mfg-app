@@ -19,6 +19,8 @@ export interface AgentRecord {
   displayName: string;
   status: 'active' | 'blocked';
   minimumAgentVersion: string;
+  /** Expected daily silence, UTC "HH:MM-HH:MM"; null = not set (migration 247). */
+  expectedSilenceUtc: string | null;
   configPublishBlocked: boolean;
   version: number;
 }
@@ -102,6 +104,7 @@ function toAgent(row: QueryResultRow): AgentRecord {
     displayName: row.display_name,
     status: row.status,
     minimumAgentVersion: row.minimum_agent_version,
+    expectedSilenceUtc: row.expected_silence_utc ?? null,
     configPublishBlocked: row.config_publish_blocked,
     version: num(row.version),
   };
@@ -347,7 +350,7 @@ export class PgOnecRepository {
     const { rows } = await this.database.query(
       `SELECT a.agent_id, a.source_id, s.display_name AS source_name, s.code AS source_code,
               s.identity_status, s.identity, s.observed_identity, s.generation AS source_generation, a.site_id, a.display_name, a.status,
-              a.minimum_agent_version, a.config_publish_blocked, a.version, a.created_at, a.updated_at,
+              a.minimum_agent_version, a.expected_silence_utc, a.config_publish_blocked, a.version, a.created_at, a.updated_at,
               st.received_at, st.agent_version, st.state, st.state_reason, st.heartbeat,
               st.active_config_version, st.rejected_config_version, st.rejected_reason, st.cert_expires_at,
               cv.config_version AS published_config_version,
@@ -381,7 +384,8 @@ export class PgOnecRepository {
   async updateAgent(
     client: DatabaseClient,
     agentId: string,
-    patch: { siteId?: string; displayName?: string; minimumAgentVersion?: string; status?: 'active' | 'blocked' },
+    // expectedSilenceUtc: undefined = keep, null = clear, text = set.
+    patch: { siteId?: string; displayName?: string; minimumAgentVersion?: string; status?: 'active' | 'blocked'; expectedSilenceUtc?: string | null },
     actorId: number,
   ): Promise<AgentRecord> {
     const { rows } = await client.query(
@@ -390,9 +394,11 @@ export class PgOnecRepository {
           display_name = COALESCE($3, display_name),
           minimum_agent_version = COALESCE($4, minimum_agent_version),
           status = COALESCE($5, status),
+          expected_silence_utc = CASE WHEN $7::boolean THEN $8::text ELSE expected_silence_utc END,
           version = version + 1, updated_by = $6, updated_at = now()
         WHERE agent_id = $1 RETURNING *`,
-      [agentId, patch.siteId ?? null, patch.displayName ?? null, patch.minimumAgentVersion ?? null, patch.status ?? null, actorId],
+      [agentId, patch.siteId ?? null, patch.displayName ?? null, patch.minimumAgentVersion ?? null, patch.status ?? null, actorId,
+        patch.expectedSilenceUtc !== undefined, patch.expectedSilenceUtc ?? null],
     );
     return toAgent(rows[0]!);
   }
@@ -733,7 +739,7 @@ export class PgOnecRepository {
 
   async listAgentsForMonitor(): Promise<QueryResultRow[]> {
     const { rows } = await this.database.query(
-      `SELECT a.agent_id, a.source_id, a.status, st.received_at, st.state, st.state_reason, st.cert_expires_at
+      `SELECT a.agent_id, a.source_id, a.status, a.expected_silence_utc, st.received_at, st.state, st.state_reason, st.cert_expires_at
          FROM onec_agents a LEFT JOIN onec_agent_status st ON st.agent_id = a.agent_id
         WHERE a.status = 'active'`,
     );

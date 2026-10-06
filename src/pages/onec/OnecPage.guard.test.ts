@@ -381,3 +381,13 @@ describe('Onec (1C integration) UI wiring', () => {
   });
 });
 
+describe('ожидаемое молчание агента в форме редактирования', () => {
+  it('показывает значение, проверяет формат и отправляет поле только при изменении', () => {
+    expect(drawer).toContain('<Descriptions.Item label="Ожидаемое молчание (UTC)">');
+    expect(drawer).toContain('name="expectedSilenceUtc"');
+    expect(drawer).toContain('expectedSilenceError(value)');
+    expect(drawer).toContain("const silenceChanged = silence !== (agent.expectedSilenceUtc ?? null);");
+    expect(drawer).toContain('...(silenceChanged ? { expectedSilenceUtc: silence } : {})');
+    expect(api).toContain('expectedSilenceUtc?: string | null');
+  });
+});

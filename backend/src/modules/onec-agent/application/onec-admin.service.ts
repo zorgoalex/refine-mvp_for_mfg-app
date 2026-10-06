@@ -16,6 +16,7 @@ import {
 } from '../domain/onec-config';
 import { buildOnecEvent } from '../domain/onec-events';
 import { AGENT_VERSION_PATTERN, sameSourceIdentity } from '../domain/onec-protocol';
+import { expectedSilenceProblem } from '../domain/onec-expected-silence';
 import { OnecRuntimeConfigService } from '../onec-runtime-config.service';
 import { OnecAuditWriter, type OnecRequestContext } from './onec-audit';
 import { OnecEtlRevocationService } from './onec-etl-revocation.service';
@@ -49,6 +50,11 @@ const agentUpdateSchema = z
     siteId: z.string().trim().min(1).max(64).optional(),
     displayName: z.string().trim().min(1).max(200).optional(),
     minimumAgentVersion: z.string().regex(AGENT_VERSION_PATTERN).optional(),
+    // Expected daily silence, UTC "HH:MM-HH:MM" (≤ 120 minutes); null clears it.
+    expectedSilenceUtc: z.string().trim().nullable().optional().superRefine((value, ctx) => {
+      const problem = typeof value === 'string' ? expectedSilenceProblem(value) : null;
+      if (problem) ctx.addIssue({ code: 'custom', message: problem });
+    }),
   })
   .strict();
 const agentStatusSchema = z.object({ version: z.number().int().positive() }).strict();
@@ -221,8 +227,8 @@ export class OnecAdminService {
           event: 'onec.agent.updated',
           entityType: 'onec_agent',
           entityId: agentId,
-          before: { siteId: before.siteId, displayName: before.displayName, minimumAgentVersion: before.minimumAgentVersion },
-          after: { siteId: after.siteId, displayName: after.displayName, minimumAgentVersion: after.minimumAgentVersion },
+          before: { siteId: before.siteId, displayName: before.displayName, minimumAgentVersion: before.minimumAgentVersion, expectedSilenceUtc: before.expectedSilenceUtc },
+          after: { siteId: after.siteId, displayName: after.displayName, minimumAgentVersion: after.minimumAgentVersion, expectedSilenceUtc: after.expectedSilenceUtc },
         },
         { agentId, sourceId: after.sourceId },
       );
@@ -797,6 +803,7 @@ export class OnecAdminService {
       status: row.status,
       version: Number(row.version),
       minimumAgentVersion: row.minimum_agent_version,
+      expectedSilenceUtc: row.expected_silence_utc ?? null,
       source: {
         sourceId: Number(row.source_id),
         code: row.source_code,

@@ -88,7 +88,8 @@ suite('1C agent E1 — isolated PostgreSQL', () => {
       CREATE TABLE permissions_state(id boolean, version integer, updated_at timestamptz); INSERT INTO permissions_state VALUES (true, 1, now());
       CREATE TABLE audit_log(LIKE public.audit_log INCLUDING ALL);
       CREATE TABLE audit_log_related_entity(LIKE public.audit_log_related_entity INCLUDING ALL);`);
-    for (const file of ['193_onec_agent_foundation.sql', '196_onec_agent_commands.sql', '198_onec_etl.sql', '200_onec_etl_snapshots_revocation.sql']) {
+    for (const file of ['193_onec_agent_foundation.sql', '196_onec_agent_commands.sql', '198_onec_etl.sql', '200_onec_etl_snapshots_revocation.sql',
+      '247_onec_agent_expected_silence.sql']) {
       await pool.query(readFileSync(new URL(`../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     const values: Partial<BackendEnv> = { DATABASE_URL: url.toString(), DATABASE_QUERY_TIMEOUT_MS: 10000, DATABASE_POOL_MIN: 0, DATABASE_POOL_MAX: 4, DATABASE_SSL: false };
@@ -377,6 +378,52 @@ suite('1C agent E1 — isolated PostgreSQL', () => {
       [JSON.stringify({ envelopeVersion: 1, agentId: 'agent-a', data: { silentSince: new Date(Date.now() - 600000).toISOString() } })]);
     await monitor.relayOutbox();
     expect((await pool.query(`SELECT count(*)::int AS n FROM onec_alerts WHERE state = 'open'`)).rows[0].n).toBe(0);
+  });
+
+  it('does not report a silence explained by the expected daily interval; reports it when the interval ends or is cleared', async () => {
+    const { agent } = await registerAgent();
+    const silentEvents = async () => (await pool.query(
+      `SELECT payload_json->'data'->>'silentSince' AS since FROM onec_outbox_events WHERE event_type = 'onec.agent.silent' ORDER BY event_id`)).rows.map((row) => row.since);
+
+    // The setting: validated, stored, audited, returned by the admin API.
+    expect(await statusOf(() => admin.updateAgent('agent-a', { version: agent.version, expectedSilenceUtc: '20:00-23:00' }, actor, ctx('es-long')))).toBe('422 VALIDATION_FAILED');
+    expect(await statusOf(() => admin.updateAgent('agent-a', { version: agent.version, expectedSilenceUtc: '2345-0025' }, actor, ctx('es-bad')))).toBe('422 VALIDATION_FAILED');
+    const updated = await admin.updateAgent('agent-a', { version: agent.version, expectedSilenceUtc: '23:45-00:25' }, actor, ctx('es-set'));
+    expect(updated.expectedSilenceUtc).toBe('23:45-00:25');
+    expect((await admin.getAgent('agent-a')).expectedSilenceUtc).toBe('23:45-00:25');
+    const audit = await pool.query(`SELECT a.before_json, a.after_json FROM audit_log a JOIN onec_audit_links l ON l.audit_id = a.audit_id WHERE l.request_id = 'es-set'`);
+    expect(audit.rows[0].before_json.expectedSilenceUtc).toBeNull();
+    expect(audit.rows[0].after_json.expectedSilenceUtc).toBe('23:45-00:25');
+    // Another field can be saved without touching the interval.
+    const renamed = await admin.updateAgent('agent-a', { version: updated.version, displayName: 'E2E переименован' }, actor, ctx('es-keep'));
+    expect(renamed.expectedSilenceUtc).toBe('23:45-00:25');
+
+    // A clean stop at 23:49:33 (the production night of 2026-10-05).
+    const session = await authenticate(agentRequest(), 'heartbeat');
+    await protocol.heartbeat(session, { agentId: 'agent-a', version: '1.2.0', state: 'healthy' });
+    await pool.query(`UPDATE onec_agent_status SET received_at = '2026-10-05T23:49:33Z' WHERE agent_id = 'agent-a'`);
+    await monitor.detectSilentAgents(new Date('2026-10-05T23:53:16Z'));
+    await monitor.detectSilentAgents(new Date('2026-10-06T00:03:00Z'));
+    await monitor.detectSilentAgents(new Date('2026-10-06T00:24:59Z'));
+    expect(await silentEvents()).toEqual([]);
+    // Still silent when the interval ends: reported once, with the real beginning of the silence.
+    await monitor.detectSilentAgents(new Date('2026-10-06T00:25:00Z'));
+    await monitor.detectSilentAgents(new Date('2026-10-06T00:26:00Z'));
+    expect(await silentEvents()).toEqual(['2026-10-05T23:49:33.000Z']);
+
+    // A silence that began long before the interval is not hidden by it.
+    await pool.query(`DELETE FROM onec_outbox_events`);
+    await pool.query(`UPDATE onec_agent_status SET received_at = '2026-10-05T20:03:23Z' WHERE agent_id = 'agent-a'`);
+    await monitor.detectSilentAgents(new Date('2026-10-05T23:50:00Z'));
+    expect(await silentEvents()).toEqual(['2026-10-05T20:03:23.000Z']);
+
+    // Cleared: the same planned stop is reported again.
+    await pool.query(`DELETE FROM onec_outbox_events`);
+    const cleared = await admin.updateAgent('agent-a', { version: renamed.version, expectedSilenceUtc: null }, actor, ctx('es-clear'));
+    expect(cleared.expectedSilenceUtc).toBeNull();
+    await pool.query(`UPDATE onec_agent_status SET received_at = '2026-10-05T23:49:33Z' WHERE agent_id = 'agent-a'`);
+    await monitor.detectSilentAgents(new Date('2026-10-05T23:53:16Z'));
+    expect(await silentEvents()).toEqual(['2026-10-05T23:49:33.000Z']);
   });
 
   it('projects agent state alerts from the current status: out-of-order retry and replay are no-ops', async () => {

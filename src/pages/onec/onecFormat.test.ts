@@ -865,3 +865,20 @@ describe('onec matching (E3c) labels', () => {
     expect(onecItemTypeBreakdownLabel([])).toBe('');
   });
 });
+
+describe('ожидаемое ежедневное молчание агента', () => {
+  it('принимает интервал по UTC, в том числе через полночь, и пустое значение', async () => {
+    const { expectedSilenceError, normalizeExpectedSilence } = await import('./onecFormat');
+    for (const ok of ['23:45-00:25', '02:00-02:30', '00:00-02:00', '', '   ', null, undefined]) {
+      expect(expectedSilenceError(ok as string | null | undefined), String(ok)).toBeNull();
+    }
+    expect(expectedSilenceError('2345-0025')).toMatch(/Формат/);
+    expect(expectedSilenceError('24:00-00:10')).toMatch(/Формат/);
+    expect(expectedSilenceError('10:00-10:00')).toMatch(/совпадают/);
+    expect(expectedSilenceError('20:00-23:00')).toMatch(/длиннее 120 минут/);
+    expect(expectedSilenceError('00:00-02:01')).toMatch(/длиннее 120 минут/);
+    expect(normalizeExpectedSilence(' 23:45-00:25 ')).toBe('23:45-00:25');
+    expect(normalizeExpectedSilence('')).toBeNull();
+    expect(normalizeExpectedSilence(undefined)).toBeNull();
+  });
+});

@@ -99,7 +99,7 @@ export const onecApi = {
 
   updateAgent(
     agentId: string,
-    input: { version: number; siteId?: string; displayName?: string; minimumAgentVersion?: string },
+    input: { version: number; siteId?: string; displayName?: string; minimumAgentVersion?: string; expectedSilenceUtc?: string | null },
   ): Promise<OnecAgentView> {
     return httpClient.patch(path(`/agents/${agentIdPath(agentId)}`), input);
   },

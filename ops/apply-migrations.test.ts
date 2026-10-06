@@ -350,6 +350,15 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText.slice(verifyStart, verifyEnd)).toContain('237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*');
   });
 
+  it('probes the expected-silence column and its format check before ledgering migration 247', () => {
+    const arm = probeFn.slice(probeFn.indexOf('247_onec_agent_expected_silence*)'), probeFn.indexOf('245_onec_operator_role*)'));
+    expect(arm).toContain('q_col onec_agents expected_silence_utc');
+    expect(arm).toContain('q_con_on onec_agents chk_onec_agents_expected_silence_utc');
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('245_onec_operator_role*|247_onec_agent_expected_silence*');
+  });
+
   it('probes the operator role, its six permissions, scopes and the enabled guard trigger before ledgering migration 245', () => {
     const arm = probeFn.slice(probeFn.indexOf('245_onec_operator_role*)'), probeFn.indexOf('242_supplier_phone_contact_sync*)'));
     for (const marker of ["role_id = 32 AND role_code = 'onec_operator'", "'onec.view','onec.manage','onec.commands.send'", ') = 6;',

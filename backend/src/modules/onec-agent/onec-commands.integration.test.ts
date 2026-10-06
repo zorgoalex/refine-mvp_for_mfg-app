@@ -61,7 +61,7 @@ suite('1C agent E2 command queue — isolated PostgreSQL', () => {
       CREATE TABLE permissions_state(id boolean, version integer, updated_at timestamptz); INSERT INTO permissions_state VALUES (true, 1, now());
       CREATE TABLE audit_log(LIKE public.audit_log INCLUDING ALL);
       CREATE TABLE audit_log_related_entity(LIKE public.audit_log_related_entity INCLUDING ALL);`);
-    for (const file of ['193_onec_agent_foundation.sql', '196_onec_agent_commands.sql']) {
+    for (const file of ['193_onec_agent_foundation.sql', '196_onec_agent_commands.sql', '247_onec_agent_expected_silence.sql']) {
       await pool.query(readFileSync(new URL(`../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     const values: Partial<BackendEnv> = { DATABASE_URL: url.toString(), DATABASE_QUERY_TIMEOUT_MS: 15000, DATABASE_POOL_MIN: 0, DATABASE_POOL_MAX: 6, DATABASE_SSL: false };

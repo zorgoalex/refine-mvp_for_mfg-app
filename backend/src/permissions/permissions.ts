@@ -586,5 +586,14 @@ export function can(role: UserRole, permission: PermissionName): boolean {
   return (ROLE_PERMISSIONS[role] as readonly PermissionName[]).includes(permission);
 }
 
+/**
+ * Login roles that deliberately have NO Hasura grants: their accounts work through the backend API only, so the
+ * Hasura metadata never mentions them (guard tests of the metadata iterate over HASURA_DATA_ROLES).
+ */
+export const ROLES_WITHOUT_HASURA_GRANTS: readonly UserRole[] = ['onec_operator'];
+
+/** Roles that read application data through Hasura (every login role except the ones above). */
+export const HASURA_DATA_ROLES: readonly UserRole[] = USER_ROLES.filter((role) => !ROLES_WITHOUT_HASURA_GRANTS.includes(role));
+
 /** role_id of the 1C integration operator (migration 245); role changes to or from it are forbidden. */
 export const ONEC_OPERATOR_ROLE_ID = 32;
