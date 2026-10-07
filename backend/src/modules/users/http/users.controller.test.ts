@@ -9,12 +9,38 @@ import type {
   UserListResponseDto,
 } from '../dto/user.dto';
 import {
+  parseActivationRequest,
   parseCreateUserRequest,
+  parseOptionalIdempotencyKey,
+  parseUpdateUserRequestWithVersion,
   parseUserId,
   parseUserListQuery,
   UsersController,
 } from './users.controller';
 import type { UsersRuntimeConfigService } from './users-runtime-config.service';
+
+describe('users command protocol (access groups plan §5.3, transitional)', () => {
+  it('accepts an optional expectedVersion next to the fields, but not alone', () => {
+    expect(parseUpdateUserRequestWithVersion({ fullName: 'X', expectedVersion: 4 })).toEqual({ fullName: 'X', expectedVersion: 4 });
+    expect(parseUpdateUserRequestWithVersion({ fullName: 'X' })).toEqual({ fullName: 'X' });
+    expect(() => parseUpdateUserRequestWithVersion({ expectedVersion: 4 })).toThrow(expect.objectContaining({ statusCode: 422 }));
+    expect(() => parseUpdateUserRequestWithVersion({ fullName: 'X', expectedVersion: 0 })).toThrow(expect.objectContaining({ statusCode: 422 }));
+  });
+
+  it('activation bodies are optional (old clients send none)', () => {
+    expect(parseActivationRequest(undefined)).toEqual({});
+    expect(parseActivationRequest({})).toEqual({});
+    expect(parseActivationRequest({ expectedVersion: 3 })).toEqual({ expectedVersion: 3 });
+    expect(() => parseActivationRequest({ isActive: false })).toThrow(expect.objectContaining({ statusCode: 422 }));
+  });
+
+  it('Idempotency-Key is optional and validated when present', () => {
+    expect(parseOptionalIdempotencyKey(undefined)).toBeUndefined();
+    expect(parseOptionalIdempotencyKey('users-0b1c2d3e-aaaa')).toBe('users-0b1c2d3e-aaaa');
+    expect(() => parseOptionalIdempotencyKey('short')).toThrow(expect.objectContaining({ statusCode: 422 }));
+    expect(() => parseOptionalIdempotencyKey(['users-00000001', 'users-00000002'])).toThrow(expect.objectContaining({ statusCode: 422 }));
+  });
+});
 
 describe('UsersController', () => {
   it('fails closed when users API feature flag is disabled by default', async () => {
@@ -210,6 +236,7 @@ function userDto(overrides: Partial<UserDto> = {}): UserDto {
     permissions: getPermissionsForRole('manager'),
     isActive: true,
     createdAt: '2026-04-30T00:00:00.000Z',
+    rowVersion: 1,
     ...overrides,
   };
 }

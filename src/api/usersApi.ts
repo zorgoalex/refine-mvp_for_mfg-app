@@ -24,33 +24,45 @@ export const usersApi = {
     return response.user;
   },
 
-  create(request: CreateUserRequest): Promise<UserResponse> {
-    return httpClient.post<UserResponse>(apiRoutes.users.list, request);
+  // One Idempotency-Key per user action: a repeat of the same request returns the stored result.
+  create(request: CreateUserRequest, idempotencyKey: string = newActionKey()): Promise<UserResponse> {
+    return httpClient.post<UserResponse>(apiRoutes.users.list, request, actionHeaders(idempotencyKey));
   },
 
-  update(userId: number, request: UpdateUserRequest): Promise<UserResponse> {
+  update(userId: number, request: UpdateUserRequest, idempotencyKey: string = newActionKey()): Promise<UserResponse> {
     return httpClient.patch<UserResponse>(
       apiRoutes.users.byId(validateUserId(userId)),
       request,
+      actionHeaders(idempotencyKey),
     );
   },
 
   changePassword(
     userId: number,
     request: ChangePasswordRequest,
+    idempotencyKey: string = newActionKey(),
   ): Promise<ChangePasswordResponse> {
     return httpClient.post<ChangePasswordResponse>(
       apiRoutes.users.changePassword(validateUserId(userId)),
       request,
+      actionHeaders(idempotencyKey),
     );
   },
 
-  deactivate(userId: number): Promise<UserResponse> {
-    return httpClient.patch<UserResponse>(apiRoutes.users.deactivate(validateUserId(userId)));
+  deactivate(userId: number, expectedVersion?: number, idempotencyKey: string = newActionKey()): Promise<UserResponse> {
+    return httpClient.patch<UserResponse>(
+      apiRoutes.users.deactivate(validateUserId(userId)),
+      expectedVersion === undefined ? undefined : { expectedVersion },
+      actionHeaders(idempotencyKey),
+    );
   },
 
-  activate(userId: number): Promise<UserResponse> {
-    return httpClient.patch<UserResponse>(apiRoutes.users.activate(validateUserId(userId)));
+  activate(userId: number, expectedVersion?: number, idempotencyKey: string = newActionKey()): Promise<UserResponse> {
+    return httpClient.patch<UserResponse>(
+      apiRoutes.users.activate(validateUserId(userId)),
+      expectedVersion === undefined ? undefined : { expectedVersion },
+      actionHeaders(idempotencyKey),
+    );
   },
 };
 
@@ -60,4 +72,12 @@ export function validateUserId(userId: number): number {
   }
 
   return userId;
+}
+
+function newActionKey(): string {
+  return `users-${crypto.randomUUID()}`;
+}
+
+function actionHeaders(idempotencyKey: string) {
+  return { headers: { 'Idempotency-Key': idempotencyKey } };
 }

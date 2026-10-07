@@ -487,6 +487,27 @@ export class WorkosAuthService {
       actor: this.toActor(command),
       actorSessionId: sessionId,
     });
+    if (outcome.status === 'access_denied') {
+      // Decided inside the invitation transaction (fresh authorization): recorded like the pre-check denial.
+      try {
+        await this.ports.deniedAudit.recordDenied(this.ports.database, {
+          event: 'auth.identity.invitation_create_denied',
+          entityType: 'user',
+          entityId: command.targetUserId,
+          actorUserId: command.currentUser.id,
+          actorUsername: command.currentUser.username,
+          actorRole: command.currentUser.role,
+          relatedUserId: Number(command.targetUserId),
+          requiredPermissions: [MANAGE_SSO_PERMISSION],
+          requestId: command.requestId ?? '',
+          source: 'workos',
+          reason: outcome.reason,
+          metadata: { mode: 'admin' },
+        });
+      } catch {
+        // best-effort: sink failure must not change the denial outcome
+      }
+    }
     const invitation = this.mapInvitationCreateOutcome(outcome);
     const invitationUrl = new URL('/auth/workos/invite', this.ports.frontendOrigin);
     invitationUrl.hash = new URLSearchParams({ token }).toString();
@@ -818,6 +839,11 @@ export class WorkosAuthService {
         throw new UserInactiveError();
       case 'session_inactive':
         throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
+      case 'access_denied':
+        throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+          requiredPermissions: [MANAGE_SSO_PERMISSION],
+          reason: outcome.reason,
+        });
     }
   }
 

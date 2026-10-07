@@ -69,6 +69,22 @@ describe('usersApi', () => {
     expect(init?.body).not.toContain('role_id');
   });
 
+  it('sends one Idempotency-Key per action and the form row version (transitional users protocol)', async () => {
+    const user = createUserDto({ id: 11 });
+    const fetchMock = mockFetch({ user }, { user });
+
+    await usersApi.update(11, { fullName: 'X', expectedVersion: 4 }, 'users-fixed-key-1');
+    await usersApi.deactivate(11, 5);
+
+    const [, updateInit] = fetchMock.mock.calls[0];
+    expect(new Headers(updateInit?.headers).get('Idempotency-Key')).toBe('users-fixed-key-1');
+    expect(JSON.parse(String(updateInit?.body))).toEqual({ fullName: 'X', expectedVersion: 4 });
+    const [deactivateUrl, deactivateInit] = fetchMock.mock.calls[1];
+    expect(deactivateUrl).toBe('/api/v1/users/11/deactivate');
+    expect(new Headers(deactivateInit?.headers).get('Idempotency-Key')).toMatch(/^users-[0-9a-f-]{36}$/);
+    expect(JSON.parse(String(deactivateInit?.body))).toEqual({ expectedVersion: 5 });
+  });
+
   it('updates user and changes password via new backend endpoints', async () => {
     const user = createUserDto({ id: 11, username: 'operator_user' });
     const fetchMock = mockFetch({ user }, { success: true, revokedSessions: 2 });

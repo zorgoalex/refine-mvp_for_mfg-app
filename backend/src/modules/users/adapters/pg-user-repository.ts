@@ -1,3 +1,4 @@
+import { createHash, createHmac } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
@@ -5,6 +6,13 @@ import { auditService } from '../../../common/audit/audit.service';
 import { computeDiff } from '../../../common/audit/audit-diff';
 import { DatabaseService } from '../../../database/database.service';
 import { assertNoAccountEscalation } from '../../../permissions/account-escalation';
+import {
+  assertAdministrationRemains,
+  bumpAuthorizationVersion,
+  lockAuthorizationState,
+} from '../../../permissions/authorization-command-guard';
+import type { CurrentUser } from '../../../permissions/current-user';
+import { loadEvaluationUserWith } from '../../../permissions/user-authorization-snapshot';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import {
   getPermissionsForRole,
@@ -23,6 +31,8 @@ import type {
   ListUsersCommand,
   UpdateUserCommand,
   UserActivationCommand,
+  UserCommandName,
+  UserCommandRecheck,
   UserRepositoryPort,
 } from '../application/user-command.types';
 
@@ -40,6 +50,7 @@ interface UserRow extends QueryResultRow {
   is_active: boolean;
   created_at: string | Date;
   updated_at: string | Date | null;
+  row_version: string | number;
 }
 
 interface CountRow extends QueryResultRow {
@@ -58,7 +69,63 @@ export class PgUserRepository implements UserRepositoryPort {
   constructor(
     private readonly database: UserDatabase | DatabaseService,
     private readonly permissions?: Pick<PermissionsService, 'loadUserAuthorization'>,
+    /**
+     * Server secret for the password part of idempotent requests (HMAC; no derivative of a password is stored
+     * that could be checked without it). Without it, commands carrying a password run without idempotency.
+     */
+    private readonly idempotencySecret?: string,
   ) {}
+
+  /**
+   * A completed command with this Idempotency-Key, actor and payload: its stored response (plan §5.3). Read before any
+   * policy check, so a repeat after a lost response is answered even when the actor's rights changed since (the
+   * response is what this command already returned to him). Another payload or actor → 409; unknown or unfinished
+   * key → null (the command runs, and its own claim decides).
+   */
+  async findCompletedReplay<T>(name: UserCommandName, command: UserCommandInput): Promise<T | null> {
+    const spec = this.idempotencySpec(name, command);
+    if (!spec) return null;
+    const result = await this.database.query<{ request_hash: string; response_json: T | null; status: string; actor_user_id: string | number | null }>(
+      'SELECT request_hash, response_json, status, actor_user_id FROM command_idempotency_keys WHERE idempotency_key = $1',
+      [spec.key],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    assertSameRequest(row, spec);
+    return row.status === 'completed' && row.response_json ? row.response_json : null;
+  }
+
+  private idempotencySpec(name: UserCommandName, command: UserCommandInput): IdempotencySpec | null {
+    if (!command.idempotencyKey) return null;
+    let payload: unknown = {};
+    let entityId = 'userId' in command ? String(command.userId) : 'new';
+    if (name === 'users.create') {
+      const { password, ...rest } = (command as CreateUserCommand).dto;
+      const proof = this.passwordProof(password);
+      if (!proof) return null;
+      payload = { ...rest, passwordProof: proof };
+      entityId = 'new';
+    } else if (name === 'users.change_password') {
+      const { newPassword, ...rest } = (command as ChangeUserPasswordCommand).dto;
+      const proof = this.passwordProof(newPassword);
+      if (!proof) return null;
+      payload = { ...rest, passwordProof: proof };
+    } else if (name === 'users.update') {
+      payload = (command as UpdateUserCommand).dto;
+    }
+    return {
+      name,
+      key: `users:${command.idempotencyKey}`,
+      entityId,
+      actorUserId: toNullableUserId(command.currentUser.id),
+      hash: requestHash(name, entityId, payload),
+    };
+  }
+
+  private passwordProof(password: string): string | null {
+    if (!this.idempotencySecret) return null;
+    return createHmac('sha256', this.idempotencySecret).update(`users-command-password:v1\0${password}`).digest('hex');
+  }
 
   async listUsers(command: ListUsersCommand): Promise<UserListResponseDto> {
     const params: unknown[] = [];
@@ -78,7 +145,7 @@ export class PgUserRepository implements UserRepositoryPort {
       `
       SELECT
         u.user_id, u.username, u.email, u.full_name, u.role_id, r.role_code,
-        u.employee_id, u.is_active, u.created_at, u.updated_at
+        u.employee_id, u.is_active, u.created_at, u.updated_at, u.row_version
       FROM users u
       LEFT JOIN roles r ON r.role_id = u.role_id
       ${where}
@@ -109,9 +176,9 @@ export class PgUserRepository implements UserRepositoryPort {
     const roleId = mapRoleToRoleId(command.dto.role);
     const email = normalizeEmail(command.dto.email, command.dto.username);
 
-    return this.database.transaction(async (tx) => {
+    return this.runCommand(command, this.idempotencySpec('users.create', command), async (tx, versionBefore) => {
+      await this.recheckActor(tx, command, null);
       try {
-        await lockAuthorizationState(tx);
         const created = await tx.query<UserRow>(
           `
           INSERT INTO users (
@@ -122,7 +189,7 @@ export class PgUserRepository implements UserRepositoryPort {
           RETURNING
             user_id, username, email, full_name, role_id,
             (SELECT role_code FROM roles WHERE role_id = $4) AS role_code,
-            employee_id, is_active, created_at, updated_at
+            employee_id, is_active, created_at, updated_at, row_version
           `,
           [
             command.dto.username,
@@ -138,6 +205,7 @@ export class PgUserRepository implements UserRepositoryPort {
         // The new account may not have permissions or scopes its creator lacks (access groups 0A.4).
         await assertNoAccountEscalation(tx, command.currentUser.id, created.rows[0].user_id);
         const user = await this.mapUserRow(created.rows[0], tx);
+        const versions = { permissionsVersionBefore: versionBefore, permissionsVersionAfter: versionBefore };
 
         await writeUserAudit(tx, {
           command,
@@ -146,7 +214,11 @@ export class PgUserRepository implements UserRepositoryPort {
           after: sanitizeUserForAudit(user),
           diff: computeDiff(null, sanitizeUserForAudit(user)),
           employeeIds: [user.employeeId],
+          metadata: { ...versions, accessChanges: ['created'] },
         });
+        if (user.isActive) {
+          await writeAuthorizationChanged(tx, command, 'users.create', user, ['created'], versions);
+        }
 
         return user;
       } catch (error) {
@@ -156,13 +228,11 @@ export class PgUserRepository implements UserRepositoryPort {
   }
 
   async updateUser(command: UpdateUserCommand): Promise<UserDto> {
-    return this.database.transaction(async (tx) => {
-      // Authorization lock order (access groups plan §5.1): permissions_state first, then the user row.
-      await lockAuthorizationState(tx);
+    return this.runCommand(command, this.idempotencySpec('users.update', command), async (tx, versionBefore) => {
       // Locked until the audit is written: a concurrent relink cannot slip between the pre-image and the
       // update, so the audited «before» employee is the one this command really replaced. NO KEY UPDATE keeps
       // the audit FK key-share of other commands of this user (e.g. a contacts save by him) unblocked.
-      const before = await this.getUserByIdInternal(tx, command.userId, { lock: true });
+      const before = await this.lockTarget(tx, command);
       const assignments: string[] = [];
       const params: unknown[] = [];
 
@@ -186,6 +256,7 @@ export class PgUserRepository implements UserRepositoryPort {
       }
 
       assignments.push(`edited_by = $${params.push(toNullableUserId(command.currentUser.id))}`);
+      assignments.push('row_version = u.row_version + 1');
       const userIdIndex = params.push(command.userId);
       const expectedRoleIndex = params.push(expectedRoleId(command.expectedTargetRole));
 
@@ -200,7 +271,7 @@ export class PgUserRepository implements UserRepositoryPort {
           RETURNING
             u.user_id, u.username, u.email, u.full_name, u.role_id,
             (SELECT role_code FROM roles WHERE role_id = u.role_id) AS role_code,
-            u.employee_id, u.is_active, u.created_at, u.updated_at
+            u.employee_id, u.is_active, u.created_at, u.updated_at, u.row_version
           `,
           params,
         );
@@ -211,17 +282,27 @@ export class PgUserRepository implements UserRepositoryPort {
 
         // The account as it will be committed (e.g. a new role) may not exceed the administrator (0A.4).
         await assertNoAccountEscalation(tx, command.currentUser.id, command.userId);
-        await bumpUserVersions(tx, command.userId,
-          before !== null && before.role !== normalizeRole(updated.rows[0].role_id, updated.rows[0].role_code ?? null));
+        const changes: AuthorizationChange[] = [];
+        if (before.role !== normalizeRole(updated.rows[0].role_id, updated.rows[0].role_code ?? null)) changes.push('role');
+        if (before.isActive !== updated.rows[0].is_active) changes.push('activity');
+        // Disabling through PATCH is the same as /deactivate: the sessions and the current token stop working.
+        const revokedSessions = before.isActive && !updated.rows[0].is_active
+          ? await revokeActiveSessions(tx, command.userId)
+          : 0;
+        const versions = await this.finishAuthorizationChange(tx, versionBefore, changes);
         const user = await this.mapUserRow(updated.rows[0], tx);
         await writeUserAudit(tx, {
           command,
           action: 'users.update',
           entityId: user.id,
           after: sanitizeUserForAudit(user),
-          diff: computeDiff(before ? sanitizeUserForAudit(before) : null, sanitizeUserForAudit(user)),
-          employeeIds: [before?.employeeId, user.employeeId],
+          diff: computeDiff(sanitizeUserForAudit(before), sanitizeUserForAudit(user)),
+          employeeIds: [before.employeeId, user.employeeId],
+          metadata: { ...versions, accessChanges: changes, ...(revokedSessions ? { revokedSessions } : {}) },
         });
+        if (changes.length > 0) {
+          await writeAuthorizationChanged(tx, command, 'users.update', user, changes, versions);
+        }
 
         return user;
       } catch (error) {
@@ -233,15 +314,16 @@ export class PgUserRepository implements UserRepositoryPort {
   async changePassword(command: ChangeUserPasswordCommand) {
     const passwordHash = await bcrypt.hash(command.dto.newPassword, PASSWORD_HASH_ROUNDS);
 
-    return this.database.transaction(async (tx) => {
+    return this.runCommand(command, this.idempotencySpec('users.change_password', command), async (tx, versionBefore) => {
+      await this.lockTarget(tx, command);
       const updated = await tx.query(
         `
         UPDATE users
-        SET password_hash = $1, edited_by = $2
+        SET password_hash = $1, edited_by = $2, row_version = row_version + 1
         WHERE user_id = $3
           AND is_service_account = false
           AND ($4::smallint IS NULL OR role_id = $4::smallint)
-        RETURNING user_id
+        RETURNING user_id, row_version
         `,
         [passwordHash, toNullableUserId(command.currentUser.id), command.userId, expectedRoleId(command.expectedTargetRole)],
       );
@@ -251,7 +333,6 @@ export class PgUserRepository implements UserRepositoryPort {
       }
       // Resetting the password of an account with wider permissions than the administrator is an escalation.
       await assertNoAccountEscalation(tx, command.currentUser.id, command.userId);
-      await bumpUserVersions(tx, command.userId, false);
 
       const revokedSessions = command.dto.revokeExistingSessions
         ? await revokeActiveSessions(tx, command.userId)
@@ -262,10 +343,11 @@ export class PgUserRepository implements UserRepositoryPort {
         action: 'users.change_password',
         entityId: command.userId,
         diff: { credentialChanged: { from: false, to: true } },
-        metadata: { revokedSessions },
+        metadata: { revokedSessions, permissionsVersionBefore: versionBefore, permissionsVersionAfter: versionBefore },
       });
 
-      return { success: true as const, revokedSessions };
+      // The new row version lets an open form keep saving without a false stale-version conflict.
+      return { success: true as const, revokedSessions, rowVersion: toNumber((updated.rows[0] as { row_version: string | number }).row_version) };
     });
   }
 
@@ -282,21 +364,19 @@ export class PgUserRepository implements UserRepositoryPort {
     isActive: boolean,
     action: 'users.deactivate' | 'users.activate',
   ): Promise<UserDto> {
-    return this.database.transaction(async (tx) => {
-      // Authorization lock order (access groups plan §5.1): permissions_state first, then the user row.
-      await lockAuthorizationState(tx);
-      const before = await this.getUserByIdInternal(tx, command.userId);
+    return this.runCommand(command, this.idempotencySpec(action, command), async (tx, versionBefore) => {
+      const before = await this.lockTarget(tx, command);
       const updated = await tx.query<UserRow>(
         `
         UPDATE users u
-        SET is_active = $1, edited_by = $2
+        SET is_active = $1, edited_by = $2, row_version = u.row_version + 1
         WHERE u.user_id = $3
           AND u.is_service_account = false
           AND ($4::smallint IS NULL OR u.role_id = $4::smallint)
         RETURNING
           u.user_id, u.username, u.email, u.full_name, u.role_id,
           (SELECT role_code FROM roles WHERE role_id = u.role_id) AS role_code,
-          u.employee_id, u.is_active, u.created_at, u.updated_at
+          u.employee_id, u.is_active, u.created_at, u.updated_at, u.row_version
         `,
         [isActive, toNullableUserId(command.currentUser.id), command.userId, expectedRoleId(command.expectedTargetRole)],
       );
@@ -307,8 +387,9 @@ export class PgUserRepository implements UserRepositoryPort {
 
       // Re-enabling or disabling an account with wider permissions than the administrator is an escalation.
       await assertNoAccountEscalation(tx, command.currentUser.id, command.userId);
-      await bumpUserVersions(tx, command.userId, before?.isActive !== isActive);
+      const changes: AuthorizationChange[] = before.isActive !== isActive ? ['activity'] : [];
       const revokedSessions = isActive ? 0 : await revokeActiveSessions(tx, command.userId);
+      const versions = await this.finishAuthorizationChange(tx, versionBefore, changes);
       const user = await this.mapUserRow(updated.rows[0], tx);
 
       await writeUserAudit(tx, {
@@ -316,12 +397,93 @@ export class PgUserRepository implements UserRepositoryPort {
         action,
         entityId: user.id,
         after: sanitizeUserForAudit(user),
-        diff: computeDiff(before ? sanitizeUserForAudit(before) : null, sanitizeUserForAudit(user)),
-        metadata: { revokedSessions },
+        diff: computeDiff(sanitizeUserForAudit(before), sanitizeUserForAudit(user)),
+        metadata: { revokedSessions, ...versions, accessChanges: changes },
       });
+      if (changes.length > 0) {
+        await writeAuthorizationChanged(tx, command, action, user, changes, versions);
+      }
 
       return user;
     });
+  }
+
+  /**
+   * Authorization command protocol (access groups plan §5.1, §5.3): permissions_state is locked first; then the
+   * Idempotency-Key is claimed (a completed repeat returns the stored response before any version check, without new
+   * state, version, audit or outbox); the command runs; its response is stored in the same transaction.
+   */
+  private async runCommand<T>(
+    command: { currentUser: CurrentUser },
+    spec: IdempotencySpec | null,
+    body: (tx: TransactionClient, versionBefore: number) => Promise<T>,
+  ): Promise<T> {
+    return this.database.transaction(async (tx) => {
+      const versionBefore = await lockAuthorizationState(tx, 'update');
+      const key = spec?.key ?? null;
+      if (spec) {
+        const replay = await claimIdempotency<T>(tx, spec);
+        if (replay !== null) return replay;
+      }
+      const result = await body(tx, versionBefore);
+      if (key) {
+        await tx.query(
+          `UPDATE command_idempotency_keys SET status = 'completed', response_json = $2::jsonb, completed_at = now()
+           WHERE idempotency_key = $1`,
+          [key, JSON.stringify(result)],
+        );
+      }
+      return result;
+    });
+  }
+
+  /**
+   * Steps 2–3 of §5.1 for a command over an existing user: the target row is locked, the actor is re-read in this
+   * transaction and the command's policy re-run on fresh data, then the client's row version is compared.
+   */
+  private async lockTarget(
+    tx: TransactionClient,
+    command: { currentUser: CurrentUser; userId: number; expectedVersion?: number; recheck?: UserCommandRecheck },
+  ): Promise<UserDto> {
+    const before = await this.getUserByIdInternal(tx, command.userId, { lock: true });
+    if (!before) throw userNotFound(command.userId);
+    await this.recheckActor(tx, command, before);
+    if (command.expectedVersion !== undefined && command.expectedVersion !== before.rowVersion) {
+      throw new ApiError(409, 'USER_VERSION_CONFLICT', 'Пользователь изменён другим администратором, обновите форму', {
+        userId: command.userId,
+        expectedVersion: command.expectedVersion,
+        currentVersion: before.rowVersion,
+      });
+    }
+    return before;
+  }
+
+  private async recheckActor(
+    tx: TransactionClient,
+    command: { currentUser: CurrentUser; recheck?: UserCommandRecheck },
+    target: UserDto | null,
+  ): Promise<void> {
+    if (!command.recheck) return;
+    const actor = await loadEvaluationUserWith(tx, command.currentUser.id);
+    const reason = actor
+      ? command.recheck(actor, target ? { id: String(target.id), role: target.role } : null)
+      : 'missing_permission';
+    if (reason) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', { reason });
+    }
+  }
+
+  /** Steps 5–6 of §5.1: lockout on the resulting state, then the authorization version (tokens refresh at once). */
+  private async finishAuthorizationChange(
+    tx: TransactionClient,
+    versionBefore: number,
+    changes: readonly AuthorizationChange[],
+  ): Promise<{ permissionsVersionBefore: number; permissionsVersionAfter: number }> {
+    if (changes.length === 0) {
+      return { permissionsVersionBefore: versionBefore, permissionsVersionAfter: versionBefore };
+    }
+    await assertAdministrationRemains(tx);
+    return { permissionsVersionBefore: versionBefore, permissionsVersionAfter: await bumpAuthorizationVersion(tx) };
   }
 
   private async getUserByIdInternal(database: DatabaseClient, userId: number, options: { lock?: boolean } = {}): Promise<UserDto | null> {
@@ -329,7 +491,7 @@ export class PgUserRepository implements UserRepositoryPort {
       `
       SELECT
         u.user_id, u.username, u.email, u.full_name, u.role_id, r.role_code,
-        u.employee_id, u.is_active, u.created_at, u.updated_at
+        u.employee_id, u.is_active, u.created_at, u.updated_at, u.row_version
       FROM users u
       LEFT JOIN roles r ON r.role_id = u.role_id
       WHERE u.user_id = $1
@@ -339,7 +501,8 @@ export class PgUserRepository implements UserRepositoryPort {
       [userId],
     );
 
-    return result.rows[0] ? this.mapUserRow(result.rows[0]) : null;
+    // Same connection as the caller: inside a command transaction no seed and no second pool connection.
+    return result.rows[0] ? this.mapUserRow(result.rows[0], database) : null;
   }
 
   private async mapUserRows(rows: readonly UserRow[]): Promise<UserDto[]> {
@@ -365,6 +528,7 @@ export class PgUserRepository implements UserRepositoryPort {
       isActive: row.is_active,
       createdAt: toIsoString(row.created_at),
       updatedAt: row.updated_at ? toIsoString(row.updated_at) : null,
+      rowVersion: toNumber(row.row_version),
     };
   }
 }
@@ -569,19 +733,91 @@ function userNotFound(userId: number): ApiError {
   return new ApiError(404, 'USER_NOT_FOUND', 'User not found', { userId });
 }
 
-/** Authorization lock order (access groups plan §5.1): permissions_state is always locked before user rows. */
-async function lockAuthorizationState(tx: TransactionClient): Promise<void> {
-  await tx.query('SELECT version FROM permissions_state WHERE id = true FOR UPDATE');
+type AuthorizationChange = 'created' | 'role' | 'activity';
+
+function requestHash(name: string, entityId: string, payload: unknown): string {
+  return createHash('sha256').update(JSON.stringify({ name, entityId, payload: sortKeys(payload) })).digest('hex');
+}
+
+function sortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeys((value as Record<string, unknown>)[key])]));
+  }
+  return value;
+}
+
+interface IdempotencySpec {
+  name: UserCommandName;
+  key: string;
+  entityId: string;
+  actorUserId: number | null;
+  hash: string;
+}
+
+type UserCommandInput = CreateUserCommand | UpdateUserCommand | ChangeUserPasswordCommand | UserActivationCommand;
+
+function assertSameRequest(
+  row: { request_hash: string; actor_user_id: string | number | null },
+  spec: IdempotencySpec,
+): void {
+  const storedActor = row.actor_user_id === null ? null : Number(row.actor_user_id);
+  if (row.request_hash !== spec.hash || storedActor !== spec.actorUserId) {
+    throw new ApiError(409, 'IDEMPOTENCY_KEY_REUSED', 'Idempotency key was reused with a different request');
+  }
+}
+
+/** Same pattern as the other command repositories: insert the key or read the earlier attempt. */
+async function claimIdempotency<T>(tx: TransactionClient, spec: IdempotencySpec): Promise<T | null> {
+  const inserted = await tx.query(
+    `INSERT INTO command_idempotency_keys
+       (idempotency_key, command_name, actor_user_id, entity_type, entity_id, request_hash, status)
+     VALUES ($1, $2, $3, 'user', $4, $5, 'processing') ON CONFLICT (idempotency_key) DO NOTHING
+     RETURNING idempotency_key`,
+    [spec.key, spec.name, spec.actorUserId, spec.entityId, spec.hash],
+  );
+  if (inserted.rowCount === 1) return null;
+  const existing = await tx.query<{ request_hash: string; response_json: T | null; status: string; actor_user_id: string | number | null }>(
+    'SELECT request_hash, response_json, status, actor_user_id FROM command_idempotency_keys WHERE idempotency_key = $1 FOR UPDATE',
+    [spec.key],
+  );
+  const row = existing.rows[0];
+  if (!row) throw new ApiError(409, 'IDEMPOTENCY_KEY_REUSED', 'Idempotency key was reused with a different request');
+  assertSameRequest(row, spec);
+  if (row.status === 'completed' && row.response_json) return row.response_json;
+  throw new ApiError(409, 'IDEMPOTENCY_IN_PROGRESS', 'Idempotent command is still processing');
 }
 
 /**
- * Every user command increments users.row_version (stale-write protection, plan §5.3). A change of role or
- * activity also increments the authorization version, so the user's current token stops being accepted at once
- * (the token is refreshed with the new grants) instead of living until its natural refresh (plan 0A.7).
+ * Domain event of an authorization change (plan §7), in the command transaction. Delivery is not enabled in v1:
+ * the relay marks a type without consumers processed. The key is unique per committed change of the user
+ * (row_version grows with every command), so a replay — which never reaches here — cannot duplicate it.
  */
-async function bumpUserVersions(tx: TransactionClient, userId: number | string, authorizationChanged: boolean): Promise<void> {
-  await tx.query('UPDATE users SET row_version = row_version + 1 WHERE user_id = $1', [userId]);
-  if (authorizationChanged) {
-    await tx.query('UPDATE permissions_state SET version = version + 1, updated_at = now() WHERE id = true');
-  }
+async function writeAuthorizationChanged(
+  tx: TransactionClient,
+  command: { currentUser: CurrentUser; requestId?: string },
+  action: string,
+  user: UserDto,
+  changes: readonly AuthorizationChange[],
+  versions: { permissionsVersionBefore: number; permissionsVersionAfter: number },
+): Promise<void> {
+  await tx.query(
+    `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+     VALUES ('authorization.changed', 'user', $1, $2::jsonb, $3)
+     ON CONFLICT (idempotency_key) DO NOTHING`,
+    [
+      String(user.id),
+      JSON.stringify({
+        command: action,
+        actorUserId: toNullableUserId(command.currentUser.id),
+        requestId: command.requestId ?? DEFAULT_REQUEST_ID,
+        affectedUserIds: [user.id],
+        changes,
+        role: user.role,
+        isActive: user.isActive,
+        ...versions,
+      }),
+      `authorization.changed:user-${user.id}:row-${user.rowVersion}`,
+    ],
+  );
 }

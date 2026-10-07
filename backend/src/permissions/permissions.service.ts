@@ -1,4 +1,5 @@
 import { Injectable, Optional } from '@nestjs/common';
+import { lockAuthorizationState } from './authorization-command-guard';
 import type { QueryResultRow } from 'pg';
 import { computeDiff } from '../common/audit/audit-diff';
 import { ApiError } from '../common/errors/api-error';
@@ -309,6 +310,10 @@ export class PermissionsService {
   ): Promise<RolesMatrixDto> {
     this.requireMatrixMutationAccess(currentUser);
     return this.requireDatabase().transaction(async (tx) => {
+      // Global lock order of authorization commands (access groups plan §5.1): permissions_state first, then the
+      // seed under it. Seeding first would hold catalog rows while waiting for permissions_state — a cycle with a
+      // command that holds permissions_state and waits for a session whose holder seeds (R2).
+      await lockAuthorizationState(tx, 'update');
       await this.seedDefaults(tx);
       const before = await this.readMatrix(tx, { lockState: true });
       this.assertExpectedVersion(request.version, before.version);
@@ -337,6 +342,10 @@ export class PermissionsService {
   ): Promise<RolesMatrixDto> {
     this.requireMatrixMutationAccess(currentUser);
     return this.requireDatabase().transaction(async (tx) => {
+      // Global lock order of authorization commands (access groups plan §5.1): permissions_state first, then the
+      // seed under it. Seeding first would hold catalog rows while waiting for permissions_state — a cycle with a
+      // command that holds permissions_state and waits for a session whose holder seeds (R2).
+      await lockAuthorizationState(tx, 'update');
       await this.seedDefaults(tx);
       const before = await this.readMatrix(tx, { lockState: true });
       const role = before.roles.find((row) => row.roleId === roleId);

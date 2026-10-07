@@ -199,7 +199,8 @@ describe('PgUserRepository', () => {
 
   it('changes password and revokes active sessions inside one transaction', async () => {
     const database = new FakeUserDatabase([], [
-      { match: 'UPDATE users', rows: [{ user_id: 10 }] },
+      { match: 'FROM users u', rows: [userRow({ user_id: 10 })] },
+      { match: 'UPDATE users', rows: [{ user_id: 10, row_version: 2 }] },
       { match: 'WITH revoked_sessions', rows: [{ revoked_sessions: 2 }] },
       { match: 'INSERT INTO audit_log', rows: [] },
     ]);
@@ -212,15 +213,19 @@ describe('PgUserRepository', () => {
         requestId: 'req_password',
         dto: { newPassword: 'new-secure-password', revokeExistingSessions: true },
       }),
-    ).resolves.toEqual({ success: true, revokedSessions: 2 });
+    ).resolves.toEqual({ success: true, revokedSessions: 2, rowVersion: 2 });
 
     expect(database.transactionCount).toBe(1);
-    expect(database.queries[0].text).toContain('UPDATE users');
-    expect(database.queries[1].text).toContain('UPDATE auth_sessions');
-    expect(database.queries[2].params).toContain('users.change_password');
+    // Same lock order as every authorization command: permissions_state, then the user row (§5.1).
+    expect(database.authQueries[0].text).toContain('FROM permissions_state WHERE id = true FOR UPDATE');
+    expect(database.queries[0].text).toContain('FOR NO KEY UPDATE OF u');
+    expect(database.queries[1].text).toContain('UPDATE users');
+    expect(database.queries[1].text).toContain('row_version = row_version + 1');
+    expect(database.queries[2].text).toContain('UPDATE auth_sessions');
+    expect(database.queries[3].params).toContain('users.change_password');
 
     // SECURITY: no password_hash or bcrypt hash must appear in any audit param
-    const auditParams = database.queries[2].params;
+    const auditParams = database.queries[3].params;
     const allParamsStr = JSON.stringify(auditParams);
     expect(allParamsStr).not.toContain('password_hash');
     expect(allParamsStr).not.toMatch(/\$2[aby]\$/);
@@ -287,12 +292,18 @@ describe('PgUserRepository', () => {
     expect(diffJson).toContain('"isActive"');
     expect(diffJson).toContain('"from":true');
     expect(diffJson).toContain('"to":false');
-    expect(audit?.params[22]).toBe(JSON.stringify({ revokedSessions: 1 })); // $23 metadata_json
+    expect(JSON.parse(audit?.params[22] as string)).toEqual({
+      revokedSessions: 1,
+      permissionsVersionBefore: 1,
+      permissionsVersionAfter: 2,
+      accessChanges: ['activity'],
+    }); // $23 metadata_json
   });
 
   it('applies user mutations only while the target still has the role the policy decided on', async () => {
     // Password change: the precondition is part of the UPDATE; a role changed meanwhile answers 409, nothing is written.
     const passwordDatabase = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [userRow({ user_id: 10, role_id: 100, role_code: 'viewer' })] },
       { match: 'UPDATE users', rows: [] },
       { match: 'SELECT role_id FROM users', rows: [{ role_id: 32 }] },
     ]);
@@ -304,9 +315,9 @@ describe('PgUserRepository', () => {
         dto: { newPassword: 'new-secure-password', revokeExistingSessions: true },
       }),
     ).rejects.toMatchObject({ statusCode: 409, code: 'USER_ROLE_CHANGED' });
-    expect(passwordDatabase.queries[0].text).toContain('($4::smallint IS NULL OR role_id = $4::smallint)');
-    expect(passwordDatabase.queries[0].params[3]).toBe(100);
-    expect(passwordDatabase.queries).toHaveLength(2);
+    expect(passwordDatabase.queries[1].text).toContain('($4::smallint IS NULL OR role_id = $4::smallint)');
+    expect(passwordDatabase.queries[1].params[3]).toBe(100);
+    expect(passwordDatabase.queries).toHaveLength(3);
 
     // Deactivation and update carry the same precondition.
     const activationDatabase = new FakeUserDatabase([], [
@@ -333,15 +344,17 @@ describe('PgUserRepository', () => {
 
     // Same role, no row: the user is gone (or is a service account) — still 404. Without an expected role: no precondition.
     const goneDatabase = new FakeUserDatabase([], [
-      { match: 'UPDATE users', rows: [] },
-      { match: 'SELECT role_id FROM users', rows: [] },
+      { match: 'FROM users u', rows: [] },
     ]);
     await expect(
       new PgUserRepository(goneDatabase).changePassword({ currentUser: currentUser('admin', '1'), userId: 10, expectedTargetRole: 'viewer', dto: { newPassword: 'new-secure-password', revokeExistingSessions: false } }),
     ).rejects.toMatchObject({ statusCode: 404, code: 'USER_NOT_FOUND' });
-    const legacyDatabase = new FakeUserDatabase([], [{ match: 'UPDATE users', rows: [{ user_id: 10 }] }]);
+    const legacyDatabase = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [userRow({ user_id: 10 })] },
+      { match: 'UPDATE users', rows: [{ user_id: 10, row_version: 2 }] },
+    ]);
     await new PgUserRepository(legacyDatabase).changePassword({ currentUser: currentUser('admin', '1'), userId: 10, dto: { newPassword: 'new-secure-password', revokeExistingSessions: false } });
-    expect(legacyDatabase.queries[0].params[3]).toBeNull();
+    expect(legacyDatabase.queries[1].params[3]).toBeNull();
   });
 
   it('maps the errors of the operator-role guard trigger to 409 API errors', async () => {
@@ -390,10 +403,11 @@ describe('PgUserRepository', () => {
       }),
     ).rejects.toMatchObject({ statusCode: 404, code: 'USER_NOT_FOUND' });
 
+    // The locked pre-image already excludes service accounts: nothing is updated.
     expect(updateDatabase.queries[0].text).toContain('u.is_service_account = false');
-    expect(updateDatabase.queries[1].text).toContain('u.is_service_account = false');
+    expect(updateDatabase.queries).toHaveLength(1);
 
-    const passwordDatabase = new FakeUserDatabase([], [{ match: 'UPDATE users', rows: [] }]);
+    const passwordDatabase = new FakeUserDatabase([], [{ match: 'FROM users u', rows: [] }]);
     const passwordRepository = new PgUserRepository(passwordDatabase);
 
     await expect(
@@ -420,7 +434,7 @@ describe('PgUserRepository', () => {
     ).rejects.toMatchObject({ statusCode: 404, code: 'USER_NOT_FOUND' });
 
     expect(activationDatabase.queries[0].text).toContain('u.is_service_account = false');
-    expect(activationDatabase.queries[1].text).toContain('u.is_service_account = false');
+    expect(activationDatabase.queries).toHaveLength(1);
 
     const reactivationDatabase = new FakeUserDatabase([], [
       { match: 'FROM users u', rows: [] },
@@ -436,11 +450,219 @@ describe('PgUserRepository', () => {
     ).rejects.toMatchObject({ statusCode: 404, code: 'USER_NOT_FOUND' });
 
     expect(reactivationDatabase.queries[0].text).toContain('u.is_service_account = false');
-    expect(reactivationDatabase.queries[1].text).toContain('u.is_service_account = false');
+    expect(reactivationDatabase.queries).toHaveLength(1);
+  });
+
+  it('disabling through PATCH revokes sessions, bumps the authorization version and records the change (R1 #1, #8)', async () => {
+    const database = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [userRow({ user_id: 15, is_active: true, row_version: 4 })] },
+      { match: 'UPDATE users u', rows: [userRow({ user_id: 15, is_active: false, row_version: 5 })] },
+      { match: 'WITH revoked_sessions', rows: [{ revoked_sessions: 3 }] },
+      { match: 'INSERT INTO audit_log', rows: [] },
+    ]);
+    const user = await new PgUserRepository(database).updateUser({
+      currentUser: currentUser('admin', '1'), userId: 15, requestId: 'req_patch_off', dto: { isActive: false },
+    });
+
+    expect(user).toMatchObject({ isActive: false, rowVersion: 5 });
+    expect(database.queries[1].text).toContain('row_version = u.row_version + 1');
+    expect(database.queries[2].text).toContain('UPDATE auth_sessions');
+    expect(database.authQueries.some((q) => q.text.includes('UPDATE permissions_state SET version'))).toBe(true);
+    expect(database.authQueries.some((q) => q.text.includes('AS remains'))).toBe(true);
+    const audit = database.queries.find((q) => q.text.includes('INSERT INTO audit_log'));
+    expect(JSON.parse(audit?.params[22] as string)).toEqual({
+      permissionsVersionBefore: 1, permissionsVersionAfter: 2, accessChanges: ['activity'], revokedSessions: 3,
+    });
+    const outbox = database.authQueries.filter((q) => q.text.includes('INSERT INTO outbox_events'));
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0].params[0]).toBe('15');
+    expect(JSON.parse(outbox[0].params[1] as string)).toMatchObject({
+      command: 'users.update', actorUserId: 1, requestId: 'req_patch_off', affectedUserIds: [15],
+      changes: ['activity'], permissionsVersionBefore: 1, permissionsVersionAfter: 2,
+    });
+    expect(outbox[0].params[2]).toBe('authorization.changed:user-15:row-5');
+  });
+
+  it('a rename changes no authorization: no version bump, no lockout check, no event', async () => {
+    const database = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [userRow({ user_id: 15 })] },
+      { match: 'UPDATE users u', rows: [userRow({ user_id: 15, full_name: 'Renamed', row_version: 2 })] },
+      { match: 'INSERT INTO audit_log', rows: [] },
+    ]);
+    await new PgUserRepository(database).updateUser({ currentUser: currentUser('admin', '1'), userId: 15, dto: { fullName: 'Renamed' } });
+    expect(database.authQueries.some((q) => q.text.includes('UPDATE permissions_state') || q.text.includes('AS remains')
+      || q.text.includes('outbox_events'))).toBe(false);
+    expect(database.queries.some((q) => q.text.includes('auth_sessions'))).toBe(false);
+  });
+
+  it('refuses a change that leaves no active administrator, before anything is written (R1 #5)', async () => {
+    const database = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [userRow({ user_id: 1, role_id: 2, role_code: 'superadmin' })] },
+      { match: 'UPDATE users u', rows: [userRow({ user_id: 1, role_id: 1, role_code: 'admin' })] },
+    ]);
+    database.administrationRemains = false;
+    // The only superadmin demotes himself: self-service is not an escalation, but the lockout check stops it.
+    await expect(new PgUserRepository(database).updateUser({
+      currentUser: currentUser('superadmin', '1'), userId: 1, dto: { role: 'admin' },
+    })).rejects.toMatchObject({ statusCode: 409, code: 'PERMISSIONS_LOCKOUT_DENIED' });
+    expect(database.queries.some((q) => q.text.includes('audit_log'))).toBe(false);
+    expect(database.authQueries.some((q) => q.text.includes('UPDATE permissions_state') || q.text.includes('outbox_events'))).toBe(false);
+
+    const deactivation = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [userRow({ user_id: 5, role_id: 2, role_code: 'superadmin' })] },
+      { match: 'UPDATE users u', rows: [userRow({ user_id: 5, role_id: 2, role_code: 'superadmin', is_active: false })] },
+      { match: 'WITH revoked_sessions', rows: [{ revoked_sessions: 0 }] },
+    ]);
+    deactivation.administrationRemains = false;
+    await expect(new PgUserRepository(deactivation).deactivateUser({ currentUser: currentUser('superadmin', '1'), userId: 5 }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'PERMISSIONS_LOCKOUT_DENIED' });
+  });
+
+  it('re-runs the command policy on the actor read after the authorization lock (R1 #2)', async () => {
+    const database = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [userRow({ user_id: 15, role_id: 100, role_code: 'viewer' })] },
+    ]);
+    // The administrator lost users.update while waiting for the lock: his fresh snapshot is a viewer.
+    database.actorRoleId = 100;
+    const seen: Array<{ actorRole: string; targetRole?: string }> = [];
+    await expect(new PgUserRepository(database).updateUser({
+      currentUser: currentUser('admin', '1'),
+      userId: 15,
+      dto: { fullName: 'X' },
+      recheck: (actor, target) => {
+        seen.push({ actorRole: actor.role, targetRole: target?.role });
+        return actor.permissions.includes('users.update') ? null : 'missing_permission';
+      },
+    })).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED', details: { reason: 'missing_permission' } });
+    expect(seen).toEqual([{ actorRole: 'viewer', targetRole: 'viewer' }]);
+    expect(database.queries.some((q) => q.text.includes('UPDATE users'))).toBe(false);
+    // Lock order: permissions_state, then the target row, then the actor snapshot.
+    const lockIndex = database.authQueries.findIndex((q) => q.text.includes('FOR UPDATE'));
+    const actorIndex = database.authQueries.findIndex((q) => q.text.includes('unnest'));
+    expect(lockIndex).toBeGreaterThanOrEqual(0);
+    expect(actorIndex).toBeGreaterThan(lockIndex);
+
+    // Creation is re-checked too (no target), and the password change takes the same lock first.
+    const create = new FakeUserDatabase([], []);
+    create.actorRoleId = 100;
+    await expect(new PgUserRepository(create).createUser({
+      currentUser: currentUser('admin', '1'),
+      dto: { username: 'x_user', password: 'secure-password', role: 'viewer' },
+      recheck: (actor, target) => (target === null && actor.permissions.includes('users.create') ? null : 'missing_permission'),
+    })).rejects.toMatchObject({ statusCode: 403 });
+    expect(create.queries.some((q) => q.text.includes('INSERT INTO users'))).toBe(false);
+  });
+
+  it('refuses a stale form: expectedVersion is compared under the lock (R1 #6)', async () => {
+    const stale = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [userRow({ user_id: 15, row_version: 7 })] },
+    ]);
+    await expect(new PgUserRepository(stale).updateUser({
+      currentUser: currentUser('admin', '1'), userId: 15, expectedVersion: 6, dto: { isActive: false },
+    })).rejects.toMatchObject({ statusCode: 409, code: 'USER_VERSION_CONFLICT', details: { currentVersion: 7, expectedVersion: 6 } });
+    expect(stale.queries.some((q) => q.text.includes('UPDATE users'))).toBe(false);
+
+    const current = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [userRow({ user_id: 15, row_version: 7, is_active: false })] },
+      { match: 'UPDATE users u', rows: [userRow({ user_id: 15, row_version: 8, is_active: true })] },
+      { match: 'INSERT INTO audit_log', rows: [] },
+    ]);
+    await expect(new PgUserRepository(current).activateUser({ currentUser: currentUser('admin', '1'), userId: 15, expectedVersion: 7 }))
+      .resolves.toMatchObject({ rowVersion: 8, isActive: true });
+  });
+
+  it('a password change from an open form is refused when the user changed after the form was loaded (R3 #1)', async () => {
+    const database = new FakeUserDatabase([], [{ match: 'FROM users u', rows: [userRow({ user_id: 10, row_version: 2 })] }]);
+    await expect(new PgUserRepository(database).changePassword({
+      currentUser: currentUser('admin', '1'), userId: 10, expectedVersion: 1,
+      dto: { newPassword: 'new-secure-password', revokeExistingSessions: true },
+    })).rejects.toMatchObject({ statusCode: 409, code: 'USER_VERSION_CONFLICT' });
+    expect(database.queries.some((q) => q.text.includes('UPDATE users'))).toBe(false);
+  });
+
+  it('replays a completed command by Idempotency-Key without new effects; another payload is 409 (R1 #7)', async () => {
+    const database = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [userRow({ user_id: 15, role_id: 100, role_code: 'viewer', row_version: 3 })] },
+      { match: 'UPDATE users u', rows: [userRow({ user_id: 15, role_id: 20, role_code: 'worker', row_version: 4 })] },
+      { match: 'INSERT INTO audit_log', rows: [] },
+    ]);
+    const repository = new PgUserRepository(database);
+    const command = { currentUser: currentUser('admin', '1'), userId: 15, requestId: 'req-1', idempotencyKey: 'key-00000001', dto: { role: 'worker' as const } };
+    const first = await repository.updateUser(command);
+    const effects = () => ({
+      users: database.queries.filter((q) => q.text.includes('UPDATE users')).length,
+      audit: database.queries.filter((q) => q.text.includes('INSERT INTO audit_log')).length,
+      versions: database.authQueries.filter((q) => q.text.includes('UPDATE permissions_state')).length,
+      outbox: database.authQueries.filter((q) => q.text.includes('outbox_events')).length,
+    });
+    const afterFirst = effects();
+    expect(afterFirst).toEqual({ users: 1, audit: 1, versions: 1, outbox: 1 });
+
+    // The response was lost; the client repeats the same request — even with a later expectedVersion it is a replay.
+    await expect(repository.updateUser({ ...command, requestId: 'req-2', expectedVersion: 99 })).resolves.toEqual(JSON.parse(JSON.stringify(first)));
+    expect(effects()).toEqual(afterFirst);
+
+    await expect(repository.updateUser({ ...command, dto: { role: 'viewer' } }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_KEY_REUSED' });
+    expect(effects()).toEqual(afterFirst);
+    expect([...database.idempotency.keys()]).toEqual(['users:key-00000001']);
+  });
+
+  it('a password command is idempotent only with the server secret; the password is bound by HMAC, not by the current hash (R2 #2)', async () => {
+    const userRow10 = () => [
+      { match: 'FROM users u', rows: [userRow({ user_id: 10 })] },
+      { match: 'UPDATE users', rows: [{ user_id: 10, row_version: 2 }] },
+      { match: 'WITH revoked_sessions', rows: [{ revoked_sessions: 0 }] },
+      { match: 'INSERT INTO audit_log', rows: [] },
+    ];
+    const database = new FakeUserDatabase([], [...userRow10(), ...userRow10()]);
+    const repository = new PgUserRepository(database, undefined, 'server-secret-of-at-least-32-characters!!');
+    const command = (password: string, key = 'pw-key-0001') => ({
+      currentUser: currentUser('admin', '1'), userId: 10, idempotencyKey: key,
+      dto: { newPassword: password, revokeExistingSessions: true },
+    });
+
+    await expect(repository.changePassword(command('first-password'))).resolves.toEqual({ success: true, revokedSessions: 0, rowVersion: 2 });
+    // Another command later sets a second password (state changes; the stored proof of K does not).
+    await repository.changePassword(command('second-password', 'pw-key-0002'));
+    // K with its own password is still a replay; K with the later password is another request.
+    await expect(repository.changePassword(command('first-password'))).resolves.toEqual({ success: true, revokedSessions: 0, rowVersion: 2 });
+    await expect(repository.changePassword(command('second-password'))).rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_KEY_REUSED' });
+    // Nothing derived from the password is stored without the secret: the stored hash is not a plain sha of it.
+    const stored = database.idempotency.get('users:pw-key-0001')!.hash;
+    expect(stored).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify([...database.idempotency.values()])).not.toContain('first-password');
+
+    // Without the secret the key is ignored for password commands (the command runs as before, no stored response).
+    const plain = new FakeUserDatabase([], userRow10());
+    await new PgUserRepository(plain).changePassword(command('first-password', 'pw-key-0003'));
+    expect(plain.idempotency.size).toBe(0);
+  });
+
+  it('finds a completed replay without a transaction; another payload is 409, unknown key is null (R2 #3)', async () => {
+    const database = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [userRow({ user_id: 15, row_version: 3 })] },
+      { match: 'UPDATE users u', rows: [userRow({ user_id: 15, full_name: 'A', row_version: 4 })] },
+      { match: 'INSERT INTO audit_log', rows: [] },
+    ]);
+    const repository = new PgUserRepository(database);
+    const command = { currentUser: currentUser('admin', '1'), userId: 15, idempotencyKey: 'replay-key-01', dto: { fullName: 'A' } };
+    const first = await repository.updateUser(command);
+
+    await expect(repository.findCompletedReplay('users.update', command)).resolves.toEqual(JSON.parse(JSON.stringify(first)));
+    await expect(repository.findCompletedReplay('users.update', { ...command, dto: { fullName: 'B' } }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_KEY_REUSED' });
+    await expect(repository.findCompletedReplay('users.update', { ...command, currentUser: currentUser('admin', '2') }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_KEY_REUSED' });
+    await expect(repository.findCompletedReplay('users.update', { ...command, idempotencyKey: 'unknown-key-1' })).resolves.toBeNull();
+    await expect(repository.findCompletedReplay('users.update', { ...command, idempotencyKey: undefined })).resolves.toBeNull();
   });
 
   it('rolls a user command back when the account would exceed the administrator (access groups 0A.4)', async () => {
-    const database = new FakeUserDatabase([], [{ match: 'UPDATE users', rows: [{ user_id: '42' }] }]);
+    const database = new FakeUserDatabase([], [
+      { match: 'FROM users u', rows: [userRow({ user_id: 42, role_id: 1, role_code: 'admin' })] },
+      { match: 'UPDATE users', rows: [{ user_id: '42' }] },
+    ]);
     // The target is an admin; the acting top manager lacks admin permissions.
     database.targetRoleId = 1;
     await expect(new PgUserRepository(database as never).changePassword({
@@ -467,6 +689,10 @@ class FakeUserDatabase {
   readonly authQueries: Array<{ text: string; params: readonly unknown[] }> = [];
   /** Base role of the target account as the escalation snapshot sees it (default viewer). */
   targetRoleId = 100;
+  /** Result of the lockout check (§5.2). */
+  administrationRemains = true;
+  actorRoleId = 1;
+  readonly idempotency = new Map<string, { hash: string; actor: unknown; status: string; response: unknown }>();
   transactionCount = 0;
   private queryQueue: Array<QueryResult<QueryResultRow>>;
   private readonly transactionQueue: ExpectedQuery[];
@@ -484,6 +710,10 @@ class FakeUserDatabase {
     text: string,
     params: readonly unknown[] = [],
   ): Promise<QueryResult<T>> {
+    if (text.includes('FROM command_idempotency_keys')) {
+      // Replay lookup outside the transaction (service, before the policy).
+      return authorizationAuxiliary(text, params, this.targetRoleId, this) as QueryResult<T>;
+    }
     this.queries.push({ text, params });
     const next = this.queryQueue.shift() ?? toQueryResult([]);
     return next as QueryResult<T>;
@@ -499,7 +729,7 @@ class FakeUserDatabase {
       ): Promise<QueryResult<T>> => {
         // Authorization bookkeeping of access groups 0A (lock order, escalation snapshots, version bumps) is
         // recorded separately so the assertions on the user statements keep their positions.
-        const auxiliary = authorizationAuxiliary(text, params, this.targetRoleId);
+        const auxiliary = authorizationAuxiliary(text, params, this.targetRoleId, this);
         if (auxiliary) {
           this.authQueries.push({ text, params });
           return auxiliary as QueryResult<T>;
@@ -523,9 +753,44 @@ class FakeUserDatabase {
 }
 
 /** Test actors are `<role>-id`; targets (numeric ids) are viewers — inside every administrator's authority. */
-function authorizationAuxiliary(text: string, params: readonly unknown[], targetRoleId = 100): QueryResult<QueryResultRow> | null {
+interface AuxiliaryState {
+  administrationRemains?: boolean;
+  /** Base role of numeric actors read by the in-transaction recheck (default admin). */
+  actorRoleId?: number;
+  idempotency?: Map<string, { hash: string; actor: unknown; status: string; response: unknown }>;
+}
+
+function authorizationAuxiliary(
+  text: string,
+  params: readonly unknown[],
+  targetRoleId = 100,
+  options: AuxiliaryState = {},
+): QueryResult<QueryResultRow> | null {
+  const store = options.idempotency;
+  if (store && text.includes('INSERT INTO command_idempotency_keys')) {
+    const key = String(params[0]);
+    if (store.has(key)) return { ...toQueryResult([]), rowCount: 0 };
+    store.set(key, { hash: String(params[4]), actor: params[2], status: 'processing', response: null });
+    return toQueryResult([{ idempotency_key: key }]);
+  }
+  if (store && text.includes('FROM command_idempotency_keys')) {
+    const row = store.get(String(params[0]));
+    return toQueryResult(row ? [{ request_hash: row.hash, response_json: row.response, status: row.status, actor_user_id: row.actor }] : []);
+  }
+  if (store && text.includes('UPDATE command_idempotency_keys')) {
+    const row = store.get(String(params[0]));
+    if (row) Object.assign(row, { status: 'completed', response: JSON.parse(String(params[1])) });
+    return toQueryResult([]);
+  }
+  if (text.includes('unnest($1::bigint[])')) {
+    return toQueryResult((params[0] as string[]).map((id) => ({
+      snapshot: staticRawAuthorizationSnapshot({ userId: id, roleId: options.actorRoleId ?? 1 }),
+    })));
+  }
   if (text.includes('FROM permissions_state WHERE id = true FOR UPDATE')) return toQueryResult([{ version: 1 }]);
-  if (text.includes('UPDATE users SET row_version') || text.includes('UPDATE permissions_state SET version')) return toQueryResult([]);
+  if (text.includes('UPDATE permissions_state SET version')) return toQueryResult([{ version: 2 }]);
+  if (text.includes('AS remains')) return toQueryResult([{ remains: options.administrationRemains ?? true }]);
+  if (text.includes('INSERT INTO outbox_events')) return toQueryResult([]);
   if (text.includes('user_authorization_snapshot')) {
     const id = String(params[0]);
     const role = /^(\w+)-id$/.exec(id)?.[1];
@@ -567,6 +832,7 @@ function userRow(overrides: Partial<QueryResultRow> = {}): QueryResultRow {
     is_active: true,
     created_at: new Date('2026-04-30T00:00:00.000Z'),
     updated_at: new Date('2026-04-30T01:00:00.000Z'),
+    row_version: 1,
     ...overrides,
   };
 }

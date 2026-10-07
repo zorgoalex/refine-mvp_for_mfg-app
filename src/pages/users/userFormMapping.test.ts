@@ -109,6 +109,9 @@ describe('user form mapping', () => {
   it('links and unlinks the employee only when the form has the field', () => {
     expect(mapBackendUpdateUserRequest({ employee_id: 7 })).toMatchObject({ employeeId: 7 });
     expect(mapBackendUpdateUserRequest({ employee_id: null })).toMatchObject({ employeeId: null });
+    // The row version of the loaded user goes with the save; an older backend that sends none — nothing is added.
+    expect(mapBackendUpdateUserRequest({ full_name: 'X' }, 6)).toMatchObject({ expectedVersion: 6 });
+    expect(mapBackendUpdateUserRequest({ full_name: 'X' }, null)).not.toHaveProperty('expectedVersion');
     expect(mapBackendUpdateUserRequest({ role: 'admin' })).not.toHaveProperty('employeeId');
     expect(mapBackendCreateUserRequest({ username: 'u1', password: 'secure-password', role: 'viewer', employee_id: 4 })).toMatchObject({ employeeId: 4 });
   });

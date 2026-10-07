@@ -24,11 +24,20 @@ export function accountEscalationViolations(
   const held = new Set<string>(actor.permissions);
   const missingPermissions = [...new Set(target.permissions.filter((permission) => !held.has(permission)))].sort();
   const scopeKeys: string[] = [];
+  const targetHolds = new Set<string>(target.permissions);
   for (const [key, targetSet, actorSet] of scopeEntries(target.scopeSets, actor.scopeSets)) {
+    // A scope without its permission grants nothing (§3.2): compare only scopes the target can use.
+    if (!targetHolds.has(SCOPE_PERMISSION[key] ?? key)) continue;
     if (targetSet.length > 0 && !actorSet.includes('all')) scopeKeys.push(key);
   }
   return { missingPermissions, scopeKeys };
 }
+
+/** Permission behind each scope key (the key name, except production tasks). */
+const SCOPE_PERMISSION: Record<string, string> = {
+  'productionTasks.view': 'production.tasks.view',
+  'productionTasks.update': 'production.tasks.update',
+};
 
 function scopeEntries(target: RolePolicyScopeSets, actor: RolePolicyScopeSets): Array<[string, readonly ScopeGrant[], readonly ScopeGrant[]]> {
   const entries: Array<[string, readonly ScopeGrant[], readonly ScopeGrant[]]> = [];

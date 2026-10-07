@@ -11,6 +11,8 @@ export interface UserDto {
   isActive: boolean;
   createdAt: string;
   updatedAt?: string | null;
+  /** Grows with every command over the user; sent back as expectedVersion (absent on an older backend). */
+  rowVersion?: number;
 }
 
 export interface UserListQuery {
@@ -52,14 +54,20 @@ export interface UpdateUserRequest {
   employeeId?: number | null;
   fullName?: string | null;
   isActive?: boolean;
+  /** rowVersion the form was loaded with: a newer save by someone else answers 409 instead of being overwritten. */
+  expectedVersion?: number;
 }
 
 export interface ChangePasswordRequest {
   newPassword: string;
   revokeExistingSessions?: boolean;
+  /** rowVersion of the open form (the password change then also guards the form against a stale state). */
+  expectedVersion?: number;
 }
 
 export interface ChangePasswordResponse {
   success: true;
   revokedSessions: number;
+  /** User row version after the change (absent on an older backend). */
+  rowVersion?: number;
 }

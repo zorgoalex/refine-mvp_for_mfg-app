@@ -1566,6 +1566,7 @@ function mapBackendUserToLegacyRow(user: UserDto): AnyObject {
     last_login_at: null,
     created_at: user.createdAt,
     updated_at: user.updatedAt ?? null,
+    row_version: user.rowVersion ?? null,
   };
 }
 

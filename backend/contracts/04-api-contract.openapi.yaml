@@ -13901,6 +13901,8 @@ paths:
       security:
         - bearerAuth: []
       x-permission: users.create
+      parameters:
+        - $ref: '#/components/parameters/UsersCommandIdempotencyKey'
       requestBody:
         required: true
         content:
@@ -13957,9 +13959,15 @@ paths:
         - Users
       operationId: updateUser
       summary: Обновить пользователя
+      description: >-
+        Смена роли или активности повышает версию прав (текущие токены обновляются), выключение отзывает сессии.
+        409 — устаревший expectedVersion (USER_VERSION_CONFLICT), смена роли цели (USER_ROLE_CHANGED), последний
+        администратор (PERMISSIONS_LOCKOUT_DENIED), занятый логин/e-mail.
       security:
         - bearerAuth: []
       x-permission: users.update
+      parameters:
+        - $ref: '#/components/parameters/UsersCommandIdempotencyKey'
       requestBody:
         required: true
         content:
@@ -13997,6 +14005,8 @@ paths:
       security:
         - bearerAuth: []
       x-permission: users.change_password
+      parameters:
+        - $ref: '#/components/parameters/UsersCommandIdempotencyKey'
       requestBody:
         required: true
         content:
@@ -14032,6 +14042,14 @@ paths:
       security:
         - bearerAuth: []
       x-permission: users.deactivate
+      parameters:
+        - $ref: '#/components/parameters/UsersCommandIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserActivationRequest'
       responses:
         '200':
           description: Пользователь деактивирован
@@ -14059,6 +14077,14 @@ paths:
       security:
         - bearerAuth: []
       x-permission: users.activate
+      parameters:
+        - $ref: '#/components/parameters/UsersCommandIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserActivationRequest'
       responses:
         '200':
           description: Пользователь активирован
@@ -20746,6 +20772,18 @@ components:
         minLength: 8
         maxLength: 200
         example: order-delete:01HZX8K5T3M2F5F7K9A2S1QW3E
+    UsersCommandIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >-
+        Переходный контракт команд пользователей: ключ необязателен. С ключом повтор того же запроса возвращает
+        сохранённый ответ без новых изменений, аудита и событий; тот же ключ с другим запросом — 409 IDEMPOTENCY_KEY_REUSED.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 200
+        pattern: '^[A-Za-z0-9_.:-]{8,200}$'
     IfMatchVersion:
       name: If-Match
       in: header
@@ -30550,6 +30588,7 @@ components:
         - permissions
         - isActive
         - createdAt
+        - rowVersion
       properties:
         id:
           type: integer
@@ -30582,6 +30621,19 @@ components:
           type: string
           format: date-time
           nullable: true
+        rowVersion:
+          type: integer
+          format: int64
+          description: Растёт с каждой командой над пользователем; отправляется обратно как expectedVersion.
+
+    UserActivationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 1
 
     CreateUserRequest:
       type: object
@@ -30640,6 +30692,11 @@ components:
           maxLength: 255
         isActive:
           type: boolean
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          description: rowVersion формы; если пользователь изменён после загрузки — 409 USER_VERSION_CONFLICT.
 
     ChangePasswordRequest:
       type: object
@@ -30654,6 +30711,11 @@ components:
         revokeExistingSessions:
           type: boolean
           default: true
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          description: rowVersion открытой формы; если пользователь изменён после загрузки — 409 USER_VERSION_CONFLICT.
 
     ChangePasswordResponse:
       type: object
@@ -30667,6 +30729,10 @@ components:
           type: integer
           minimum: 0
           example: 2
+        rowVersion:
+          type: integer
+          format: int64
+          description: users.row_version после смены пароля (форма продолжает сохранять без ложного 409).
 
     VlmHealthResponse:
       type: object

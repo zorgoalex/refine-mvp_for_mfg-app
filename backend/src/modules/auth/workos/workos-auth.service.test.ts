@@ -885,6 +885,18 @@ describe('WorkosAuthService administrator controls', () => {
     );
   });
 
+  it('a denial decided inside the invitation transaction is a 403 and is audited (access groups 0A.4)', async () => {
+    const harness = createHarness();
+    harness.ports.createInvitation.mockResolvedValueOnce({ status: 'access_denied', reason: 'privilege_escalation_denied' });
+
+    await expect(harness.service.adminCreateInvitation({ currentUser: admin, targetUserId: '42', requestId: 'req_tx' }))
+      .rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED', details: { reason: 'privilege_escalation_denied' } });
+    expect(harness.ports.recordDenied).toHaveBeenCalledTimes(1);
+    expect(harness.ports.recordDenied.mock.calls[0][1]).toMatchObject({
+      event: 'auth.identity.invitation_create_denied', reason: 'privilege_escalation_denied', relatedUserId: 42, requestId: 'req_tx',
+    });
+  });
+
   it('keeps the operator role boundary in SSO administration, whatever users.manage_sso grants say', async () => {
     const withTargetRole = (roleId: number, actorRoleId = 1) => {
       const harness = createHarness();

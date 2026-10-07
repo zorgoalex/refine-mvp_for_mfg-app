@@ -33,4 +33,12 @@ describe('no escalation through accounts: target ≼ actor (access groups 0A.4)'
     const noOrders = { ...snap(30), scopeSets: { ...snap(30).scopeSets, orders: { view: [], update: [], export: [], delete: [] } } };
     expect(accountEscalationViolations(narrowAdmin, noOrders).scopeKeys).not.toContain('orders.view');
   });
+
+  it('a scope without its permission is not compared (it grants nothing)', () => {
+    const actor = { ...snap(1), permissions: snap(1).permissions.filter((p) => p !== 'payments.delete'),
+      scopeSets: { ...snap(1).scopeSets, payments: { ...snap(1).scopeSets.payments, delete: [] } } };
+    const target = { ...snap(100), permissions: snap(100).permissions.filter((p) => p !== 'payments.delete'),
+      scopeSets: { ...snap(100).scopeSets, payments: { ...snap(100).scopeSets.payments, delete: ['own' as const] } } };
+    expect(accountEscalationViolations(actor, target).scopeKeys).not.toContain('payments.delete');
+  });
 });

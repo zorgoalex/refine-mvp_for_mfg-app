@@ -1,8 +1,9 @@
 import { humanName } from '../../../shared/human-name-schema';
-import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiHeader,
   ApiOperation,
   ApiParam,
   ApiQuery,
@@ -50,19 +51,32 @@ const updateUserRequestSchema = z
     employeeId: employeeIdSchema,
     fullName: humanName(255, 0).nullable().optional(),
     isActive: z.boolean().optional(),
+    expectedVersion: z.number().int().positive().optional(),
   })
-  .refine((value) => Object.keys(value).length > 0, {
+  .refine((value) => Object.keys(value).some((key) => key !== 'expectedVersion'), {
     message: 'At least one field must be provided',
   });
+
+/** Optional body of activate/deactivate: the row version the client acted on (transitional, §5.3). */
+const activationRequestSchema = z.object({ expectedVersion: z.number().int().positive().optional() }).strict();
+
+/** Transitional contract (access groups plan §5.3): the key is optional; with it a repeat returns the stored result. */
+const idempotencyHeader = {
+  name: 'Idempotency-Key',
+  required: false,
+  description: 'One key per user action; a repeat with the same key and payload returns the stored response',
+  schema: { type: 'string', minLength: 8, maxLength: 200 },
+} as const;
 
 const changePasswordRequestSchema = z.object({
   newPassword: z.string().min(8).max(200),
   revokeExistingSessions: z.boolean().default(true),
+  expectedVersion: z.number().int().positive().optional(),
 });
 
 const userSwaggerSchema = {
   type: 'object',
-  required: ['id', 'username', 'role', 'permissions', 'isActive', 'createdAt'],
+  required: ['id', 'username', 'role', 'permissions', 'isActive', 'createdAt', 'rowVersion'],
   properties: {
     id: { type: 'integer' },
     username: { type: 'string' },
@@ -74,6 +88,7 @@ const userSwaggerSchema = {
     isActive: { type: 'boolean' },
     createdAt: { type: 'string', format: 'date-time' },
     updatedAt: { type: 'string', format: 'date-time', nullable: true },
+    rowVersion: { type: 'integer', description: 'Increments with every command over the user; send as expectedVersion' },
   },
 } as const;
 
@@ -112,6 +127,14 @@ const updateUserRequestSwaggerSchema = {
     employeeId: { type: 'integer', nullable: true },
     fullName: { type: 'string', maxLength: 255, nullable: true },
     isActive: { type: 'boolean' },
+    expectedVersion: { type: 'integer', minimum: 1, description: 'rowVersion of the form; a different current version answers 409' },
+  },
+} as const;
+
+const activationRequestSwaggerSchema = {
+  type: 'object',
+  properties: {
+    expectedVersion: { type: 'integer', minimum: 1 },
   },
 } as const;
 
@@ -121,6 +144,7 @@ const changePasswordRequestSwaggerSchema = {
   properties: {
     newPassword: { type: 'string', minLength: 8, maxLength: 200, writeOnly: true },
     revokeExistingSessions: { type: 'boolean', default: true },
+    expectedVersion: { type: 'integer', minimum: 1 },
   },
 } as const;
 
@@ -147,6 +171,7 @@ const changePasswordResponseSwaggerSchema = {
   properties: {
     success: { type: 'boolean', enum: [true] },
     revokedSessions: { type: 'integer' },
+    rowVersion: { type: 'integer', description: 'users.row_version after the change' },
   },
 } as const;
 
@@ -218,10 +243,12 @@ export class UsersController {
   @ApiResponse({ status: 422, description: 'Invalid create user payload' })
   @ApiResponse({ status: 503, description: 'Users API is disabled' })
   @ApiOperation({ operationId: 'createUser', summary: 'Create a user' })
+  @ApiHeader(idempotencyHeader)
   @Post()
   async create(
     @Req() request: RequestWithCurrentUser,
     @Body() body: unknown,
+    @Headers('idempotency-key') idempotencyKey?: string | string[],
   ): Promise<UserResponseDto> {
     this.assertUsersEnabled();
 
@@ -230,6 +257,7 @@ export class UsersController {
       currentUser,
       dto: parseCreateUserRequest(body),
       requestId: request.requestId,
+      idempotencyKey: parseOptionalIdempotencyKey(idempotencyKey),
     });
 
     return { user };
@@ -243,21 +271,27 @@ export class UsersController {
   @ApiResponse({ status: 404, description: 'User not found' })
   @ApiResponse({ status: 422, description: 'Invalid update user payload' })
   @ApiResponse({ status: 503, description: 'Users API is disabled' })
+  @ApiResponse({ status: 409, description: 'Stale expectedVersion, role changed or last administrator' })
   @ApiOperation({ operationId: 'updateUser', summary: 'Update a user' })
+  @ApiHeader(idempotencyHeader)
   @Patch(':userId')
   async update(
     @Req() request: RequestWithCurrentUser,
     @Param('userId') userIdParam: string,
     @Body() body: unknown,
+    @Headers('idempotency-key') idempotencyKey?: string | string[],
   ): Promise<UserResponseDto> {
     this.assertUsersEnabled();
 
     const currentUser = this.requireCurrentUser(request);
+    const { expectedVersion, ...dto } = parseUpdateUserRequestWithVersion(body);
     const user = await this.users.update({
       currentUser,
       userId: parseUserId(userIdParam),
-      dto: parseUpdateUserRequest(body),
+      dto,
+      expectedVersion,
       requestId: request.requestId,
+      idempotencyKey: parseOptionalIdempotencyKey(idempotencyKey),
     });
 
     return { user };
@@ -272,12 +306,14 @@ export class UsersController {
   @ApiResponse({ status: 422, description: 'Invalid change password payload' })
   @ApiResponse({ status: 503, description: 'Users API is disabled' })
   @ApiOperation({ operationId: 'changeUserPassword', summary: 'Change a user password' })
+  @ApiHeader(idempotencyHeader)
   @Post(':userId/change-password')
   @HttpCode(200)
   async changePassword(
     @Req() request: RequestWithCurrentUser,
     @Param('userId') userIdParam: string,
     @Body() body: unknown,
+    @Headers('idempotency-key') idempotencyKey?: string | string[],
   ) {
     this.assertUsersEnabled();
 
@@ -285,8 +321,9 @@ export class UsersController {
     return this.users.changePassword({
       currentUser,
       userId: parseUserId(userIdParam),
-      dto: parseChangePasswordRequest(body),
+      ...parseChangePasswordRequestWithVersion(body),
       requestId: request.requestId,
+      idempotencyKey: parseOptionalIdempotencyKey(idempotencyKey),
     });
   }
 
@@ -297,10 +334,14 @@ export class UsersController {
   @ApiResponse({ status: 404, description: 'User not found' })
   @ApiResponse({ status: 503, description: 'Users API is disabled' })
   @ApiOperation({ operationId: 'deactivateUser', summary: 'Deactivate a user' })
+  @ApiBody({ required: false, schema: swaggerSchema(activationRequestSwaggerSchema) })
+  @ApiHeader(idempotencyHeader)
   @Patch(':userId/deactivate')
   async deactivate(
     @Req() request: RequestWithCurrentUser,
     @Param('userId') userIdParam: string,
+    @Body() body?: unknown,
+    @Headers('idempotency-key') idempotencyKey?: string | string[],
   ): Promise<UserResponseDto> {
     this.assertUsersEnabled();
 
@@ -309,6 +350,8 @@ export class UsersController {
       currentUser,
       userId: parseUserId(userIdParam),
       requestId: request.requestId,
+      expectedVersion: parseActivationRequest(body).expectedVersion,
+      idempotencyKey: parseOptionalIdempotencyKey(idempotencyKey),
     });
 
     return { user };
@@ -321,10 +364,14 @@ export class UsersController {
   @ApiResponse({ status: 404, description: 'User not found' })
   @ApiResponse({ status: 503, description: 'Users API is disabled' })
   @ApiOperation({ operationId: 'activateUser', summary: 'Activate a user' })
+  @ApiBody({ required: false, schema: swaggerSchema(activationRequestSwaggerSchema) })
+  @ApiHeader(idempotencyHeader)
   @Patch(':userId/activate')
   async activate(
     @Req() request: RequestWithCurrentUser,
     @Param('userId') userIdParam: string,
+    @Body() body?: unknown,
+    @Headers('idempotency-key') idempotencyKey?: string | string[],
   ): Promise<UserResponseDto> {
     this.assertUsersEnabled();
 
@@ -333,6 +380,8 @@ export class UsersController {
       currentUser,
       userId: parseUserId(userIdParam),
       requestId: request.requestId,
+      expectedVersion: parseActivationRequest(body).expectedVersion,
+      idempotencyKey: parseOptionalIdempotencyKey(idempotencyKey),
     });
 
     return { user };
@@ -384,11 +433,39 @@ export function parseCreateUserRequest(body: unknown): CreateUserRequestDto {
 }
 
 export function parseUpdateUserRequest(body: unknown): UpdateUserRequestDto {
-  return parseRequestBody(updateUserRequestSchema, body) as UpdateUserRequestDto;
+  const { expectedVersion: _version, ...dto } = parseUpdateUserRequestWithVersion(body);
+  return dto;
+}
+
+export function parseUpdateUserRequestWithVersion(body: unknown): UpdateUserRequestDto & { expectedVersion?: number } {
+  return parseRequestBody(updateUserRequestSchema, body) as UpdateUserRequestDto & { expectedVersion?: number };
+}
+
+/** Old clients send no body (or an empty one) to activate/deactivate. */
+export function parseActivationRequest(body: unknown): { expectedVersion?: number } {
+  if (body === undefined || body === null || (typeof body === 'object' && Object.keys(body).length === 0)) return {};
+  return parseRequestBody(activationRequestSchema, body);
+}
+
+export function parseOptionalIdempotencyKey(value: string | string[] | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const key = Array.isArray(value) ? (value.length === 1 ? value[0] : undefined) : value;
+  if (key === undefined || !/^[A-Za-z0-9_.:-]{8,200}$/.test(key)) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Idempotency-Key must be 8..200 characters [A-Za-z0-9_.:-]', {
+      errors: [{ field: 'Idempotency-Key', message: 'invalid' }],
+    });
+  }
+  return key;
 }
 
 export function parseChangePasswordRequest(body: unknown): ChangePasswordRequestDto {
-  return parseRequestBody(changePasswordRequestSchema, body) as ChangePasswordRequestDto;
+  return parseChangePasswordRequestWithVersion(body).dto;
+}
+
+/** expectedVersion (optional): the row version of the open form; a newer row answers 409 instead of being masked. */
+export function parseChangePasswordRequestWithVersion(body: unknown): { dto: ChangePasswordRequestDto; expectedVersion?: number } {
+  const { expectedVersion, ...dto } = parseRequestBody(changePasswordRequestSchema, body) as ChangePasswordRequestDto & { expectedVersion?: number };
+  return expectedVersion === undefined ? { dto } : { dto, expectedVersion };
 }
 
 function parseSearch(value: string | string[] | undefined): string | undefined {

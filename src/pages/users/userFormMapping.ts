@@ -79,8 +79,10 @@ export function mapBackendCreateUserRequest(
 
 export function mapBackendUpdateUserRequest(
   values: UserFormValues,
+  expectedVersion?: number | null,
 ): UpdateUserRequest {
   return {
+    ...(typeof expectedVersion === 'number' ? { expectedVersion } : {}),
     username: values.username,
     email: nullableText(values.email),
     role: values.role,
