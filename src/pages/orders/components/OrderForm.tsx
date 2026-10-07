@@ -22,6 +22,7 @@ import { useTabStore, computeCloseTargetPath } from '../../../stores/tabStore';
 import { useTabDirty } from '../../../hooks/useTabDirty';
 import { DraggableModalWrapper } from '../../../components/DraggableModalWrapper';
 import {
+  useKeepAlive,
   useWorkspaceTabKey,
 } from '../../../components/workspace/KeepAliveContext';
 import { useDefaultStatuses } from '../../../hooks/useDefaultStatuses';
@@ -87,6 +88,8 @@ import { OrderBasicInfo } from './sections/OrderBasicInfo';
 import { OrderNotesSection } from './sections/OrderNotesSection';
 import { OrderDatesSection } from './sections/OrderDatesSection';
 import { OrderFinanceSection } from './sections/OrderFinanceSection';
+import { OrderFinanceSummary } from './sections/OrderFinanceSummary';
+import { OrderFormWorkbenchBar } from './sections/OrderFormWorkbenchBar';
 import { OrderMaterialsTab } from './sections/OrderMaterialsTab';
 import { OrderLegacySection } from './sections/OrderLegacySection';
 import { OrderFilesSection } from './sections/OrderFilesSection';
@@ -1738,6 +1741,42 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     });
   };
 
+  // «NewLine»: обычный срок по настройкам сроков — для быстрого выбора рядом с плановой датой.
+  const usualPlannedDate = useMemo(
+    () => (
+      isWorkbench && mode === 'create' && deadlineDefaultSchedule.loaded && header.order_date
+        ? computePlannedCompletionDate(
+          String(header.order_date),
+          deadlineDefaultSchedule.schedule,
+          applicableProductionStatusIds,
+        )
+        : null
+    ),
+    [
+      isWorkbench,
+      mode,
+      deadlineDefaultSchedule.loaded,
+      deadlineDefaultSchedule.schedule,
+      header.order_date,
+      applicableProductionStatusIds,
+    ],
+  );
+  const workbenchSaveHotkeyRef = useRef<(() => void) | null>(null);
+  // вкладки заказов остаются смонтированными: сохранять по клавишам можно только видимую
+  const workspaceTabActive = useKeepAlive().isActive;
+  useEffect(() => {
+    if (!isWorkbench) return undefined;
+    // Ctrl+S / ⌘S сохраняет заказ; по коду клавиши, чтобы работало и в русской раскладке
+    const handleSaveHotkey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.code !== 'KeyS') return;
+      if (!workbenchSaveHotkeyRef.current) return;
+      event.preventDefault();
+      workbenchSaveHotkeyRef.current();
+    };
+    window.addEventListener('keydown', handleSaveHotkey);
+    return () => window.removeEventListener('keydown', handleSaveHotkey);
+  }, [isWorkbench]);
+
   const headerTabItems = useMemo(
     () => {
       const projectCode = header.project_code?.trim() || null;
@@ -1829,7 +1868,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       {
         key: 'dates',
         label: isOperational ? 'Логистика' : 'Даты',
-        children: <OrderLifecycleReadSurface active={isFormSectionActive('dates')}><OrderDatesSection /></OrderLifecycleReadSurface>,
+        children: <OrderLifecycleReadSurface active={isFormSectionActive('dates')}><OrderDatesSection usualPlannedDate={usualPlannedDate} /></OrderLifecycleReadSurface>,
       },
       {
         key: 'finance',
@@ -1951,6 +1990,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       catalogLines,
       setCatalogLines,
       can,
+      usualPlannedDate,
     ]
   );
 
@@ -2401,6 +2441,9 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         </Space>
   );
   const formHasUnsavedChanges = isDirty || isDetailEditing || isPaymentEditing;
+  workbenchSaveHotkeyRef.current = isWorkbench && formHasUnsavedChanges && !isSaving && workspaceTabActive
+    ? () => { void handleSave(); }
+    : null;
   // «NewLine» compact bar: the two actions needed while editing a long details list.
   const workbenchCompactActions = (
     <>
@@ -2488,8 +2531,23 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
                     {hybridSectionTitle(key, item.label)}
                   </h2>
                   <div className="wb-form-section__body">
-                    {item.children}
+                    {key === 'finance' ? (
+                      <div className="wb-form-finance">
+                        <div className="wb-form-finance__main">{item.children}</div>
+                        <OrderFinanceSummary />
+                      </div>
+                    ) : item.children}
                     {dates ? <div className="wb-form-section__sub">{dates.children}</div> : null}
+                    {key === 'details' ? (
+                      <p className="wb-form-keys">
+                        <span><kbd>Tab</kbd> следующее поле</span>
+                        <span><kbd>Enter</kbd> или <kbd>F2</kbd> править ячейку</span>
+                        <span><kbd>Esc</kbd> отменить правку</span>
+                        <span><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> по ячейкам</span>
+                        <span><kbd>↓</kbd> на последней строке — новая строка</span>
+                        <span><kbd>Ctrl</kbd><kbd>S</kbd> сохранить заказ</span>
+                      </p>
+                    ) : null}
                   </div>
                 </section>
               );
@@ -2532,6 +2590,12 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
               className="wb-form-spacer"
               style={{ height: hybridSpacerHeight }}
               aria-hidden
+            />
+            <OrderFormWorkbenchBar
+              dirty={formHasUnsavedChanges}
+              saving={isSaving}
+              onSave={() => { void handleSave(); }}
+              onCancel={handleCancel}
             />
           </>
         ) : (
