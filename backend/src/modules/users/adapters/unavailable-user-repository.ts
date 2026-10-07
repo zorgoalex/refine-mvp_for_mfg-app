@@ -15,6 +15,10 @@ import type {
 } from '../dto/user.dto';
 
 export class UnavailableUserRepository implements UserRepositoryPort {
+  async findCompletedReplay<T>(): Promise<T | null> {
+    throw unavailableUsersAdapterError();
+  }
+
   async listUsers(_command: ListUsersCommand): Promise<UserListResponseDto> {
     throw unavailableUsersAdapterError();
   }

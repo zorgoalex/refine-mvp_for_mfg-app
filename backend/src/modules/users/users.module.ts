@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { DatabaseModule } from '../../database/database.module';
 import { DatabaseService } from '../../database/database.service';
 import { PgUserRepository } from './adapters/pg-user-repository';
@@ -16,15 +17,16 @@ import { UsersController } from './http/users.controller';
     UsersRuntimeConfigService,
     {
       provide: UserService,
-      useFactory: (database: DatabaseService, permissions: PermissionsService) =>
+      useFactory: (database: DatabaseService, permissions: PermissionsService, config: ConfigService) =>
         new UserService({
           users: database.isConfigured
-            ? new PgUserRepository(database, permissions)
+            // Server-only secret of the auth module, used as the HMAC key of passwords in idempotent requests.
+            ? new PgUserRepository(database, permissions, config.get<string>('REFRESH_TOKEN_PEPPER') || undefined)
             : new UnavailableUserRepository(),
           database,
           permissions,
         }),
-      inject: [DatabaseService, PermissionsService],
+      inject: [DatabaseService, PermissionsService, ConfigService],
     },
   ],
 })

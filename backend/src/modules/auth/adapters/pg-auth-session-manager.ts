@@ -333,7 +333,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         },
       });
 
-      const currentUser = await this.toCurrentUser(current, current.session_id);
+      const currentUser = await this.toCurrentUser(current, current.session_id, tx);
       const issuedAccessToken = await this.accessTokens.issueAccessToken(currentUser, {
         notAfter: sessionExpiresAt,
       });
@@ -674,7 +674,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
     );
   }
 
-  private async toCurrentUser(row: RefreshSessionRow, sessionId: string): Promise<CurrentUser> {
+  private async toCurrentUser(row: RefreshSessionRow, sessionId: string, tx: TransactionClient): Promise<CurrentUser> {
     const roleId = Number(row.role_id);
     const role = mapRoleIdToRole(roleId);
 
@@ -685,9 +685,10 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
     }
 
     if (this.permissions) {
-      // One-statement snapshot: role, grants, scopes and version together (access groups stage 0A).
+      // One-statement snapshot: role, grants, scopes and version together (access groups stage 0A). Read in the
+      // refresh transaction that holds the session row: no seed and no second connection under that lock.
       return currentUserFromAuthorization(
-        await this.permissions.loadUserAuthorization(String(row.user_id)),
+        await this.permissions.loadUserAuthorization(String(row.user_id), tx),
         { sessionId },
       );
     }

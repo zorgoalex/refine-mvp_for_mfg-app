@@ -1,4 +1,7 @@
 import type { QueryResultRow } from 'pg';
+import { auditService } from '../../../common/audit/audit.service';
+import { lockAuthorizationState, ssoManagementDenial } from '../../../permissions/authorization-command-guard';
+import type { UserDenialReason } from '../../../permissions/policies/user-access.policy';
 import { DatabaseService } from '../../../database/database.service';
 import { mapRoleIdToRole } from '../../../permissions/permissions';
 import type { AuthSchemaCapabilities } from '../auth.module';
@@ -58,6 +61,7 @@ export type SettingsUpdateOutcome =
 
 export type InvitationCreateOutcome =
   | { status: 'created'; invitation: WorkosLinkInvitation }
+  | { status: 'access_denied'; reason: UserDenialReason }
   | { status: 'not_found' }
   | { status: 'user_inactive' }
   | { status: 'session_inactive' };
@@ -305,6 +309,9 @@ export class PgUserIdentityRepository {
     actorSessionId: string;
   }): Promise<InvitationCreateOutcome> {
     return this.database.transaction(async (tx) => {
+      // Lock order of authorization commands (access groups plan §5.1): permissions_state before user rows; shared,
+      // so a concurrent role/matrix change waits for the invitation and the check below sees committed data.
+      await lockAuthorizationState(tx, 'share');
       const session = await tx.query(
         `SELECT 1 FROM auth_sessions
          WHERE session_id = $1 AND status = 'active' AND expires_at > now()
@@ -325,6 +332,11 @@ export class PgUserIdentityRepository {
       }
       if (!targetRow.is_active) {
         return { status: 'user_inactive' };
+      }
+      // The service check before the transaction is a fast fail; this one decides (0A.4, fresh actor and target).
+      const denial = await ssoManagementDenial(tx, input.actor.userId, input.targetUserId);
+      if (denial) {
+        return { status: 'access_denied', reason: denial };
       }
 
       await tx.query(
@@ -589,6 +601,7 @@ export class PgUserIdentityRepository {
     ipAddress?: string;
   }): Promise<InvitationLinkOutcome> {
     return this.database.transaction(async (tx) => {
+      await lockAuthorizationState(tx, 'share');
       const invitation = await tx.query<{
         target_user_id: string | number;
         created_by_user_id: string | number;
@@ -632,6 +645,28 @@ export class PgUserIdentityRepository {
       }
 
       const targetUserId = String(row.target_user_id);
+      // An invitation never outlives its creator's authority: if the creator lost users.manage_sso or the target now
+      // has permissions the creator lacks (e.g. a new role since the invitation), it is revoked and refused.
+      const denial = await ssoManagementDenial(tx, row.created_by_user_id, targetUserId);
+      if (denial) {
+        await tx.query('UPDATE workos_link_invitations SET revoked_at = now() WHERE invitation_id = $1', [input.invitationId]);
+        await auditService.record(tx, {
+          event: 'auth.identity.invitation_revoked',
+          entityType: 'user',
+          entityId: targetUserId,
+          actorUserId: null,
+          requestId: input.requestId ?? DEFAULT_REQUEST_ID,
+          source: 'workos',
+          relatedUserId: toNullableUserId(targetUserId),
+          metadata: {
+            mode: 'authorization_changed',
+            invitationId: input.invitationId,
+            createdByUserId: toNullableUserId(String(row.created_by_user_id)),
+            reason: denial,
+          },
+        });
+        return { status: 'invitation_invalid' };
+      }
       const actor: IdentityActor = {
         userId: String(row.created_by_user_id),
         username: row.actor_username,

@@ -3,7 +3,26 @@ import { Pool, type QueryResultRow } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { staticRawAuthorizationSnapshot } from '../../../permissions/testing/static-authorization-snapshot';
 import { PgUserRepository } from './pg-user-repository';
+
+/**
+ * These isolated schemas test row locks and preconditions of the user statements. The authorization protocol
+ * (permissions_state lock, snapshots, lockout, outbox) reads public objects and is answered here: actor 1 is an
+ * admin, every target a viewer. It runs for real in pg-user-repository.authorization.integration.test.ts.
+ */
+function authorizationStub(text: string, params: readonly unknown[]): { rows: QueryResultRow[]; rowCount: number } | null {
+  const rows = (list: QueryResultRow[]) => ({ rows: list, rowCount: list.length });
+  if (text.includes('FROM permissions_state')) return rows([{ version: 1 }]);
+  if (text.includes('UPDATE permissions_state')) return rows([{ version: 2 }]);
+  if (text.includes('AS remains')) return rows([{ remains: true }]);
+  if (text.includes('INSERT INTO outbox_events')) return rows([]);
+  if (text.includes('user_authorization_snapshot')) {
+    const ids = text.includes('unnest') ? (params[0] as string[]) : [String(params[0])];
+    return rows(ids.map((id) => ({ snapshot: staticRawAuthorizationSnapshot({ userId: id, roleId: id === '1' ? 1 : 100 }) })));
+  }
+  return null;
+}
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const admin: CurrentUser = { id: '1', username: 'admin', role: 'admin', roleId: 1, permissions: ['users.update'] };
@@ -25,6 +44,8 @@ describe.skipIf(!databaseUrl)('PgUserRepository relink audit (PostgreSQL, isolat
         try {
           const value = await handler({
             query: async <R extends QueryResultRow>(text: string, params: readonly unknown[] = []) => {
+              const stub = authorizationStub(text, params);
+              if (stub) return stub;
               if (gate?.tag === tag && /INSERT INTO audit_log\b/.test(text)) await gate.open;
               return connection.query<R>(text, [...params]);
             },
@@ -49,7 +70,7 @@ describe.skipIf(!databaseUrl)('PgUserRepository relink audit (PostgreSQL, isolat
       INSERT INTO "${schema}".roles VALUES (1, 'admin'), (10, 'manager');
       CREATE TABLE "${schema}".users(user_id bigint PRIMARY KEY, username text, email text, full_name text, role_id int, employee_id bigint,
         is_active boolean DEFAULT true, is_service_account boolean DEFAULT false, edited_by bigint,
-        created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now());
+        created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(), row_version bigint NOT NULL DEFAULT 1);
       INSERT INTO "${schema}".users(user_id, username, role_id, employee_id) VALUES (15, 'relinked', 10, 101);
       CREATE TABLE "${schema}".audit_log(audit_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),event text NOT NULL,entity_type text,entity_id text,
         user_id bigint,username text,role_code text,role text,request_id text NOT NULL,source text,related_order_id bigint,related_client_id bigint,
@@ -97,7 +118,8 @@ describe.skipIf(!databaseUrl)('PgUserRepository target-role precondition (Postgr
         await connection.query(`SET search_path="${schema}",public`);
         await connection.query('BEGIN');
         try {
-          const value = await handler({ query: <R extends QueryResultRow>(text: string, params: readonly unknown[] = []) => connection.query<R>(text, [...params]) });
+          const value = await handler({ query: async <R extends QueryResultRow>(text: string, params: readonly unknown[] = []) =>
+            authorizationStub(text, params) ?? connection.query<R>(text, [...params]) });
           await connection.query('COMMIT');
           return value;
         } catch (error) {
@@ -122,7 +144,7 @@ describe.skipIf(!databaseUrl)('PgUserRepository target-role precondition (Postgr
       INSERT INTO "${schema}".roles VALUES (1, 'admin'), (10, 'manager'), (100, 'viewer');
       CREATE TABLE "${schema}".users(user_id bigint PRIMARY KEY, username text, email text, full_name text, password_hash text, role_id int,
         employee_id bigint, is_active boolean DEFAULT true, is_service_account boolean DEFAULT false, edited_by bigint,
-        created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now());
+        created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(), row_version bigint NOT NULL DEFAULT 1);
       INSERT INTO "${schema}".users(user_id, username, password_hash, role_id) VALUES (21, 'sequential', 'old-hash', 100), (22, 'concurrent', 'old-hash', 100), (23, 'steady', 'old-hash', 100);
       CREATE TABLE "${schema}".auth_sessions(session_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id bigint, status text, revoked_at timestamptz, revoke_reason text);
       CREATE TABLE "${schema}".refresh_tokens(token_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id bigint, revoked_at timestamptz, revoked_reason text);
@@ -164,11 +186,11 @@ describe.skipIf(!databaseUrl)('PgUserRepository target-role precondition (Postgr
       await promoter.query('BEGIN');
       await promoter.query(`UPDATE "${schema}".users SET role_id = 10 WHERE user_id = 22`);
       const pending = changePassword(22).then((value) => ({ value }), (error: unknown) => ({ error }));
-      // The UPDATE of the password change is blocked on the row the promoter holds.
+      // The password change waits for the row the promoter holds (its locked pre-image read, §5.1 step 2).
       let blocked = false;
       for (let i = 0; i < 80 && !blocked; i += 1) {
         const waiting = await pool.query(
-          `SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%SET password_hash%' AND query NOT LIKE '%pg_stat_activity%'`);
+          `SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%FOR NO KEY UPDATE OF u%' AND query NOT LIKE '%pg_stat_activity%'`);
         blocked = waiting.rowCount === 1;
         if (!blocked) await new Promise((done) => setTimeout(done, 100));
       }
