@@ -11,7 +11,7 @@ import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec
 import type { Request, Response } from 'express';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
-import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { policyScopeSetsForUser, rolePolicyForUser } from '../../../permissions/policies/scope';
 import { RateLimitService } from '../../../rate-limit/rate-limit.service';
 import { AuthService } from '../auth.service';
 import type { AuthResponse, LoginCommand } from '../auth.types';
@@ -60,6 +60,7 @@ const authUserSwaggerSchema = {
     permissions: { type: 'array', items: { type: 'string' } },
     permissionsVersion: { type: 'integer', minimum: 0 },
     policyScopes: { type: 'object', additionalProperties: true },
+    policyScopeSets: { type: 'object', additionalProperties: true },
   },
 } as const;
 
@@ -277,6 +278,7 @@ export class AuthController {
         permissions: request.user.permissions,
         permissionsVersion: request.user.permissionsVersion ?? 0,
         policyScopes: rolePolicyForUser(request.user),
+        policyScopeSets: policyScopeSetsForUser(request.user),
       },
     };
   }

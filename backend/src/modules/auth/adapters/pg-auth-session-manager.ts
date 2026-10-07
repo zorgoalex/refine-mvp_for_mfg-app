@@ -4,8 +4,9 @@ import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole, mapRoleIdToRole } from '../../../permissions/permissions';
+import { currentUserFromAuthorization } from '../../../permissions/current-user-from-authorization';
 import type { PermissionsService } from '../../../permissions/permissions.service';
-import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { policyScopeSetsForUser, rolePolicyForUser } from '../../../permissions/policies/scope';
 import { LoginMethodNotAllowedError, UserInactiveError } from '../auth.errors';
 import type {
   AuthResponse,
@@ -88,7 +89,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
     private readonly tokenService: TokenService,
     private readonly accessTokens: JwtAccessTokenIssuer,
     private readonly options: PgAuthSessionManagerOptions,
-    private readonly permissions?: Pick<PermissionsService, 'loadRoleAuthorization'>,
+    private readonly permissions?: Pick<PermissionsService, 'loadUserAuthorization'>,
   ) {}
 
   async createLoginSession(user: AuthUserRecord, context: LoginSessionContext): Promise<AuthSessionRecord> {
@@ -683,18 +684,21 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
       });
     }
 
-    const authorization = this.permissions
-      ? await this.permissions.loadRoleAuthorization(roleId)
-      : { permissions: getPermissionsForRole(role), scopes: undefined, version: 0 };
+    if (this.permissions) {
+      // One-statement snapshot: role, grants, scopes and version together (access groups stage 0A).
+      return currentUserFromAuthorization(
+        await this.permissions.loadUserAuthorization(String(row.user_id)),
+        { sessionId },
+      );
+    }
 
     return {
       id: String(row.user_id),
       username: row.username,
       role,
       roleId,
-      permissions: authorization.permissions,
-      policyScopes: authorization.scopes,
-      permissionsVersion: authorization.version,
+      permissions: getPermissionsForRole(role),
+      permissionsVersion: 0,
       sessionId,
     };
   }
@@ -711,6 +715,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         permissions: user.permissions,
         permissionsVersion: user.permissionsVersion ?? 0,
         policyScopes: rolePolicyForUser(user),
+        policyScopeSets: policyScopeSetsForUser(user),
       },
     };
   }

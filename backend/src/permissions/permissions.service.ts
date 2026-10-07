@@ -17,6 +17,12 @@ import {
   type UserRole,
 } from './permissions';
 import { ROLE_POLICIES, type RolePolicy, type Scope } from './policies/role-policies';
+import { scopeSetsFromPolicy } from './policies/scope-sets';
+import {
+  parseAuthorizationSnapshot,
+  type RawAuthorizationSnapshot,
+  type UserAuthorizationSnapshot,
+} from './user-authorization-snapshot';
 
 export const ROLE_POLICY_SCOPE_KEYS = [
   'orders.view',
@@ -105,6 +111,8 @@ export interface RoleAuthorizationSnapshot {
   scopes: RolePolicy;
   version: number;
 }
+
+export type { UserAuthorizationSnapshot } from './user-authorization-snapshot';
 
 export interface RoleMatrixRoleDto {
   roleId: number;
@@ -236,6 +244,36 @@ export class PermissionsService {
     } catch (error) {
       throw mapPermissionsRuntimeError(error);
     }
+  }
+
+  /**
+   * Effective authorization of a user (base role; access groups when enabled — migration 249). One SQL
+   * statement; takes no locks. Pass the caller's transaction client to read under the caller's locks.
+   * Returns null for an unknown user. Without a database: the static matrix of the given fallback role.
+   */
+  async loadUserAuthorization(
+    userId: string | number,
+    client?: DatabaseClient,
+  ): Promise<UserAuthorizationSnapshot | null> {
+    if (!this.database?.isConfigured) return null;
+    try {
+      if (!client) await this.seedDefaults();
+      const target = client ?? this.database;
+      const result = await target.query<{ snapshot: RawAuthorizationSnapshot | null }>(
+        'SELECT public.user_authorization_snapshot($1::bigint) AS snapshot',
+        [String(userId)],
+      );
+      const raw = result.rows[0]?.snapshot;
+      return raw ? parseAuthorizationSnapshot(raw) : null;
+    } catch (error) {
+      throw mapPermissionsRuntimeError(error);
+    }
+  }
+
+  /** Static fallback snapshot pieces (no database configured), for callers that keep their old path. */
+  staticAuthorizationForRole(role: UserRole): Pick<UserAuthorizationSnapshot, 'permissions' | 'scopes' | 'scopeSets' | 'version'> {
+    const scopes = cloneRolePolicy(ROLE_POLICIES[role]);
+    return { permissions: getPermissionsForRole(role), scopes, scopeSets: scopeSetsFromPolicy(scopes), version: 0 };
   }
 
   async getAuthorizationVersion(client?: DatabaseClient): Promise<number> {

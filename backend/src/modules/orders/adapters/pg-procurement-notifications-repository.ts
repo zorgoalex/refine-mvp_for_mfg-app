@@ -7,7 +7,7 @@ import { mapRoleIdToRole } from '../../../permissions/permissions';
 import { PgNotificationWriteAdapter } from '../../notifications-engine/adapters/pg-notification-write';
 import { balloonFor } from '../../notifications-engine/application/notification-delivery';
 import type { BalloonMode, NotificationChannel } from '../../notifications-engine/domain/notification-rule.types';
-import { loadRoleAuthorizationWith } from '../../notifications-engine/adapters/pg-procurement-recipient-visibility';
+import { loadEvaluationUsersWith } from '../../../permissions/user-authorization-snapshot';
 import { PROCUREMENT_DIGEST_SOURCE } from '../../notifications-engine/domain/notification-event-registry';
 import { PROCUREMENT_WORKLIST_DONE_STATUS_CODES } from '../application/procurement-workspace.types';
 import {
@@ -149,26 +149,21 @@ export class PgProcurementNotificationsRepository {
          JOIN roles r ON r.role_id = u.role_id AND r.is_active = true
         WHERE u.is_active = true AND COALESCE(u.is_service_account, false) = false
           AND CASE WHEN $1::text IS NOT NULL
-                   THEN EXISTS (SELECT 1 FROM role_permissions rp JOIN permissions_catalog pc ON pc.permission_name = rp.permission_name AND pc.is_active = true
-                                 WHERE rp.role_id = u.role_id AND rp.permission_name = $1 AND rp.is_enabled = true)
+                   THEN EXISTS (SELECT 1 FROM user_effective_permissions uep
+                                 WHERE uep.user_id = u.user_id AND uep.permission_name = $1)
                    ELSE (r.role_code = ANY($2::text[]) OR u.user_id = ANY($3::bigint[])) END
           AND NOT EXISTS (
             SELECT 1 FROM unnest($4::text[]) AS need(permission_name)
-             WHERE NOT EXISTS (SELECT 1 FROM role_permissions rp JOIN permissions_catalog pc ON pc.permission_name = rp.permission_name AND pc.is_active = true
-                                WHERE rp.role_id = u.role_id AND rp.permission_name = need.permission_name AND rp.is_enabled = true))
+             WHERE NOT EXISTS (SELECT 1 FROM user_effective_permissions uep
+                                WHERE uep.user_id = u.user_id AND uep.permission_name = need.permission_name))
         ORDER BY u.user_id`,
       [filter.byPermission, filter.roleCodes, filter.userIds, required],
     )).rows;
-    const byRole = new Map<number, Awaited<ReturnType<typeof loadRoleAuthorizationWith>>>();
-    const users: CurrentUser[] = [];
-    for (const row of rows) {
-      const roleId = Number(row.role_id);
-      const role = mapRoleIdToRole(roleId);
-      if (!role) continue;
-      if (!byRole.has(roleId)) byRole.set(roleId, await loadRoleAuthorizationWith(this.database, roleId));
-      const authorization = byRole.get(roleId)!;
-      users.push({ id: row.user_id, username: row.username ?? row.user_id, role, roleId, permissions: authorization.permissions, policyScopes: authorization.scopes });
-    }
+    // Effective authorization of each user (same snapshot as the token), in the order of the query.
+    const effective = await loadEvaluationUsersWith(this.database, rows.map((row) => row.user_id), { requireActiveRole: true });
+    const users: CurrentUser[] = rows
+      .map((row) => effective.get(String(row.user_id)))
+      .filter((user): user is CurrentUser => Boolean(user));
     return users;
   }
 

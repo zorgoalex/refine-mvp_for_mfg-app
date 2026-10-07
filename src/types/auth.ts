@@ -20,6 +20,16 @@ export interface AuthTokens {
 
 export type AuthorizationScope = 'all' | 'own' | 'assigned' | 'none';
 
+/** A granted scope value; an empty set means none. */
+export type AuthorizationScopeGrant = 'all' | 'own' | 'assigned';
+
+/** Scopes as sets (access groups): `own` from one group and `assigned` from another; `all` absorbs the rest. */
+export interface AuthorizationPolicyScopeSets {
+  orders: { view: AuthorizationScopeGrant[]; update: AuthorizationScopeGrant[]; export: AuthorizationScopeGrant[]; delete: AuthorizationScopeGrant[] };
+  payments: { view: AuthorizationScopeGrant[]; create: AuthorizationScopeGrant[]; update: AuthorizationScopeGrant[]; delete: AuthorizationScopeGrant[] };
+  productionTasks: { view: AuthorizationScopeGrant[]; update: AuthorizationScopeGrant[] };
+}
+
 export interface AuthorizationPolicyScopes {
   orders: Record<'view' | 'update' | 'export' | 'delete', AuthorizationScope>;
   payments: Record<'view' | 'create' | 'update' | 'delete', AuthorizationScope>;
@@ -38,6 +48,8 @@ export interface UserIdentity {
   permissions?: string[];
   permissionsVersion?: number;
   policyScopes?: AuthorizationPolicyScopes;
+  /** Absent from older backends: readers fall back to `policyScopes`. */
+  policyScopeSets?: AuthorizationPolicyScopeSets;
 }
 
 /**

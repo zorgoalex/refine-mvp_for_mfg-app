@@ -5,6 +5,7 @@ import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import { PgUserRepository } from './pg-user-repository';
+import { staticRawAuthorizationSnapshot } from '../../../permissions/testing/static-authorization-snapshot';
 
 describe('PgUserRepository', () => {
   it('lists users with search, role, active filters and maps canonical permissions', async () => {
@@ -437,6 +438,22 @@ describe('PgUserRepository', () => {
     expect(reactivationDatabase.queries[0].text).toContain('u.is_service_account = false');
     expect(reactivationDatabase.queries[1].text).toContain('u.is_service_account = false');
   });
+
+  it('rolls a user command back when the account would exceed the administrator (access groups 0A.4)', async () => {
+    const database = new FakeUserDatabase([], [{ match: 'UPDATE users', rows: [{ user_id: '42' }] }]);
+    // The target is an admin; the acting top manager lacks admin permissions.
+    database.targetRoleId = 1;
+    await expect(new PgUserRepository(database as never).changePassword({
+      currentUser: currentUser('top_manager'),
+      userId: 42,
+      expectedTargetRole: 'admin',
+      dto: { newPassword: 'new-secure-password', revokeExistingSessions: true },
+    } as never)).rejects.toMatchObject({ statusCode: 403, code: 'USER_ESCALATION_DENIED' });
+    expect(database.authQueries.some((query) => query.text.includes('user_authorization_snapshot'))).toBe(true);
+    // Nothing after the denial: no session revoke, no audit (the transaction rolls back).
+    expect(database.queries.some((query) => query.text.includes('auth_sessions') || query.text.includes('audit_log'))).toBe(false);
+  });
+
 });
 
 interface ExpectedQuery {
@@ -447,6 +464,9 @@ interface ExpectedQuery {
 
 class FakeUserDatabase {
   readonly queries: Array<{ text: string; params: readonly unknown[] }>;
+  readonly authQueries: Array<{ text: string; params: readonly unknown[] }> = [];
+  /** Base role of the target account as the escalation snapshot sees it (default viewer). */
+  targetRoleId = 100;
   transactionCount = 0;
   private queryQueue: Array<QueryResult<QueryResultRow>>;
   private readonly transactionQueue: ExpectedQuery[];
@@ -477,6 +497,13 @@ class FakeUserDatabase {
         text: string,
         params: readonly unknown[] = [],
       ): Promise<QueryResult<T>> => {
+        // Authorization bookkeeping of access groups 0A (lock order, escalation snapshots, version bumps) is
+        // recorded separately so the assertions on the user statements keep their positions.
+        const auxiliary = authorizationAuxiliary(text, params, this.targetRoleId);
+        if (auxiliary) {
+          this.authQueries.push({ text, params });
+          return auxiliary as QueryResult<T>;
+        }
         this.queries.push({ text, params });
         const expected = this.transactionQueue.shift();
         if (!expected) {
@@ -493,6 +520,19 @@ class FakeUserDatabase {
 
     return handler(tx);
   }
+}
+
+/** Test actors are `<role>-id`; targets (numeric ids) are viewers — inside every administrator's authority. */
+function authorizationAuxiliary(text: string, params: readonly unknown[], targetRoleId = 100): QueryResult<QueryResultRow> | null {
+  if (text.includes('FROM permissions_state WHERE id = true FOR UPDATE')) return toQueryResult([{ version: 1 }]);
+  if (text.includes('UPDATE users SET row_version') || text.includes('UPDATE permissions_state SET version')) return toQueryResult([]);
+  if (text.includes('user_authorization_snapshot')) {
+    const id = String(params[0]);
+    const role = /^(\w+)-id$/.exec(id)?.[1];
+    const roleId = role ? ({ superadmin: 2, admin: 1, top_manager: 15, manager: 10, operator: 11, worker: 20, packer: 30, viewer: 100 } as Record<string, number>)[role] ?? 100 : targetRoleId;
+    return toQueryResult([{ snapshot: staticRawAuthorizationSnapshot({ userId: id, roleId }) }]);
+  }
+  return null;
 }
 
 function toQueryResult(rows: QueryResultRow[]): QueryResult<QueryResultRow> {

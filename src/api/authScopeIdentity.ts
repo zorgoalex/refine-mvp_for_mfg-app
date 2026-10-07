@@ -7,6 +7,7 @@ export function getUserAuthorizationScopeKey(user: UserIdentity): string {
     [...(user.permissions ?? [])].sort().join(','),
     user.permissionsVersion ?? '',
     stableSerialize(user.policyScopes ?? null),
+    stableSerialize(user.policyScopeSets ?? null),
   ].join('|');
 }
 

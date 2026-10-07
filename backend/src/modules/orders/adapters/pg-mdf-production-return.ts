@@ -8,6 +8,7 @@ import type { CurrentUser } from "../../../permissions/current-user";
 import { OrderAccessPolicy } from "../../../permissions/policies/order-access.policy";
 import {
   allowsScope,
+  policyScopeSetsForUser,
   rolePolicyForUser,
 } from "../../../permissions/policies/scope";
 import {
@@ -481,7 +482,7 @@ export class PgMdfProductionReturn {
       actor: {
         id: user.id,
         permissions: user.permissions,
-        scopes: rolePolicyForUser(user),
+        scopes: policyScopeSetsForUser(user),
       },
       source,
       target: target.id,
