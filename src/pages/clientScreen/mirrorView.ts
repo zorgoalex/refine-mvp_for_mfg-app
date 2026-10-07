@@ -84,7 +84,10 @@ export function buildMirrorView(snapshot: ClientScreenSnapshot, ui: ClientScreen
   let tableTitle: string | null = null;
   if (activeTab === 'basic') fields = withFocus(snapshot.basic);
   else if (activeTab === 'dates') fields = withFocus(snapshot.dates);
-  else if (activeTab === 'finance') {
+  else if (activeTab === 'hdf') {
+    fields = withFocus(snapshot.hdf?.fields);
+    if (snapshot.hdf?.table) table = mirrorTable(snapshot.hdf.table, ui, { editable: false, paged: false });
+  } else if (activeTab === 'finance') {
     fields = withFocus(snapshot.finance?.fields);
     if (snapshot.finance?.payments) {
       table = mirrorTable(snapshot.finance.payments, ui, { editable: false, paged: false });

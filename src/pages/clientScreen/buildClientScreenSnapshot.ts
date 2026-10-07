@@ -26,6 +26,8 @@ export interface ClientScreenOrderSource {
     | 'designer' | 'basis_project' | 'project' | 'order_status' | 'payment_status' | 'production_status' | 'priority' | 'created_by'>;
   basic: FieldsOf<'client' | 'order_name' | 'order_date' | 'order_status' | 'payment_status' | 'production_status' | 'manager' | 'priority' | 'doweling' | 'notes'>;
   dates: FieldsOf<'planned' | 'completion' | 'issue'>;
+  /** The HDF tab of the edit form; a screen without such a tab leaves it out. */
+  hdf?: { fields: FieldsOf<'min_threshold' | 'total'>; rows: ReadonlyArray<ClientScreenRowSource<HdfField>> };
   finance: FieldsOf<'total' | 'discount' | 'surcharge' | 'final' | 'paid' | 'debt'>;
   payments: ReadonlyArray<ClientScreenRowSource<'date' | 'type' | 'amount' | 'note'>>;
   details: {
@@ -38,16 +40,22 @@ export interface ClientScreenOrderSource {
   services: ReadonlyArray<ClientScreenRowSource<'name' | 'quantity' | 'price' | 'sum'>>;
 }
 
+/** Columns of the HDF table, in the order of the manager's tab. */
+export const HDF_FIELDS = ['position', 'milling_type', 'source_height', 'source_width', 'source_quantity', 'parameter', 'height', 'width', 'quantity', 'area',
+  'status', 'production_status', 'cut_job', 'bazis_cut_sets'] as const;
+export type HdfField = typeof HDF_FIELDS[number];
+
 export type DetailField = 'n' | 'name' | 'height' | 'width' | 'quantity' | 'area' | 'material' | 'milling_type' | 'edge_type' | 'film'
   | 'price_per_sqm' | 'cost' | 'note' | 'production_status'
   | 'hdf_parameter' | 'doweling' | 'cut_job' | 'bath_cut_job' | 'bazis_cut_sets' | 'priority' | 'basis_project' | 'basis_product' | 'basis_data'
   | 'basis_designation';
 
 /** Issues opaque ids for rows and groups; the manager window keeps one per presentation. */
-export type ClientScreenIdFor = (scope: 'detail' | 'detail-group' | 'payment' | 'service', key: string) => string;
+export type ClientScreenIdFor = (scope: 'detail' | 'detail-group' | 'payment' | 'service' | 'hdf', key: string) => string;
 
 const EMPTY = '—';
-const RIGHT_ALIGNED = new Set(['height', 'width', 'quantity', 'area', 'price_per_sqm', 'cost', 'amount', 'price', 'sum', 'hdf_parameter', 'priority']);
+const RIGHT_ALIGNED = new Set(['height', 'width', 'quantity', 'area', 'price_per_sqm', 'cost', 'amount', 'price', 'sum', 'hdf_parameter', 'priority',
+  'source_height', 'source_width', 'source_quantity', 'parameter']);
 const LABELS = new Map<string, string>(CLIENT_SCREEN_GROUPS.flatMap((group) => group.fields.map((field) => [field.code, field.label] as const)));
 /** The longest text the wire takes for one value; longer text is cut, visibly, instead of failing the whole snapshot. */
 export const CLIENT_SCREEN_TEXT_LIMIT = 2000;
@@ -83,12 +91,26 @@ export function buildClientScreenSnapshot(source: ClientScreenOrderSource, visib
     // The name is a header line of its own only when the title is made of the number.
     summary: fields('summary', SUMMARY_ORDER.filter((key) => key !== 'order_name' || clientScreenTitle(source, visible).by === 'number'), source.summary, visible),
     tabs: source.tabs
-      .filter((tab) => (CLIENT_SCREEN_TAB_KEYS as readonly string[]).includes(tab.key) && tabOn(tab.key))
+      .filter((tab) => (CLIENT_SCREEN_TAB_KEYS as readonly string[]).includes(tab.key) && tabOn(tab.key) && (tab.key !== 'hdf' || Boolean(source.hdf)))
       .map((tab) => (tab.key === 'details' ? { key: tab.key, label: tab.label.slice(0, 200), counter: String(source.details.rows.length) } : { key: tab.key, label: tab.label.slice(0, 200) })),
   };
 
   if (tabOn('basic')) snapshot.basic = fields('basic', fieldKeys('basic') as Array<keyof ClientScreenOrderSource['basic']>, source.basic, visible);
   if (tabOn('dates')) snapshot.dates = fields('dates', fieldKeys('dates') as Array<keyof ClientScreenOrderSource['dates']>, source.dates, visible);
+
+  if (tabOn('hdf') && source.hdf) {
+    const hdf = source.hdf;
+    snapshot.hdf = { fields: fields('hdf', ['min_threshold', 'total'], hdf.fields, visible) };
+    const order = HDF_FIELDS.filter((field) => isClientScreenCodeVisible(`hdf.${field}`, visible) && available(hdf.rows, field));
+    if (order.length > 0) {
+      snapshot.hdf.table = {
+        columns: order.map((field) => ({
+          code: `hdf.${field}` as ClientScreenCode, label: LABELS.get(`hdf.${field}`) ?? field, align: RIGHT_ALIGNED.has(field) ? 'right' : 'left',
+        })),
+        rows: hdf.rows.map((row) => ({ id: idFor('hdf', row.key), cells: order.map((field) => text(row.values[field])) })),
+      };
+    }
+  }
 
   if (tabOn('finance')) {
     const financeKeys = (fieldKeys('finance') as string[]).filter((key) => key !== 'payments' && key !== 'payments_note');
@@ -188,7 +210,7 @@ export function filterClientScreenUi(ui: ClientScreenUi, snapshot: ClientScreenS
   const visible = new Set(visibleCodes);
   const tabs = new Set<string>(snapshot.tabs.map((tab) => tab.key));
   const rowIds = new Set<string>([
-    ...(snapshot.details?.rows ?? []), ...(snapshot.services?.rows ?? []), ...(snapshot.finance?.payments?.rows ?? []),
+    ...(snapshot.details?.rows ?? []), ...(snapshot.services?.rows ?? []), ...(snapshot.finance?.payments?.rows ?? []), ...(snapshot.hdf?.table?.rows ?? []),
   ].map((row) => row.id));
   const detailRowIds = new Set<string>((snapshot.details?.rows ?? []).map((row) => row.id));
   const detailCodes = new Set<string>((snapshot.details?.columns ?? []).map((column) => column.code));

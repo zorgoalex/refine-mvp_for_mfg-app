@@ -21,6 +21,7 @@ import {
   collectHdfConfigErrorDescriptions,
   describeHdfConfigErrors,
   HDF_CONFIG_SETTINGS_LOCATION,
+  HDF_STATUS_LABELS,
 } from './orderHdfStatusView';
 import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
 import {
@@ -37,12 +38,7 @@ interface OrderHdfTabProps {
   onSave: () => Promise<boolean>;
 }
 
-const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  ok: { label: 'Рассчитано', color: 'green' },
-  too_narrow: { label: 'ХДФ слишком узкий', color: 'red' },
-  config_missing: { label: 'Нет настройки', color: 'orange' },
-  source_changed: { label: 'Исходная деталь изменилась', color: 'volcano' },
-};
+const STATUS_LABELS = HDF_STATUS_LABELS;
 
 function hdfHeader(primary: string, secondary?: string) {
   return (

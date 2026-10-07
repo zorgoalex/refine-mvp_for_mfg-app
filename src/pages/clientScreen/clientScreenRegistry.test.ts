@@ -21,7 +21,7 @@ describe('client screen registry', () => {
   });
 
   it('has the summary group first without a tab code, then one group per tab', () => {
-    expect(CLIENT_SCREEN_GROUPS.map((g) => g.key)).toEqual(['summary', 'basic', 'details', 'dates', 'finance', 'services']);
+    expect(CLIENT_SCREEN_GROUPS.map((g) => g.key)).toEqual(['summary', 'basic', 'details', 'hdf', 'dates', 'finance', 'services']);
     expect(CLIENT_SCREEN_GROUPS[0].tabCode).toBeNull();
     for (const group of CLIENT_SCREEN_GROUPS.slice(1)) {
       expect(group.tabCode).toBe(`tab.${group.key}`);

@@ -43,13 +43,14 @@ export interface ClientScreenOrderBridgeInput {
 const TAB_LABELS: Record<ClientScreenTabKey, [string, string]> = {
   basic: ['Основная информация', 'Обзор'],
   details: ['Детали заказа', 'Состав'],
+  hdf: ['ХДФ', 'ХДФ'],
   dates: ['Даты', 'Логистика'],
   finance: ['Финансы', 'Финансы'],
   services: ['Услуги/товары', 'Услуги/товары'],
 };
 const TAB_ORDER: Record<'default' | 'operational', ClientScreenTabKey[]> = {
-  default: ['basic', 'details', 'dates', 'finance', 'services'],
-  operational: ['basic', 'details', 'finance', 'dates', 'services'],
+  default: ['basic', 'details', 'hdf', 'dates', 'finance', 'services'],
+  operational: ['basic', 'details', 'hdf', 'finance', 'dates', 'services'],
 };
 
 /** Tabs of the form the customer screen can mirror, with the labels and order the manager sees. */

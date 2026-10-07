@@ -87,4 +87,20 @@ describe('clientScreenSwitchedOn', () => {
     expect(clientScreenSwitchedOn(undefined, true)).toBe(false);
     expect(clientScreenSwitchedOn({}, 'true')).toBe(false);
   });
+
+  it('the HDF tab shows its fields and its table', () => {
+    const withHdf = {
+      ...snapshot,
+      tabs: [...snapshot.tabs, { key: 'hdf' as const, label: 'ХДФ' }],
+      hdf: {
+        fields: [{ code: 'hdf.total' as const, label: 'Итого ХДФ', value: '1,10 м², деталей: 4' }],
+        table: { columns: [{ code: 'hdf.position' as const, label: 'Позиция', align: 'left' as const }], rows: [{ id: 'hdfrow0001', cells: ['1 · Фасад'] }] },
+      },
+    };
+    const view = buildMirrorView(withHdf, ui({ tab: 'hdf' }));
+    expect(view.activeTab).toBe('hdf');
+    expect(view.fields.map((field) => field.value)).toEqual(['1,10 м², деталей: 4']);
+    expect(view.table!.rows.map((row) => row.cells.map((cell) => cell.text))).toEqual([['1 · Фасад']]);
+  });
 });
+

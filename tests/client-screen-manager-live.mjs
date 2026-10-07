@@ -187,6 +187,12 @@ try {
   const headerCodes = ['summary.order_name', 'summary.deadline', 'summary.positions', 'summary.material', 'summary.milling_type', 'summary.edge_type',
     'summary.film', 'summary.paid', 'summary.discount', 'summary.surcharge'];
   if (process.env.HEADER === '1') for (const code of headerCodes) if (!codes.includes(code)) codes.push(code);
+  // HDF=1: the HDF tab with all its fields and columns is ticked for the run (needs a backend that knows the codes).
+  if (process.env.HDF === '1') {
+    for (const code of ['tab.hdf', 'hdf.min_threshold', 'hdf.total', 'hdf.position', 'hdf.milling_type', 'hdf.height', 'hdf.width', 'hdf.quantity', 'hdf.area', 'hdf.status']) {
+      if (!codes.includes(code)) codes.push(code);
+    }
+  }
   const switching = change.run(async () => {
     const response = await settingsRequest('PUT', { enabled: true, visibleCodes: codes, expectedVersion: original.version });
     return { ok: response.ok, status: response.status, body: response.ok ? await response.json() : null };
@@ -342,7 +348,16 @@ try {
     await expect(popup.locator('.client-screen__field').first()).toBeVisible();
     results.push('tab switches mirrored');
 
-    const unmirrored = managerTab(/ХДФ|Материалы|Дополнительно|Бирки/);
+    // The HDF tab is mirrored only when the organisation ticked it; otherwise the customer keeps the last tab.
+    const hdfTab = managerTab(/^ХДФ$/);
+    if (codes.includes('tab.hdf') && await hdfTab.count()) {
+      await hdfTab.click();
+      await expect(selectedTab()).toHaveText(/ХДФ/, { timeout: 20000 });
+      results.push('HDF tab mirrored');
+      await managerTab(/Основная информация|Обзор/).click();
+      await expect(selectedTab()).toHaveText(/Основная информация|Обзор/, { timeout: 20000 });
+    }
+    const unmirrored = managerTab(codes.includes('tab.hdf') ? /Материалы|Дополнительно|Бирки|Цеха/ : /ХДФ|Материалы|Дополнительно|Бирки/);
     if (await unmirrored.count() && await unmirrored.isEnabled()) {
       await unmirrored.click();
       await page.waitForTimeout(1500);

@@ -8,10 +8,12 @@ import { resolveHeaderMaterialName } from '../../utils/materialDisplayName';
 import { resolveOrderBasisProject } from '../../utils/orderBasisProject';
 import { isOrderDetailPlaceholder } from '../../utils/orderDetailRows';
 import { collectOrderBasisProjects } from '../orders/components/sections/orderBasisProjects';
+import { resolveHdfParameterDisplay } from '../orders/components/tabs/orderHdfBulkParameter';
+import { describeHdfConfigErrors, HDF_STATUS_LABELS } from '../orders/components/tabs/orderHdfStatusView';
 import { formatBazisCutSetsGroupLabel, formatCutJobGroupLabel } from '../orders/detailGrouping';
 import { buildOrderHeaderMaterialSummaryItems } from '../orders/orderMaterialsSummary';
 import type { OrderDetailTableCells } from './orderDetailTableMirror';
-import type { ClientScreenOrderSource, ClientScreenValue, DetailField } from './buildClientScreenSnapshot';
+import type { ClientScreenOrderSource, ClientScreenValue, DetailField, HdfField } from './buildClientScreenSnapshot';
 import { CLIENT_SCREEN_TAB_KEYS, type ClientScreenTabKey } from './clientScreenSnapshotSchema';
 
 /**
@@ -235,6 +237,63 @@ export function clientScreenHeaderFromDetails(
   };
 }
 
+/**
+ * The HDF tab of the edit form as display text: the order's minimal side, the total of calculated
+ * HDF details, and one row per HDF detail with the cells of the manager's table (the parameter as the
+ * tab resolves it, the state of the calculation with its note, names instead of ids).
+ */
+export function clientScreenHdfTab(input: {
+  hdfDetails: readonly OrderHdfDetail[];
+  details: readonly OrderDetail[];
+  minThresholdMm: number | null | undefined;
+  productionStatus: NameOf;
+}): NonNullable<ClientScreenOrderSource['hdf']> {
+  const number = (value: unknown, digits: number): ClientScreenValue =>
+    (value === null || value === undefined || value === '' ? null : formatNumber(Number.isFinite(Number(value)) ? Number(value) : 0, digits));
+  const sourceDetailById = new Map<number, OrderDetail>(
+    input.details.filter((detail) => Number.isSafeInteger(Number(detail.detail_id)) && Number(detail.detail_id) > 0).map((detail) => [Number(detail.detail_id), detail]),
+  );
+  let area = 0;
+  let quantity = 0;
+  const rows = input.hdfDetails.map((row) => {
+    if (row.status === 'ok' && row.is_stale !== true) {
+      area += Number.isFinite(Number(row.area_m2)) ? Number(row.area_m2) : 0;
+      quantity += Math.max(0, Math.trunc(Number.isFinite(Number(row.quantity)) ? Number(row.quantity) : 0));
+    }
+    const parameter = resolveHdfParameterDisplay(row, sourceDetailById);
+    const status = [
+      HDF_STATUS_LABELS[row.status]?.label ?? row.status,
+      row.is_stale ? 'устарело' : null,
+      row.status === 'config_missing' ? describeHdfConfigErrors(row.config_errors).join(', ') || null : null,
+    ].filter(Boolean).join(' · ');
+    const position = [row.source_detail_number ?? null, plain(row.source_detail_name)].filter((item) => item !== null && item !== undefined).join(' · ');
+    const values: Record<HdfField, ClientScreenValue> = {
+      position: position || null,
+      milling_type: plain(row.milling_type_name),
+      source_height: number(row.source_height_mm, 1),
+      source_width: number(row.source_width_mm, 1),
+      source_quantity: number(row.source_quantity, 0),
+      parameter: parameter.value === null ? null : `${formatNumber(parameter.value, 2)}${parameter.pending ? ' (изменено)' : ''}`,
+      height: number(row.hdf_height_mm, 1),
+      width: number(row.hdf_width_mm, 1),
+      quantity: number(row.quantity, 0),
+      area: formatNumber(Number.isFinite(Number(row.area_m2)) ? Number(row.area_m2) : 0, 2),
+      status: status || null,
+      production_status: plain(row.production_status_name) ?? named(row.production_status_id, input.productionStatus),
+      cut_job: row.cut_job ? plain(row.cut_job.cutNumber) ?? `#${row.cut_job.cutJobId}` : null,
+      bazis_cut_sets: (row.bazis_cut_sets ?? []).length ? (row.bazis_cut_sets ?? []).map((set) => `БР-${set.bazisCutSetId}`).join(', ') : null,
+    };
+    return { key: String(row.order_hdf_detail_id), values };
+  });
+  return {
+    fields: {
+      min_threshold: input.minThresholdMm === null || input.minThresholdMm === undefined ? null : formatNumber(Number(input.minThresholdMm), 1),
+      total: `${formatNumber(area, 2)} м², деталей: ${formatNumber(quantity, 0)}`,
+    },
+    rows,
+  };
+}
+
 /** A discount or surcharge is a header line only when there is one, as in the manager's header. */
 export const clientScreenExtraMoney = (value: unknown, allowed: boolean): ClientScreenValue =>
   (allowed && Number(value) > 0 ? clientScreenMoney(Number(value)) : undefined);
@@ -314,6 +373,9 @@ export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenO
       doweling: doweling.length ? doweling.join(', ') : null,
       notes: header.notes ?? null,
     },
+    hdf: clientScreenHdfTab({
+      hdfDetails: input.hdfDetails ?? [], details: input.details, minThresholdMm: header.hdf_min_threshold_mm, productionStatus: names.productionStatus,
+    }),
     dates: {
       planned: clientScreenDate(header.planned_completion_date),
       completion: clientScreenDate(header.completion_date),

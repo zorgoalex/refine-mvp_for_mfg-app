@@ -21362,6 +21362,23 @@ components:
         - details.basis_product
         - details.basis_data
         - details.basis_designation
+        - tab.hdf
+        - hdf.min_threshold
+        - hdf.total
+        - hdf.position
+        - hdf.milling_type
+        - hdf.source_height
+        - hdf.source_width
+        - hdf.source_quantity
+        - hdf.parameter
+        - hdf.height
+        - hdf.width
+        - hdf.quantity
+        - hdf.area
+        - hdf.status
+        - hdf.production_status
+        - hdf.cut_job
+        - hdf.bazis_cut_sets
         - tab.dates
         - dates.planned
         - dates.completion

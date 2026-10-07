@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { HDF_FIELDS } from './buildClientScreenSnapshot';
 import {
   buildClientScreenSnapshot, createClientScreenIdMap, filterClientScreenUi, resolveClientScreenTab, type ClientScreenOrderSource, type DetailField,
 } from './buildClientScreenSnapshot';
@@ -14,7 +15,7 @@ const group = <F extends string>(prefix: string, keys: readonly F[], row = '') =
 function source(over: Partial<ClientScreenOrderSource> = {}): ClientScreenOrderSource {
   return {
     tabs: [
-      { key: 'basic', label: 'Обзор' }, { key: 'details', label: 'Состав' }, { key: 'dates', label: 'Логистика' },
+      { key: 'basic', label: 'Обзор' }, { key: 'details', label: 'Состав' }, { key: 'hdf', label: 'ХДФ' }, { key: 'dates', label: 'Логистика' },
       { key: 'finance', label: 'Финансы' }, { key: 'services', label: 'Услуги/товары' },
     ],
     summary: group('summary', ['number', 'order_name', 'client', 'client_phone', 'client_phones', 'deadline', 'positions', 'parts', 'area', 'material', 'milling_type',
@@ -22,6 +23,10 @@ function source(over: Partial<ClientScreenOrderSource> = {}): ClientScreenOrderS
       'production_status', 'priority', 'created_by']),
     basic: group('basic', ['client', 'order_name', 'order_date', 'order_status', 'payment_status', 'production_status', 'manager', 'priority', 'doweling', 'notes']),
     dates: group('dates', ['planned', 'completion', 'issue']),
+    hdf: {
+      fields: group('hdf', ['min_threshold', 'total']),
+      rows: [1, 2].map((n) => ({ key: `HDFKEY-${n}`, values: group('hdf', HDF_FIELDS, `#${n}`) })),
+    },
     finance: group('finance', ['total', 'discount', 'surcharge', 'final', 'paid', 'debt']),
     payments: [1, 2].map((n) => ({
       key: `PAYKEY-${n}`,
@@ -78,7 +83,7 @@ describe('buildClientScreenSnapshot', () => {
       });
       const snapshot = buildClientScreenSnapshot(grouped, codes, ids());
       const json = JSON.stringify(snapshot);
-      expect(json).not.toMatch(/DETAILKEY|PAYKEY|SERVICEKEY|GROUPKEY/);
+      expect(json).not.toMatch(/DETAILKEY|PAYKEY|SERVICEKEY|GROUPKEY|HDFKEY/);
       for (const code of sentinelCodes(json)) {
         expect(isClientScreenCodeVisible(code, visible), `${code} leaked with [${codes.join(',')}]`).toBe(true);
       }
@@ -193,4 +198,26 @@ describe('buildClientScreenSnapshot', () => {
     expect(resolveClientScreenTab('cut', 'finance', tabs)).toBe('basic');
     expect(resolveClientScreenTab(null, null, { tabs: [] })).toBeNull();
   });
+
+  it('the HDF tab: its fields and only the ticked columns, in the order of the manager table; without the tab nothing of it', () => {
+    const codes = ['tab.hdf', 'hdf.total', 'hdf.area', 'hdf.position', 'hdf.status'];
+    const snapshot = buildClientScreenSnapshot(source(), codes, ids());
+    expect(snapshot.tabs).toEqual([{ key: 'hdf', label: 'ХДФ' }]);
+    expect(snapshot.hdf!.fields).toEqual([{ code: 'hdf.total', label: 'Итого ХДФ', value: S('hdf.total') }]);
+    expect(snapshot.hdf!.table!.columns.map((column) => column.code)).toEqual(['hdf.position', 'hdf.area', 'hdf.status']);
+    expect(snapshot.hdf!.table!.rows).toHaveLength(2);
+    expect(snapshot.hdf!.table!.rows[0].cells).toEqual([S('hdf.position', '#1'), S('hdf.area', '#1'), S('hdf.status', '#1')]);
+    expect(clientScreenSnapshotSchema.safeParse(snapshot).success).toBe(true);
+    // The tab not ticked: its fields and columns stay home even when they are ticked themselves.
+    const noTab = buildClientScreenSnapshot(source(), ['hdf.total', 'hdf.area', 'tab.details'], ids());
+    expect(noTab.hdf).toBeUndefined();
+    expect(JSON.stringify(noTab)).not.toContain('<<hdf.');
+    // Only fields ticked: no table at all. A screen without an HDF tab (the view page): no tab.
+    expect(buildClientScreenSnapshot(source(), ['tab.hdf', 'hdf.min_threshold'], ids()).hdf!.table).toBeUndefined();
+    const { hdf: _omitted, ...withoutHdf } = source();
+    const viewLike = buildClientScreenSnapshot(withoutHdf, CLIENT_SCREEN_CODES, ids());
+    expect(viewLike.hdf).toBeUndefined();
+    expect(viewLike.tabs.map((tab) => tab.key)).not.toContain('hdf');
+  });
 });
+

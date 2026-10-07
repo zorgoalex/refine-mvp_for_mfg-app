@@ -25,12 +25,12 @@ describe('opening the customer window', () => {
 });
 
 describe('order form bridge helpers', () => {
-  it('mirrors the five tabs with the labels and order of the layout the manager uses', () => {
+  it('mirrors the tabs with the labels and order of the layout the manager uses', () => {
     expect(orderFormMirrorTabs(false)).toEqual([
-      { key: 'basic', label: 'Основная информация' }, { key: 'details', label: 'Детали заказа' }, { key: 'dates', label: 'Даты' },
+      { key: 'basic', label: 'Основная информация' }, { key: 'details', label: 'Детали заказа' }, { key: 'hdf', label: 'ХДФ' }, { key: 'dates', label: 'Даты' },
       { key: 'finance', label: 'Финансы' }, { key: 'services', label: 'Услуги/товары' },
     ]);
-    expect(orderFormMirrorTabs(true).map((tab) => `${tab.key}:${tab.label}`)).toEqual(['basic:Обзор', 'details:Состав', 'finance:Финансы', 'dates:Логистика', 'services:Услуги/товары']);
+    expect(orderFormMirrorTabs(true).map((tab) => `${tab.key}:${tab.label}`)).toEqual(['basic:Обзор', 'details:Состав', 'hdf:ХДФ', 'finance:Финансы', 'dates:Логистика', 'services:Услуги/товары']);
   });
 
   it('resolves names from the references the form has loaded; unknown ids and missing references give no name', () => {
@@ -69,8 +69,8 @@ describe('customer screen control in the order header', () => {
   });
 
   it('maps the manager tab to a mirrored tab or to nothing', () => {
-    expect(['basic', 'details', 'dates', 'finance', 'services'].map(mirroredTab)).toEqual(['basic', 'details', 'dates', 'finance', 'services']);
-    expect(['hdf', 'cut', 'workshops', 'requirements', 'additional', ''].map(mirroredTab)).toEqual([null, null, null, null, null, null]);
+    expect(['basic', 'details', 'hdf', 'dates', 'finance', 'services'].map(mirroredTab)).toEqual(['basic', 'details', 'hdf', 'dates', 'finance', 'services']);
+    expect(['cut', 'workshops', 'requirements', 'additional', ''].map(mirroredTab)).toEqual([null, null, null, null, null]);
   });
 });
 

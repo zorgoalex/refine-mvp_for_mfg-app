@@ -50,7 +50,7 @@ describe('client screen protocol', () => {
   it('drops anything with an unknown key, a wrong version, a wrong type or a foreign shape', () => {
     const state = all[5];
     for (const bad of [
-      null, 'state', 42, {}, { ...state, v: 1 }, { ...state, v: 3 }, { ...state, v: 5 }, { ...state, t: 'takeover' }, { ...state, extra: 1 },
+      null, 'state', 42, {}, { ...state, v: 1 }, { ...state, v: 4 }, { ...state, v: 6 }, { ...state, t: 'takeover' }, { ...state, extra: 1 },
       { ...state, snapshot: { ...snapshot, header: { order_id: 7 } } },
       { ...state, snapshot: { ...snapshot, summary: [{ code: 'orders.secret', label: 'x', value: 'y' }] } },
       { ...state, snapshot: { ...snapshot, details: { ...snapshot.details!, rows: [{ id: 'rowaaaaaa', cells: ['only one'] }] } } },
@@ -101,10 +101,11 @@ describe('workstation record', () => {
 
 describe('wire version', () => {
   it('names of the channel and of the locks carry the version, so windows of different builds never meet', () => {
-    expect(CLIENT_SCREEN_PROTOCOL_VERSION).toBe(4);
-    expect(CLIENT_SCREEN_CHANNEL).toBe('erp-client-screen-v4');
-    expect(CLIENT_SCREEN_VIEWER_LOCK).toBe('erp-client-screen-viewer-v4');
-    expect(clientScreenOwnerLock(7)).toBe('erp-client-screen-owner-v4-7');
+    expect(CLIENT_SCREEN_PROTOCOL_VERSION).toBe(5);
+    expect(CLIENT_SCREEN_CHANNEL).toBe('erp-client-screen-v5');
+    expect(CLIENT_SCREEN_VIEWER_LOCK).toBe('erp-client-screen-viewer-v5');
+    expect(clientScreenOwnerLock(7)).toBe('erp-client-screen-owner-v5-7');
+    expect('erp-client-screen-owner-v4-7'.startsWith(CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX)).toBe(true);
     expect('erp-client-screen-owner-v3-7'.startsWith(CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX)).toBe(true);
     expect('erp-client-screen-owner-v2-7'.startsWith(CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX)).toBe(true);
     expect(clientScreenOwnerLock(7).startsWith(CLIENT_SCREEN_OWNER_LOCK_PREFIX)).toBe(true);
@@ -113,7 +114,7 @@ describe('wire version', () => {
     expect('erp-client-screen-owner-7'.startsWith(CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX)).toBe(true);
     expect(CLIENT_SCREEN_VIEWER_LOCK.startsWith(CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX)).toBe(false);
     const retired = CLIENT_SCREEN_RETIRED_VIEWERS.map((item) => item.channel);
-    expect(retired).toEqual(['erp-client-screen', 'erp-client-screen-v2', 'erp-client-screen-v3']);
+    expect(retired).toEqual(['erp-client-screen', 'erp-client-screen-v2', 'erp-client-screen-v3', 'erp-client-screen-v4']);
     expect(retired).not.toContain(CLIENT_SCREEN_CHANNEL);
   });
 
@@ -121,7 +122,8 @@ describe('wire version', () => {
     expect(parseClientScreenMessage({ v: 1, t: 'shutdown' })).toBeNull();
     expect(parseClientScreenMessage({ v: 1, t: 'hello', viewerId: 'aaaaaaaaaaaaaaaa' })).toBeNull();
     expect(parseClientScreenMessage({ v: 2, t: 'shutdown' })).toBeNull();
-    expect(CLIENT_SCREEN_RETIRED_VIEWERS.map((item) => item.shutdown)).toEqual([{ v: 1, t: 'shutdown' }, { v: 2, t: 'shutdown' }, { v: 3, t: 'shutdown' }]);
+    expect(CLIENT_SCREEN_RETIRED_VIEWERS.map((item) => item.shutdown)).toEqual([{ v: 1, t: 'shutdown' }, { v: 2, t: 'shutdown' }, { v: 3, t: 'shutdown' }, { v: 4, t: 'shutdown' }]);
+    expect(parseClientScreenMessage({ v: 4, t: 'shutdown' })).toBeNull();
     expect(parseClientScreenMessage({ v: 3, t: 'shutdown' })).toBeNull();
     expect(parseClientScreenMessage({ v: CLIENT_SCREEN_PROTOCOL_VERSION, t: 'shutdown' })).not.toBeNull();
   });
@@ -131,7 +133,7 @@ describe('wire version', () => {
   // previous channel to CLIENT_SCREEN_RETIRED_VIEWERS, then update the pair below.
   it('the registry of codes is pinned to the wire version', () => {
     expect({ version: CLIENT_SCREEN_PROTOCOL_VERSION, codes: CLIENT_SCREEN_CODES.join(' ') }).toEqual({
-      version: 4,
+      version: 5,
       codes: 'summary.number summary.order_name summary.client summary.client_phone summary.client_phones summary.deadline summary.positions '
         + 'summary.parts summary.area summary.material summary.milling_type summary.edge_type summary.film '
         + 'summary.final summary.discount summary.surcharge summary.paid summary.debt '
@@ -143,6 +145,8 @@ describe('wire version', () => {
         + 'details.edge_type details.film details.price_per_sqm details.cost details.note details.production_status '
         + 'details.hdf_parameter details.doweling details.cut_job details.bath_cut_job details.bazis_cut_sets details.priority '
         + 'details.basis_project details.basis_product details.basis_data details.basis_designation '
+        + 'tab.hdf hdf.min_threshold hdf.total hdf.position hdf.milling_type hdf.source_height hdf.source_width hdf.source_quantity '
+        + 'hdf.parameter hdf.height hdf.width hdf.quantity hdf.area hdf.status hdf.production_status hdf.cut_job hdf.bazis_cut_sets '
         + 'tab.dates dates.planned dates.completion dates.issue '
         + 'tab.finance finance.total finance.discount finance.surcharge finance.final finance.paid finance.debt finance.payments finance.payments_note '
         + 'tab.services services.name services.quantity services.price services.sum',

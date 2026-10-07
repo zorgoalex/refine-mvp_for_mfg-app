@@ -69,7 +69,7 @@ describe('buildOrderEditSource', () => {
 
   it('maps only known tabs, columns and grouping fields; everything else is left out', () => {
     const source = buildOrderEditSource(input({ grouping: { field: 'unknown_grouping', groups: [{ key: '__sep__:x:8:0', label: 'Нечто 8', rowKeys: [71] }] } }));
-    expect(source.tabs.map((tab) => tab.key)).toEqual(['basic', 'details', 'dates', 'finance', 'services']);
+    expect(source.tabs.map((tab) => tab.key)).toEqual(['basic', 'details', 'hdf', 'dates', 'finance', 'services']);
     expect(source.tabs[1].label).toBe('Детали заказа');
     // Every column of the manager's table has a field; only «Действия» has none.
     expect(source.details.columnOrder).toEqual(['n', 'height', 'width', 'quantity', 'area', 'milling_type', 'hdf_parameter', 'edge_type', 'material', 'note',
@@ -577,6 +577,66 @@ describe('every element of the manager screen is available as a tick', () => {
       buildOrderEditSource(input({ grouping, detailColumnOrder: ['detail_number', 'film_id'] })), CLIENT_SCREEN_CODES, idFor(),
     );
     expect(shownColumn.details!.groups!.map((group) => group.title)).toEqual(['Белый софт']);
+  });
+});
+
+describe('the HDF tab of the edit form', () => {
+  const idFor = () => createClientScreenIdMap((() => { let n = 0; return () => `id${String(++n).padStart(6, '0')}`; })());
+  const hdfDetails = [
+    { order_hdf_detail_id: 501, source_order_detail_id_snapshot: 71, source_detail_number: 1, source_detail_name: 'Фасад верхний', source_height_mm: 716,
+      source_width_mm: 396.5, source_quantity: 4, milling_type_id: 1, milling_type_name: 'Модерн', edge_mm: 3, hdf_height_mm: 709, hdf_width_mm: 389.5,
+      quantity: 4, area_m2: 1.1046, status: 'ok', is_stale: false, production_status_id: 4, production_status_name: null, version: 1,
+      cut_job: { cutJobId: 12, name: 'Раскрой ХДФ', cutNumber: 'Р-12' }, bazis_cut_sets: [{ bazisCutSetId: 5, name: 'x' }, { bazisCutSetId: 6, name: 'y' }] },
+    { order_hdf_detail_id: 502, source_order_detail_id_snapshot: 72, source_detail_number: 2, source_detail_name: null, source_height_mm: 100, source_width_mm: 2400,
+      source_quantity: 2, milling_type_id: 77, milling_type_name: null, edge_mm: null, hdf_height_mm: null, hdf_width_mm: null, quantity: null, area_m2: 0,
+      status: 'config_missing', config_errors: ['unknown_code'], is_stale: true, version: 1 },
+  ] as unknown as NonNullable<OrderEditSourceInput['hdfDetails']>;
+  const src = () => buildOrderEditSource(input({ hdfDetails, header: { ...input().header, hdf_min_threshold_mm: 60 } as OrderEditSourceInput['header'] }));
+
+  it('fields and rows as the tab shows them: names instead of ids, the state with its notes, totals of valid rows only', () => {
+    const hdf = src().hdf!;
+    expect(hdf.fields).toEqual({ min_threshold: '60,0', total: '1,10 м², деталей: 4' });
+    expect(hdf.rows[0]).toEqual({ key: '501', values: {
+      position: '1 · Фасад верхний', milling_type: 'Модерн', source_height: '716,0', source_width: '396,5', source_quantity: '4', parameter: '3,00',
+      height: '709,0', width: '389,5', quantity: '4', area: '1,10', status: 'Рассчитано', production_status: 'Фрезеровка', cut_job: 'Р-12',
+      bazis_cut_sets: 'БР-5, БР-6',
+    } });
+    // No milling name: empty, never «ID: 77». A stale failed row: its state says so and it is not in the total.
+    expect(hdf.rows[1].values).toMatchObject({ position: '2', milling_type: null, parameter: null, height: null, quantity: null, area: '0,00', cut_job: null,
+      bazis_cut_sets: null, production_status: null });
+    expect(hdf.rows[1].values.status).toMatch(/^Нет настройки · устарело/);
+    expect(JSON.stringify(hdf)).not.toContain('77');
+  });
+
+  it('a parameter changed in the detail but not yet recalculated is shown as the tab shows it', () => {
+    const base = input();
+    const changed = buildOrderEditSource(input({
+      hdfDetails, details: [{ ...base.details[0], hdf_parameter_override_mm: 4.5 }, base.details[1]] as OrderEditSourceInput['details'],
+    }));
+    expect(changed.hdf!.rows[0].values.parameter).toBe('4,50 (изменено)');
+  });
+
+  it('the tab reaches the customer only when ticked, column by column; the row keys never do', () => {
+    const off = buildClientScreenSnapshot(src(), CLIENT_SCREEN_CODES.filter((code) => code !== 'tab.hdf'), idFor());
+    expect(off.hdf).toBeUndefined();
+    expect(off.tabs.map((tab) => tab.key)).not.toContain('hdf');
+    for (const hidden of ['709,0', 'Раскрой ХДФ', 'БР-6', 'Рассчитано', '1,10 м², деталей']) expect(JSON.stringify(off), hidden).not.toContain(hidden);
+    const some = buildClientScreenSnapshot(src(), ['tab.hdf', 'hdf.position', 'hdf.height', 'hdf.width', 'hdf.quantity'], idFor());
+    expect(some.hdf!.fields).toEqual([]);
+    expect(some.hdf!.table!.columns.map((column) => column.label)).toEqual(['Позиция', 'ХДФ выс.', 'ХДФ шир.', 'ХДФ кол.']);
+    expect(some.hdf!.table!.rows[0].cells).toEqual(['1 · Фасад верхний', '709,0', '389,5', '4']);
+    expect(some.hdf!.table!.rows[1].cells).toEqual(['2', '—', '—', '—']);
+    const wire = JSON.stringify(some);
+    for (const hidden of ['501', '502', 'Р-12', 'БР-5', 'Рассчитано', 'Модерн', '716']) expect(wire, hidden).not.toContain(hidden);
+    expect(clientScreenSnapshotSchema.safeParse(buildClientScreenSnapshot(src(), CLIENT_SCREEN_CODES, idFor())).success).toBe(true);
+    // The HDF codes are off by default.
+    expect(CLIENT_SCREEN_DEFAULT_VISIBLE_CODES.some((code) => code === 'tab.hdf' || code.startsWith('hdf.'))).toBe(false);
+  });
+
+  it('an order without HDF: the tab is there with its total and an empty table', () => {
+    const empty = buildClientScreenSnapshot(buildOrderEditSource(input()), CLIENT_SCREEN_CODES, idFor());
+    expect(empty.hdf!.fields.find((field) => field.code === 'hdf.total')?.value).toBe('0,00 м², деталей: 0');
+    expect(empty.hdf!.table!.rows).toEqual([]);
   });
 });
 
