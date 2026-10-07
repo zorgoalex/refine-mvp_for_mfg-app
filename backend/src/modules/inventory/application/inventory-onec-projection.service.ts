@@ -68,11 +68,13 @@ export class InventoryOnecProjectionService implements OnModuleInit, OnModuleDes
     return this.inventory.enabled() && this.config.get('BACKEND_INVENTORY_ONEC_CONSUMPTION', { infer: true }) === true;
   }
 
+  receiptsEnabled(): boolean {
+    return this.config.get('BACKEND_INVENTORY_ONEC_RECEIPTS', { infer: true }) === true;
+  }
+
   /** Виды документов 1С, участвующие в проекции: расход всегда, приход — по своему флагу. */
   projectedKinds(): readonly StockProjectionDocKind[] {
-    return this.config.get('BACKEND_INVENTORY_ONEC_RECEIPTS', { infer: true }) === true
-      ? [...CONSUMPTION_DOC_KINDS, ...STOCK_RECEIPT_DOC_KINDS]
-      : CONSUMPTION_DOC_KINDS;
+    return this.receiptsEnabled() ? [...CONSUMPTION_DOC_KINDS, ...STOCK_RECEIPT_DOC_KINDS] : CONSUMPTION_DOC_KINDS;
   }
 
   onModuleInit(): void {
@@ -285,9 +287,14 @@ export class InventoryOnecProjectionService implements OnModuleInit, OnModuleDes
    * Компенсация склада (откат, §7.3): since := NULL и применённое склада → 0 по всем документам 1С любого
    * источника. Без чтения документов 1С (работает при выключенном модуле 1С, флаге проекции и AMBIGUOUS_SOURCE).
    */
-  async compensate(ctx: CommandContext, warehouseId: number): Promise<OnecCompensationResult> {
+  async compensate(ctx: CommandContext, warehouseId: number, options: { includesReceipts?: boolean } = {}): Promise<OnecCompensationResult> {
     this.require(ctx.currentUser.permissions, 'inventory.manage');
-    const start = await this.warehouses.beginOnecCompensation(ctx, warehouseId);
+    // Откат снимает и приход. Клиент, не знающий об этом (старая вкладка обещает вернуть только списания), получает
+    // отказ ДО очистки даты и остатков — когда приход включён или на складе есть применённое с плюсом. Проверка — в
+    // транзакции начала отката под блокировкой склада: параллельный проход не добавит плюс после неё.
+    const start = await this.warehouses.beginOnecCompensation(ctx, warehouseId, {
+      receiptsAcknowledged: options.includesReceipts === true, receiptsEnabled: this.receiptsEnabled(),
+    });
     if (start.replay) return start.replay;
     const actor = { id: Number(ctx.currentUser.id), username: ctx.currentUser.username ?? '', role: ctx.currentUser.role };
     const mineOf = (applied: Map<string, number>) => new Map([...applied].filter(([key]) => parseStockKey(key).warehouseId === warehouseId));

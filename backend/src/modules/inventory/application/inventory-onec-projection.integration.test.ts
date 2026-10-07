@@ -520,8 +520,48 @@ describe.skipIf(!url)('1C consumption projection — real PostgreSQL', { timeout
     await on.runPass('test');
     expect(await balance(film1)).toBe(before + 6.5);
     expect(await onecDocs()).toBe(docsBefore + 4);
-    // Компенсация склада возвращает и приход.
-    await on.compensate(ctx(), warehouseId);
+    // Компенсация склада возвращает и приход — только с подтверждением клиента. Старый клиент (без подтверждения)
+    // получает отказ до очистки даты и остатков: и при включённом приходе, и когда флаг выключен, а плюс ещё применён.
+    const untouched = async () => ({
+      balance: await balance(film1), docs: await onecDocs(),
+      since: (await watcher.query<{ s: Date | null }>('SELECT onec_consumption_since AS s FROM warehouses WHERE warehouse_id = $1', [warehouseId])).rows[0].s,
+    });
+    const beforeRefusal = await untouched();
+    expect(beforeRefusal.since).not.toBeNull();
+    await expect(on.compensate(ctx(), warehouseId)).rejects.toMatchObject({ statusCode: 409, code: 'ONEC_COMPENSATION_CONFIRM_REQUIRED' });
+    await expect(off.compensate(ctx(), warehouseId, { includesReceipts: false })).rejects.toMatchObject({ statusCode: 409, code: 'ONEC_COMPENSATION_CONFIRM_REQUIRED' });
+    expect(await untouched()).toEqual(beforeRefusal);
+    // Гонка: приход выключен и плюса ещё нет — старый клиент начинает откат, а параллельный проход (держит склад
+    // FOR KEY SHARE) фиксирует плюс. Проверка под блокировкой склада видит его: отказ, дата и остатки не тронуты.
+    await off.runPass('test');
+    expect((await watcher.query('SELECT 1 FROM inventory_onec_applied WHERE warehouse_id = $1 AND quantity > 0', [warehouseId])).rows).toHaveLength(0);
+    const beforeRace = await untouched();
+    const racer = new Client({ connectionString: url });
+    await racer.connect();
+    try {
+      await racer.query('BEGIN');
+      await racer.query('SELECT 1 FROM warehouses WHERE warehouse_id = $1 FOR KEY SHARE', [warehouseId]);
+      const run = off.compensate(ctx(), warehouseId);
+      const outcome = run.then(() => 'done', (error: { code?: string }) => error.code ?? 'error');
+      let waiting = 0;
+      for (let i = 0; i < 200 && waiting === 0; i += 1) {
+        waiting = Number((await watcher.query<{ n: string }>(
+          `SELECT count(*) AS n FROM pg_stat_activity
+            WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE '%FROM warehouses WHERE warehouse_id = $1 FOR UPDATE%'`)).rows[0].n);
+        if (waiting === 0) await sleep(25);
+      }
+      expect(waiting).toBe(1);
+      await racer.query('INSERT INTO inventory_onec_applied (onec_document_id, warehouse_id, film_id, quantity) VALUES ($1, $2, $3, 5)', [docId, warehouseId, film1]);
+      await racer.query('COMMIT');
+      expect(await outcome).toBe('ONEC_COMPENSATION_CONFIRM_REQUIRED');
+    } finally { await racer.end(); }
+    expect(await untouched()).toEqual(beforeRace);
+    await watcher.query('DELETE FROM inventory_onec_applied WHERE onec_document_id = $1 AND warehouse_id = $2', [docId, warehouseId]);
+    // Завершённый ключ повторяется без подтверждения — сохранённый ответ, без изменений.
+    expect(await on.compensate({ ...ctx(), idempotencyKey: compensationKey }, warehouseId)).toEqual(compensationResult);
+    expect(await untouched()).toEqual(beforeRace);
+    await on.runPass('test');
+    await on.compensate(ctx(), warehouseId, { includesReceipts: true });
     expect((await watcher.query('SELECT 1 FROM inventory_onec_applied WHERE warehouse_id = $1 AND quantity <> 0', [warehouseId])).rows).toHaveLength(0);
   });
 });
