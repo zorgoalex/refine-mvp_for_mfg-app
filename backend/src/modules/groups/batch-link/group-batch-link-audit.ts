@@ -8,7 +8,6 @@ export interface BuildBatchLinkRoleDeniedInput {
   currentUser: CurrentUser;
   requestId: string;
   groupId?: string | number | null; // DryRunGroupBatchLinkCommand.groupId is a string
-  allowedRoles: readonly string[];
 }
 
 export function buildBatchLinkRoleDeniedEvent(input: BuildBatchLinkRoleDeniedInput): DeniedAuditEvent {
@@ -18,7 +17,6 @@ export function buildBatchLinkRoleDeniedEvent(input: BuildBatchLinkRoleDeniedInp
     actorUserId: input.currentUser.id, actorUsername: input.currentUser.username ?? null,
     actorRole: input.currentUser.role ?? null, requestId: input.requestId,
     source: GROUPS_AUDIT_SOURCE, reason: 'role_denied',
-    requiredPermissions: ['groups.manage_links'],
-    metadata: { allowedRoles: [...input.allowedRoles] },
+    requiredPermissions: ['groups.manage_links', 'groups.batch_link'],
   };
 }

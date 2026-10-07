@@ -19,6 +19,7 @@ import { PermissionsGuard } from '../../../permissions/permissions.guard';
 import { RequirePermissions } from '../../../permissions/require-permissions.decorator';
 import { Bitrix24ReverseProcessorService } from './bitrix24-reverse-processor.service';
 import { PgBitrix24ReverseRepository } from './pg-bitrix24-reverse-repository';
+import { bitrix24RequestScope } from './bitrix24-request-scope';
 
 const positiveId = z.coerce.number().int().positive();
 const requestDetailSchema = z.object({
@@ -93,7 +94,7 @@ export class Bitrix24ReverseAdminController {
     if (!parsed.success) throw validationError(parsed.error);
     return this.repository.listIncomingRequests({
       ...parsed.data,
-      scope: crmRequestScope(actor),
+      scope: bitrix24RequestScope(actor),
       canViewFinancials: actor.permissions.includes('orders.view_financials'),
     });
   }
@@ -108,7 +109,7 @@ export class Bitrix24ReverseAdminController {
     const actor = requireUser(request);
     return this.repository.getIncomingRequest(
       parseId(requestId, 'requestId'),
-      crmRequestScope(actor),
+      bitrix24RequestScope(actor),
       actor.permissions.includes('orders.view_financials'),
     );
   }
@@ -140,7 +141,7 @@ export class Bitrix24ReverseAdminController {
       actorUsername: actor.username,
       actorRole: actor.role,
       auditRequestId: requireRequestId(request),
-      scope: crmRequestScope(actor),
+      scope: bitrix24RequestScope(actor),
       canViewFinancials: actor.permissions.includes('orders.view_financials'),
     });
   }
@@ -166,7 +167,7 @@ export class Bitrix24ReverseAdminController {
       actorUsername: actor.username,
       actorRole: actor.role,
       auditRequestId: requireRequestId(request),
-      scope: crmRequestScope(actor),
+      scope: bitrix24RequestScope(actor),
     });
   }
 
@@ -188,7 +189,7 @@ export class Bitrix24ReverseAdminController {
       expectedOrderVersion: parsed.data.expectedOrderVersion,
       actorUserId: actor.id,
       auditRequestId: requireRequestId(request),
-      scope: crmRequestScope(actor),
+      scope: bitrix24RequestScope(actor),
     });
   }
 
@@ -210,7 +211,7 @@ export class Bitrix24ReverseAdminController {
       expectedOrderVersion: parsed.data.expectedOrderVersion,
       actorUserId: actor.id,
       auditRequestId: requireRequestId(request),
-      scope: crmRequestScope(actor),
+      scope: bitrix24RequestScope(actor),
     });
   }
 
@@ -224,7 +225,7 @@ export class Bitrix24ReverseAdminController {
     const actor = requireUser(request);
     return this.repository.getMappedOrderPayments(
       parseId(orderId, 'orderId'),
-      crmRequestScope(actor),
+      bitrix24RequestScope(actor),
       actor.permissions.includes('bitrix24.requests.view'),
     );
   }
@@ -239,7 +240,7 @@ export class Bitrix24ReverseAdminController {
   ) {
     const actor = requireUser(request);
     const orderId = parseId(orderIdValue, 'orderId');
-    const scope = crmRequestScope(actor);
+    const scope = bitrix24RequestScope(actor);
     const current = await this.repository.getMappedOrderPayments(orderId, scope);
     if (current.linked !== true || typeof current.bitrixDealId !== 'string') {
       return current;
@@ -369,16 +370,6 @@ function parseId(value: string, field: string): number {
 function requireUser(request: RequestWithCurrentUser) {
   if (!request.user) throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication required');
   return request.user;
-}
-
-function crmRequestScope(user: NonNullable<RequestWithCurrentUser['user']>) {
-  if (user.role === 'superadmin' || user.role === 'admin' || user.role === 'top_manager') {
-    return { mode: 'all' as const };
-  }
-  if (user.role === 'manager' || user.role === 'operator') {
-    return { mode: 'assigned' as const, userId: Number(user.id) };
-  }
-  throw new ApiError(403, 'PERMISSION_DENIED', 'Insufficient Bitrix24 request scope');
 }
 
 function requireRequestId(request: RequestWithCurrentUser): string {
