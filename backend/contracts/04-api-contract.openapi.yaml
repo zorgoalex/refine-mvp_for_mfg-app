@@ -21794,6 +21794,8 @@ components:
         - groups.update
         - groups.archive
         - groups.manage_links
+        - clients.onec_data.view
+        - clients.onec_documents.view
         - groups.view_history
         - groups.members.view
         - groups.members.manage
