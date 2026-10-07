@@ -10,6 +10,7 @@ import {
 import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
 import { Form, Input, Checkbox, notification, Spin, Radio, Typography } from "antd";
 import { ClientPhonesSection } from "./components/ClientPhonesSection";
+import { ClientCounterpartyCard } from "./ClientCounterpartyCard";
 import { ContactsCard } from "../../components/contacts/ContactsCard";
 import { CLIENT_CONTACTS } from "../../components/contacts/partyContactsSources";
 import { can } from "../../utils/permissions";
@@ -165,9 +166,6 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Активен" name="is_active" valuePropName="checked">
           <Checkbox>Активен</Checkbox>
         </Form.Item>
-        <Form.Item label="Ключ 1C" name="ref_key_1c">
-          <Input />
-        </Form.Item>
         <ReferenceSortOrderFormItem />
       </Form>
 
@@ -185,6 +183,10 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
       )}
       <div style={{ marginTop: 12 }}>
         <ContactsCard ownerId={Number(id) || null} editable={can("clients.update")} source={CLIENT_CONTACTS} />
+      </div>
+      {/* Сопоставление с контрагентом 1С — отдельной командой, вне формы клиента. */}
+      <div style={{ marginTop: 12 }}>
+        <ClientCounterpartyCard clientId={Number(id) || null} editable={can("clients.update")} />
       </div>
     </Edit>
   );

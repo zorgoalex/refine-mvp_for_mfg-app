@@ -7,6 +7,7 @@ import { PermissionsGuard } from '../../permissions/permissions.guard';
 import { RequirePermissions } from '../../permissions/require-permissions.decorator';
 import { EMPLOYEE_CONTACT_KINDS, EMPLOYEE_CONTACTS_MAX, type EmployeeContactInput } from '../employees/employee-contacts';
 import type { PartyKind } from './party-contacts';
+import { ClientCounterpartyRepository } from './client-counterparty.repository';
 import { PartyContactsRepository } from './party-contacts.repository';
 import { SupplierCounterpartyRepository, parseRefKey1c } from './supplier-counterparty.repository';
 
@@ -25,7 +26,7 @@ const linkSchema = z.object({ refKey1c: z.string().nullable(), expectedRefKey1c:
 const fromCounterpartySchema = z.object({ refKey1c: z.string() }).strict();
 
 /**
- * Contacts of suppliers, vendors and clients, and the supplier ↔ 1C counterparty link. One explicit route per
+ * Contacts of suppliers, vendors and clients, and the supplier / client ↔ 1C counterparty links. One explicit route per
  * owner, so each carries its own permissions (view: <owner>.view; change: suppliers.manage / vendors.manage /
  * clients.update).
  */
@@ -37,6 +38,7 @@ export class PartyContactsController {
   constructor(
     @Inject(PartyContactsRepository) private readonly contacts: PartyContactsRepository,
     @Inject(SupplierCounterpartyRepository) private readonly counterparties: SupplierCounterpartyRepository,
+    @Inject(ClientCounterpartyRepository) private readonly clientCounterparties: ClientCounterpartyRepository,
   ) {}
 
   @ApiOperation({ summary: 'Contacts of a supplier with the set version' })
@@ -99,6 +101,28 @@ export class PartyContactsController {
     if (!parsed.success) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос');
     const { user, requestId } = actor(request);
     return this.counterparties.createFromCounterparty(parseRefKey1c(parsed.data.refKey1c), user, requestId);
+  }
+
+  @ApiOperation({ summary: 'The 1C counterparty a client is linked to' })
+  @Get('clients/:id/counterparty') @RequirePermissions(['clients.view'])
+  clientCounterparty(@Param('id') id: string) { return this.clientCounterparties.link(parseId(id)); }
+
+  // The search opens the whole 1C counterparty directory (names, BIN/IIN, phones): only for those who may link.
+  @ApiOperation({ summary: '1C counterparties for a client: by a search text, or the ones that look like the client (name, phone)' })
+  @Get('clients/:id/counterparty-candidates') @RequirePermissions(['clients.update'])
+  async clientCounterpartyCandidates(@Param('id') id: string, @Query('search') search: unknown) {
+    const text = typeof search === 'string' && search.trim() ? search.trim().slice(0, 100) : null;
+    return { items: await this.clientCounterparties.candidates(parseId(id), text) };
+  }
+
+  @ApiOperation({ summary: 'Link, relink or unlink a client and a 1C counterparty (compare-and-swap on the previous key)' })
+  @Put('clients/:id/counterparty') @RequirePermissions(['clients.update'])
+  linkClient(@Param('id') id: string, @Body() body: unknown, @Req() request: RequestWithCurrentUser) {
+    const parsed = linkSchema.safeParse(body);
+    if (!parsed.success) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос сопоставления');
+    const { user, requestId } = actor(request);
+    return this.clientCounterparties.setLink(parseId(id), parsed.data.refKey1c === null ? null : parseRefKey1c(parsed.data.refKey1c),
+      parsed.data.expectedRefKey1c === null ? null : parseRefKey1c(parsed.data.expectedRefKey1c), user, requestId);
   }
 
   private replace(party: PartyKind, id: string, body: unknown, request: RequestWithCurrentUser) {

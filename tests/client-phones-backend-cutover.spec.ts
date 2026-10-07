@@ -27,7 +27,6 @@ test.describe('Client phones backend cutover', () => {
     await page.goto('/clients/create');
     await fillText(page, 'client_name', 'E2E клиент backend phones');
     await fillText(page, 'notes', 'Проверка backend телефонов');
-    await fillText(page, 'ref_key_1c', 'CLIENT-PHONE-BACKEND-E2E');
 
     const phonesCard = page.locator('.ant-card').filter({ hasText: 'Телефоны' });
     await phonesCard.getByRole('button', { name: 'Добавить' }).click();

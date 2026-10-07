@@ -30,6 +30,38 @@ export interface SupplierLink {
   counterpartyName: string | null;
 }
 
+/** A 1C counterparty as the loaded 1C data has it. */
+export interface CounterpartyCard {
+  refKey1c: string;
+  name: string;
+  code: string | null;
+  bin: string | null;
+  /** Marked as a buyer in 1C (null when the source does not say). */
+  isBuyer: boolean | null;
+  phones: string[];
+}
+
+export type ClientCounterpartyReason = 'name' | 'phone' | 'similar';
+
+/** A 1C counterparty offered for a client. */
+export interface ClientCounterparty extends CounterpartyCard {
+  /** Why it is offered: equal name, equal phone, similar name. Empty for a text search. */
+  matchedBy: ClientCounterpartyReason[];
+  /** The client already linked to it. */
+  clientId: number | null;
+  clientName: string | null;
+}
+
+export interface ClientLink {
+  clientId: number;
+  clientName: string;
+  refKey1c: string | null;
+  /** Counterparties of 1C are loaded: without them nothing can be chosen. */
+  available: boolean;
+  /** null — no link, or the key is not in the loaded 1C data. */
+  counterparty: CounterpartyCard | null;
+}
+
 export const partyContactsApi = {
   get: (party: PartyKind, id: number) => httpClient.get<PartyContacts>(apiRoutes.partyContacts.contacts(party, id)),
   replace: (party: PartyKind, id: number, body: { version: number; contacts: EmployeeContactInput[] }) =>
@@ -47,4 +79,12 @@ export const partyContactsApi = {
     httpClient.put<SupplierLink>(apiRoutes.partyContacts.supplierCounterparty(supplierId), body),
   supplierFromCounterparty: (refKey1c: string) =>
     httpClient.post<SupplierLink & { created: boolean }>(apiRoutes.partyContacts.supplierFromCounterparty, { refKey1c }),
+  clientCounterparty: (clientId: number) => httpClient.get<ClientLink>(apiRoutes.partyContacts.clientCounterparty(clientId)),
+  /** Without a search text — the counterparties that look like the client (name, phone). */
+  clientCounterpartyCandidates: (clientId: number, search?: string) =>
+    httpClient.get<{ items: ClientCounterparty[] }>(
+      `${apiRoutes.partyContacts.clientCounterpartyCandidates(clientId)}${search?.trim() ? `?search=${encodeURIComponent(search.trim())}` : ''}`),
+  /** Link, relink or unlink (refKey1c null); `expectedRefKey1c` is the key this page showed. */
+  setClientCounterparty: (clientId: number, body: { refKey1c: string | null; expectedRefKey1c: string | null }) =>
+    httpClient.put<ClientLink>(apiRoutes.partyContacts.clientCounterparty(clientId), body),
 };
