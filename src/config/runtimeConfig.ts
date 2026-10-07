@@ -8,7 +8,7 @@ export interface FrontendRuntimeConfig {
   apiUrl?: string | null;
   build?: FrontendBuildRuntimeConfig | null;
   hasuraUrl?: string | null;
-  features?: (RuntimeFeatureFlagSource & { filmCatalogImport?: string | boolean }) | null;
+  features?: (RuntimeFeatureFlagSource & { filmCatalogImport?: string | boolean; inventory?: string | boolean }) | null;
   ui?: FrontendUiRuntimeConfig | null;
   observability?: FrontendObservabilityRuntimeConfig | null;
   rollouts?: FrontendRolloutsRuntimeConfig | null;

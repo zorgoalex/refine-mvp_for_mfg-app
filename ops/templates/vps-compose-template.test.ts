@@ -415,4 +415,17 @@ describe('VPS compose backend runtime flags', () => {
     expect(envExample).toContain('CAD_SERVICE_TRUST_PROXY_HEADERS=1');
     expect(envExample).toContain('CAD_SERVICE_BASE_URL=http://cad-service:8000');
   });
+
+  it('passes the film warehouse switches with safe defaults', () => {
+    const compose = readTemplate('ops/templates/docker-compose.vps.yml');
+    const envExample = readTemplate('ops/templates/env.vps.example');
+    expect(compose).toContain('BACKEND_INVENTORY_ENABLED: ${BACKEND_INVENTORY_ENABLED:-false}');
+    expect(compose).toContain('BACKEND_INVENTORY_ONEC_AUTOSYNC: ${BACKEND_INVENTORY_ONEC_AUTOSYNC:-false}');
+    expect(compose).toContain('BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID: ${BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID:-}');
+    expect(compose).toContain('BACKEND_INVENTORY_ONEC_CONSUMPTION: ${BACKEND_INVENTORY_ONEC_CONSUMPTION:-false}');
+    expect(envExample).toContain('BACKEND_INVENTORY_ENABLED=false');
+    expect(envExample).toContain('BACKEND_INVENTORY_ONEC_AUTOSYNC=false');
+    expect(envExample).toContain('BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID=');
+    expect(envExample).toContain('BACKEND_INVENTORY_ONEC_CONSUMPTION=false');
+  });
 });

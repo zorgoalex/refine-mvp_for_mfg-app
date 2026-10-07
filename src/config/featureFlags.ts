@@ -39,6 +39,8 @@ export interface FrontendFeatureFlags {
   useBackendWhatsApp: boolean;
   /** "Интеграция 1С" admin section (agents, configuration, alerts/incidents). */
   useBackendOnec: boolean;
+  /** Film warehouse section and order stock badges. */
+  inventory: boolean;
 }
 
 type EnvSource = Record<string, string | boolean | undefined>;
@@ -74,6 +76,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   workosAuth: string | boolean;
   backendWhatsApp: string | boolean;
   backendOnec: string | boolean;
+  inventory: string | boolean;
 }>;
 
 export function getFeatureFlags(
@@ -111,6 +114,7 @@ export function getFeatureFlags(
     workosAuth: readBooleanFlag(env.VITE_WORKOS_AUTH, false),
     useBackendWhatsApp: readBooleanFlag(env.VITE_USE_BACKEND_WHATSAPP, false),
     useBackendOnec: readBooleanFlag(env.VITE_USE_BACKEND_ONEC, false),
+    inventory: false,
   };
 
   return mergeRuntimeFeatureFlags(envFlags, runtimeFeatures);
@@ -181,6 +185,7 @@ export function mergeRuntimeFeatureFlags(
     useBackendWhatsApp:
       readOptionalBooleanFlag(runtimeFeatures.backendWhatsApp) ?? fallback.useBackendWhatsApp,
     useBackendOnec: readOptionalBooleanFlag(runtimeFeatures.backendOnec) ?? fallback.useBackendOnec,
+    inventory: readOptionalBooleanFlag(runtimeFeatures.inventory) ?? fallback.inventory,
   });
 }
 

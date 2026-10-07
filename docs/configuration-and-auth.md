@@ -529,3 +529,72 @@ scope `orders.view`. Порядок включения:
 `procurement_order_event` / `procurement_digest`) видны в списке, счётчике, «прочитать», «прочитать всё» и
 удалении только при праве `procurement.view` и пока заказ в текущем scope `orders.view` читателя; скрытые строки
 не удаляются и возвращаются при восстановлении доступа.
+
+### Склад плёнки
+
+`BACKEND_INVENTORY_ENABLED` (backend, по умолчанию `false`) включает склад плёнки:
+`/api/v1/inventory/*` (склады, остатки, журнал документов, ручной приход/списание/
+инвентаризация, импорт файла остатков, проведение и отмена черновиков) и
+`GET /api/v1/orders/{orderId}/film-stock`, `GET /api/v1/inventory/stock` (вкладки по
+материалам: плёнка ERP + остатки 1С из зеркала, только чтение; без модуля 1С —
+только плёнка). При выключенном флаге маршруты
+отвечают `404`. Frontend-флаг `RUNTIME_CONFIG_INVENTORY` показывает раздел
+«Склады → Остатки на складах» и метки остатка в заказе.
+
+Права: чтение — `inventory.view`, изменения — `inventory.manage`. Документы,
+привязанные к заказу, видны и изменяемы только при `orders.view` и доступе к этому
+заказу. Команды записи требуют заголовок `Idempotency-Key`. Остатки ведутся по
+основной плёнке справочника; списание в минус требует подтверждения
+(`allowNegative`).
+
+Порядок выкладки и включения — единый для всего склада: миграции `203_film_stock.sql`,
+`205_warehouses_onec_key_required.sql`, `206_inventory_onec_autosync_state.sql` и
+`217_inventory_onec_consumption.sql` (все четыре, после 202; backend склада читает колонки
+каждой из них, в том числе `warehouses.onec_consumption_since` из 217 при выключенном расходе)
+→ backend этой версии → права Hasura `warehouses` (`ops/hasura/warehouses-read-only.sh`) →
+`BACKEND_INVENTORY_ENABLED=true`, пересоздание backend и `RUNTIME_CONFIG_INVENTORY`.
+Включать склад на схеме без любой из четырёх миграций нельзя.
+
+Справочник складов (`/api/v1/inventory/warehouses`) пишет только backend; в Hasura
+таблица `warehouses` — только чтение. Каждый склад привязан к складу 1С
+(`ref_key_1c`, `Ref_Key` справочника «Структурные единицы», тип «Склад»); при
+доступном зеркале 1С ключ проверяется по нему, `POST …/warehouses/sync-onec`
+создаёт склады ERP для всех складов 1С (зеркало обязательно).
+
+Миграция `205_warehouses_onec_key_required.sql` — CHECK `ref_key_1c IS NOT NULL` NOT VALID:
+существующие строки не проверяются, новая или изменяемая запись склада обязана иметь ключ 1С.
+Склад «Склад плёнки», созданный миграцией 203 без ключа, привязывается к складу 1С в
+«Справочнике складов» (без зеркала 1С — ввод `Ref_Key` вручную). Backend без справочника складов
+в `warehouses` не пишет, поэтому 205 применяется вместе с остальными миграциями до backend. Если
+понадобится backend, создающий склады без ключа: сначала
+`ALTER TABLE public.warehouses DROP CONSTRAINT IF EXISTS chk_warehouses_ref_key_1c_required;`
+(данные не меняются; повторное применение 205 вернёт ограничение).
+
+Расход из документов 1С: `BACKEND_INVENTORY_ONEC_CONSUMPTION` (backend, по умолчанию
+`false`) переносит расход плёнки из документов 1С (реализация, возврат поставщику,
+списание, перемещение) в учёт склада. Нужны `BACKEND_INVENTORY_ENABLED`, загрузка
+документов 1С и `BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID` — от имени этого
+служебного пользователя пишутся документы `onec`. Без него backend с включённым
+флагом не стартует. Маршруты: `GET /api/v1/inventory/onec-consumption/issues`
+(`inventory.view`), `POST /api/v1/inventory/onec-consumption/run` и
+`POST /api/v1/inventory/warehouses/{warehouseId}/onec-consumption/compensate`
+(`inventory.manage`; компенсация — с `Idempotency-Key`). `PATCH …/warehouses/{id}`
+принимает `onecConsumptionSince`, инвентаризация (ручная и импорт) — `countedAt`.
+Склад участвует, только если у него задан `onecConsumptionSince`.
+
+Порядок включения:
+
+1. Миграция `217_inventory_onec_consumption.sql`.
+2. Backend и frontend.
+3. На складе провести инвентаризацию с моментом подсчёта.
+4. Задать «Расход из 1С с» (тот же момент).
+5. Включить флаг и пересоздать backend.
+6. Проверка: «Пересчитать сейчас»; сумма документов «Расход 1С» должна равняться сумме
+   строк 1С, а повторный пересчёт — давать «записано изменений 0».
+
+С выключенным флагом проход не выполняется, а компенсация работает. Откат:
+«Откатить расход 1С» на каждом складе с датой начала (можно уже с выключенным флагом),
+затем выключить флаг. Документы `onec` остаются в журнале.
+
+Точечные скрипты прав Hasura: `ops/hasura/warehouses-read-only.sh plan|apply` снимает прежние права записи
+`warehouses` (чтение остаётся); всю metadata не заменяет.

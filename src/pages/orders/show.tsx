@@ -112,6 +112,9 @@ import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent } from ".
 import { buildOrderEditAddPaymentPath } from "./orderPaymentIntent";
 import { OperationalPageHeader, useOperationalUi } from "../../ui-operational/OperationalPrimitives";
 import { buildCutJobNameById, CutJobLinks } from "./CutJobLinks";
+import { ORDER_FILM_COLUMN_WIDTH, OrderFilmStockCaption, orderFilmStockColumns, OrderSheetStockCaption, orderSheetStockColumns } from "../inventory/orderFilmStockColumns";
+import { useOrderSheetStock } from "../inventory/useOrderSheetStock";
+import { useOrderFilmStock } from "../inventory/useOrderFilmStock";
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from "./orderMaterialsSummary";
 import { useOrderDetailLiveState } from "./useOrderDetailLiveState";
 import {
@@ -1896,6 +1899,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     [bathCutJobs, details, filmsMap],
   );
   const cutJobNameById = useMemo(() => buildCutJobNameById(bathCutJobs), [bathCutJobs]);
+  // Остатки плёнки на складе — как во вкладке «Материалы» формы редактирования (тот же запрос и автообновление).
+  const filmStock = useOrderFilmStock(record?.order_id == null ? null : Number(record.order_id));
+  const sheetStock = useOrderSheetStock(record?.order_id == null ? null : Number(record.order_id));
   const orderFilmMaterialRows = useMemo(
     () => buildOrderFilmMaterialRows(details as any, bathFilmUsage, filmsMap),
     [bathFilmUsage, details, filmsMap],
@@ -3762,6 +3768,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 12 }}>
                         <div>
                           <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Пленка</div>
+                          {filmStock.allowed && <div style={{ marginBottom: 6 }}><OrderFilmStockCaption {...filmStock} /></div>}
                           <Table
                             dataSource={orderFilmMaterialRows}
                             rowKey="key"
@@ -3769,7 +3776,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                             pagination={false}
                             bordered
                             loading={bathCutJobsLoading}
-                            scroll={{ x: 680 }}
+                            tableLayout="fixed"
                             locale={{
                               emptyText: cutColumnEnabled ? 'Нет данных по пленке' : 'Нет доступа к данным раскроя',
                             }}
@@ -3783,6 +3790,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                 title: 'м²',
                                 dataIndex: 'totalArea',
                                 key: 'totalArea',
+                                width: ORDER_FILM_COLUMN_WIDTH.number,
                                 align: 'right' as const,
                                 render: (value: number) => formatNumber(value, 2),
                               },
@@ -3790,12 +3798,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                 title: 'Детали',
                                 dataIndex: 'detailsCount',
                                 key: 'detailsCount',
+                                width: ORDER_FILM_COLUMN_WIDTH.number,
                                 align: 'center' as const,
                               },
                               {
                                 title: 'Пог. м',
                                 dataIndex: 'bathLinearMeters',
                                 key: 'bathLinearMeters',
+                                width: ORDER_FILM_COLUMN_WIDTH.number,
                                 align: 'right' as const,
                                 render: (value: number) => value > 0 ? formatNumber(value, 1) : '—',
                               },
@@ -3803,6 +3813,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                 title: 'Листы',
                                 dataIndex: 'bathSheets',
                                 key: 'bathSheets',
+                                width: ORDER_FILM_COLUMN_WIDTH.sheets,
                                 align: 'center' as const,
                                 render: (value: number) => value > 0 ? value : '—',
                               },
@@ -3810,10 +3821,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                 title: 'Раскрои',
                                 dataIndex: 'cutJobIds',
                                 key: 'cutJobIds',
+                                width: ORDER_FILM_COLUMN_WIDTH.cutJobs,
                                 render: (value: number[]) => (
-                                  <CutJobLinks cutJobIds={value} cutJobNameById={cutJobNameById} />
+                                  <CutJobLinks compact cutJobIds={value} cutJobNameById={cutJobNameById} />
                                 ),
                               },
+                              ...(filmStock.allowed ? orderFilmStockColumns<(typeof orderFilmMaterialRows)[number]>(filmStock.byFilmId) : []),
                             ]}
                             summary={(data) => {
                               const totalArea = data.reduce((sum, item) => sum + item.totalArea, 0);
@@ -3839,6 +3852,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                     <strong>{totalSheets > 0 ? totalSheets : '—'}</strong>
                                   </Table.Summary.Cell>
                                   <Table.Summary.Cell index={5} />
+                                  {filmStock.allowed && <><Table.Summary.Cell index={6} /><Table.Summary.Cell index={7} /></>}
                                 </Table.Summary.Row>
                               );
                             }}
@@ -3846,6 +3860,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         </div>
                         <div>
                           <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Листовые материалы</div>
+                          {sheetStock.allowed && <div style={{ marginBottom: 6 }}><OrderSheetStockCaption {...sheetStock} /></div>}
                           <Table
                             dataSource={orderSheetMaterialRows}
                             rowKey="key"
@@ -3872,6 +3887,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                 key: 'detailsCount',
                                 align: 'center' as const,
                               },
+                              ...(sheetStock.allowed ? orderSheetStockColumns<(typeof orderSheetMaterialRows)[number]>(sheetStock.byId) : []),
                             ]}
                             summary={(data) => {
                               const totalArea = data.reduce((sum, item) => sum + item.totalArea, 0);
@@ -3888,6 +3904,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                   <Table.Summary.Cell index={2} align="center">
                                     <strong>{totalDetails}</strong>
                                   </Table.Summary.Cell>
+                                  {sheetStock.allowed && <><Table.Summary.Cell index={3} /><Table.Summary.Cell index={4} /></>}
                                 </Table.Summary.Row>
                               );
                             }}

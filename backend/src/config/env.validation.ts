@@ -444,6 +444,14 @@ export const envSchema = z
     BACKEND_ENABLE_ONEC_AGENT: booleanFromEnv.default(false),
     // Импорт каталога плёнок из 1С (миграции 202, 212); до включения применить миграции.
     BACKEND_FILM_CATALOG_IMPORT_ENABLED: booleanFromEnv.default(false),
+    // Склад плёнки (миграции 203, 205, 206, 217); до включения применить миграции.
+    BACKEND_INVENTORY_ENABLED: booleanFromEnv.default(false),
+    BACKEND_INVENTORY_ONEC_AUTOSYNC: booleanFromEnv.default(false),
+    BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID: z
+      .union([emptyTrimmedStringFromEnv, z.coerce.number().int().positive()])
+      .optional(),
+    // Расход склада из документов 1С (проекция; исполнитель — BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID).
+    BACKEND_INVENTORY_ONEC_CONSUMPTION: booleanFromEnv.default(false),
     ONEC_AGENT_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
     /** Shared secret Traefik adds to agent requests; proves the request came through the mTLS router. */
     ONEC_INGRESS_SECRET: optionalTrimmedStringFromEnv,
@@ -806,6 +814,20 @@ export const envSchema = z
       });
     }
 
+    if (env.BACKEND_INVENTORY_ONEC_AUTOSYNC && !env.BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID'],
+        message: 'required when BACKEND_INVENTORY_ONEC_AUTOSYNC=true',
+      });
+    }
+    if (env.BACKEND_INVENTORY_ONEC_CONSUMPTION && !env.BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID'],
+        message: 'required when BACKEND_INVENTORY_ONEC_CONSUMPTION=true',
+      });
+    }
     if (env.BACKEND_ENABLE_ONEC_AGENT) {
       for (const key of ['DATABASE_URL', 'ONEC_INGRESS_SECRET'] as const) {
         if (!env[key]) {

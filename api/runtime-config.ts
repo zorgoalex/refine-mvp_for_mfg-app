@@ -26,6 +26,8 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
       // Stage deployment enables the film catalog UI by default (the API stays gated by the backend
       // flag); production needs an explicit RUNTIME_CONFIG_FILM_CATALOG_IMPORT value.
       filmCatalogImport: readBooleanEnv(process.env.RUNTIME_CONFIG_FILM_CATALOG_IMPORT, isStageRuntime(req)),
+      // Склад: тот же принцип — на stage включён по умолчанию, на проде нужен RUNTIME_CONFIG_INVENTORY=true.
+      inventory: readBooleanEnv(process.env.RUNTIME_CONFIG_INVENTORY, isStageRuntime(req)),
     },
   };
 

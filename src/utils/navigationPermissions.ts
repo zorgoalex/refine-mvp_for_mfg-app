@@ -18,6 +18,8 @@ export const SETTINGS_CATEGORY_PERMISSIONS: PermissionName[] = [
 
 export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   onec_purchase_documents: ['procurement.view'],
+  'film-inventory': ['inventory.view'],
+  'inventory-warehouses': ['inventory.view'],
   orders_view: ['orders.view'],
   'orders-trash': ['orders.delete'],
   calendar: ['calendar.view'],

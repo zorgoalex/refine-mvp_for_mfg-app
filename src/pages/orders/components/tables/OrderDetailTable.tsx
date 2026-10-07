@@ -100,6 +100,9 @@ import {
 import { useDeferredWorkspaceEditingKey } from '../../../../workspace/useDeferredWorkspaceEditingKey';
 import { millingTypeDimensionWarning } from '../../../../utils/millingTypeDimensions';
 import { newDetailMaterialDefault } from '../../newDetailMaterialDefault';
+import { useQuery } from '@tanstack/react-query';
+import { inventoryApi } from '../../../../api/inventoryApi';
+import { filmStockBadgeFor, ORDER_FILM_STOCK_REFRESH, orderFilmStockKey } from '../../../inventory/filmStock';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -830,6 +833,17 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const useBackendReferences = orderFormData.enabled;
   const bazisCutLinkEnabled = featureFlags.bazisCut && can('cut.view');
   const bazisProjectLinkEnabled = featureFlags.useBackendBazis && can('bazis.view');
+  const inventoryViewAllowed = featureFlags.inventory && can('inventory.view');
+  const filmStockQuery = useQuery({
+    queryKey: orderFilmStockKey(header?.order_id),
+    queryFn: () => inventoryApi.orderFilmStock(header.order_id!),
+    enabled: inventoryViewAllowed && Number.isInteger(header?.order_id) && (header?.order_id ?? 0) > 0,
+    ...ORDER_FILM_STOCK_REFRESH,
+  });
+  const stockByFilmId = useMemo(
+    () => new Map((filmStockQuery.data?.items ?? []).map((item) => [item.filmId, item.stockLm])),
+    [filmStockQuery.data],
+  );
 
   // SP3: sheet picker gating (backend write + sheet_materials.view) + order-era
   // eligibility (create OR loaded order's sheet_eligible !== false).
@@ -2361,13 +2375,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           </Form.Item>
         ) : (
           <span style={{ fontSize: '11px' }}>
-            {getDisplayedField(d, 'film_id') ? (
-              <FilmCell
-                filmId={getDisplayedField(d, 'film_id')!}
-                namesById={filmNameById}
-                loading={referencesLoading}
-              />
-            ) : '—'}
+            {getDisplayedField(d, 'film_id') ? <>
+              <FilmCell filmId={getDisplayedField(d, 'film_id')!} namesById={filmNameById} loading={referencesLoading} />
+              {inventoryViewAllowed && editingKey === null && (() => {
+                // Метка — только по полученному ответу: при загрузке, ошибке и у несохранённого заказа её нет.
+                const badge = filmStockBadgeFor(filmStockQuery.isSuccess, stockByFilmId, getDisplayedField(d, 'film_id'));
+                return badge ? <Tag color={badge.kind === 'none' ? 'red' : 'blue'} style={{ marginInlineStart: 4 }}>{badge.label}</Tag> : null;
+              })()}
+            </> : '—'}
           </span>
         );
       },

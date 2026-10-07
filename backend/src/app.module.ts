@@ -39,6 +39,7 @@ import { RequestContextModule } from './common/request-context/request-context.m
 import { PerformanceModule } from './performance/performance.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { OnecAgentModule } from './modules/onec-agent/onec-agent.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
 import { OnecSyncModule } from './modules/onec-sync/onec-sync.module';
 import { MdfBoardModule } from './modules/mdf-board/mdf-board.module';
 
@@ -86,6 +87,7 @@ import { MdfBoardModule } from './modules/mdf-board/mdf-board.module';
     PermissionsModule,
     WhatsAppModule,
     OnecAgentModule,
+    InventoryModule,
     OnecSyncModule,
     MdfBoardModule,
   ],

@@ -108,6 +108,8 @@ export const PERMISSIONS = [
   'requirements.delete',
   'procurement.view',
   'procurement.manage',
+  'inventory.view',
+  'inventory.manage',
 
   'doweling.view',
   'doweling.create',
@@ -295,6 +297,8 @@ export const ROLE_PERMISSIONS = {
     'requirements.delete',
     'procurement.view',
     'procurement.manage',
+    'inventory.view',
+    'inventory.manage',
 
     'doweling.view',
     'doweling.create',
@@ -378,6 +382,7 @@ export const ROLE_PERMISSIONS = {
     'requirements.create',
     'requirements.update',
     'procurement.view',
+    'inventory.view',
 
     'doweling.view',
     'doweling.create',
