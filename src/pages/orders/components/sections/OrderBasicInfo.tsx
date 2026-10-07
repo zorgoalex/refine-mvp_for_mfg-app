@@ -391,7 +391,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
 
   return (
     <>
-      <Form layout="vertical">
+      <Form layout="vertical" className="order-basic-form">
         {/* Row 1: Автообновление, Клиент, Название заказа, Дата заказа */}
         <Row gutter={16}>
           <Col span={7}>
@@ -560,13 +560,13 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
         </Row>
 
         {projectField ? (
-          <Row gutter={16}>
+          <Row gutter={16} className="order-basic-form__project">
             <Col span={7}>{projectField}</Col>
           </Row>
         ) : null}
 
         {/* Row 4: Присадки */}
-        <Row gutter={16}>
+        <Row gutter={16} className="order-basic-form__doweling">
           <Col span={24}>
             <Form.Item
               label="Присадки"

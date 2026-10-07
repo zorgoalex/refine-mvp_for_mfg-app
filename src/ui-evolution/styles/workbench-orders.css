@@ -2105,3 +2105,219 @@
   margin-top: -20px;
   font-size: 12px;
 }
+
+/* === Форма заказа: содержимое разделов (макет 05) ===
+   Каркас формы (шапка, якоря, пронумерованные разделы) задан выше; здесь — поля, панель и таблица
+   деталей, услуги, финансы и платежи внутри разделов. Только оформление. */
+
+/* поля: мелкая спокойная подпись, плотный шаг между строками */
+:root[data-ui-variant="workbench"] .wb-form-section .ant-form-vertical .ant-form-item {
+  margin-bottom: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-form-vertical .ant-form-item-label {
+  padding-bottom: 3px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-form-vertical .ant-form-item-label > label {
+  height: 18px;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-form-item-with-help .ant-form-item-explain {
+  min-height: 12px;
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section textarea.ant-input {
+  min-height: 56px;
+  height: 56px;
+}
+
+/* «Клиент и срок»: проект и присадки стоят в одну строку, а не двумя пустыми полосами */
+:root[data-ui-variant="workbench"] .wb-form-section .order-basic-form {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 17fr);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-basic-form > * {
+  grid-column: 1 / -1;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-basic-form > .order-basic-form__project {
+  grid-column: 1;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-basic-form > .order-basic-form__project > .ant-col {
+  flex: 0 0 100%;
+  max-width: 100%;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-basic-form > .order-basic-form__project + .order-basic-form__doweling {
+  grid-column: 2;
+}
+
+/* «Детали»: таблица без вложенной карточки, сетка в тонах NewLine */
+:root[data-ui-variant="workbench"] .wb-form-section .order-form-details-section > .ant-card,
+:root[data-ui-variant="workbench"] .wb-form-section .wb-form-section__body > .ant-space > .ant-space-item > .ant-card {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-form-details-section > .ant-card > .ant-card-body,
+:root[data-ui-variant="workbench"] .wb-form-section .wb-form-section__body > .ant-space > .ant-space-item > .ant-card > .ant-card-body {
+  padding: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table {
+  --order-detail-grid-accent: var(--evo-primary);
+  --order-detail-grid-line: var(--evo-border);
+  --order-detail-grid-header: var(--evo-surface-muted);
+  --order-detail-grid-index: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-thead > tr > th {
+  color: var(--evo-text-secondary);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-tbody > tr > td,
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell {
+  height: 28px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-toolbar__content .ant-btn {
+  min-width: 32px;
+  min-height: 32px;
+  height: 32px;
+  border-color: var(--evo-border);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+/* пустые ячейки вертикального стека (места под модальные окна) не дают отступов под таблицей */
+:root[data-ui-variant="workbench"] .wb-form-section .order-form-details-section .ant-space-vertical > .ant-space-item:empty {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper.order-details-table {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-pagination.ant-pagination {
+  margin: 8px 0 0;
+}
+
+/* вторичные «главные» кнопки внутри разделов — мягкий акцент: основная кнопка формы одна, «Сохранить» */
+:root[data-ui-variant="workbench"] .wb-form-section .wb-form-section__body .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous) {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--evo-primary) 12%, var(--evo-surface));
+  box-shadow: none;
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .wb-form-section__body .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous):hover {
+  background: color-mix(in srgb, var(--evo-primary) 20%, var(--evo-surface));
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .app-table-horizontal-edge-button {
+  background: color-mix(in srgb, var(--evo-primary) 14%, var(--evo-surface));
+  color: var(--evo-primary);
+}
+
+/* «Услуги и товары» и платежи: простые таблицы с одной тонкой линией */
+:root[data-ui-variant="workbench"] .wb-form-section .ant-select-lg {
+  min-height: 0 !important;
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-select-lg:not(.ant-select-customize-input) .ant-select-selector {
+  height: 34px;
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-select-lg .ant-select-selection-search-input,
+:root[data-ui-variant="workbench"] .wb-form-section .ant-select-lg .ant-select-selection-placeholder,
+:root[data-ui-variant="workbench"] .wb-form-section .ant-select-lg .ant-select-selection-item {
+  height: 32px;
+  line-height: 32px;
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table {
+  background: transparent;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-thead > tr > th {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--evo-border);
+  background: transparent;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: start;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-thead > tr > th::before {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-tbody > tr > td,
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-summary > tr > td {
+  padding: 7px 10px;
+  border-inline: 0;
+  border-bottom: 1px solid var(--evo-border);
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-container,
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-container table,
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-thead > tr > th {
+  border-inline: 0 !important;
+  border-top: 0 !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-tbody > tr.ant-table-row > td {
+  background-color: transparent !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-tbody > tr.ant-table-row:hover > td {
+  background-color: color-mix(in srgb, var(--evo-primary) 4%, var(--evo-surface)) !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-placeholder > td {
+  padding: 14px 10px;
+  background: transparent !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-placeholder .ant-empty {
+  margin: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-placeholder .ant-empty-image {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-footer {
+  padding: 8px 10px;
+  border-radius: 0;
+  background: transparent;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* «Финансы»: поля без серой подложки */
+:root[data-ui-variant="workbench"] .wb-form-section .wb-form-section__body > .ant-space > .ant-space-item > div:has(> form.ant-form-small) {
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
