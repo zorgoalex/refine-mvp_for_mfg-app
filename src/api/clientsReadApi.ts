@@ -20,6 +20,36 @@ export const clientsReadApi = {
   },
 };
 
+/** Заказ клиента во вкладке «Документы ERP»; денег нет, если у пользователя нет права видеть финансы заказов. */
+export interface ClientOrder {
+  orderId: number;
+  orderName: string;
+  fullNumber: string | null;
+  orderDate: string | null;
+  orderStatusName: string | null;
+  productionStatusName: string | null;
+  paymentStatusName: string | null;
+  finalAmount?: number;
+  paidAmount?: number;
+  debtAmount?: number;
+}
+
+export interface ClientOrdersResponse {
+  data: ClientOrder[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  /** Какие заказы показаны: все заказы клиента или только свои (автор или менеджер). */
+  scope: 'all' | 'own';
+  /** Итог по всем страницам; нет без права видеть финансы. */
+  summary?: { finalAmount: number; paidAmount: number; debtAmount: number };
+}
+
+/** Карточка клиента, «Документы ERP»: область видимости заказов применяет backend. */
+export const clientOrdersApi = {
+  list(clientId: number, page: number, pageSize: number): Promise<ClientOrdersResponse> {
+    return httpClient.get<ClientOrdersResponse>(withQuery(apiRoutes.clientsRead.orders(clientId), { page, pageSize }));
+  },
+};
+
 export type ClientPersonTypeCode = 'individual' | 'legal';
 export type ClientRecencySegment = 'active' | 'sleeping' | 'lost' | 'no_orders';
 export type ClientFrequencyBucket = '1' | '2-3' | '4-9' | '10+';
