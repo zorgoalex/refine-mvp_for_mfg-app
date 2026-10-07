@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
@@ -70,7 +72,7 @@ describe.skipIf(!databaseUrl)('PgUserRepository authorization protocol (PostgreS
     const ids = [superadminId, adminId, viewerId].filter(Boolean);
     await pool.query(`DELETE FROM outbox_events WHERE aggregate_type = 'user' AND aggregate_id = ANY($1::text[])`, [ids.map(String)]);
     await pool.query(`DELETE FROM command_idempotency_keys WHERE idempotency_key LIKE 'users:${PREFIX}%'`);
-    await pool.query(`DELETE FROM audit_log WHERE request_id IN ('it-cycle', 'it-race', 'it-race-retry')`);
+    await pool.query(`DELETE FROM audit_log WHERE request_id IN ('it-cycle', 'it-race', 'it-race-retry', 'it-migr-matrix')`);
     await pool.query('DELETE FROM audit_log WHERE entity_type = $1 AND entity_id = ANY($2::text[])', ['user', ids.map(String)]);
     await pool.query('DELETE FROM auth_sessions WHERE user_id = ANY($1::bigint[])', [ids]);
     await pool.query('DELETE FROM users WHERE username LIKE $1', [`${PREFIX}%`]);
@@ -245,4 +247,56 @@ describe.skipIf(!databaseUrl)('PgUserRepository authorization protocol (PostgreS
     }
     expect(await count(`SELECT count(*) AS n FROM audit_log WHERE request_id = 'it-race-retry'`, [])).toBe(0);
   });
+  it('seed raises the permissions version when it adds grants, so old tokens refresh (0A.3 R1)', async () => {
+    const permissions = new PermissionsService(database);
+    const versionOf = async () => Number((await pool.query('SELECT version FROM permissions_state WHERE id = true')).rows[0].version);
+    // A grant of the static matrix is missing (backend newer than the database): seed adds it and bumps the version.
+    const removed = await pool.query(
+      `DELETE FROM role_permissions WHERE role_id = 1 AND permission_name = 'groups.batch_link' RETURNING is_enabled`,
+    );
+    const before = await versionOf();
+    await permissions.seedDefaults();
+    expect(await versionOf()).toBe(before + (removed.rowCount ? 1 : 0));
+    expect((await pool.query(`SELECT is_enabled FROM role_permissions WHERE role_id = 1 AND permission_name = 'groups.batch_link'`)).rows[0].is_enabled).toBe(true);
+    // Nothing new: no bump.
+    const steady = await versionOf();
+    await permissions.seedDefaults();
+    expect(await versionOf()).toBe(steady);
+  });
+
+  it('migration 249 and a roles-matrix save run concurrently without a lock cycle (0A.3 R2)', async () => {
+    const migration = readFileSync(resolve(__dirname, '../../../../db/migrations/249_role_checks_to_permissions.sql'), 'utf8');
+    const permissions = new PermissionsService(database);
+    const holder = await pool.connect();
+    const migrator = await pool.connect();
+    const within = <T>(promise: Promise<T>, ms: number) => Promise.race([
+      promise, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms)),
+    ]);
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT version FROM permissions_state WHERE id = true FOR UPDATE');
+      // The matrix queues on permissions_state first; the migration comes second. With the old migration order
+      // (catalog rows, then state) it would hold the catalog the matrix's seed needs while queued behind the matrix.
+      const version = Number((await pool.query('SELECT version FROM permissions_state WHERE id = true')).rows[0].version);
+      const matrix = permissions.updateRolesMatrix(
+        { id: String(superadminId), username: `${PREFIX}-superadmin`, role: 'superadmin', roleId: 2, permissions: ['system.superadmin', 'permissions.manage', 'roles.manage'] },
+        { version, rolePermissions: {}, roleScopes: {} },
+        'it-migr-matrix',
+      ).then((value) => value, (error: unknown) => error);
+      await new Promise((done) => setTimeout(done, 300));
+      const migrating = migrator.query(migration).then(() => null, (error: unknown) => error);
+      await new Promise((done) => setTimeout(done, 300));
+      await holder.query('COMMIT');
+      // Both complete; neither is chosen as a deadlock victim (the matrix may meet a moved version: 409 is fine).
+      const migrationOutcome = await within(migrating, 15_000);
+      expect(migrationOutcome).toBeNull();
+      const outcome = await within(matrix, 15_000);
+      expect((outcome as { code?: string }).code).not.toBe('40P01');
+      if (outcome instanceof Error) expect((outcome as { code?: string }).code).toBe('PERMISSIONS_VERSION_CONFLICT');
+    } finally {
+      await holder.query('ROLLBACK').catch(() => undefined);
+      holder.release();
+      migrator.release();
+    }
+  }, 40_000);
 });

@@ -583,15 +583,19 @@ export class PermissionsService {
         rolePermissionValues.push(`($${base + 1}, $${base + 2}, $${base + 3})`);
       }
     }
+    // Grants a role did not have before (a new permission of a newer backend): counted to invalidate tokens below.
+    let grantsAdded = 0;
     if (rolePermissionValues.length > 0) {
-      await target.query(
+      const inserted = await target.query<{ is_enabled: boolean } & QueryResultRow>(
         `
         INSERT INTO role_permissions (role_id, permission_name, is_enabled)
         VALUES ${rolePermissionValues.join(', ')}
         ON CONFLICT (role_id, permission_name) DO NOTHING
+        RETURNING is_enabled
         `,
         rolePermissionParams,
       );
+      grantsAdded += (inserted?.rows ?? []).filter((row) => row.is_enabled === true).length;
     }
 
     const scopeParams: unknown[] = [];
@@ -607,14 +611,16 @@ export class PermissionsService {
       }
     }
     if (scopeValues.length > 0) {
-      await target.query(
+      const insertedScopes = await target.query<{ scope_value: string } & QueryResultRow>(
         `
         INSERT INTO role_policy_scopes (role_id, scope_key, scope_value)
         VALUES ${scopeValues.join(', ')}
         ON CONFLICT (role_id, scope_key) DO NOTHING
+        RETURNING scope_value
         `,
         scopeParams,
       );
+      grantsAdded += (insertedScopes?.rows ?? []).filter((row) => row.scope_value !== 'none').length;
     }
 
     await target.query(
@@ -624,6 +630,11 @@ export class PermissionsService {
       ON CONFLICT (id) DO NOTHING
       `,
     );
+    // New grants change effective authorization: tokens issued before them must refresh (access groups 0A.3 R1).
+    // Whether the backend or the migration that grants them came first, the version moves exactly when rows appear.
+    if (grantsAdded > 0) {
+      await target.query('UPDATE permissions_state SET version = version + 1, updated_at = now() WHERE id = true');
+    }
   }
 
   private requireDatabase(): DatabaseService {

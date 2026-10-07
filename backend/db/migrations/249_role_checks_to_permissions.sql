@@ -10,6 +10,10 @@ BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '60s';
 
+-- Lock order of authorization changes (access groups plan §5.1): permissions_state first, as the roles matrix does
+-- before its seed — otherwise this migration (catalog → state) and a matrix save (state → catalog) can deadlock.
+SELECT version FROM public.permissions_state WHERE id = true FOR UPDATE;
+
 INSERT INTO public.permissions_catalog
   (permission_name, domain, label, description, sort_order, is_dangerous, is_active)
 SELECT v.permission_name, v.domain, v.label, v.description,

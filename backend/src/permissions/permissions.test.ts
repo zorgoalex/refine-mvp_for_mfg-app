@@ -298,6 +298,13 @@ describe('permissions foundation', () => {
     }
   });
 
+  it('keeps the permissions of the former role-name checks in the OpenAPI PermissionName enum (0A.3)', () => {
+    const contractPermissions = readPermissionNameEnum(readOpenApiContract());
+    for (const permission of ['bitrix24.requests.view_all', 'bitrix24.requests.view_assigned', 'groups.batch_link']) {
+      expect(contractPermissions).toContain(permission);
+    }
+  });
+
   it('keeps label permissions in the static OpenAPI PermissionName enum', () => {
     const contract = readOpenApiContract();
     const contractPermissions = readPermissionNameEnum(contract);

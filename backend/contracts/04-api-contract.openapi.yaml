@@ -23084,6 +23084,8 @@ components:
         - groups.archive
         - groups.manage_links
         - groups.batch_link
+        - bitrix24.requests.view_all
+        - bitrix24.requests.view_assigned
         - groups.view_history
         - groups.members.view
         - groups.members.manage
