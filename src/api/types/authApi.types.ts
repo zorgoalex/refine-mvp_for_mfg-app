@@ -44,6 +44,8 @@ export type PermissionName =
   | 'payments.onec.view'
   | 'payments.onec.manage'
   | 'clients.analytics.view'
+  | 'clients.onec_data.view'
+  | 'clients.onec_documents.view'
   | 'vlm.use'
   | 'vlm.configure'
   | 'settings.view'

@@ -305,6 +305,15 @@ describe('permissions foundation', () => {
     }
   });
 
+  it('keeps the 1C data permissions of the client card in the OpenAPI PermissionName enum, for manager and above only', () => {
+    const contractPermissions = readPermissionNameEnum(readOpenApiContract());
+    for (const permission of ['clients.onec_data.view', 'clients.onec_documents.view'] as const) {
+      expect(contractPermissions).toContain(permission);
+      for (const role of ['superadmin', 'admin', 'top_manager', 'manager'] as const) expect(can(role, permission)).toBe(true);
+      for (const role of ['operator', 'worker', 'packer', 'viewer', 'onec_operator'] as const) expect(can(role, permission)).toBe(false);
+    }
+  });
+
   it('keeps label permissions in the static OpenAPI PermissionName enum', () => {
     const contract = readOpenApiContract();
     const contractPermissions = readPermissionNameEnum(contract);

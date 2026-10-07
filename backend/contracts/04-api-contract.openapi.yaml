@@ -23146,6 +23146,8 @@ components:
         - groups.archive
         - groups.manage_links
         - groups.batch_link
+        - clients.onec_data.view
+        - clients.onec_documents.view
         - bitrix24.requests.view_all
         - bitrix24.requests.view_assigned
         - groups.view_history

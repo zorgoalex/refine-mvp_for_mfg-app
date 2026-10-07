@@ -202,6 +202,12 @@ export const PERMISSIONS = [
   'bitrix24.requests.view_assigned',
   /** Batch linking of entities to a group (was the role list admin/top_manager). */
   'groups.batch_link',
+
+  // 1C counterparty data of a client (user decision 2026-10-08: manager and above). Appended.
+  /** Phones, emails, addresses and tax number of the matched 1C counterparty in the client card. */
+  'clients.onec_data.view',
+  /** «Документы 1С» of the matched counterparty in the client card (amounts also need orders.view_financials). */
+  'clients.onec_documents.view',
 ] as const;
 
 export type PermissionName = (typeof PERMISSIONS)[number];
@@ -265,6 +271,8 @@ export const ROLE_PERMISSIONS = {
     'clients.create',
     'clients.update',
     'clients.analytics.view',
+    'clients.onec_data.view',
+    'clients.onec_documents.view',
 
     'bitrix24.requests.view',
     'bitrix24.requests.view_all',
@@ -366,6 +374,8 @@ export const ROLE_PERMISSIONS = {
     'clients.create',
     'clients.update',
     'clients.analytics.view',
+    'clients.onec_data.view',
+    'clients.onec_documents.view',
 
     'bitrix24.requests.view',
     'bitrix24.requests.view_assigned',
