@@ -1177,6 +1177,64 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '409': {description: 'SUPPLIER_NAME_TAKEN (details.supplierId)'}
         '422': {description: 'SUPPLIER_COUNTERPARTY_UNKNOWN or VALIDATION_ERROR'}
+  /api/v1/clients/{id}/counterparty:
+    get:
+      tags: [Party contacts]
+      operationId: getClientCounterparty
+      summary: 'The 1C counterparty a client is linked to'
+      description: 'counterparty is null when there is no link, or when the stored key is not in the loaded 1C data (deleted or marked for deletion there).'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Link, content: {application/json: {schema: {$ref: '#/components/schemas/ClientCounterpartyLink'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'CLIENT_NOT_FOUND'}
+    put:
+      tags: [Party contacts]
+      operationId: setClientCounterparty
+      summary: 'Link, relink or unlink a client and a 1C counterparty'
+      description: 'One counterparty for a client and one client for a counterparty. Compare-and-swap on the key the caller saw (expectedRefKey1c). The key already being the new one is a silent repeat. Only a counterparty of the loaded 1C data can be linked; unlinking works without 1C data.'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.update]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [refKey1c, expectedRefKey1c]
+              properties:
+                refKey1c: {type: string, format: uuid, nullable: true, description: 'null = unlink'}
+                expectedRefKey1c: {type: string, format: uuid, nullable: true}
+      responses:
+        '200': {description: Link, content: {application/json: {schema: {$ref: '#/components/schemas/ClientCounterpartyLink'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'CLIENT_NOT_FOUND'}
+        '409': {description: 'CLIENT_COUNTERPARTY_CONFLICT (details.refKey1c = the current key) or CLIENT_COUNTERPARTY_TAKEN (details.clientId, details.clientName = the holder)'}
+        '422': {description: 'CLIENT_COUNTERPARTY_UNKNOWN or VALIDATION_ERROR'}
+  /api/v1/clients/{id}/counterparty-candidates:
+    get:
+      tags: [Party contacts]
+      operationId: listClientCounterpartyCandidates
+      summary: '1C counterparties to choose from for a client'
+      description: 'With search — by name, code, BIN/IIN or phone digits (at most 50). Without it — the counterparties that look like the client (at most 10): the same name, the same phone, a similar name. Not folders, not marked for deletion, still in the source. Requires the right to change clients: the search opens the whole 1C counterparty directory.'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.update]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: search, in: query, required: false, schema: {type: string, maxLength: 100}}
+      responses:
+        '200': {description: Counterparties, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/ClientCounterpartyCandidate'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'CLIENT_NOT_FOUND'}
   /api/v1/employees/{employeeId}/contacts:
     get:
       tags: [Employees]
@@ -31322,6 +31380,34 @@ components:
         supplierName: {type: string}
         refKey1c: {type: string, format: uuid, nullable: true}
         counterpartyName: {type: string, nullable: true}
+    OnecCounterpartyCard:
+      type: object
+      required: [refKey1c, name, code, bin, isBuyer, phones]
+      properties:
+        refKey1c: {type: string, format: uuid}
+        name: {type: string}
+        code: {type: string, nullable: true}
+        bin: {type: string, nullable: true, description: 'BIN/IIN as 1C has it'}
+        isBuyer: {type: boolean, nullable: true}
+        phones: {type: array, items: {type: string}}
+    ClientCounterpartyCandidate:
+      allOf:
+        - {$ref: '#/components/schemas/OnecCounterpartyCard'}
+        - type: object
+          required: [matchedBy, clientId, clientName]
+          properties:
+            matchedBy: {type: array, items: {type: string, enum: [name, phone, similar]}, description: 'Why it is offered; empty for a text search'}
+            clientId: {type: integer, nullable: true, description: 'The client already linked to this counterparty'}
+            clientName: {type: string, nullable: true}
+    ClientCounterpartyLink:
+      type: object
+      required: [clientId, clientName, refKey1c, available, counterparty]
+      properties:
+        clientId: {type: integer}
+        clientName: {type: string}
+        refKey1c: {type: string, format: uuid, nullable: true}
+        available: {type: boolean, description: 'Counterparties of 1C are loaded'}
+        counterparty: {allOf: [{$ref: '#/components/schemas/OnecCounterpartyCard'}], nullable: true}
     EmployeeContacts:
       type: object
       required: [employeeId, version, contacts]

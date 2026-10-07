@@ -3,7 +3,7 @@ import React, { useState, useCallback, useEffect } from "react";
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, ShowButton, EditButton, CreateButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Space, Badge, Input, Button, message } from "antd";
+import { Space, Badge, Input, Button, Tag, Typography, message } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { HasuraReportError } from "../../api/hasuraReportClient";
@@ -252,7 +252,11 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
             { text: "Неактивен", value: false },
           ]}
         />
-        <Table.Column dataIndex="ref_key_1c" title="1С-key" />
+        <Table.Column
+          dataIndex="ref_key_1c"
+          title="Контрагент 1С"
+          render={(value: string | null) => (value ? <Tag color="green">сопоставлен</Tag> : <Typography.Text type="secondary">—</Typography.Text>)}
+        />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (

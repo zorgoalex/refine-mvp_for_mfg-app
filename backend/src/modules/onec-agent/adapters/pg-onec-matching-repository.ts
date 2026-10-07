@@ -1,25 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { QueryResultRow } from 'pg';
 import { DatabaseService } from '../../../database/database.service';
+import { normalizedName, normalizedPhone } from '../domain/onec-matching-sql';
 
 /**
  * Read-only matching of the 1C copy against ERP reference data (plan §9 «Сопоставление»): nothing is
  * written anywhere. ERP has no BIN and no 1C keys yet (clients.ref_key_1c is empty), so a counterparty
  * is matched by the 1C key when present, by normalized name, and — for clients — by phone.
  */
-
-/**
- * Lowercase, drop quotes and legal-form words, collapse everything but letters/digits to single spaces.
- * Kazakh letters (ә ғ қ ң ө ұ ү һ і) are letters: «Қанат» and «Ғанат» stay different.
- */
-const normalizedName = (expr: string) =>
-  `btrim(regexp_replace(regexp_replace(regexp_replace(lower(coalesce(${expr}, '')), '[«»"''“”„\`]', '', 'g'),
-     '(^|\\s)(тоо|ип|ао|оао|зао|ооо|пк|кх|too|llp|ip)(?=\\s|$)', ' ', 'g'), '[^0-9a-zа-яёәғқңөұүһі]+', ' ', 'g'))`;
-/**
- * KZ numbers: all digits, the first 11 (an extension typed after the number is dropped), then the last
- * 10 (+7 / 8 prefix does not matter). "+7 (701) 555-44-33", "87015554433", "87015554433-123" → 7015554433.
- */
-const normalizedPhone = (expr: string) => `right(left(regexp_replace(coalesce(${expr}, ''), '\\D', '', 'g'), 11), 10)`;
 
 export type CounterpartyMatchStatus = 'matched' | 'ambiguous' | 'unmatched';
 

@@ -774,26 +774,22 @@ const catalogCases: CatalogCase[] = [
             await page.getByRole('radio', { name: 'Юридическое лицо' }).check();
             await fillText(page, 'notes', 'Клиент из workflow-теста');
             await setChecked(page, 'is_active', true);
-            await fillText(page, 'ref_key_1c', 'CLIENT-E2E');
         },
         fillUpdate: async (page) => {
             await fillText(page, 'client_name', 'E2E клиент обновлен');
             await page.getByRole('radio', { name: 'Физическое лицо' }).check();
             await fillText(page, 'notes', 'Клиент обновлен из workflow-теста');
             await setChecked(page, 'is_active', false);
-            await fillText(page, 'ref_key_1c', 'CLIENT-E2E-UPD');
         },
         expectedCreate: {
             person_type: 'legal',
             notes: 'Клиент из workflow-теста',
             is_active: true,
-            ref_key_1c: 'CLIENT-E2E',
         },
         expectedUpdate: {
             person_type: 'individual',
             notes: 'Клиент обновлен из workflow-теста',
             is_active: false,
-            ref_key_1c: 'CLIENT-E2E-UPD',
         },
     },
 ];
@@ -844,7 +840,6 @@ test.describe('Reference workflows', () => {
         await fillText(page, 'client_name', 'E2E клиент с телефоном');
         await fillText(page, 'notes', 'Проверка справочника клиентов');
         await setChecked(page, 'is_active', true);
-        await fillText(page, 'ref_key_1c', 'CLIENT-PHONE-E2E');
 
         const phonesCard = page.locator('.ant-card').filter({ hasText: 'Телефоны' });
         await phonesCard.getByRole('button', { name: 'Добавить' }).click();
@@ -870,7 +865,6 @@ test.describe('Reference workflows', () => {
         expect(client).toMatchObject({
             is_active: true,
             notes: 'Проверка справочника клиентов',
-            ref_key_1c: 'CLIENT-PHONE-E2E',
         });
 
         await expect

@@ -10,6 +10,7 @@ import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 import { CLIENT_PERSON_TYPE_LABELS, ClientPersonType } from "../../types/clients";
 import { ContactsCard } from "../../components/contacts/ContactsCard";
 import { CLIENT_CONTACTS } from "../../components/contacts/partyContactsSources";
+import { ClientCounterpartyCard } from "./ClientCounterpartyCard";
 
 const { Title, Text } = Typography;
 
@@ -120,12 +121,7 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
 
       <Divider />
 
-      <Row gutter={[16, 16]}>
-        <Col span={8}>
-          <Title level={5}>Ключ 1C</Title>
-          <TextField value={record?.ref_key_1c} />
-        </Col>
-      </Row>
+      <ClientCounterpartyCard clientId={Number(record?.client_id) || null} editable={false} />
 
       <Divider />
 
