@@ -81,6 +81,25 @@ describe('desiredForDocument', () => {
     expect([...result.desired].sort()).toEqual([[K, -500], [stockKey(7, 100), 500]].sort());
   });
 
+  it('a purchase receipt is plus on the warehouse of the line, under the same rules as consumption', () => {
+    const receipt = (over: Partial<ConsumptionDocumentView> = {}) => doc({ docKind: 'purchase_receipt', ...over });
+    expect([...desiredForDocument(receipt(), context()).desired]).toEqual([[K, 500]]);
+    // Склад строки, а не шапки; склад без даты начала приход не принимает и не шумит.
+    const other = desiredForDocument(receipt({ warehouseRefKey: W2, lines: [line({ warehouseRefKey: W1 })] }), context({}, { since: null }));
+    expect([...other.desired]).toEqual([[K, 500]]);
+    const silent = desiredForDocument(receipt({ warehouseRefKey: W2, lines: [line({ warehouseRefKey: W2 })] }), context({}, { since: null }));
+    expect(silent.desired.size).toBe(0);
+    expect(silent.issues).toEqual([]);
+    // До отсечки приход уже в количестве инвентаризации; непроведённый — ноль; не плёнка в пог. м — «не связана».
+    expect(desiredForDocument(receipt({ docAt: since }), context()).desired.size).toBe(0);
+    expect(desiredForDocument(receipt({ posted: false }), context()).desired.size).toBe(0);
+    const unlinked = desiredForDocument(receipt({ lines: [line({ nomenclatureRefKey: 'aaaaaaaa-0000-0000-0000-000000000000' })] }), context());
+    expect(unlinked.issues.map((issue) => issue.code)).toEqual(['FILM_UNLINKED']);
+    // Приход и расход одной плёнки складываются в остатке через разные документы: дельты противоположных знаков.
+    expect(projectionDeltas(desiredForDocument(receipt(), context()), new Map()).deltas.get(K)).toBe(500);
+    expect(projectionDeltas(desiredForDocument(null, context()), new Map([[K, 500]])).deltas.get(K)).toBe(-500);
+  });
+
   it('ambiguous source and a closed baseline freeze the warehouse; a foreign source means zero', () => {
     const ambiguous = desiredForDocument(doc(), context({ source: 'ambiguous' }));
     expect([...ambiguous.frozenWarehouses]).toEqual([2]);

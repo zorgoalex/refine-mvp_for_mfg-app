@@ -452,6 +452,8 @@ export const envSchema = z
       .optional(),
     // Расход склада из документов 1С (проекция; исполнитель — BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID).
     BACKEND_INVENTORY_ONEC_CONSUMPTION: booleanFromEnv.default(false),
+    // Приход склада из поступлений 1С — дополнение к проекции расхода (без BACKEND_INVENTORY_ONEC_CONSUMPTION не действует).
+    BACKEND_INVENTORY_ONEC_RECEIPTS: booleanFromEnv.default(false),
     ONEC_AGENT_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
     /** Shared secret Traefik adds to agent requests; proves the request came through the mTLS router. */
     ONEC_INGRESS_SECRET: optionalTrimmedStringFromEnv,
