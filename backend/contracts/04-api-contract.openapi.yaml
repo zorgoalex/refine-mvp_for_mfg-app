@@ -19383,6 +19383,29 @@ paths:
         '400': {description: "VALIDATION_FAILED — a malformed or too long list"}
         '401': {description: Authentication required}
         '403': {description: "Permission denied (audited as clients.list_facts_denied)"}
+  /api/v1/clients/{clientId}/orders:
+    get:
+      tags:
+        - Client Phones
+      operationId: listClientOrders
+      summary: "Orders of one client within the order visibility of the user, with totals over all pages (client card, tab «Документы ERP»; read-only)"
+      security:
+        - {bearerAuth: []}
+      x-permission: clients.view
+      description: >-
+        Requires clients.view and orders.view. Rows, the count and the sums all follow the order visibility of the user:
+        every real order of the client for the scope «all», only the user's own (creator or manager) for «own»;
+        any other scope is refused. Money of the rows and `summary` are present only with orders.view_financials.
+      parameters:
+        - {name: clientId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: page, in: query, required: false, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: pageSize, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200': {description: "{data[{orderId, orderName, fullNumber, orderDate, orderStatusName, productionStatusName, paymentStatusName, finalAmount?, paidAmount?, debtAmount?}], pagination{page, pageSize, total, totalPages}, scope: all|own, summary?{finalAmount, paidAmount, debtAmount}}"}
+        '400': {description: "VALIDATION_FAILED"}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as clients.orders_denied)"}
+        '404': {description: "CLIENT_NOT_FOUND"}
   /api/v1/clients-analytics/dashboard:
     get:
       tags:
