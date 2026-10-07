@@ -20620,10 +20620,18 @@ paths:
       parameters:
         - {name: warehouseId, in: path, required: true, schema: {type: integer, minimum: 1}}
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                includesReceipts: {type: boolean, description: 'Клиент подтверждает, что откат снимает и поступления 1С (остаток может уменьшиться)'}
       responses:
-        '200': {description: '{documents, remaining}; повтор с тем же Idempotency-Key возвращает сохранённый ответ'}
+        '200': {description: '{documents, remaining}; повтор с тем же Idempotency-Key возвращает сохранённый ответ (завершённый ключ — без проверки includesReceipts: повтор ничего не меняет)'}
         '404': {description: WAREHOUSE_NOT_FOUND}
-        '409': {description: 'ONEC_COMPENSATION_SUPERSEDED (прерванный откат, а расход снова включён), IDEMPOTENCY_IN_PROGRESS не возвращается — прерванный откат продолжается'}
+        '409': {description: 'ONEC_COMPENSATION_SUPERSEDED (прерванный откат, а расход снова включён), IDEMPOTENCY_IN_PROGRESS не возвращается — прерванный откат продолжается; ONEC_COMPENSATION_CONFIRM_REQUIRED — приход 1С включён или на складе есть применённое с плюсом, а тело запроса не содержит includesReceipts: true (ничего не изменено)'}
         '422': {description: IDEMPOTENCY_KEY_REUSED}
   /api/v1/orders/{orderId}/sheet-stock:
     get:
