@@ -37,7 +37,7 @@ export interface ProjectionIssue {
 }
 
 export interface DesiredProjection {
-  /** `${w}:${f}` → желаемое в сотых со знаком (расход — минус). */
+  /** `${w}:${f}` → желаемое в сотых со знаком (расход — минус, приход — плюс). */
   desired: Map<string, number>;
   /** Склады, по которым применённое не меняется: `AMBIGUOUS_SOURCE`, `NO_BASELINE`. */
   frozenWarehouses: Set<number>;
@@ -104,7 +104,8 @@ export function desiredForDocument(
     const headerWarehouse = line.warehouseRefKey ?? doc.warehouseRefKey;
     const sides = doc.docKind === 'inventory_transfer'
       ? [{ refKey: headerWarehouse, sign: -1 }, { refKey: doc.destinationWarehouseRefKey, sign: 1 }]
-      : [{ refKey: headerWarehouse, sign: -1 }];
+      // Поступление от поставщика — приход на склад строки (как оформлено в 1С); остальные виды — расход.
+      : [{ refKey: headerWarehouse, sign: doc.docKind === 'purchase_receipt' ? 1 : -1 }];
     for (const side of sides) {
       const issue = (code: OnecIssueCode, warehouseId: number | null) =>
         issues.push({ lineId: line.lineId, code, warehouseId, nomenclatureRefKey: line.nomenclatureRefKey, quantity: line.quantity });

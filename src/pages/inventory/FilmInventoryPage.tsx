@@ -19,7 +19,7 @@ import './inventory.css';
 const { Title, Text } = Typography;
 const formatQuantity = (value: number | null | undefined) => value == null ? '—' : new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(value);
 const today = () => new Date().toISOString().slice(0, 10);
-const docTypeName: Record<StockDocKind, string> = { receipt: 'Приход', writeoff: 'Списание', inventory: 'Инвентаризация', onec: 'Расход 1С' };
+const docTypeName: Record<StockDocKind, string> = { receipt: 'Приход', writeoff: 'Списание', inventory: 'Инвентаризация', onec: 'Документ 1С' };
 const statusName = { draft: 'Черновик', posted: 'Проведён', cancelled: 'Отменён' };
 // Модалки склада: шапка и кнопки («Провести / Отменить») всегда на экране, длинный список прокручивается внутри.
 const scrollingModal = { centered: true, bodyStyle: { maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' as const, overflowX: 'auto' as const } };

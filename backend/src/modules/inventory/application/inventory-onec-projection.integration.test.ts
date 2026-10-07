@@ -319,7 +319,7 @@ describe.skipIf(!url)('1C consumption projection — real PostgreSQL', { timeout
     expect(row.rows[0].onec_consumption_since).toBeNull();
     const last = await watcher.query<{ document_id: string; comment: string }>(
       "SELECT document_id, comment FROM stock_documents WHERE source = 'onec' AND warehouse_id = $1 ORDER BY document_id DESC LIMIT 1", [warehouseId]);
-    expect(last.rows[0].comment).toBe('1С: откат расхода склада (компенсация)');
+    expect(last.rows[0].comment).toBe('1С: откат учёта склада (компенсация)');
     const audit = await watcher.query<{ source: string | null; actor: string | null }>(
       `SELECT metadata_json->>'commandSource' AS source, user_id::text AS actor FROM audit_log
         WHERE event = 'inventory.onec_consumption_applied' AND entity_id = $1`, [last.rows[0].document_id]);
@@ -459,5 +459,109 @@ describe.skipIf(!url)('1C consumption projection — real PostgreSQL', { timeout
       expect(await run).toBe(0);
     } finally { await blocker.end(); }
     expect(await balance(film1)).toBe(100);
+  });
+
+  it('receipts flag: a 1C purchase receipt adds stock on its warehouse; without the flag it is returned', async () => {
+    const serviceId = Number((await watcher.query<{ user_id: string }>('SELECT user_id FROM users WHERE username = $1', [`${tag}-service`])).rows[0].user_id);
+    const live = (receipts: boolean) => {
+      const config = new ConfigService<BackendEnv, true>({
+        DATABASE_URL: url, DATABASE_POOL_MIN: 1, DATABASE_POOL_MAX: 2, DATABASE_SSL: false, DATABASE_QUERY_TIMEOUT_MS: 20000,
+        BACKEND_INVENTORY_ENABLED: true, BACKEND_ENABLE_ONEC_AGENT: true, ONEC_CLIENT_CERT_HEADER: 'x-client-cert',
+        BACKEND_ONEC_DOCUMENTS_LOAD: true, BACKEND_INVENTORY_ONEC_CONSUMPTION: true, BACKEND_INVENTORY_ONEC_RECEIPTS: receipts,
+        BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID: serviceId,
+      });
+      return new InventoryOnecProjectionService(database, config, inventory, new OnecCatalogReader(database, new OnecRuntimeConfigService(config)),
+        new OnecDocumentsReader(database, config), alerts, new NoOnecDocumentsSignal());
+    };
+    const on = live(true);
+    const off = live(false);
+    // Устойчивое исходное состояние на настоящем порте (документы тестового порта для него не существуют).
+    await off.runPass('test');
+    const before = await balance(film1);
+    const docsBefore = await onecDocs();
+    const docId = Number((await watcher.query<{ onec_document_id: string }>(
+      `INSERT INTO onec_documents (source_id, doc_kind, onec_ref_key, number, doc_date, doc_at, posted, applied_revision, currency, warehouse_ref_key)
+       VALUES ($1, 'purchase_receipt', $2, 'ПТ-15', '2026-09-27', $3, true, 1, 'KZT', $4) RETURNING onec_document_id`,
+      [sourceA, randomUUID(), at(600), W],
+    )).rows[0].onec_document_id);
+    const lineSql = `INSERT INTO onec_document_lines (onec_document_id, line_no, nomenclature_ref_key, quantity, unit_code, unit_is_package, warehouse_ref_key)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)`;
+    await watcher.query(lineSql, [docId, 1, ITEM1, '4.000', 'lm', false, W]);
+    // Листы МДФ в том же поступлении — не плёнка: ни движения, ни «не учтено».
+    await watcher.query(lineSql, [docId, 2, randomUUID(), '10.000', 'sheet', false, W]);
+    // Без флага прихода поступление для проекции не существует.
+    expect(await off.runPass('test')).toMatchObject({ status: 'done', documents: 0 });
+    expect(await balance(film1)).toBe(before);
+    expect((await watcher.query('SELECT 1 FROM inventory_onec_projection WHERE onec_document_id = $1', [docId])).rows).toHaveLength(0);
+    // С флагом — плюс на склад строки, один раз.
+    expect(await on.runPass('test')).toMatchObject({ status: 'done', documents: 1, failed: 0 });
+    expect(await balance(film1)).toBe(before + 4);
+    expect(await on.runPass('test')).toMatchObject({ status: 'done', documents: 0 });
+    const doc = await watcher.query<{ comment: string; delta: string }>(
+      `SELECT d.comment, m.delta FROM stock_documents d JOIN stock_movements m ON m.document_id = d.document_id
+        WHERE d.source = 'onec' AND d.onec_document_id = $1`, [docId]);
+    expect(doc.rows.map((row) => [row.comment, Number(row.delta)])).toEqual([['1С: Поступление № ПТ-15 от 27.09.2026', 4]]);
+    const audit = await watcher.query<{ kind: string }>(
+      `SELECT metadata_json->>'onecDocKind' AS kind FROM audit_log WHERE event = 'inventory.onec_consumption_applied' AND metadata_json->>'onecDocumentId' = $1`, [String(docId)]);
+    expect(audit.rows).toEqual([{ kind: 'purchase_receipt' }]);
+    expect((await on.listIssues(admin.permissions, { warehouseId, code: null, includeBeforeCutoff: true, offset: 0, limit: 200 }))
+      .items.filter((issue) => issue.onecDocumentId === docId)).toEqual([]);
+    // Исправили количество в 1С: дельта на разницу. Распровели — приход возвращён.
+    await watcher.query('UPDATE onec_document_lines SET quantity = 6.5 WHERE onec_document_id = $1 AND line_no = 1', [docId]);
+    await watcher.query('UPDATE onec_documents SET applied_revision = applied_revision + 1 WHERE onec_document_id = $1', [docId]);
+    await on.runPass('test');
+    expect(await balance(film1)).toBe(before + 6.5);
+    // Флаг выключили (откат): применённый приход возвращается обычным проходом, записи остаются в журнале.
+    expect(await off.runPass('test')).toMatchObject({ status: 'done', documents: 1 });
+    expect(await balance(film1)).toBe(before);
+    expect((await watcher.query<{ gone: boolean }>('SELECT gone FROM inventory_onec_projection WHERE onec_document_id = $1', [docId])).rows[0].gone).toBe(true);
+    expect(await off.runPass('test')).toMatchObject({ status: 'done', documents: 0 });
+    // Снова включили — приход применяется заново.
+    await on.runPass('test');
+    expect(await balance(film1)).toBe(before + 6.5);
+    expect(await onecDocs()).toBe(docsBefore + 4);
+    // Компенсация склада возвращает и приход — только с подтверждением клиента. Старый клиент (без подтверждения)
+    // получает отказ до очистки даты и остатков: и при включённом приходе, и когда флаг выключен, а плюс ещё применён.
+    const untouched = async () => ({
+      balance: await balance(film1), docs: await onecDocs(),
+      since: (await watcher.query<{ s: Date | null }>('SELECT onec_consumption_since AS s FROM warehouses WHERE warehouse_id = $1', [warehouseId])).rows[0].s,
+    });
+    const beforeRefusal = await untouched();
+    expect(beforeRefusal.since).not.toBeNull();
+    await expect(on.compensate(ctx(), warehouseId)).rejects.toMatchObject({ statusCode: 409, code: 'ONEC_COMPENSATION_CONFIRM_REQUIRED' });
+    await expect(off.compensate(ctx(), warehouseId, { includesReceipts: false })).rejects.toMatchObject({ statusCode: 409, code: 'ONEC_COMPENSATION_CONFIRM_REQUIRED' });
+    expect(await untouched()).toEqual(beforeRefusal);
+    // Гонка: приход выключен и плюса ещё нет — старый клиент начинает откат, а параллельный проход (держит склад
+    // FOR KEY SHARE) фиксирует плюс. Проверка под блокировкой склада видит его: отказ, дата и остатки не тронуты.
+    await off.runPass('test');
+    expect((await watcher.query('SELECT 1 FROM inventory_onec_applied WHERE warehouse_id = $1 AND quantity > 0', [warehouseId])).rows).toHaveLength(0);
+    const beforeRace = await untouched();
+    const racer = new Client({ connectionString: url });
+    await racer.connect();
+    try {
+      await racer.query('BEGIN');
+      await racer.query('SELECT 1 FROM warehouses WHERE warehouse_id = $1 FOR KEY SHARE', [warehouseId]);
+      const run = off.compensate(ctx(), warehouseId);
+      const outcome = run.then(() => 'done', (error: { code?: string }) => error.code ?? 'error');
+      let waiting = 0;
+      for (let i = 0; i < 200 && waiting === 0; i += 1) {
+        waiting = Number((await watcher.query<{ n: string }>(
+          `SELECT count(*) AS n FROM pg_stat_activity
+            WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE '%FROM warehouses WHERE warehouse_id = $1 FOR UPDATE%'`)).rows[0].n);
+        if (waiting === 0) await sleep(25);
+      }
+      expect(waiting).toBe(1);
+      await racer.query('INSERT INTO inventory_onec_applied (onec_document_id, warehouse_id, film_id, quantity) VALUES ($1, $2, $3, 5)', [docId, warehouseId, film1]);
+      await racer.query('COMMIT');
+      expect(await outcome).toBe('ONEC_COMPENSATION_CONFIRM_REQUIRED');
+    } finally { await racer.end(); }
+    expect(await untouched()).toEqual(beforeRace);
+    await watcher.query('DELETE FROM inventory_onec_applied WHERE onec_document_id = $1 AND warehouse_id = $2', [docId, warehouseId]);
+    // Завершённый ключ повторяется без подтверждения — сохранённый ответ, без изменений.
+    expect(await on.compensate({ ...ctx(), idempotencyKey: compensationKey }, warehouseId)).toEqual(compensationResult);
+    expect(await untouched()).toEqual(beforeRace);
+    await on.runPass('test');
+    await on.compensate(ctx(), warehouseId, { includesReceipts: true });
+    expect((await watcher.query('SELECT 1 FROM inventory_onec_applied WHERE warehouse_id = $1 AND quantity <> 0', [warehouseId])).rows).toHaveLength(0);
   });
 });

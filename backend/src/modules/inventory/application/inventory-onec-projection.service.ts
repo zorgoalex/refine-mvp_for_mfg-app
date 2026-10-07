@@ -15,8 +15,8 @@ import { desiredForDocument, parseStockKey, projectionDeltas, projectionHash, st
 import { InventoryService } from './inventory.service';
 import type { CommandContext } from './inventory.types';
 import {
-  CONSUMPTION_DOC_KINDS, ONEC_CONSUMPTION_READER, ONEC_DOCUMENTS_SIGNAL,
-  type ConsumptionDocumentView, type OnecConsumptionReader, type OnecDocumentsSignal,
+  CONSUMPTION_DOC_KINDS, ONEC_CONSUMPTION_READER, ONEC_DOCUMENTS_SIGNAL, STOCK_RECEIPT_DOC_KINDS,
+  type ConsumptionDocumentView, type OnecConsumptionReader, type OnecDocumentsSignal, type StockProjectionDocKind,
 } from './onec-consumption.port';
 
 export const PROJECTION_ALERT_KIND = 'inventory_onec_projection_failed';
@@ -35,6 +35,8 @@ export type ProjectionPassOutcome =
  * Проекция расхода 1С в учёт плёнки (план 2026-09-30-onec-consumption-documents-plan.md §4): сходящийся проход
  * по документам 1С с изменившимся hash входов; транзакция на документ; документы-дельты source='onec'.
  * Флаг BACKEND_INVENTORY_ONEC_CONSUMPTION; исполнитель — служебный пользователь автосинхронизации складов.
+ * Приход (поступления от поставщика, с плюсом на склад строки 1С) — дополнительно под BACKEND_INVENTORY_ONEC_RECEIPTS:
+ * без флага документы прихода для проекции не существуют, уже применённый приход возвращается к 0 обычным проходом.
  */
 @Injectable()
 export class InventoryOnecProjectionService implements OnModuleInit, OnModuleDestroy {
@@ -66,12 +68,22 @@ export class InventoryOnecProjectionService implements OnModuleInit, OnModuleDes
     return this.inventory.enabled() && this.config.get('BACKEND_INVENTORY_ONEC_CONSUMPTION', { infer: true }) === true;
   }
 
+  receiptsEnabled(): boolean {
+    return this.config.get('BACKEND_INVENTORY_ONEC_RECEIPTS', { infer: true }) === true;
+  }
+
+  /** Виды документов 1С, участвующие в проекции: расход всегда, приход — по своему флагу. */
+  projectedKinds(): readonly StockProjectionDocKind[] {
+    return this.receiptsEnabled() ? [...CONSUMPTION_DOC_KINDS, ...STOCK_RECEIPT_DOC_KINDS] : CONSUMPTION_DOC_KINDS;
+  }
+
   onModuleInit(): void {
     if (!this.enabled()) return;
     this.unsubscribe = this.inventory.onProjectionInputsChanged((reason) => void this.safePass(reason));
-    // Сигнал загрузчика 1С: только виды расхода (приходы/оплаты проекции не касаются).
+    // Сигнал загрузчика 1С: только участвующие виды (оплаты, а без флага прихода и поступления проекции не касаются).
+    const kinds = this.projectedKinds() as readonly string[];
     this.unsubscribeDocuments = this.documentsSignal.onDocumentsLoaded((event) => {
-      if (event.docKinds.some((kind) => (CONSUMPTION_DOC_KINDS as readonly string[]).includes(kind))) void this.safePass('onec-documents');
+      if (event.docKinds.some((kind) => kinds.includes(kind))) void this.safePass('onec-documents');
     });
     this.firstPass = setTimeout(() => void this.safePass('startup'), FIRST_PASS_DELAY_MS);
     this.firstPass.unref?.();
@@ -135,7 +147,7 @@ export class InventoryOnecProjectionService implements OnModuleInit, OnModuleDes
     const sources = (await this.database.query<{ source_id: string }>('SELECT source_id FROM onec_sources ORDER BY source_id')).rows
       .map((row) => Number(row.source_id));
     try {
-      candidates = await this.reader.consumptionCandidates({ sourceIds: sources });
+      candidates = await this.reader.consumptionCandidates({ sourceIds: sources, kinds: this.projectedKinds() });
       onecWarehouses = await this.onec.listWarehouses();
     } catch (error) {
       if (unavailable(error)) return { status: 'skipped', reason: 'onec_unavailable' };
@@ -198,7 +210,7 @@ export class InventoryOnecProjectionService implements OnModuleInit, OnModuleDes
   /** Транзакция документа 1С (порядок блокировок §4.3): число созданных документов-дельт. */
   async projectDocument(onecDocumentId: number, actor: ProjectionActor, requestId: string): Promise<number> {
     return this.database.transaction(async (tx) => {
-      const view = await this.reader.lockDocumentForProjection(onecDocumentId, tx);
+      const view = await this.reader.lockDocumentForProjection(onecDocumentId, tx, this.projectedKinds());
       const state = await this.repository.lockState(tx, onecDocumentId, view);
       if (!state) return 0;
       const applied = await this.repository.applied(tx, onecDocumentId);
@@ -275,9 +287,14 @@ export class InventoryOnecProjectionService implements OnModuleInit, OnModuleDes
    * Компенсация склада (откат, §7.3): since := NULL и применённое склада → 0 по всем документам 1С любого
    * источника. Без чтения документов 1С (работает при выключенном модуле 1С, флаге проекции и AMBIGUOUS_SOURCE).
    */
-  async compensate(ctx: CommandContext, warehouseId: number): Promise<OnecCompensationResult> {
+  async compensate(ctx: CommandContext, warehouseId: number, options: { includesReceipts?: boolean } = {}): Promise<OnecCompensationResult> {
     this.require(ctx.currentUser.permissions, 'inventory.manage');
-    const start = await this.warehouses.beginOnecCompensation(ctx, warehouseId);
+    // Откат снимает и приход. Клиент, не знающий об этом (старая вкладка обещает вернуть только списания), получает
+    // отказ ДО очистки даты и остатков — когда приход включён или на складе есть применённое с плюсом. Проверка — в
+    // транзакции начала отката под блокировкой склада: параллельный проход не добавит плюс после неё.
+    const start = await this.warehouses.beginOnecCompensation(ctx, warehouseId, {
+      receiptsAcknowledged: options.includesReceipts === true, receiptsEnabled: this.receiptsEnabled(),
+    });
     if (start.replay) return start.replay;
     const actor = { id: Number(ctx.currentUser.id), username: ctx.currentUser.username ?? '', role: ctx.currentUser.role };
     const mineOf = (applied: Map<string, number>) => new Map([...applied].filter(([key]) => parseStockKey(key).warehouseId === warehouseId));

@@ -64,9 +64,13 @@ export const inventoryApi = {
   runOnecConsumption() {
     return httpClient.post<OnecConsumptionRunDto>(`${root}/onec-consumption/run`, {});
   },
-  /** Откат: расход 1С склада возвращается в 0, дата начала очищается. */
+  /**
+   * Откат: всё применённое на складе по документам 1С (расход и приход) возвращается в 0, дата начала очищается.
+   * `includesReceipts` — подтверждение, что пользователю показано предупреждение о снятии поступлений: без него
+   * backend с включённым приходом откат не выполняет.
+   */
   compensateOnecConsumption(warehouseId: number, key = createInventoryIdempotencyKey()) {
-    return httpClient.post<OnecCompensateDto>(`${root}/warehouses/${warehouseId}/onec-consumption/compensate`, {}, commandOptions(key));
+    return httpClient.post<OnecCompensateDto>(`${root}/warehouses/${warehouseId}/onec-consumption/compensate`, { includesReceipts: true }, commandOptions(key));
   },
   /** Остатки листовых материалов заказа по данным 1С. */
   orderSheetStock(orderId: number) {

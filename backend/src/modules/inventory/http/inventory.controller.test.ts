@@ -142,7 +142,12 @@ describe('InventoryController', () => {
     await expectError(() => controller.compensateOnecConsumption({ user: user(['inventory.manage']) }, 'k', 'abc'), 400, 'VALIDATION_FAILED');
     await expectError(() => controller.compensateOnecConsumption({ user: user(['inventory.manage']) }, 'k', '40000'), 404, 'WAREHOUSE_NOT_FOUND');
     await controller.compensateOnecConsumption({ user: user(['inventory.manage']), requestId: 'r' }, 'k1', '2');
-    expect(projection.compensate).toHaveBeenLastCalledWith(expect.objectContaining({ idempotencyKey: 'k1' }), 2);
+    expect(projection.compensate).toHaveBeenLastCalledWith(expect.objectContaining({ idempotencyKey: 'k1' }), 2, { includesReceipts: false });
+    // Подтверждение «откат снимает и поступления» — только явное true в теле.
+    await controller.compensateOnecConsumption({ user: user(['inventory.manage']), requestId: 'r' }, 'k2', '2', { includesReceipts: 'true' });
+    expect(projection.compensate).toHaveBeenLastCalledWith(expect.anything(), 2, { includesReceipts: false });
+    await controller.compensateOnecConsumption({ user: user(['inventory.manage']), requestId: 'r' }, 'k3', '2', { includesReceipts: true });
+    expect(projection.compensate).toHaveBeenLastCalledWith(expect.anything(), 2, { includesReceipts: true });
   });
 
   it('countedAt only for inventory documents; since only as an ISO moment', async () => {

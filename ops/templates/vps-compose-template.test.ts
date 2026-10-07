@@ -427,5 +427,7 @@ describe('VPS compose backend runtime flags', () => {
     expect(envExample).toContain('BACKEND_INVENTORY_ONEC_AUTOSYNC=false');
     expect(envExample).toContain('BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID=');
     expect(envExample).toContain('BACKEND_INVENTORY_ONEC_CONSUMPTION=false');
+    expect(compose).toContain('BACKEND_INVENTORY_ONEC_RECEIPTS: ${BACKEND_INVENTORY_ONEC_RECEIPTS:-false}');
+    expect(envExample).toContain('BACKEND_INVENTORY_ONEC_RECEIPTS=false');
   });
 });
