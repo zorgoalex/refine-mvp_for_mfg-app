@@ -13,6 +13,10 @@ describe('migration 249: role-name checks become permissions (access groups 0A.3
     expect(sql).toContain("SET LOCAL lock_timeout = '5s';");
     expect(sql).toContain('UPDATE public.permissions_state SET version = version + 1');
     expect(sql).toContain('ON CONFLICT (role_id, permission_name) DO NOTHING');
+    // permissions_state is locked before any catalog or grant row (same order as the roles matrix).
+    const lock = sql.indexOf('FROM public.permissions_state WHERE id = true FOR UPDATE');
+    expect(lock).toBeGreaterThan(0);
+    expect(lock).toBeLessThan(sql.indexOf('INSERT INTO public.permissions_catalog'));
   });
 
   it('grants each new permission to exactly the roles of the static matrix', () => {
