@@ -220,9 +220,13 @@ describe.skipIf(!databaseUrl)('PgUserRepository authorization protocol (PostgreS
         'it-cycle',
       );
       expect(await waitingOn('permissions_state')).toBe(true);
-      // The session holder seeds through another connection (what the old refresh did): it must not wait.
-      await within(permissions.seedDefaults(), 5_000);
+      // The session holder (a refresh) reads the authorization in its own transaction — no seed, no second
+      // connection — so it does not wait for anything the others hold.
+      await within(permissions.loadUserAuthorization(String(adminId), holder), 5_000);
+      // An independent login seeds (state first): it queues and finishes once the holder is done, no cycle.
+      const loginSeed = permissions.seedDefaults();
       await holder.query('COMMIT');
+      await within(loginSeed, 10_000);
       await expect(within(invitation, 10_000)).resolves.toMatchObject({ status: 'created' });
       await expect(within(matrix, 10_000)).resolves.toMatchObject({ version: version + 1 });
     } finally {
@@ -246,7 +250,7 @@ describe.skipIf(!databaseUrl)('PgUserRepository authorization protocol (PostgreS
       await pool.query('UPDATE users SET role_id = 100 WHERE user_id = $1', [viewerId]);
     }
     expect(await count(`SELECT count(*) AS n FROM audit_log WHERE request_id = 'it-race-retry'`, [])).toBe(0);
-  });
+  }, 30_000);
   it('seed raises the permissions version when it adds grants, so old tokens refresh (0A.3 R1)', async () => {
     const permissions = new PermissionsService(database);
     const versionOf = async () => Number((await pool.query('SELECT version FROM permissions_state WHERE id = true')).rows[0].version);
@@ -262,6 +266,31 @@ describe.skipIf(!databaseUrl)('PgUserRepository authorization protocol (PostgreS
     const steady = await versionOf();
     await permissions.seedDefaults();
     expect(await versionOf()).toBe(steady);
+  });
+
+  it('seed is atomic: a failure after the grant inserts rolls them back, the repeat adds them and bumps (0A.3 R2)', async () => {
+    const versionOf = async () => Number((await pool.query('SELECT version FROM permissions_state WHERE id = true')).rows[0].version);
+    const grantExists = async () => (await pool.query(
+      `SELECT 1 FROM role_permissions WHERE role_id = 1 AND permission_name = 'groups.batch_link'`)).rowCount === 1;
+    await pool.query(`DELETE FROM role_permissions WHERE role_id = 1 AND permission_name = 'groups.batch_link'`);
+    const before = await versionOf();
+    // The process «dies» right before the version bump.
+    const failing = {
+      ...database,
+      transaction: (handler: (tx: PoolClient) => Promise<unknown>) => database.transaction((tx) => handler({
+        query: (text: string, params?: unknown[]) => {
+          if (text.includes('UPDATE permissions_state SET version')) throw new Error('crash before bump');
+          return tx.query(text, params as never);
+        },
+      } as PoolClient)),
+    } as unknown as DatabaseService;
+    await expect(new PermissionsService(failing).seedDefaults()).rejects.toThrow('crash before bump');
+    expect(await grantExists()).toBe(false);
+    expect(await versionOf()).toBe(before);
+    // The next seed adds the grant and bumps the version: old tokens refresh.
+    await new PermissionsService(database).seedDefaults();
+    expect(await grantExists()).toBe(true);
+    expect(await versionOf()).toBe(before + 1);
   });
 
   it('migration 249 and a roles-matrix save run concurrently without a lock cycle (0A.3 R2)', async () => {

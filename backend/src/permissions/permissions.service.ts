@@ -519,8 +519,23 @@ export class PermissionsService {
     }
   }
 
+  /**
+   * Static defaults into the matrix tables. Atomic and in the authorization lock order (access groups plan §5.1):
+   * permissions_state is locked first, then catalog and grants, and the version moves in the same transaction
+   * when new grants appear — a failure in between rolls everything back, so grants never land without the bump.
+   * With a client the caller's transaction is used (the roles matrix already holds the lock).
+   */
   async seedDefaults(client?: DatabaseClient): Promise<void> {
-    const target = client ?? this.requireDatabase();
+    if (client) {
+      await this.seedRows(client);
+      return;
+    }
+    await this.requireDatabase().transaction((tx) => this.seedRows(tx));
+  }
+
+  private async seedRows(target: DatabaseClient): Promise<void> {
+    await target.query('INSERT INTO permissions_state (id, version) VALUES (true, 1) ON CONFLICT (id) DO NOTHING');
+    await target.query('SELECT version FROM permissions_state WHERE id = true FOR UPDATE');
     const catalogRows = PERMISSIONS.map((permission, index) => ({
       permission,
       domain: permissionDomain(permission),
@@ -623,13 +638,6 @@ export class PermissionsService {
       grantsAdded += (insertedScopes?.rows ?? []).filter((row) => row.scope_value !== 'none').length;
     }
 
-    await target.query(
-      `
-      INSERT INTO permissions_state (id, version)
-      VALUES (true, 1)
-      ON CONFLICT (id) DO NOTHING
-      `,
-    );
     // New grants change effective authorization: tokens issued before them must refresh (access groups 0A.3 R1).
     // Whether the backend or the migration that grants them came first, the version moves exactly when rows appear.
     if (grantsAdded > 0) {
