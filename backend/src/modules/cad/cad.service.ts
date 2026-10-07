@@ -429,8 +429,8 @@ export class CadService implements OnModuleInit, OnModuleDestroy {
           WHERE u.user_id=$1 AND u.is_active AND r.is_active AND u.role_id=$2
             AND ps.id=true AND ps.version=$3 AND NOT EXISTS (
               SELECT unnest(ARRAY['cad.approve','cad.view','orders.view']) EXCEPT
-              SELECT rp.permission_name FROM role_permissions rp JOIN permissions_catalog pc USING(permission_name)
-              WHERE rp.role_id=u.role_id AND rp.is_enabled AND pc.is_active)) AS allowed`, [actor.id, actor.roleId, actor.permissionsVersion ?? -1]);
+              SELECT uep.permission_name FROM user_effective_permissions uep
+              WHERE uep.user_id=u.user_id)) AS allowed`, [actor.id, actor.roleId, actor.permissionsVersion ?? -1]);
         if (!authorization.rows[0]?.allowed) throw new ApiError(403, 'CAD_APPROVAL_AUTHORITY_CHANGED', 'Approver permissions changed; submit again');
         await this.checkRunSources(actor, run);
         const part = await this.client.readinessPart(run.remote_job_id, command.group_id);

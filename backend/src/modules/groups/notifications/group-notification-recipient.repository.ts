@@ -3,7 +3,8 @@ import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
-import { filterUserIdsByOrderVisibility, mapUserRow } from '../../../permissions/visibility/order-visibility-filter';
+import { filterUserIdsByOrderVisibility } from '../../../permissions/visibility/order-visibility-filter';
+import { loadEvaluationUserWith, loadEvaluationUsersWith } from '../../../permissions/user-authorization-snapshot';
 import type { GroupLinkedEntityRef, GroupNotificationRecipient } from './group-notification.types';
 
 interface ParticipantRow extends QueryResultRow {
@@ -128,10 +129,12 @@ export class PgGroupNotificationRecipientRepository {
       [recipients.map((recipient) => recipient.userId), deadlineInstanceId],
     );
     const recipientById = new Map(recipients.map((recipient) => [recipient.userId, recipient]));
+    // Effective authorization (same snapshot as the token), not the static role matrix.
+    const users = await loadEvaluationUsersWith(this.database, rows.rows.map((row) => row.user_id));
 
     return rows.rows
       .filter((row) => {
-        const currentUser = mapUserRow(row);
+        const currentUser = users.get(String(row.user_id)) ?? null;
         return Boolean(currentUser)
           && currentUser!.permissions.includes('deadlines.view')
           && this.orderAccessPolicy.canView(currentUser!, {
@@ -149,18 +152,9 @@ export class PgGroupNotificationRecipientRepository {
     recipients: GroupNotificationRecipient[],
     permission: PermissionName,
   ): Promise<GroupNotificationRecipient[]> {
-    const rows = await this.database.query<UserPermissionRow>(
-      `
-      SELECT u.user_id::text AS user_id, u.username, u.role_id
-      FROM public.users u
-      WHERE u.user_id = ANY($1::bigint[])
-      `,
-      [recipients.map((recipient) => recipient.userId)],
-    );
+    const users = await loadEvaluationUsersWith(this.database, recipients.map((recipient) => recipient.userId));
     const allowedUserIds = new Set(
-      rows.rows
-        .map(mapUserRow)
-        .filter((user): user is CurrentUser => Boolean(user))
+      [...users.values()]
         .filter((user) => user.permissions.includes(permission))
         .map((user) => user.id),
     );
@@ -168,15 +162,7 @@ export class PgGroupNotificationRecipientRepository {
   }
 
   private async loadCurrentUser(userId: string): Promise<CurrentUser | null> {
-    const result = await this.database.query<UserPermissionRow>(
-      `
-      SELECT u.user_id::text AS user_id, u.username, u.role_id
-      FROM public.users u
-      WHERE u.user_id = $1::bigint
-      `,
-      [userId],
-    );
-    return result.rows[0] ? mapUserRow(result.rows[0]) : null;
+    return loadEvaluationUserWith(this.database, userId);
   }
 }
 

@@ -4,6 +4,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import { computeDiff } from '../../../common/audit/audit-diff';
 import { DatabaseService } from '../../../database/database.service';
+import { assertNoAccountEscalation } from '../../../permissions/account-escalation';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import {
   getPermissionsForRole,
@@ -56,7 +57,7 @@ type UserDatabase = DatabaseClient & {
 export class PgUserRepository implements UserRepositoryPort {
   constructor(
     private readonly database: UserDatabase | DatabaseService,
-    private readonly permissions?: Pick<PermissionsService, 'loadRoleAuthorization'>,
+    private readonly permissions?: Pick<PermissionsService, 'loadUserAuthorization'>,
   ) {}
 
   async listUsers(command: ListUsersCommand): Promise<UserListResponseDto> {
@@ -110,6 +111,7 @@ export class PgUserRepository implements UserRepositoryPort {
 
     return this.database.transaction(async (tx) => {
       try {
+        await lockAuthorizationState(tx);
         const created = await tx.query<UserRow>(
           `
           INSERT INTO users (
@@ -133,7 +135,9 @@ export class PgUserRepository implements UserRepositoryPort {
             toNullableUserId(command.currentUser.id),
           ],
         );
-        const user = await this.mapUserRow(created.rows[0]);
+        // The new account may not have permissions or scopes its creator lacks (access groups 0A.4).
+        await assertNoAccountEscalation(tx, command.currentUser.id, created.rows[0].user_id);
+        const user = await this.mapUserRow(created.rows[0], tx);
 
         await writeUserAudit(tx, {
           command,
@@ -153,6 +157,8 @@ export class PgUserRepository implements UserRepositoryPort {
 
   async updateUser(command: UpdateUserCommand): Promise<UserDto> {
     return this.database.transaction(async (tx) => {
+      // Authorization lock order (access groups plan §5.1): permissions_state first, then the user row.
+      await lockAuthorizationState(tx);
       // Locked until the audit is written: a concurrent relink cannot slip between the pre-image and the
       // update, so the audited «before» employee is the one this command really replaced. NO KEY UPDATE keeps
       // the audit FK key-share of other commands of this user (e.g. a contacts save by him) unblocked.
@@ -203,7 +209,11 @@ export class PgUserRepository implements UserRepositoryPort {
           throw await missingOrRoleChanged(tx, command.userId, command.expectedTargetRole);
         }
 
-        const user = await this.mapUserRow(updated.rows[0]);
+        // The account as it will be committed (e.g. a new role) may not exceed the administrator (0A.4).
+        await assertNoAccountEscalation(tx, command.currentUser.id, command.userId);
+        await bumpUserVersions(tx, command.userId,
+          before !== null && before.role !== normalizeRole(updated.rows[0].role_id, updated.rows[0].role_code ?? null));
+        const user = await this.mapUserRow(updated.rows[0], tx);
         await writeUserAudit(tx, {
           command,
           action: 'users.update',
@@ -239,6 +249,9 @@ export class PgUserRepository implements UserRepositoryPort {
       if (!updated.rows[0]) {
         throw await missingOrRoleChanged(tx, command.userId, command.expectedTargetRole);
       }
+      // Resetting the password of an account with wider permissions than the administrator is an escalation.
+      await assertNoAccountEscalation(tx, command.currentUser.id, command.userId);
+      await bumpUserVersions(tx, command.userId, false);
 
       const revokedSessions = command.dto.revokeExistingSessions
         ? await revokeActiveSessions(tx, command.userId)
@@ -270,6 +283,8 @@ export class PgUserRepository implements UserRepositoryPort {
     action: 'users.deactivate' | 'users.activate',
   ): Promise<UserDto> {
     return this.database.transaction(async (tx) => {
+      // Authorization lock order (access groups plan §5.1): permissions_state first, then the user row.
+      await lockAuthorizationState(tx);
       const before = await this.getUserByIdInternal(tx, command.userId);
       const updated = await tx.query<UserRow>(
         `
@@ -290,8 +305,11 @@ export class PgUserRepository implements UserRepositoryPort {
         throw await missingOrRoleChanged(tx, command.userId, command.expectedTargetRole);
       }
 
+      // Re-enabling or disabling an account with wider permissions than the administrator is an escalation.
+      await assertNoAccountEscalation(tx, command.currentUser.id, command.userId);
+      await bumpUserVersions(tx, command.userId, before?.isActive !== isActive);
       const revokedSessions = isActive ? 0 : await revokeActiveSessions(tx, command.userId);
-      const user = await this.mapUserRow(updated.rows[0]);
+      const user = await this.mapUserRow(updated.rows[0], tx);
 
       await writeUserAudit(tx, {
         command,
@@ -328,11 +346,12 @@ export class PgUserRepository implements UserRepositoryPort {
     return Promise.all(rows.map((row) => this.mapUserRow(row)));
   }
 
-  private async mapUserRow(row: UserRow): Promise<UserDto> {
+  private async mapUserRow(row: UserRow, client?: DatabaseClient): Promise<UserDto> {
     const role = normalizeRole(row.role_id, row.role_code);
     const roleId = toNumber(row.role_id);
+    // Effective permissions of the user (base role; access groups when enabled), same source as the token.
     const permissions = this.permissions
-      ? (await this.permissions.loadRoleAuthorization(roleId)).permissions
+      ? (await this.permissions.loadUserAuthorization(String(row.user_id), client))?.permissions ?? []
       : getPermissionsForRole(role);
 
     return {
@@ -548,4 +567,21 @@ function isPgUniqueViolation(error: unknown): error is { code: string; constrain
 
 function userNotFound(userId: number): ApiError {
   return new ApiError(404, 'USER_NOT_FOUND', 'User not found', { userId });
+}
+
+/** Authorization lock order (access groups plan §5.1): permissions_state is always locked before user rows. */
+async function lockAuthorizationState(tx: TransactionClient): Promise<void> {
+  await tx.query('SELECT version FROM permissions_state WHERE id = true FOR UPDATE');
+}
+
+/**
+ * Every user command increments users.row_version (stale-write protection, plan §5.3). A change of role or
+ * activity also increments the authorization version, so the user's current token stops being accepted at once
+ * (the token is refreshed with the new grants) instead of living until its natural refresh (plan 0A.7).
+ */
+async function bumpUserVersions(tx: TransactionClient, userId: number | string, authorizationChanged: boolean): Promise<void> {
+  await tx.query('UPDATE users SET row_version = row_version + 1 WHERE user_id = $1', [userId]);
+  if (authorizationChanged) {
+    await tx.query('UPDATE permissions_state SET version = version + 1, updated_at = now() WHERE id = true');
+  }
 }

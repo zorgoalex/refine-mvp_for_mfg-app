@@ -1,7 +1,7 @@
 import type { DatabaseClient } from '../../../database/database.types';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import type { MdfJobDatabase } from '../application/mdf-job-runner';
 import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
 import { loadMdfEffectivePlacement } from './mdf-effective-placement';
@@ -55,7 +55,7 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
     if (state.mode!=='active' && state.mode!=='read_only') return { schemaVersion: 1 as const, ...state,
       cards: [],positions: [],members: [],pendingJobs: [],trackedJobs: [],presentation: [],progress: [],orders: [],
       unregistered: [],issues: ['MDF_PUBLICATION_NOT_ACTIVE'] };
-    const scope = rolePolicyForUser(user).orders.view;
+    const scope = policyScopeSetsForUser(user).orders.view;
     const owners = mdfAllowedOrdersSql(user);
     // Card owners = current published members ∪ demand/evidence owners of the exact
     // published accepted AND received revisions (retained physical proof survives a
@@ -98,7 +98,7 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
           COALESCE(bool_and(x.order_id IN (SELECT order_id FROM allowed)),$6::boolean) all_allowed
         FROM (${cardOwners('page')}) x(order_id)) o
       ORDER BY page.source_created_at DESC,page.source_kind,page.source_id`,
-    [user.id,state.dateFrom,state.dateTo,query.focus?.kind ?? null,query.focus?.id ?? null,scope==='all',
+    [user.id,state.dateFrom,state.dateTo,query.focus?.kind ?? null,query.focus?.id ?? null,scope.includes('all'),
       [...(query.searchOrderIds ?? [])],state.displayFrom])).rows;
     checkLimit(cardRows,1000);
     const cardOwnerIds = cardRows.flatMap(c => c.ownerIds);
@@ -127,7 +127,7 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
           ON s.kind='bath' AND ('cut-result:'||cp.cut_result_id::text)=s.id WHERE cp.order_id IS NOT NULL)
       SELECT s.kind,s.id,($4::boolean OR NOT EXISTS(SELECT 1 FROM raw r WHERE r.kind=s.kind AND r.id=s.id
         AND r.order_id NOT IN (SELECT order_id FROM allowed))) ok FROM s`,
-    [user.id,cardRows.map(c => c.kind),cardRows.map(c => c.id),scope==='all'])).rows.map(r => [`${r.kind}:${r.id}`,r.ok]));
+    [user.id,cardRows.map(c => c.kind),cardRows.map(c => c.id),scope.includes('all')])).rows.map(r => [`${r.kind}:${r.id}`,r.ok]));
     const fullyVisible = (c: { kind: string; id: string; allOwnersAllowed: boolean }) =>
       c.allOwnersAllowed && rawOwnersVisible.get(`${c.kind}:${c.id}`) === true;
     // A partial viewer never sees the source name (program/BASIS names can identify hidden co-owners).
@@ -153,8 +153,8 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
     checkLimit(progress,20000);
     const unregistered = await loadMdfUnregisteredSources(tx,owners,user.id,state);
     checkLimit(unregistered,200);
-    const pendingJobs = await loadPending(tx,owners,user.id,state,query,scope==='all');
-    const trackedJobs = await loadTracked(tx,owners,user.id,query.jobIds ?? [],scope==='all');
+    const pendingJobs = await loadPending(tx,owners,user.id,state,query,scope.includes('all'));
+    const trackedJobs = await loadTracked(tx,owners,user.id,query.jobIds ?? [],scope.includes('all'));
     const selectedOwners = [...new Set([...members.map(m => m.orderId),...cardOwnerIds,...(query.orderIds ?? []),
       ...(query.searchOrderIds ?? []),
       ...pendingJobs.flatMap(j => j.orderIds)])];
@@ -174,11 +174,15 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
 
 /** Orders the user may view under the current server scope ($1 = user id). */
 export function mdfAllowedOrdersSql(user: CurrentUser): string {
-  const scope = rolePolicyForUser(user).orders.view;
-  const allowed = scope==='all' ? 'TRUE' : scope==='own' ? '(o.created_by=$1::bigint OR o.manager_id=$1::bigint)'
-    : scope==='assigned' ? `EXISTS(SELECT 1 FROM order_workshops w JOIN users u
+  // Scope set of the token (access groups stage 0A): own ∪ assigned = OR of both; one value = same SQL as before.
+  const scope = policyScopeSetsForUser(user).orders.view;
+  const parts = scope.includes('all') ? ['TRUE'] : [
+    ...(scope.includes('own') ? ['(o.created_by=$1::bigint OR o.manager_id=$1::bigint)'] : []),
+    ...(scope.includes('assigned') ? [`EXISTS(SELECT 1 FROM order_workshops w JOIN users u
       ON u.employee_id=w.responsible_employee_id WHERE w.order_id=o.order_id AND NOT w.delete_flag
-      AND u.is_active AND u.user_id=$1::bigint)` : 'FALSE';
+      AND u.is_active AND u.user_id=$1::bigint)`] : []),
+  ];
+  const allowed = parts.length === 0 ? 'FALSE' : parts.length === 1 ? parts[0] : `(${parts.join(' OR ')})`;
   return `SELECT o.order_id FROM orders o WHERE $1::bigint IS NOT NULL
     AND NOT o.delete_flag AND o.order_kind='production_order' AND ${allowed}`;
 }

@@ -6,6 +6,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser, RequestWithCurrentUser } from '../../../permissions/current-user';
 import type { MdfPublishedQuery } from '../adapters/mdf-published-snapshot';
 import { MdfPublishedBoardService } from '../application/mdf-published-board.service';
+import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 
 @ApiTags('Orders')
 @ApiBearerAuth()
@@ -80,5 +81,5 @@ export function mdfPublishedEtag(user: CurrentUser,query: MdfPublishedQuery,
   snapshot: Awaited<ReturnType<MdfPublishedBoardService['get']>>): string {
   const { generatedAt: _generatedAt,...stable }=snapshot;
   return `"${createHash('sha256').update(JSON.stringify([user.id,user.permissionsVersion ?? null,
-    user.role,user.policyScopes ?? null,[...user.permissions].sort(),query,stable])).digest('hex')}"`;
+    user.role,policyScopeSetsForUser(user),[...user.permissions].sort(),query,stable])).digest('hex')}"`;
 }

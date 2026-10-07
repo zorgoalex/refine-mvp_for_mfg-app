@@ -5,8 +5,8 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { buildOrderReadScopePredicate, normalizeActorUserId, orderAssignmentExistsSql } from '../../../permissions/policies/order-read-scope-sql';
-import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { buildOrderReadScopePredicate, normalizeActorUserId, orderAssignmentExistsSql, scopeNeedsActor } from '../../../permissions/policies/order-read-scope-sql';
+import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import { CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE as MDF,
   CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE as OTHER } from '../../../shared/cnc-material';
 import { requireMdfCommandBoundary } from '../application/mdf-command-boundary';
@@ -487,7 +487,7 @@ export class PgMdfBazisCompositionCommand {
       { allocationId: row.allocationId, bathId: row.bathId, bathRevision: row.bathRevision,
         orderId: row.orderId, detailId: row.detailId, quantity: row.quantity, state: row.state }));
     const previewDigest = hash({ protocol: 'mdf-bazis-composition-preview-v1',
-      actor: { id: user.id, role: user.role, permissions: [...user.permissions].sort(), scope: rolePolicyForUser(user) },
+      actor: { id: user.id, role: user.role, permissions: [...user.permissions].sort(), scope: policyScopeSetsForUser(user) },
       setId, request: { expectedVersion: request.expectedVersion, sourceToken: request.sourceToken, desiredRows: desired },
       beforeVersion: String(setVersion), rawSnapshotDigest: raw.rawSnapshotDigest,
       head: { received: head.received, accepted, version: head.version, epoch: head.epoch },
@@ -701,8 +701,8 @@ function actorUserId(user: CurrentUser): number {
 /** Exactly the active BASIS creation/rename current-policy gate. */
 async function lockScopedOwners(tx: TransactionClient, user: CurrentUser, ids: readonly number[]): Promise<void> {
   const params: unknown[] = [[...ids]];
-  const scope = rolePolicyForUser(user).orders.view;
-  const actor = scope === 'own' || scope === 'assigned' ? params.push(normalizeActorUserId(user.id)) : null;
+  const scope = policyScopeSetsForUser(user).orders.view;
+  const actor = scopeNeedsActor(scope) ? params.push(normalizeActorUserId(user.id)) : null;
   const predicate = buildOrderReadScopePredicate(scope, actor,
     actor === null ? 'FALSE' : orderAssignmentExistsSql('o', actor), 'o');
   const rows = (await tx.query<QueryResultRow & { id: number }>(`SELECT o.order_id::float8 id FROM orders o

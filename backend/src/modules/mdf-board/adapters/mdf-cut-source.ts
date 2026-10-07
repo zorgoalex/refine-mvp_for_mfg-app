@@ -1,8 +1,8 @@
 import { ApiError } from '../../../common/errors/api-error';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { buildOrderReadScopePredicate, normalizeActorUserId, orderAssignmentExistsSql } from '../../../permissions/policies/order-read-scope-sql';
-import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { buildOrderReadScopePredicate, normalizeActorUserId, orderAssignmentExistsSql, scopeNeedsActor } from '../../../permissions/policies/order-read-scope-sql';
+import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import { CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE as MDF, CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE as OTHER } from '../../../shared/cnc-material';
 import { requireMdfCommandBoundary } from '../application/mdf-command-boundary';
 import { recordMdfReceipt } from '../application/mdf-receipt';
@@ -66,8 +66,8 @@ export async function lockMdfCutOwners(tx: TransactionClient, input: {
   if (!input.user.permissions.includes('cut.manage') || !input.user.permissions.includes('orders.view')) denied();
   const scope = await readScope(tx,input.cutJobId,input.commandId);
   const params: unknown[] = [scope.owners];
-  const policy = rolePolicyForUser(input.user).orders.view;
-  const actor = policy === 'own' || policy === 'assigned' ? params.push(normalizeActorUserId(input.user.id)) : null;
+  const policy = policyScopeSetsForUser(input.user).orders.view;
+  const actor = scopeNeedsActor(policy) ? params.push(normalizeActorUserId(input.user.id)) : null;
   const predicate = buildOrderReadScopePredicate(policy,actor,actor === null ? 'FALSE' : orderAssignmentExistsSql('o',actor),'o');
   const owners = (await tx.query(`SELECT o.order_id FROM orders o WHERE o.order_id=ANY($1::bigint[])
     AND NOT o.delete_flag AND o.order_kind='production_order' AND ${predicate} ORDER BY o.order_id FOR UPDATE`,params)).rows;

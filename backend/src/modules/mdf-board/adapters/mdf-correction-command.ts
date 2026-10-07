@@ -6,7 +6,7 @@ import type { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
-import { allowsScope, rolePolicyForUser } from '../../../permissions/policies/scope';
+import { allowsScopeSet, policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import { requireMdfCommandBoundary } from '../application/mdf-command-boundary';
 import { recordMdfLineageReceipt, recordMdfReceipt, type MdfReceiptInput, type MdfReceiptLine } from '../application/mdf-receipt';
 import type { MdfPhysicalLineageAction, MdfPhysicalLineageManifest } from '../application/mdf-physical-lineage';
@@ -416,7 +416,7 @@ function authorizeOwners(user: CurrentUser,owners: readonly MdfCorrectionOwner[]
     if (owner.deleted || owner.orderKind!=='production_order') fail(409,'MDF_CORRECTION_SCOPE_CHANGED','Связанный производственный заказ удалён или недоступен');
     const subject={orderId:owner.id,createdByUserId:owner.createdBy,managerUserId:owner.managerId,assignedUserIds:owner.assigned};
     if (!policy.canView(user,subject)||!(policy.canUpdate(user,subject)
-      ||allowsScope(user,rolePolicyForUser(user).productionTasks.update,subject)))
+      ||allowsScopeSet(user,policyScopeSetsForUser(user).productionTasks.update,subject)))
       fail(403,'PERMISSION_DENIED','Нет доступа ко всем заказам связанных производственных данных');
   }
 }
@@ -629,7 +629,7 @@ function makePreview(source:Source,request:MdfCorrectionPreviewBody,snapshot:Mdf
 function correctionDigest(user:CurrentUser,source:Source,request:MdfCorrectionPreviewBody,snapshot:MdfCorrectionSnapshot,
   plan:Extract<MdfCorrectionPlan,{status:'ready'}>,stages:StageRow[],targetStage:MdfReturnStage,affectedOrderIds:number[],
   candidateJobs:CandidateJob[],deferredJobs:MdfCorrectionDeferredJobEffect[],response:MdfCorrectionPreviewResponse):string {
-  return hash({actor:{id:user.id,role:user.role,permissions:[...user.permissions].sort(),scopes:rolePolicyForUser(user)},source,
+  return hash({actor:{id:user.id,role:user.role,permissions:[...user.permissions].sort(),scopes:policyScopeSetsForUser(user)},source,
     intent:{sourceToken:request.sourceToken,targetColumn:request.targetColumn,productionStatusId:request.productionStatusId??null},
     heads:snapshot.heads,lines:snapshot.lines,demands:[...snapshot.frozenDemand].sort(([a],[b])=>a.localeCompare(b)),
     issues:[...snapshot.sourceIssues].sort(([a],[b])=>a<b?-1:a>b?1:0),

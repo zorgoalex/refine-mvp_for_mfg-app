@@ -4,7 +4,7 @@ import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionsService } from '../../../permissions/permissions.service';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
-import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import { findMdfDemandDrift, loadMdfSourceOwnerGraph, MDF_CONFLICT_LOCK_ORDER, mdfReconcileCommandKey, partitionMdfDrift }
   from '../adapters/mdf-demand-reconciler';
 import { reconcileMdfOrderDemand } from '../adapters/mdf-order-cascade';
@@ -30,7 +30,7 @@ export class MdfDemandDriftService {
       FROM mdf_demand_drift_conflicts c
       WHERE c.status='open' AND ($2::boolean OR NOT EXISTS(SELECT 1 FROM unnest(c.owner_ids) o
         WHERE o NOT IN (SELECT order_id FROM allowed)))
-      ORDER BY c.detected_at LIMIT 500`, [user.id, rolePolicyForUser(user).orders.view === 'all'])).rows;
+      ORDER BY c.detected_at LIMIT 500`, [user.id, policyScopeSetsForUser(user).orders.view.includes('all')])).rows;
   }
 
   async confirm(user: CurrentUser, conflictId: string, digest: string | null, requestId: string): Promise<{ resolved: number }> {
@@ -62,7 +62,7 @@ export class MdfDemandDriftService {
         const visible = (await tx.query<{ n: string }>(`WITH allowed AS (${mdfAllowedOrdersSql(user)})
           SELECT count(DISTINCT o)::text n FROM unnest($2::bigint[]) o WHERE o IN (SELECT order_id FROM allowed)`,
         [user.id, ids])).rows[0].n;
-        if (rolePolicyForUser(user).orders.view !== 'all' && Number(visible) !== new Set(ids).size) throw denied(['orders.update']);
+        if (!policyScopeSetsForUser(user).orders.view.includes('all') && Number(visible) !== new Set(ids).size) throw denied(['orders.update']);
       };
       await authorize(orderIds);
       if (group) {

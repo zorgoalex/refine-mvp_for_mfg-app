@@ -3,8 +3,8 @@ import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient } from '../../../database/database.types';
-import type { Scope } from '../../../permissions/policies/role-policies';
-import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
+import type { ScopeGrant } from '../../../permissions/policies/scope-sets';
 import type { CurrentUser } from '../../../permissions/current-user';
 import {
   calculateBathSheetFilmUsage,
@@ -1189,7 +1189,7 @@ export function buildScopedOrderWhere(
   params: unknown[] = [],
 ): { whereSql: string; params: unknown[] } {
   // Runtime-настроенный scope пользователя важнее статической политики роли.
-  const scope: Scope = rolePolicyForUser(currentUser).orders.view;
+  const scope = policyScopeSetsForUser(currentUser).orders.view;
   const actorIndex = scopeNeedsActor(scope)
     ? params.push(normalizeActorUserId(currentUser.id))
     : null;
@@ -1207,7 +1207,7 @@ export function buildScopedOrderWhere(
  * полномочий над связями, которые переживают удаление заказа (заявки поставщикам, CR3-1), — не для чтения данных.
  */
 export function buildOwnershipOrderWhere(currentUser: CurrentUser, params: unknown[] = []): { whereSql: string; params: unknown[] } {
-  const scope: Scope = rolePolicyForUser(currentUser).orders.view;
+  const scope = policyScopeSetsForUser(currentUser).orders.view;
   const actorIndex = scopeNeedsActor(scope) ? params.push(normalizeActorUserId(currentUser.id)) : null;
   return { whereSql: [`o.order_kind = 'production_order'`, buildScopePredicate(scope, actorIndex)].join('\n        AND '), params };
 }
@@ -1365,14 +1365,14 @@ function buildResourceFilters(
   return filters;
 }
 
-function buildScopePredicate(scope: Scope, actorIndex: number | null): string {
-  if (scope === 'all') return 'TRUE';
-  if (scope === 'none') return 'FALSE';
+/** Scope set (access groups stage 0A): `all` → TRUE; own ∪ assigned → OR of both; empty → FALSE. */
+function buildScopePredicate(scope: readonly ScopeGrant[], actorIndex: number | null): string {
+  if (scope.includes('all')) return 'TRUE';
   if (actorIndex === null) return 'FALSE';
-  if (scope === 'own') {
-    return `(o.created_by = $${actorIndex} OR o.manager_id = $${actorIndex})`;
-  }
-  return `EXISTS (
+  const parts: string[] = [];
+  if (scope.includes('own')) parts.push(`(o.created_by = $${actorIndex} OR o.manager_id = $${actorIndex})`);
+  if (scope.includes('assigned')) {
+    parts.push(`EXISTS (
     SELECT 1
     FROM order_workshops assigned_ow
     JOIN users assigned_user
@@ -1381,11 +1381,14 @@ function buildScopePredicate(scope: Scope, actorIndex: number | null): string {
       AND assigned_ow.delete_flag = false
       AND assigned_user.is_active = true
       AND assigned_user.user_id = $${actorIndex}
-  )`;
+  )`);
+  }
+  if (parts.length === 0) return 'FALSE';
+  return parts.length === 1 ? parts[0] : `(${parts.join(' OR ')})`;
 }
 
-function scopeNeedsActor(scope: Scope): boolean {
-  return scope === 'own' || scope === 'assigned';
+function scopeNeedsActor(scope: readonly ScopeGrant[]): boolean {
+  return !scope.includes('all') && (scope.includes('own') || scope.includes('assigned'));
 }
 
 function response(

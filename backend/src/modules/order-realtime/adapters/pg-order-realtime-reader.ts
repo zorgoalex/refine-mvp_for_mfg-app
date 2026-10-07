@@ -3,7 +3,7 @@ import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { mapUserRow } from '../../../permissions/visibility/order-visibility-filter';
+import { loadEvaluationUserWith } from '../../../permissions/user-authorization-snapshot';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import type {
   AuthorizedOrderRealtimeContext,
@@ -72,7 +72,8 @@ export class PgOrderRealtimeReader {
       [input.tokenUser.id, input.tokenUser.sessionId ?? null],
     );
     const userRow = users.rows[0];
-    const currentUser = userRow ? mapUserRow(userRow) : null;
+    // Effective authorization (same snapshot as the token), not the static role matrix.
+    const currentUser = userRow ? await loadEvaluationUserWith(this.database, userRow.user_id) : null;
     if (!userRow?.is_active || !userRow.session_active || !currentUser) {
       throw new ApiError(401, 'AUTH_SESSION_INVALID', 'Authentication session is no longer active');
     }

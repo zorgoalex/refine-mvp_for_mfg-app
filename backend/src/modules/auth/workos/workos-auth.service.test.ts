@@ -9,6 +9,7 @@ import type { AuthUserRecord } from '../auth.types';
 import type { WorkosIdentity } from './workos-api.client';
 import { WorkosAuthService, type WorkosAuthServicePorts } from './workos-auth.service';
 import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
+import { staticAuthorizationSnapshot } from '../../../permissions/testing/static-authorization-snapshot';
 
 const IDENTITY: WorkosIdentity = {
   sub: 'workos-sub-1',
@@ -41,6 +42,8 @@ const CURRENT_USER: CurrentUser = {
 interface Harness {
   service: WorkosAuthService;
   ports: {
+    /** Effective authorization by user id (escalation checks); default: the harness user only. */
+    authorization?: (userId: string | number) => ReturnType<typeof staticAuthorizationSnapshot> | null;
     identity: WorkosIdentity;
     identityError?: Error;
     linkRecord: { identityId: string; userId: string; provider: string; providerUserId: string; emailAtLink: string } | null;
@@ -192,20 +195,11 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
     passwords: { verify: async () => state.passwordValid },
     permissions: {
       canUser: state.canUser,
-      loadRoleAuthorization: vi.fn(async (roleId: number) => {
-        const role = mapRoleIdToRole(roleId);
-        if (!role) {
-          return {
-            permissions: [],
-            scopes: ROLE_POLICIES.viewer,
-            version: 7,
-          };
-        }
-        return {
-          permissions: getPermissionsForRole(role),
-          scopes: ROLE_POLICIES[role],
-          version: 7,
-        };
+      loadUserAuthorization: vi.fn(async (userId: string | number) => {
+        if (state.authorization) return state.authorization(userId);
+        const user = state.userById;
+        if (!user || String(user.id) !== String(userId)) return null;
+        return staticAuthorizationSnapshot({ userId: user.id, username: user.username, roleId: user.roleId, version: 7 });
       }),
     } as WorkosAuthServicePorts['permissions'],
     deniedAudit: { recordDenied: state.recordDenied },
@@ -892,10 +886,12 @@ describe('WorkosAuthService administrator controls', () => {
   });
 
   it('keeps the operator role boundary in SSO administration, whatever users.manage_sso grants say', async () => {
-    const withTargetRole = (roleId: number) => {
+    const withTargetRole = (roleId: number, actorRoleId = 1) => {
       const harness = createHarness();
       (harness.ports.database.query as ReturnType<typeof vi.fn>).mockImplementation(async (text: string) =>
         (/SELECT role_id FROM users/.test(text) ? { rows: [{ role_id: roleId }], rowCount: 1 } : { rows: [], rowCount: 0 }));
+      // Effective authorization of the administrator (id 7) and the target (id 42), as the snapshot would read it.
+      harness.ports.authorization = (id) => staticAuthorizationSnapshot({ userId: id, roleId: String(id) === '7' ? actorRoleId : roleId });
       return harness;
     };
     const actor = (role: CurrentUser['role'], roleId: number): CurrentUser =>
@@ -932,13 +928,21 @@ describe('WorkosAuthService administrator controls', () => {
 
     // Admin and superadmin administer an operator account; other targets keep the permission-only rule.
     for (const [role, roleId] of [['admin', 1], ['superadmin', 2]] as const) {
-      const harness = withTargetRole(32);
+      const harness = withTargetRole(32, roleId);
       await harness.service.adminCreateInvitation({ currentUser: actor(role, roleId), targetUserId: '42' });
       expect(harness.ports.createInvitation).toHaveBeenCalledTimes(1);
     }
-    const ordinary = withTargetRole(1);
+    // Other targets: the permission rule plus no escalation (access groups 0A.4). A top manager granted
+    // users.manage_sso administers an account whose permissions it covers (viewer)…
+    const ordinary = withTargetRole(100, 15);
     await ordinary.service.adminCreateInvitation({ currentUser: actor('top_manager', 15), targetUserId: '42' });
     expect(ordinary.ports.createInvitation).toHaveBeenCalledTimes(1);
+    // …but not an administrator's account: that would take over wider permissions through an SSO invitation.
+    const wider = withTargetRole(1, 15);
+    await expect(wider.service.adminCreateInvitation({ currentUser: actor('top_manager', 15), targetUserId: '42' }))
+      .rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+    expect(wider.ports.createInvitation).not.toHaveBeenCalled();
+    expect(wider.ports.recordDenied.mock.calls[0][1]).toMatchObject({ reason: 'privilege_escalation_denied' });
   });
 
   it('revokes active invitations through the live admin-session transaction', async () => {

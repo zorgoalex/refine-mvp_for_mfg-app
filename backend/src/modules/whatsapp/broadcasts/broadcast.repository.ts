@@ -900,8 +900,8 @@ export class BroadcastRepository {
         SELECT 1 FROM users u JOIN roles ro ON ro.role_id = u.role_id
         WHERE u.user_id = $1 AND u.is_active AND ro.is_active
           AND NOT EXISTS (SELECT 1 FROM unnest($2::text[]) need(permission_name)
-            WHERE NOT EXISTS (SELECT 1 FROM role_permissions rp JOIN permissions_catalog pc ON pc.permission_name = rp.permission_name
-              WHERE rp.role_id = u.role_id AND rp.permission_name = need.permission_name AND rp.is_enabled AND pc.is_active))
+            WHERE NOT EXISTS (SELECT 1 FROM user_effective_permissions uep
+              WHERE uep.user_id = u.user_id AND uep.permission_name = need.permission_name))
       ) AS allowed`, [userId, permissions])).rows[0];
     return Boolean(row?.allowed);
   }

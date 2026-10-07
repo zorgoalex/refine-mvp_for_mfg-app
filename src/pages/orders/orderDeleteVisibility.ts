@@ -15,9 +15,11 @@ export function canDeleteOrderForUser(
 ): boolean {
   if (!user?.permissions?.includes('orders.delete')) return false;
 
-  const scope = user.policyScopes?.orders.delete;
-  if (scope === 'all') return true;
-  if (scope !== 'own' || !order || typeof order !== 'object') return false;
+  // Scope set (access groups) when the backend sends it; otherwise the scalar of older backends.
+  const scalar = user.policyScopes?.orders.delete;
+  const scopes = user.policyScopeSets?.orders.delete ?? (scalar && scalar !== 'none' ? [scalar] : []);
+  if (scopes.includes('all')) return true;
+  if (!scopes.includes('own') || !order || typeof order !== 'object') return false;
 
   const subject = order as OrderDeleteVisibilitySubject;
 

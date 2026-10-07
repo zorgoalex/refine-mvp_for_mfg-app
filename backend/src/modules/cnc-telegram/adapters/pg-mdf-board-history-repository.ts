@@ -2,7 +2,7 @@ import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import { appendOrderReadScopeSql } from '../../../permissions/policies/order-read-scope-sql';
-import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import type {
   GetMdfBoardHistoryCommand,
   MdfBoardHistoryRepositoryPort,
@@ -272,7 +272,7 @@ export function appendMdfHistoryOrderVisibilitySql(
 ): string {
   const readScope = appendOrderReadScopeSql(params, currentUser, orderAlias);
   const canReadDeleted = currentUser.permissions.includes('orders.delete')
-    && rolePolicyForUser(currentUser).orders.delete === 'all';
+    && policyScopeSetsForUser(currentUser).orders.delete.includes('all');
   const deletionPredicate = canReadDeleted
     ? 'TRUE'
     : `COALESCE(${orderAlias}.delete_flag, false) = false`;

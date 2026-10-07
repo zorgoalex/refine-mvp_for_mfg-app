@@ -10,6 +10,7 @@ import type { AuthSessionHttpPort, LogoutCommand, RefreshCommand } from './auth-
 import { AuthController, readCookie, validateLoginBody } from './auth.controller';
 import type { AuthRuntimeConfigService } from './auth-runtime-config.service';
 import type { RateLimitService } from '../../../rate-limit/rate-limit.service';
+import { scopeSetsFromPolicy } from '../../../permissions/policies/scope-sets';
 
 interface CookieWrite {
   name: string;
@@ -267,6 +268,8 @@ describe('AuthController HTTP shell', () => {
         permissions: getPermissionsForRole('manager'),
         permissionsVersion: 0,
         policyScopes: ROLE_POLICIES.manager,
+        // A token without scope sets (older backend) gets them derived from its scalar scopes.
+        policyScopeSets: scopeSetsFromPolicy(ROLE_POLICIES.manager),
       },
     });
   });

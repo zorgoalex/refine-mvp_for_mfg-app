@@ -1,6 +1,6 @@
 import type { TransactionClient } from '../../../database/database.types';
 import { mdfAttachedLines } from '../adapters/mdf-position-detachments';
-import { mapUserRow } from '../../../permissions/visibility/order-visibility-filter';
+import { loadEvaluationUserWith } from '../../../permissions/user-authorization-snapshot';
 import { executePinnedMdfAutomation } from '../../status-automation/application/status-automation-runtime';
 import { executeMdfAllocation } from '../adapters/mdf-allocation-executor';
 import { loadMdfExecutionDetails, mdfSourceKey } from '../adapters/mdf-execution-snapshot';
@@ -130,7 +130,8 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   // fabricated admin authority; retain accounting, omit rule effects, expose why.
   const user = !composition && job.actor_user_id ? (await tx.query<{ user_id: string; username: string; role_id: number }>(
     'SELECT user_id,username,role_id FROM users WHERE user_id=$1 AND is_active',[job.actor_user_id])).rows[0] : null;
-  const actor = user ? mapUserRow(user) : null;
+  // Effective authorization of the living actor (same snapshot as the token), read in this transaction.
+  const actor = user ? await loadEvaluationUserWith(tx, user.user_id) : null;
   if (!composition && actor && effectPolicy === 'forward' && (ruleEvents.length || changedCompositionOrderIds.length)) {
     await executePinnedMdfAutomation(tx,{ actor, requestId: job.request_id, sourceIdempotencyKey: job.event_key,
       pins: rules.map(r => ({ ruleId: Number(r.rule_id), version: Number(r.rule_version) })), events: ruleEvents,

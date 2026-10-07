@@ -3,6 +3,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import { UserAccessPolicy } from '../../../permissions/policies/user-access.policy';
+import { ACCOUNT_ESCALATION_DENIED } from '../../../permissions/account-escalation';
 import type { TargetUserSubject } from '../../../permissions/policies/user-access.policy';
 import type {
   ChangePasswordResponseDto,
@@ -72,7 +73,22 @@ export class UserService {
       throw permissionDenied('users.create');
     }
 
-    return this.ports.users.createUser(command);
+    try {
+      return await this.ports.users.createUser(command);
+    } catch (error) {
+      if (error instanceof ApiError && error.code === ACCOUNT_ESCALATION_DENIED) {
+        try {
+          await auditService.recordDenied(this.ports.database, buildUserDeniedEvent({
+            actor: command.currentUser,
+            requestId: command.requestId ?? DEFAULT_REQUEST_ID,
+            action: 'create',
+            targetUserId: null,
+            reason: 'privilege_escalation_denied',
+          }));
+        } catch { /* best-effort */ }
+      }
+      throw error;
+    }
   }
 
   async update(command: UpdateUserCommand): Promise<UserDto> {
@@ -179,14 +195,19 @@ export class UserService {
     try {
       return await mutate();
     } catch (error) {
-      if (error instanceof ApiError && error.code === 'USER_ROLE_CHANGED') {
+      const reason = error instanceof ApiError && error.code === 'USER_ROLE_CHANGED'
+        ? 'target_role_changed' as const
+        : error instanceof ApiError && error.code === ACCOUNT_ESCALATION_DENIED
+          ? 'privilege_escalation_denied' as const
+          : null;
+      if (reason) {
         try {
           await auditService.recordDenied(this.ports.database, buildUserDeniedEvent({
             actor: command.currentUser,
             requestId: command.requestId ?? DEFAULT_REQUEST_ID,
             action,
             targetUserId: String(command.userId),
-            reason: 'target_role_changed',
+            reason,
           }));
         } catch { /* best-effort */ }
       }

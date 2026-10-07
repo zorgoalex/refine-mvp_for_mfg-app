@@ -15,7 +15,8 @@ describe('roles matrix runtime guards', () => {
     const source = readSource(relativePath);
 
     expect(source).not.toContain('ROLE_POLICIES');
-    expect(source).toContain('rolePolicyForUser');
+    // Runtime scopes of the token: scalar (rolePolicyForUser) or scope sets (policyScopeSetsForUser, access groups 0A).
+    expect(source).toMatch(/rolePolicyForUser|policyScopeSetsForUser/);
   });
 
   it('checks payment permissions and payment scope for order-save payment mutations', () => {

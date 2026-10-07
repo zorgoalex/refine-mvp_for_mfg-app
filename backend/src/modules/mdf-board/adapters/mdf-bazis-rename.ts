@@ -1,8 +1,8 @@
 import { ApiError } from '../../../common/errors/api-error';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { buildOrderReadScopePredicate, normalizeActorUserId, orderAssignmentExistsSql } from '../../../permissions/policies/order-read-scope-sql';
-import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { buildOrderReadScopePredicate, normalizeActorUserId, orderAssignmentExistsSql, scopeNeedsActor } from '../../../permissions/policies/order-read-scope-sql';
+import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import { CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE as MDF, CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE as OTHER } from '../../../shared/cnc-material';
 import { requireMdfCommandBoundary } from '../application/mdf-command-boundary';
 import { recordMdfLineageReceipt, recordMdfReceipt, type MdfReceiptLine } from '../application/mdf-receipt';
@@ -196,8 +196,8 @@ async function loadDemand(tx: TransactionClient, sourceId: string, revisionKey: 
 
 async function lockOwners(tx: TransactionClient, user: CurrentUser, ids: number[]): Promise<void> {
   const params: unknown[] = [ids];
-  const scope = rolePolicyForUser(user).orders.view;
-  const actor = scope === 'own' || scope === 'assigned' ? params.push(normalizeActorUserId(user.id)) : 0;
+  const scope = policyScopeSetsForUser(user).orders.view;
+  const actor = scopeNeedsActor(scope) ? params.push(normalizeActorUserId(user.id)) : 0;
   const predicate = buildOrderReadScopePredicate(scope, actor ? params.length : null,
     actor ? orderAssignmentExistsSql('o', params.length) : 'FALSE', 'o');
   const rows = (await tx.query<OwnerRow>(`SELECT o.order_id::float8 "orderId",o.created_by::text "createdBy",

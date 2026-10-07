@@ -9,8 +9,8 @@ import { ApiError } from '../../common/errors/api-error';
 import { auditService } from '../../common/audit/audit.service';
 import type { CurrentUser } from '../../permissions/current-user';
 import type { PermissionName } from '../../permissions/permissions';
-import { rolePolicyForUser } from '../../permissions/policies/scope';
-import { buildOrderReadScopePredicate, orderAssignmentExistsSql } from '../../permissions/policies/order-read-scope-sql';
+import { policyScopeSetsForUser } from '../../permissions/policies/scope';
+import { buildOrderReadScopePredicate, orderAssignmentExistsSql, scopeNeedsActor } from '../../permissions/policies/order-read-scope-sql';
 import { evaluateStatusAutomation, isStatusAutomationEnabled } from '../status-automation/application/status-automation-runtime';
 import { listEnabledRulesForEvent, loadOrderAutomationState } from '../status-automation/adapters/pg-status-automation-repository';
 import { selectApplicableRules } from '../status-automation/domain/status-automation-evaluator';
@@ -45,8 +45,8 @@ function requirePermission(actor: CurrentUser, permission: PermissionName) {
 }
 function scopeSql(actor: CurrentUser, params: unknown[]): string {
   if (!actor.permissions.includes('orders.view')) return 'FALSE';
-  const scope = rolePolicyForUser(actor).orders.view;
-  const index = scope === 'own' || scope === 'assigned' ? params.push(actor.id) : null;
+  const scope = policyScopeSetsForUser(actor).orders.view;
+  const index = scopeNeedsActor(scope) ? params.push(actor.id) : null;
   return buildOrderReadScopePredicate(scope, index, index === null ? 'FALSE' : orderAssignmentExistsSql('o', index), 'o');
 }
 

@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { ApiError } from '../../../common/errors/api-error';
+import { currentUserFromAuthorization } from '../../../permissions/current-user-from-authorization';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import { PaymentAccessPolicy } from '../../../permissions/policies/payment-access.policy';
@@ -100,16 +101,11 @@ export class Bitrix24PaymentWidgetAuthService {
       await this.repository.revokeSession(session.sessionId);
       throw sessionExpired();
     }
-    const authorization = await this.permissions.loadRoleAuthorization(mapped.roleId);
-    const actor: CurrentUser = {
-      id: String(mapped.userId),
-      username: mapped.username,
-      role: mapped.roleCode,
-      roleId: mapped.roleId,
-      permissions: authorization.permissions,
-      policyScopes: authorization.scopes,
-      permissionsVersion: authorization.version,
-    };
+    // Effective authorization of the mapped ERP user (one-statement snapshot, access groups stage 0A).
+    const actor: CurrentUser = currentUserFromAuthorization(
+      await this.permissions.loadUserAuthorization(String(mapped.userId)),
+      {},
+    );
     const cipher = new Bitrix24TokenCipher(settings.sessionEncryptionKey);
     const accessToken = cipher.decrypt(session.accessTokenCiphertext);
     const refreshToken = cipher.decrypt(session.refreshTokenCiphertext);
@@ -188,22 +184,10 @@ export class Bitrix24PaymentWidgetAuthService {
     requireLinked: boolean,
     loadedActor?: CurrentUser,
   ): Promise<void> {
-    const authorization = loadedActor
-      ? {
-          permissions: loadedActor.permissions,
-          scopes: loadedActor.policyScopes!,
-          version: loadedActor.permissionsVersion ?? 0,
-        }
-      : await this.permissions.loadRoleAuthorization(mapped.roleId);
-    const actor: CurrentUser = loadedActor ?? {
-      id: String(mapped.userId),
-      username: mapped.username,
-      role: mapped.roleCode,
-      roleId: mapped.roleId,
-      permissions: authorization.permissions,
-      policyScopes: authorization.scopes,
-      permissionsVersion: authorization.version,
-    };
+    const actor: CurrentUser = loadedActor ?? currentUserFromAuthorization(
+      await this.permissions.loadUserAuthorization(String(mapped.userId)),
+      {},
+    );
     const required = [
       'bitrix24.payments.create',
       'payments.create',

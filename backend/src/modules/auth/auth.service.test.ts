@@ -5,6 +5,7 @@ import { InvalidCredentialsError, LoginMethodNotAllowedError, UserInactiveError 
 import { AuthService } from './auth.service';
 import type { AuthServicePorts } from './auth.service';
 import type { AuthUserRecord } from './auth.types';
+import { staticAuthorizationSnapshot } from '../../permissions/testing/static-authorization-snapshot';
 
 function createPorts(
   user: AuthUserRecord | null,
@@ -61,13 +62,12 @@ function createPorts(
       },
     },
     permissions: {
-      async loadRoleAuthorization(roleId) {
-        const role = roleId === 2 ? 'superadmin' : 'manager';
-        return {
-          permissions: getPermissionsForRole(role),
-          scopes: ROLE_POLICIES[role],
-          version: 11,
-        };
+      async loadUserAuthorization(userId) {
+        // Test users: id 1 is the superadmin (role 2); others are managers (role 10).
+        return staticAuthorizationSnapshot({
+          userId, username: String(userId) === '1' ? 'superadmin' : `user-${userId}`,
+          roleId: String(userId) === '1' ? 2 : 10, version: 11,
+        });
       },
     },
   };

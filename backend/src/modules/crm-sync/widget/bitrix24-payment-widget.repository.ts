@@ -1735,15 +1735,14 @@ export class Bitrix24PaymentWidgetRepository {
                 'bitrix24.payments.create','payments.create','orders.view_financials'
               ]::text[]) required(permission_name)
                WHERE NOT EXISTS (
-                 SELECT 1 FROM role_permissions permission
-                  WHERE permission.role_id=actor.role_id
+                 SELECT 1 FROM user_effective_permissions permission
+                  WHERE permission.user_id=actor.user_id
                     AND permission.permission_name=required.permission_name
-                    AND permission.is_enabled=true
                )
             )
             AND EXISTS (
-              SELECT 1 FROM role_policy_scopes scope
-               WHERE scope.role_id=actor.role_id
+              SELECT 1 FROM user_effective_scopes scope
+               WHERE scope.user_id=actor.user_id
                  AND scope.scope_key='payments.create'
                  AND (
                    scope.scope_value='all'

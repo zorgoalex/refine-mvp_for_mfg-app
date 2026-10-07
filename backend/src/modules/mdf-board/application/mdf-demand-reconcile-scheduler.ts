@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import type { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
-import { mapUserRow } from '../../../permissions/visibility/order-visibility-filter';
+import { loadEvaluationUserWith } from '../../../permissions/user-authorization-snapshot';
 import { runMdfDemandReconcileTick } from '../adapters/mdf-demand-reconciler';
 
 /** §5.8 demand-drift reconciler poller (one bounded tick per minute; source/order locks serialize other instances).
@@ -43,7 +43,7 @@ export class MdfDemandReconcileScheduler implements OnModuleInit, OnModuleDestro
       const actorId = Number(this.actorId());
       const row = Number.isSafeInteger(actorId) && actorId > 0 ? (await this.database.query<{ user_id: string; username: string;
         role_id: number }>('SELECT user_id,username,role_id FROM users WHERE user_id=$1 AND is_active', [actorId])).rows[0] : undefined;
-      const user = row ? mapUserRow(row) : null;
+      const user = row ? await loadEvaluationUserWith(this.database, row.user_id) : null;
       if (!user) { this.logger.error({ event: 'mdf_reconcile_actor_unavailable', code: 'MDF_RECONCILE_ACTOR_UNAVAILABLE' }); return; }
       const result = await runMdfDemandReconcileTick({ user, requestId: `mdf-reconcile:${randomUUID()}`, cursor: this.cursor,
         transaction: <T>(handler: (tx: TransactionClient) => Promise<T>) => this.database.transaction(handler,

@@ -3,8 +3,8 @@ import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { buildOrderReadScopePredicate, normalizeActorUserId, orderAssignmentExistsSql } from '../../../permissions/policies/order-read-scope-sql';
-import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { buildOrderReadScopePredicate, normalizeActorUserId, orderAssignmentExistsSql, scopeNeedsActor } from '../../../permissions/policies/order-read-scope-sql';
+import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import { CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE as MDF, CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE as OTHER } from '../../../shared/cnc-material';
 import { requireMdfCommandBoundary, type MdfCommandWriter } from '../application/mdf-command-boundary';
 import { recordMdfBathTransition, recordMdfReceipt } from '../application/mdf-receipt';
@@ -98,9 +98,9 @@ async function authorizeAndLockOwners(tx: TransactionClient, user: CurrentUser, 
   // Lock first (ascending), THEN evaluate the scope on the locked rows: a concurrent reassignment that
   // committed while we waited is seen, and none can commit afterwards until this command ends.
   await tx.query('SELECT order_id FROM orders WHERE order_id=ANY($1::bigint[]) ORDER BY order_id FOR UPDATE', [[...owners]]);
-  const scope = rolePolicyForUser(user).orders.view;
+  const scope = policyScopeSetsForUser(user).orders.view;
   const params: unknown[] = [[...owners]];
-  const actor = scope === 'own' || scope === 'assigned' ? params.push(normalizeActorUserId(user.id)) : null;
+  const actor = scopeNeedsActor(scope) ? params.push(normalizeActorUserId(user.id)) : null;
   const predicate = buildOrderReadScopePredicate(scope, actor, actor === null ? 'FALSE' : orderAssignmentExistsSql('o', actor), 'o');
   const allowed = (await tx.query(`SELECT o.order_id FROM orders o WHERE o.order_id=ANY($1::bigint[]) AND ${predicate}`, params)).rows;
   if (allowed.length !== owners.length) denied();

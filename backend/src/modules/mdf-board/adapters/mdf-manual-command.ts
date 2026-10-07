@@ -3,7 +3,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import type { TransactionClient } from '../../../database/database.types';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
-import { allowsScope, rolePolicyForUser } from '../../../permissions/policies/scope';
+import { allowsScopeSet, policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import type { DeleteMdfBoardManualMoveCommand, UpsertMdfBoardManualMoveCommand } from '../../orders/application/mdf-board-manual-move.types';
 import type { MdfBoardManualMoveDto, MdfBoardManualMoveUpsertResponseDto, MdfBoardManualMoveDeleteResponseDto } from '../../orders/dto/mdf-board-manual-move.dto';
 import { requireMdfCommandBoundary } from '../application/mdf-command-boundary';
@@ -73,7 +73,7 @@ export async function executeMdfManualCommand(tx: TransactionClient,
   for (const o of locked) {
     const subject = { orderId: o.id,createdByUserId: o.createdBy,managerUserId: o.managerId,assignedUserIds: o.assigned };
     if (!policy.canView(user,subject) || !(policy.canUpdate(user,subject)
-      || allowsScope(user,rolePolicyForUser(user).productionTasks.update,subject))) {
+      || allowsScopeSet(user,policyScopeSetsForUser(user).productionTasks.update,subject))) {
       throw new ApiError(403,'PERMISSION_DENIED','Нет доступа ко всем заказам карточки');
     }
   }

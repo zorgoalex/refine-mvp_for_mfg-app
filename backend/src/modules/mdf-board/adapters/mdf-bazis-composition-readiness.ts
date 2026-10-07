@@ -1,6 +1,6 @@
 import { CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE, CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE } from '../../../shared/cnc-material';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import type { MdfJobDatabase } from '../application/mdf-job-runner';
 import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
 import { mdfAllowedOrdersSql, mdfPublishedCardOwnersSql } from './mdf-published-snapshot';
@@ -57,7 +57,7 @@ export async function loadMdfBazisCompositionReadiness(database: MdfJobDatabase,
       return unavailable('MDF_PUBLICATION_PENDING');
     }
     if ((row.issues ?? []).length) return unavailable('MDF_SOURCE_ISSUES');
-    const fullScope = rolePolicyForUser(user).orders.view === 'all';
+    const fullScope = policyScopeSetsForUser(user).orders.view.includes('all');
     if (row.allowedCount !== row.ownerCount || (row.ownerCount === 0 && !fullScope)) return unavailable('MDF_PARTIAL_ACCESS');
     const eligibleRowIds = [...mdfBazisEligibleRowIdsFromRaw(
       await loadMdfBazisCompositionRawSnapshot(tx, { setId })).rowIds];

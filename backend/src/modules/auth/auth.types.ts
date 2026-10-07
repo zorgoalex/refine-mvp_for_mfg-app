@@ -1,6 +1,7 @@
 import type { CurrentUser } from '../../permissions/current-user';
 import type { PermissionName, UserRole } from '../../permissions/permissions';
 import type { RolePolicy } from '../../permissions/policies/role-policies';
+import type { RolePolicyScopeSets } from '../../permissions/policies/scope-sets';
 
 export interface LoginCommand {
   username: string;
@@ -104,6 +105,8 @@ export interface AuthResponseUser {
   permissions: readonly PermissionName[];
   permissionsVersion: number;
   policyScopes: RolePolicy;
+  /** Scopes as sets (access groups); clients prefer it over the scalar policyScopes. */
+  policyScopeSets: RolePolicyScopeSets;
 }
 
 export interface AuthResponse {

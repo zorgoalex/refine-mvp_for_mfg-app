@@ -5,8 +5,8 @@ import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import { DatabaseService } from '../../../database/database.service';
-import { appendOrderReadScopeSql, buildOrderReadScopePredicate, normalizeActorUserId, orderAssignmentExistsSql } from '../../../permissions/policies/order-read-scope-sql';
-import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { appendOrderReadScopeSql, buildOrderReadScopePredicate, normalizeActorUserId, orderAssignmentExistsSql, scopeNeedsActor } from '../../../permissions/policies/order-read-scope-sql';
+import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
 import { captureNewMdfBazisSource, registerNewMdfBazisSource } from '../../mdf-board/adapters/mdf-bazis-source';
@@ -1320,8 +1320,8 @@ async function lockPickerOrders(
   let predicate: string;
   if (currentPolicy) {
     if (!user.permissions.includes('cut.manage') || !user.permissions.includes('orders.view')) throw pickerSelectionStale();
-    const scope = rolePolicyForUser(user).orders.view;
-    const actor = scope === 'own' || scope === 'assigned' ? params.push(normalizeActorUserId(user.id)) : null;
+    const scope = policyScopeSetsForUser(user).orders.view;
+    const actor = scopeNeedsActor(scope) ? params.push(normalizeActorUserId(user.id)) : null;
     predicate = buildOrderReadScopePredicate(scope,actor,actor === null ? 'FALSE' : orderAssignmentExistsSql('o',actor),'o');
   } else predicate = appendOrderReadScopeSql(params, user, 'o').predicate;
   const result = await client.query<OrderScopeRow>(
