@@ -2483,9 +2483,14 @@
 }
 
 /* таблица деталей ближе к макету: спокойная шапка, тонкие горизонтальные линии, вертикальные едва видны */
-/* подписи колонок заданы долями (70–75%) от шрифта ячейки шапки: 15px дают читаемые ~11px */
+/* подписи колонок заданы долями (70–75%) от шрифта ячейки шапки: 14px дают читаемые ~10,5px */
 :root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-thead > tr > th {
-  font-size: 15px;
+  font-size: 14px;
+}
+
+/* слово в подписи не рвётся посередине («Высот-а») */
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .order-detail-spreadsheet-header {
+  overflow-wrap: normal;
 }
 
 :root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-thead > tr > th,
