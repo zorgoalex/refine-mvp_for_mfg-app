@@ -13,6 +13,7 @@ import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import type { WahaClient } from '../waha.client';
 import type { WhatsAppRuntimeConfigService } from '../whatsapp-runtime-config.service';
 import { OrderSendActors } from './order-send-actors';
+import { installAuthorizationSnapshot, withLocalAuthorizationSnapshot } from './authorization-snapshot.test-util';
 import { runMigrationFile } from './migration-file.test-util';
 import { OrderSendFileStore } from './order-send-file-store';
 import { readOrderFormData } from './forms/order-form-data';
@@ -113,9 +114,12 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     await q(`CREATE TABLE suppliers(supplier_id smallint PRIMARY KEY, supplier_name text);
       CREATE TABLE supplier_requests(supplier_request_id bigint PRIMARY KEY, request_number text)`);
     await runMigrationFile((sql) => q(sql), await readFile(new URL('../../../../db/migrations/238_whatsapp_supplier_send.sql', import.meta.url), 'utf8'));
+    await installAuthorizationSnapshot((sql) => q(sql), schema,
+      await (await import('node:fs/promises')).readFile(new URL('../../../../db/migrations/248_authorization_snapshot.sql', import.meta.url), 'utf8'));
+    const local = withLocalAuthorizationSnapshot(schema);
     database = {
       isConfigured: true,
-      query: <T extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []) => pool.query<T>(text, [...params]),
+      query: <T extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []) => pool.query<T>(local(text), [...params]),
       // Same contract as DatabaseService.withAdvisoryLock: a try-lock on its own connection, null when busy.
       withAdvisoryLock: async <T>(key: string, handler: (assertOwned: () => Promise<void>) => Promise<T>) => {
         const connection = await pool.connect();
@@ -133,7 +137,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
           await connection.query(`SET search_path="${schema}",public`);
           await connection.query('BEGIN');
           try {
-            const value = await handler({ query: <R extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []) => connection.query<R>(text, [...params]) });
+            const value = await handler({ query: <R extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []) => connection.query<R>(local(text), [...params]) });
             await connection.query('COMMIT');
             return value;
           } catch (error) {

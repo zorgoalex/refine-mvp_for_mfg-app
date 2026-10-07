@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { installAuthorizationSnapshot } from '../order-send/authorization-snapshot.test-util';
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
@@ -71,6 +72,12 @@ describe.skipIf(!databaseUrl)('BroadcastRepository PostgreSQL (isolated schema)'
     for (const file of ['183_whatsapp_daily_digest.sql', '184_whatsapp_daily_digest_schedule.sql', '209_whatsapp_broadcasts.sql', '224_whatsapp_calendar_send.sql']) {
       await q(await readFile(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
+    // The author's rights are read through the authorization snapshot objects of migration 248 (views and function).
+    await q(`CREATE TABLE IF NOT EXISTS permissions_state(id boolean PRIMARY KEY DEFAULT true, version int NOT NULL DEFAULT 1);
+      INSERT INTO permissions_state VALUES (true, 1) ON CONFLICT DO NOTHING;
+      CREATE TABLE IF NOT EXISTS role_policy_scopes(role_id int, scope_key text, scope_value text, PRIMARY KEY(role_id, scope_key))`);
+    await installAuthorizationSnapshot((sql) => q(sql), schema,
+      await readFile(new URL('../../../../db/migrations/248_authorization_snapshot.sql', import.meta.url), 'utf8'));
     database = {
       query: <T extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []) => pool.query<T>(text, [...params]),
       transaction: async <T>(handler: (tx: { query: <R extends QueryResultRow = QueryResultRow>(text: string, params?: readonly unknown[]) => Promise<unknown> }) => Promise<T>) => {

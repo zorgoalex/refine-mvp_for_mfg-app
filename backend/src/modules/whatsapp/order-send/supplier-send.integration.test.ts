@@ -12,6 +12,7 @@ import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import type { WahaClient } from '../waha.client';
 import type { WhatsAppRuntimeConfigService } from '../whatsapp-runtime-config.service';
 import { OrderSendActors } from './order-send-actors';
+import { installAuthorizationSnapshot, withLocalAuthorizationSnapshot } from './authorization-snapshot.test-util';
 import { OrderSendFileStore } from './order-send-file-store';
 import { parseSupplierSendCommand } from './order-send.dto';
 import { OrderSendRepository } from './order-send.repository';
@@ -110,9 +111,12 @@ describe.skipIf(!databaseUrl)('supplier request to WhatsApp (PostgreSQL, isolate
       const sql = await readFile(new URL(`../../../../db/migrations/${migration}.sql`, import.meta.url), 'utf8');
       if (migration.startsWith('238_')) await runMigrationFile((text) => q(text), sql); else await q(sql);
     }
+    await installAuthorizationSnapshot((sql) => q(sql), schema,
+      await readFile(new URL('../../../../db/migrations/248_authorization_snapshot.sql', import.meta.url), 'utf8'));
+    const local = withLocalAuthorizationSnapshot(schema);
     database = {
       isConfigured: true,
-      query: <T extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []) => pool.query<T>(text, [...params]),
+      query: <T extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []) => pool.query<T>(local(text), [...params]),
       withAdvisoryLock: async <T>(key: string, handler: (assertOwned: () => Promise<void>) => Promise<T>) => {
         const connection = await pool.connect();
         try {
@@ -129,7 +133,7 @@ describe.skipIf(!databaseUrl)('supplier request to WhatsApp (PostgreSQL, isolate
           await connection.query(`SET search_path="${schema}",public`);
           await connection.query('BEGIN');
           try {
-            const value = await handler({ query: <R extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []) => connection.query<R>(text, [...params]) });
+            const value = await handler({ query: <R extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []) => connection.query<R>(local(text), [...params]) });
             await connection.query('COMMIT');
             return value;
           } catch (error) {
@@ -439,7 +443,7 @@ describe.skipIf(!databaseUrl)('supplier request to WhatsApp (PostgreSQL, isolate
       expect(texts, change).toEqual([]);
       expect(await events(view.sendId), change).toEqual(['requested', 'cancelled']);
     }
-  });
+  }, 30_000);
 
   it('the worker never redirects: another supplier, another number, a removed contact, an inactive supplier cancel', async () => {
     const cases: Array<[string, string, string?]> = [

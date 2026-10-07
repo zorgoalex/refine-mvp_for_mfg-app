@@ -1,8 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { mapRoleIdToRole, type PermissionName } from '../../../permissions/permissions';
-import { scopesFromRows } from '../../../permissions/permissions.service';
+import { loadEvaluationUsersWith } from '../../../permissions/user-authorization-snapshot';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import { ORDER_SEND_FINANCIAL_PERMISSION, orderForm, type OrderFormCode } from './order-send.types';
 
@@ -28,25 +27,16 @@ export async function readAccessSubject(client: DatabaseClient, orderId: number,
  * The current rights of a user, read inside the intent transaction after its locks are held. The
  * authorization version row is share-locked, so a role/permission change and a user deactivation
  * wait for this transaction: whatever commits before it is seen, whatever comes after it can no
- * longer stop a delivery that has already started.
+ * longer stop a delivery that has already started. The rights themselves come from the one
+ * authorization snapshot every other path uses (`user_authorization_snapshot`), read in this transaction.
  */
 @Injectable()
 export class OrderSendActors {
   async load(tx: DatabaseClient, userId: string): Promise<CurrentUser | null> {
     await tx.query('SELECT version FROM permissions_state WHERE id = true FOR SHARE');
-    const row = (await tx.query<{ user_id: string; username: string; role_id: number }>(`SELECT u.user_id, u.username, u.role_id
-      FROM users u JOIN roles r ON r.role_id = u.role_id WHERE u.user_id = $1 AND u.is_active AND r.is_active FOR SHARE OF u`, [userId])).rows[0];
-    if (!row) return null;
-    const roleId = Number(row.role_id);
-    const role = mapRoleIdToRole(roleId);
-    if (!role) return null;
-    const [permissions, scopes] = await Promise.all([
-      tx.query<{ permission_name: PermissionName }>(`SELECT rp.permission_name FROM role_permissions rp
-        JOIN permissions_catalog pc ON pc.permission_name = rp.permission_name
-        WHERE rp.role_id = $1 AND rp.is_enabled = true AND pc.is_active = true`, [roleId]),
-      tx.query<{ scope_key: string; scope_value: string }>('SELECT scope_key, scope_value FROM role_policy_scopes WHERE role_id = $1', [roleId]),
-    ]);
-    return { id: String(row.user_id), username: row.username, role, roleId, permissions: permissions.rows.map((item) => item.permission_name),
-      policyScopes: scopesFromRows(scopes.rows) };
+    const locked = (await tx.query<{ user_id: string }>(`SELECT u.user_id FROM users u JOIN roles r ON r.role_id = u.role_id
+      WHERE u.user_id = $1 AND u.is_active AND r.is_active FOR SHARE OF u`, [userId])).rows[0];
+    if (!locked) return null;
+    return (await loadEvaluationUsersWith(tx, [userId], { requireActiveRole: true })).get(String(locked.user_id)) ?? null;
   }
 }

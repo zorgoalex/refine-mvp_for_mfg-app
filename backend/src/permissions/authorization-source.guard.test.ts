@@ -21,8 +21,6 @@ const ALLOWED: Record<string, string> = {
   'modules/users/adapters/pg-user-repository.ts': 'fallback only when no database is configured',
   'modules/production-actions/adapters/pg-production-action-repository.ts': 'system actor of deadline actions',
   'modules/payments-onec/domain/onec-receipts.ts': 'comment only',
-  // Temporary: the WhatsApp session moves OrderSendActors to loadUserAuthorization in its own commit.
-  'modules/whatsapp/order-send/order-send-actors.ts': 'TEMPORARY — to be switched by the WhatsApp session',
 };
 
 /**
