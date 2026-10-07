@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { auditService } from '../../common/audit/audit.service';
 import { ApiError } from '../../common/errors/api-error';
 import { DatabaseService } from '../../database/database.service';
@@ -11,6 +11,9 @@ const SOURCE = 'erp_party_contacts';
 const SIMILARITY_FROM = 0.45;
 const SUGGESTIONS_LIMIT = 10;
 const SEARCH_LIMIT = 50;
+/** One confirmation request: each pair is its own transaction, so the request stays short. */
+export const CONFIRM_MAX = 100;
+const MATCHES_LIMIT = 2000;
 
 export type ClientCounterpartyReason = 'name' | 'phone' | 'similar';
 
@@ -42,6 +45,61 @@ export interface ClientLink {
   /** The linked counterparty as 1C has it now; null — no link, or the key is not in the loaded 1C data. */
   counterparty: CounterpartyCard | null;
 }
+
+export type ClientMatchStrength = 'both' | 'phone' | 'name';
+
+/** A client without a counterparty and the only counterparty that looks like it. */
+export interface ClientCounterpartyMatch {
+  clientId: number;
+  clientName: string;
+  clientPhones: string[];
+  counterparty: CounterpartyCard;
+  /** Equal name and phone, equal phone only, equal name only. */
+  strength: ClientMatchStrength;
+}
+
+/** A client whose exact candidates cannot be confirmed in bulk: several of them, or a shared or taken one. */
+export interface ClientCounterpartyAmbiguity {
+  clientId: number;
+  clientName: string;
+  candidates: Array<{ refKey1c: string; name: string; matchedBy: ClientCounterpartyReason[] }>;
+}
+
+export interface ClientCounterpartyMatches {
+  available: boolean;
+  summary: {
+    /** Active clients. */
+    clients: number;
+    linked: number;
+    /** Not linked, exactly one exact candidate, free and not a candidate of another unlinked client. */
+    both: number;
+    phone: number;
+    name: number;
+    ambiguous: number;
+    /** Not linked and nothing exact found. */
+    none: number;
+  };
+  matches: ClientCounterpartyMatch[];
+  ambiguous: ClientCounterpartyAmbiguity[];
+}
+
+export type ConfirmStatus = 'linked' | 'conflict' | 'taken' | 'unknown' | 'not_found' | 'uncertain';
+
+export interface ConfirmResult {
+  clientId: number;
+  refKey1c: string;
+  status: ConfirmStatus;
+  /** For `taken`: the client that holds the counterparty; for `conflict`: nothing — the client got another link meanwhile. */
+  holderClientId: number | null;
+  holderClientName: string | null;
+}
+
+const CONFIRM_ERRORS: Record<string, ConfirmStatus> = {
+  CLIENT_COUNTERPARTY_CONFLICT: 'conflict',
+  CLIENT_COUNTERPARTY_TAKEN: 'taken',
+  CLIENT_COUNTERPARTY_UNKNOWN: 'unknown',
+  CLIENT_NOT_FOUND: 'not_found',
+};
 
 interface CounterpartyRow {
   ref: string; name: string; code: string | null; bin: string | null; is_buyer: boolean | null; phones: string[] | null;
@@ -78,6 +136,8 @@ const CARD_COLUMNS = `cp.ref, cp.name, cp.code, cp.bin, cp.is_buyer,
  */
 @Injectable()
 export class ClientCounterpartyRepository {
+  private readonly logger = new Logger(ClientCounterpartyRepository.name);
+
   constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
 
   async link(clientId: number, client: DatabaseClient = this.database): Promise<ClientLink> {
@@ -139,11 +199,98 @@ export class ClientCounterpartyRepository {
   }
 
   /**
+   * Bulk view: active clients without a counterparty and their exact candidates (equal name, equal phone).
+   * A pair is offered for confirmation only when it is unambiguous both ways — the client has one exact
+   * candidate, that counterparty is free and is not an exact candidate of another unlinked client. Everything
+   * else is listed as ambiguous and is resolved in the card of the client.
+   */
+  async matches(client: DatabaseClient = this.database): Promise<ClientCounterpartyMatches> {
+    const totals = (await client.query<{ clients: number; linked: number }>(
+      `SELECT count(*)::int AS clients, count(ref_key_1c)::int AS linked FROM clients WHERE is_active`)).rows[0];
+    const empty = { clients: totals.clients, linked: totals.linked, both: 0, phone: 0, name: 0, ambiguous: 0, none: totals.clients - totals.linked };
+    if (!(await this.available(client))) return { available: false, summary: empty, matches: [], ambiguous: [] };
+    const rows = (await client.query<CounterpartyRow & {
+      client_id: string; client_name: string; client_phones: string[] | null; reasons: string[]; client_pairs: number; counterparty_pairs: number; holder: string | null;
+    }>(
+      `WITH ${COUNTERPARTIES},
+         cpn AS (SELECT cp.ref, ${normalizedName('cp.name')} AS n FROM cp),
+         cl AS (SELECT c.client_id, c.client_name::text AS client_name, ${normalizedName('c.client_name::text')} AS n
+                  FROM clients c WHERE c.is_active AND c.ref_key_1c IS NULL),
+         clp AS (SELECT DISTINCT p.client_id, ${normalizedPhone('p.phone_number')} AS p FROM client_phones p JOIN cl ON cl.client_id = p.client_id),
+         hit AS (
+           SELECT cl.client_id, cpn.ref, 'name' AS reason FROM cl JOIN cpn ON cpn.n = cl.n WHERE cl.n <> ''
+           UNION ALL
+           SELECT clp.client_id, cpp.ref, 'phone' FROM clp JOIN cpp ON cpp.p = clp.p JOIN cp ON cp.ref = cpp.ref WHERE length(cpp.p) = 10),
+         pair AS (SELECT client_id, ref, array_agg(DISTINCT reason ORDER BY reason) AS reasons FROM hit GROUP BY client_id, ref),
+         counted AS (
+           SELECT pair.*, count(*) OVER (PARTITION BY pair.client_id)::int AS client_pairs, count(*) OVER (PARTITION BY pair.ref)::int AS counterparty_pairs
+             FROM pair)
+       SELECT counted.client_id, cl.client_name, counted.reasons, counted.client_pairs, counted.counterparty_pairs,
+              (SELECT array_agg(x.phone_number ORDER BY x.phone_number) FROM (SELECT DISTINCT p.phone_number FROM client_phones p WHERE p.client_id = counted.client_id) x) AS client_phones,
+              (SELECT h.client_id::text FROM clients h WHERE lower(h.ref_key_1c::text) = cp.ref) AS holder,
+              ${CARD_COLUMNS}
+         FROM counted JOIN cl ON cl.client_id = counted.client_id JOIN cp ON cp.ref = counted.ref
+        ORDER BY cl.client_name, counted.client_id, cp.name, cp.ref`)).rows;
+    const matches: ClientCounterpartyMatch[] = [];
+    const ambiguous = new Map<number, ClientCounterpartyAmbiguity>();
+    for (const row of rows) {
+      const clientId = Number(row.client_id);
+      const reasons = row.reasons as ClientCounterpartyReason[];
+      if (row.client_pairs === 1 && row.counterparty_pairs === 1 && row.holder === null) {
+        matches.push({
+          clientId, clientName: row.client_name, clientPhones: row.client_phones ?? [], counterparty: toCard(row),
+          strength: reasons.length === 2 ? 'both' : reasons[0] === 'phone' ? 'phone' : 'name',
+        });
+      } else {
+        const entry = ambiguous.get(clientId) ?? { clientId, clientName: row.client_name, candidates: [] };
+        entry.candidates.push({ refKey1c: row.ref, name: row.name, matchedBy: reasons });
+        ambiguous.set(clientId, entry);
+      }
+    }
+    const count = (strength: ClientMatchStrength) => matches.filter((match) => match.strength === strength).length;
+    const summary = {
+      clients: totals.clients, linked: totals.linked, both: count('both'), phone: count('phone'), name: count('name'), ambiguous: ambiguous.size,
+      none: totals.clients - totals.linked - matches.length - ambiguous.size,
+    };
+    const order: Record<ClientMatchStrength, number> = { both: 0, phone: 1, name: 2 };
+    matches.sort((a, b) => order[a.strength] - order[b.strength]);
+    return { available: true, summary, matches: matches.slice(0, MATCHES_LIMIT), ambiguous: [...ambiguous.values()].slice(0, MATCHES_LIMIT) };
+  }
+
+  /**
+   * Confirms pairs the user saw in the bulk view: each pair is the ordinary link command of a client that had
+   * no counterparty (its own transaction, its own audit row marked as a bulk confirmation). A pair that is no
+   * longer possible — the client got a link, the counterparty was taken or left 1C — is reported and skipped;
+   * the others are still linked. An unexpected failure of one pair never hides the pairs already linked; it is
+   * reported as `uncertain`: the transaction usually rolled back, but a failure while the commit was being
+   * acknowledged leaves the link written — the caller learns the truth by reading the link of the client, never
+   * by sending the pair again (a repeat would bring back a link somebody removed meanwhile).
+   */
+  async confirm(pairs: ReadonlyArray<{ clientId: number; refKey1c: string }>, actor: CurrentUser, requestId: string): Promise<ConfirmResult[]> {
+    const results: ConfirmResult[] = [];
+    for (const pair of pairs) {
+      try {
+        await this.setLink(pair.clientId, pair.refKey1c, null, actor, requestId, 'bulk_confirm');
+        results.push({ ...pair, status: 'linked', holderClientId: null, holderClientName: null });
+      } catch (error) {
+        const known = error instanceof ApiError ? CONFIRM_ERRORS[error.code] : undefined;
+        if (!known) this.logger.error(`bulk confirm of client ${pair.clientId} failed (request ${requestId}): ${error instanceof Error ? error.message : String(error)}`);
+        const status: ConfirmStatus = known ?? 'uncertain';
+        const holder = status === 'taken' ? (error as ApiError).details as { clientId?: number; clientName?: string } | undefined : undefined;
+        results.push({ ...pair, status, holderClientId: holder?.clientId ?? null, holderClientName: holder?.clientName ?? null });
+      }
+    }
+    return results;
+  }
+
+  /**
    * Links, relinks or unlinks. `expected` is the key the caller saw: another key under the lock is a conflict
    * (nobody's link is overwritten blindly); the key already being the new one is a repeat — no second audit.
    * A counterparty of another client is refused: it is unlinked there first, by a separate audited command.
    */
-  async setLink(clientId: number, refKey1c: string | null, expected: string | null, actor: CurrentUser, requestId: string): Promise<ClientLink> {
+  async setLink(
+    clientId: number, refKey1c: string | null, expected: string | null, actor: CurrentUser, requestId: string, via: 'card' | 'bulk_confirm' = 'card',
+  ): Promise<ClientLink> {
     return this.database.transaction(async (tx) => {
       // Two clients taking one counterparty wait for each other here; the unique index is the last line of defence.
       if (refKey1c) await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`client-counterparty:${refKey1c}`]);
@@ -171,7 +318,7 @@ export class ClientCounterpartyRepository {
         relatedEntities: [{ entityType: 'client', entityId: clientId }],
         before: { refKey1c: row.ref, counterpartyName: before?.name ?? null },
         after: { refKey1c, counterpartyName: after?.name ?? null },
-        metadata: { counterpartyCode: (after ?? before)?.code ?? null, counterpartyBin: (after ?? before)?.bin ?? null },
+        metadata: { counterpartyCode: (after ?? before)?.code ?? null, counterpartyBin: (after ?? before)?.bin ?? null, via },
       });
       return this.link(clientId, tx);
     }).catch((error: unknown) => { throw taken(error); });

@@ -1,6 +1,6 @@
 import { Table } from '../../ui/tooltipDelay';
 import React, { useState, useCallback, useEffect } from "react";
-import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
+import { IResourceComponentsProps, useInvalidate, useNavigation } from "@refinedev/core";
 import { List, ShowButton, EditButton, CreateButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Badge, Input, Button, Tag, Typography, message } from "antd";
@@ -13,10 +13,14 @@ import { CLIENT_PERSON_TYPE_LABELS, ClientPersonType } from "../../types/clients
 import { clientsReadApi, type ClientListFacts } from "../../api/clientsReadApi";
 import { featureFlags } from "../../config/featureFlags";
 import { formatDate } from "../../utils/dateFormat";
+import { can } from "../../utils/permissions";
+import { ClientCounterpartyBulkModal } from "./ClientCounterpartyBulkModal";
 
 export const ClientList: React.FC<IResourceComponentsProps> = () => {
   const [searchValue, setSearchValue] = useState<string>("");
   const [highlightedClientId, setHighlightedClientId] = useState<number | null>(null);
+  const [matchingOpen, setMatchingOpen] = useState(false);
+  const invalidate = useInvalidate();
 
   const { tableProps, current, pageSize, setCurrent, sorters, setSorters } = useTable({
     syncWithLocation: true,
@@ -172,6 +176,9 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
               Найти
             </Button>
           </Space.Compact>
+          {can("clients.update") ? (
+            <Button style={{ marginRight: 8 }} onClick={() => setMatchingOpen(true)}>Сопоставить с 1С</Button>
+          ) : null}
           <CreateButton>Создать</CreateButton>
         </>
       )}
@@ -267,6 +274,11 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
           )}
         />
       </Table>
+      <ClientCounterpartyBulkModal
+        open={matchingOpen}
+        onClose={() => setMatchingOpen(false)}
+        onChanged={() => { void invalidate({ resource: "clients", invalidates: ["list"] }); }}
+      />
     </List>
   );
 };

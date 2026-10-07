@@ -62,6 +62,43 @@ export interface ClientLink {
   counterparty: CounterpartyCard | null;
 }
 
+export type ClientMatchStrength = 'both' | 'phone' | 'name';
+
+/** A client without a counterparty and the only 1C counterparty that looks like it. */
+export interface ClientCounterpartyMatch {
+  clientId: number;
+  clientName: string;
+  clientPhones: string[];
+  counterparty: CounterpartyCard;
+  strength: ClientMatchStrength;
+}
+
+export interface ClientCounterpartyAmbiguity {
+  clientId: number;
+  clientName: string;
+  candidates: Array<{ refKey1c: string; name: string; matchedBy: ClientCounterpartyReason[] }>;
+}
+
+export interface ClientCounterpartyMatches {
+  available: boolean;
+  summary: { clients: number; linked: number; both: number; phone: number; name: number; ambiguous: number; none: number };
+  matches: ClientCounterpartyMatch[];
+  ambiguous: ClientCounterpartyAmbiguity[];
+}
+
+export type ClientConfirmStatus = 'linked' | 'conflict' | 'taken' | 'unknown' | 'not_found' | 'uncertain';
+
+export interface ClientConfirmResult {
+  clientId: number;
+  refKey1c: string;
+  status: ClientConfirmStatus;
+  holderClientId: number | null;
+  holderClientName: string | null;
+}
+
+/** Pairs of one confirmation request (the backend limit). */
+export const CLIENT_CONFIRM_MAX = 100;
+
 export const partyContactsApi = {
   get: (party: PartyKind, id: number) => httpClient.get<PartyContacts>(apiRoutes.partyContacts.contacts(party, id)),
   replace: (party: PartyKind, id: number, body: { version: number; contacts: EmployeeContactInput[] }) =>
@@ -87,4 +124,8 @@ export const partyContactsApi = {
   /** Link, relink or unlink (refKey1c null); `expectedRefKey1c` is the key this page showed. */
   setClientCounterparty: (clientId: number, body: { refKey1c: string | null; expectedRefKey1c: string | null }) =>
     httpClient.put<ClientLink>(apiRoutes.partyContacts.clientCounterparty(clientId), body),
+  clientCounterpartyMatches: () => httpClient.get<ClientCounterpartyMatches>(apiRoutes.partyContacts.clientCounterpartyMatches),
+  /** At most CLIENT_CONFIRM_MAX pairs; a pair that is no longer possible is reported and skipped. */
+  confirmClientCounterparties: (pairs: Array<{ clientId: number; refKey1c: string }>) =>
+    httpClient.post<{ results: ClientConfirmResult[] }>(apiRoutes.partyContacts.clientCounterpartyMatchesConfirm, { pairs }),
 };

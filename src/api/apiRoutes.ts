@@ -444,6 +444,8 @@ export const apiRoutes = {
     supplierFromCounterparty: backendApiPath('/suppliers/from-counterparty'),
     clientCounterparty: (clientId: number) => backendApiPath(`/clients/${clientId}/counterparty`),
     clientCounterpartyCandidates: (clientId: number) => backendApiPath(`/clients/${clientId}/counterparty-candidates`),
+    clientCounterpartyMatches: backendApiPath('/client-counterparty-matches'),
+    clientCounterpartyMatchesConfirm: backendApiPath('/client-counterparty-matches/confirm'),
   },
   whatsapp: {
     preview: backendApiPath('/whatsapp/rules/preview'),

@@ -7,7 +7,7 @@ import { PermissionsGuard } from '../../permissions/permissions.guard';
 import { RequirePermissions } from '../../permissions/require-permissions.decorator';
 import { EMPLOYEE_CONTACT_KINDS, EMPLOYEE_CONTACTS_MAX, type EmployeeContactInput } from '../employees/employee-contacts';
 import type { PartyKind } from './party-contacts';
-import { ClientCounterpartyRepository } from './client-counterparty.repository';
+import { CONFIRM_MAX, ClientCounterpartyRepository } from './client-counterparty.repository';
 import { PartyContactsRepository } from './party-contacts.repository';
 import { SupplierCounterpartyRepository, parseRefKey1c } from './supplier-counterparty.repository';
 
@@ -23,6 +23,9 @@ const replaceSchema = z.object({
 }).strict();
 
 const linkSchema = z.object({ refKey1c: z.string().nullable(), expectedRefKey1c: z.string().nullable() }).strict();
+const confirmSchema = z.object({
+  pairs: z.array(z.object({ clientId: z.number().int().positive(), refKey1c: z.string() }).strict()).min(1).max(CONFIRM_MAX),
+}).strict();
 const fromCounterpartySchema = z.object({ refKey1c: z.string() }).strict();
 
 /**
@@ -123,6 +126,23 @@ export class PartyContactsController {
     const { user, requestId } = actor(request);
     return this.clientCounterparties.setLink(parseId(id), parsed.data.refKey1c === null ? null : parseRefKey1c(parsed.data.refKey1c),
       parsed.data.expectedRefKey1c === null ? null : parseRefKey1c(parsed.data.expectedRefKey1c), user, requestId);
+  }
+
+  @ApiOperation({ summary: 'Bulk view: clients without a 1C counterparty and their exact candidates (unambiguous pairs and ambiguous clients)' })
+  @Get('client-counterparty-matches') @RequirePermissions(['clients.update'])
+  clientCounterpartyMatches() { return this.clientCounterparties.matches(); }
+
+  @ApiOperation({ summary: 'Confirm pairs of the bulk view: link each client that has no counterparty yet; impossible pairs are reported and skipped' })
+  @Post('client-counterparty-matches/confirm') @HttpCode(200) @RequirePermissions(['clients.update'])
+  async confirmClientCounterparties(@Body() body: unknown, @Req() request: RequestWithCurrentUser) {
+    const parsed = confirmSchema.safeParse(body);
+    if (!parsed.success) throw new ApiError(422, 'VALIDATION_ERROR', `Некорректный запрос подтверждения (не более ${CONFIRM_MAX} пар)`);
+    const pairs = parsed.data.pairs.map((pair) => ({ clientId: pair.clientId, refKey1c: parseRefKey1c(pair.refKey1c) }));
+    if (new Set(pairs.map((pair) => pair.clientId)).size !== pairs.length || new Set(pairs.map((pair) => pair.refKey1c)).size !== pairs.length) {
+      throw new ApiError(422, 'VALIDATION_ERROR', 'Клиент и контрагент в запросе не должны повторяться');
+    }
+    const { user, requestId } = actor(request);
+    return { results: await this.clientCounterparties.confirm(pairs, user, requestId) };
   }
 
   private replace(party: PartyKind, id: string, body: unknown, request: RequestWithCurrentUser) {

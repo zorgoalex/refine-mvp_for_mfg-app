@@ -1235,6 +1235,60 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {description: 'CLIENT_NOT_FOUND'}
+  /api/v1/client-counterparty-matches:
+    get:
+      tags: [Party contacts]
+      operationId: listClientCounterpartyMatches
+      summary: 'Bulk view: clients without a 1C counterparty and their exact candidates'
+      description: 'Active clients without a counterparty. matches — pairs unambiguous both ways (the client has one exact candidate by name or phone, the counterparty is free and is not an exact candidate of another unlinked client); ambiguous — clients whose candidates must be chosen in the card. At most 2000 rows of each.'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.update]
+      responses:
+        '200': {description: Matches, content: {application/json: {schema: {$ref: '#/components/schemas/ClientCounterpartyMatches'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/client-counterparty-matches/confirm:
+    post:
+      tags: [Party contacts]
+      operationId: confirmClientCounterpartyMatches
+      summary: 'Confirm pairs of the bulk view'
+      description: 'Each pair is the link command of a client that has no counterparty (its own transaction and audit row, metadata.via = bulk_confirm). A pair that is no longer possible is reported in results and skipped; the others are linked. The request must not be repeated blindly after a lost answer: a pair is the link command with «no counterparty» as the expected state, so a repeat would link again a client whose link was removed meanwhile. After a lost answer or an uncertain pair read GET /clients/{id}/counterparty.'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.update]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [pairs]
+              properties:
+                pairs:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  description: 'A client and a counterparty may appear once'
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [clientId, refKey1c]
+                    properties:
+                      clientId: {type: integer, minimum: 1}
+                      refKey1c: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Results in the order of the request
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results: {type: array, items: {$ref: '#/components/schemas/ClientCounterpartyConfirmResult'}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {description: 'VALIDATION_ERROR'}
   /api/v1/employees/{employeeId}/contacts:
     get:
       tags: [Employees]
@@ -31468,6 +31522,59 @@ components:
             matchedBy: {type: array, items: {type: string, enum: [name, phone, similar]}, description: 'Why it is offered; empty for a text search'}
             clientId: {type: integer, nullable: true, description: 'The client already linked to this counterparty'}
             clientName: {type: string, nullable: true}
+    ClientCounterpartyMatches:
+      type: object
+      required: [available, summary, matches, ambiguous]
+      properties:
+        available: {type: boolean, description: 'Counterparties of 1C are loaded'}
+        summary:
+          type: object
+          required: [clients, linked, both, phone, name, ambiguous, none]
+          properties:
+            clients: {type: integer, description: 'Active clients'}
+            linked: {type: integer}
+            both: {type: integer, description: 'Unambiguous pairs with equal name and phone'}
+            phone: {type: integer}
+            name: {type: integer}
+            ambiguous: {type: integer}
+            none: {type: integer, description: 'Not linked and nothing exact found'}
+        matches:
+          type: array
+          items:
+            type: object
+            required: [clientId, clientName, clientPhones, counterparty, strength]
+            properties:
+              clientId: {type: integer}
+              clientName: {type: string}
+              clientPhones: {type: array, items: {type: string}}
+              counterparty: {$ref: '#/components/schemas/OnecCounterpartyCard'}
+              strength: {type: string, enum: [both, phone, name]}
+        ambiguous:
+          type: array
+          items:
+            type: object
+            required: [clientId, clientName, candidates]
+            properties:
+              clientId: {type: integer}
+              clientName: {type: string}
+              candidates:
+                type: array
+                items:
+                  type: object
+                  required: [refKey1c, name, matchedBy]
+                  properties:
+                    refKey1c: {type: string, format: uuid}
+                    name: {type: string}
+                    matchedBy: {type: array, items: {type: string, enum: [name, phone]}}
+    ClientCounterpartyConfirmResult:
+      type: object
+      required: [clientId, refKey1c, status, holderClientId, holderClientName]
+      properties:
+        clientId: {type: integer}
+        refKey1c: {type: string, format: uuid}
+        status: {type: string, enum: [linked, conflict, taken, unknown, not_found, uncertain], description: 'conflict — the client already has another link; taken — the counterparty belongs to another client; unknown — not in the loaded 1C data; uncertain — an unexpected error: the pair is usually not written, but may be (read the link of the client to know)'}
+        holderClientId: {type: integer, nullable: true}
+        holderClientName: {type: string, nullable: true}
     ClientCounterpartyLink:
       type: object
       required: [clientId, clientName, refKey1c, available, counterparty]

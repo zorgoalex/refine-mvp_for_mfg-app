@@ -27,6 +27,8 @@ describe('partyContactsApi wire contract', () => {
     await partyContactsApi.clientCounterpartyCandidates(7);
     await partyContactsApi.clientCounterpartyCandidates(7, ' 8 701 ');
     await partyContactsApi.setClientCounterparty(7, { refKey1c: 'k', expectedRefKey1c: null });
+    await partyContactsApi.clientCounterpartyMatches();
+    await partyContactsApi.confirmClientCounterparties([{ clientId: 7, refKey1c: 'k' }]);
 
     const calls = fetchMock.mock.calls as unknown as Array<[RequestInfo | URL, RequestInit | undefined]>;
     expect(calls.map(([url, init]) => `${init?.method} ${decodeURIComponent(String(url))}`)).toEqual([
@@ -44,10 +46,13 @@ describe('partyContactsApi wire contract', () => {
       'GET /api/v1/clients/7/counterparty-candidates',
       'GET /api/v1/clients/7/counterparty-candidates?search=8 701',
       'PUT /api/v1/clients/7/counterparty',
+      'GET /api/v1/client-counterparty-matches',
+      'POST /api/v1/client-counterparty-matches/confirm',
     ]);
     expect(JSON.parse(calls[1][1]?.body as string)).toEqual(body);
     expect(JSON.parse(calls[8][1]?.body as string)).toEqual({ refKey1c: null, expectedRefKey1c: 'k' });
     expect(JSON.parse(calls[9][1]?.body as string)).toEqual({ refKey1c: 'k' });
     expect(JSON.parse(calls[13][1]?.body as string)).toEqual({ refKey1c: 'k', expectedRefKey1c: null });
+    expect(JSON.parse(calls[15][1]?.body as string)).toEqual({ pairs: [{ clientId: 7, refKey1c: 'k' }] });
   });
 });
