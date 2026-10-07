@@ -2200,7 +2200,10 @@
   padding-top: 10px;
 }
 
-:root[data-ui-variant="workbench"] .wb-form-section .order-dates-form > .ant-row > .order-dates-form__planned,
+:root[data-ui-variant="workbench"] .wb-form-section .order-dates-form > .ant-row > .order-dates-form__planned {
+  flex: 0 0 190px;
+}
+
 :root[data-ui-variant="workbench"] .wb-form-section .order-dates-form > .ant-row > .order-dates-form__fact {
   flex: 0 0 150px;
 }
@@ -2480,8 +2483,9 @@
 }
 
 /* таблица деталей ближе к макету: спокойная шапка, тонкие горизонтальные линии, вертикальные едва видны */
+/* подписи колонок заданы долями (70–75%) от шрифта ячейки шапки: 15px дают читаемые ~11px */
 :root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-thead > tr > th {
-  font-size: 11.5px;
+  font-size: 15px;
 }
 
 :root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-thead > tr > th,
