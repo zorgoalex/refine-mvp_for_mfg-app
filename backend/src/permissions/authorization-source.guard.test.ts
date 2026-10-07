@@ -25,6 +25,19 @@ const ALLOWED: Record<string, string> = {
   'modules/whatsapp/order-send/order-send-actors.ts': 'TEMPORARY — to be switched by the WhatsApp session',
 };
 
+/**
+ * Authorization by the NAME of the actor's role (0A.8): `currentUser.role === 'x'`, `user.role !== 'x'`,
+ * `SOME_ROLES.has(currentUser.role)`. Allowed only where the role itself is the rule, not a grant.
+ */
+const ROLE_NAME_CHECK = /\b(currentUser|user|actor)\.role\s*[!=]==\s*'|_ROLES\.has\(\s*[\w.]*(currentUser|user|actor)\.role\b/;
+
+const ROLE_NAME_ALLOWED: Record<string, string> = {
+  'modules/production-actions/application/production-action.service.ts': 'packer mode: a restriction of the base role, not a grant',
+  'modules/production-actions/adapters/pg-production-action-repository.ts': 'packer mode: a restriction of the base role, not a grant',
+  'modules/orders/application/order-query.service.ts': 'packer mode: a restriction of the base role, not a grant',
+  'modules/orders/adapters/pg-order-status-board-repository.ts': 'packer mode: a restriction of the base role, not a grant',
+};
+
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
@@ -40,6 +53,17 @@ describe('one source of effective authorization (access groups stage 0A)', () =>
       .filter((path) => PATTERN.test(readFileSync(join(ROOT, path), 'utf8')))
       .filter((path) => !(path in ALLOWED));
     expect(offenders).toEqual([]);
+  });
+
+  it('no authorization by role name outside the listed base-role restrictions (0A.3, 0A.8)', () => {
+    const offenders = sourceFiles(ROOT)
+      .map((path) => relative(ROOT, path))
+      .filter((path) => ROLE_NAME_CHECK.test(readFileSync(join(ROOT, path), 'utf8')))
+      .filter((path) => !(path in ROLE_NAME_ALLOWED));
+    expect(offenders).toEqual([]);
+    for (const path of Object.keys(ROLE_NAME_ALLOWED)) {
+      expect(ROLE_NAME_CHECK.test(readFileSync(join(ROOT, path), 'utf8')), path).toBe(true);
+    }
   });
 
   it('every allowed place still exists (stale entries are removed)', () => {

@@ -9,6 +9,7 @@ import { RequirePermissions } from '../../../permissions/require-permissions.dec
 import { CrmSyncRuntimeConfigService } from '../http/crm-sync-runtime-config.service';
 import { PgBitrix24ReverseRepository } from './pg-bitrix24-reverse-repository';
 import { Bitrix24ProductSyncService } from './bitrix24-product-sync.service';
+import { bitrix24RequestScope } from './bitrix24-request-scope';
 
 const bodySchema = z.object({
   version: z.number().int().positive(),
@@ -67,7 +68,7 @@ export class Bitrix24OrderConversionController {
     }
     // Authorize scope BEFORE any remote presync or mutation; a manager must
     // not be able to trigger work on another user's linked request.
-    const scope = requestScope(user);
+    const scope = bitrix24RequestScope(user);
     const link = await this.repository.findRequestLinkByOrderId(orderId.data, scope);
     if (!link) {
       throw new ApiError(404, 'ORDER_NOT_FOUND', 'Order not found');
@@ -114,19 +115,10 @@ export class Bitrix24OrderConversionController {
       actorUsername: user.username,
       actorRole: user.role,
       requestId: request.requestId ?? 'crm-request-conversion',
-      scope: requestScope(user),
+      scope: bitrix24RequestScope(user),
       initialOrderStatusCode: reverse.initialOrderStatusCode,
       initialProductionStatusCode: reverse.initialProductionStatusCode,
     });
   }
 }
 
-function requestScope(user: NonNullable<RequestWithCurrentUser['user']>) {
-  if (user.role === 'superadmin' || user.role === 'admin' || user.role === 'top_manager') {
-    return { mode: 'all' as const };
-  }
-  if (user.role === 'manager') {
-    return { mode: 'assigned' as const, userId: Number(user.id) };
-  }
-  throw new ApiError(403, 'PERMISSION_DENIED', 'Insufficient Bitrix24 request scope');
-}

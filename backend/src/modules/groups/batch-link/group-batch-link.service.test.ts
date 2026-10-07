@@ -14,7 +14,7 @@ function mockDatabase() {
 }
 
 describe('GroupBatchLinkService', () => {
-  it('requires groups.manage_links and admin/top_manager role only', async () => {
+  it('requires groups.manage_links and groups.batch_link (formerly the roles admin/top_manager)', async () => {
     const service = new GroupBatchLinkService({
       batchLinks: repository(),
       database: mockDatabase(),
@@ -27,6 +27,29 @@ describe('GroupBatchLinkService', () => {
     await expect(service.dryRun(command({
       currentUser: user('admin', ['orders.view']),
     }))).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+  });
+
+  it('decides by the permission, not by the role name: a manager granted groups.batch_link may batch-link', async () => {
+    const service = new GroupBatchLinkService({
+      batchLinks: repository({
+        async dryRun(input) {
+          return {
+            groupId: input.groupId,
+            mode: 'dry-run',
+            summary: { proposed: 0, skipped: 0, conflicts: 0, sampledEvidenceRows: 0 },
+            proposals: [],
+            skipped: [],
+            sampleEvidence: [],
+            writeEnabled: false,
+          };
+        },
+      }),
+      database: mockDatabase(),
+    });
+
+    await expect(service.dryRun(command({
+      currentUser: user('manager', ['groups.manage_links', 'groups.batch_link', 'orders.view']),
+    }))).resolves.toMatchObject({ mode: 'dry-run' });
   });
 
   it('requires entity-specific view permission', async () => {
@@ -114,7 +137,7 @@ describe('GroupBatchLinkService', () => {
   });
 
   describe('role-denied audit', () => {
-    it('writes one audit row with allowedRoles when role check fails', async () => {
+    it('writes one audit row when groups.batch_link is missing', async () => {
       const auditRows: any[] = [];
       vi.spyOn(auditServiceModule.auditService, 'recordDenied').mockImplementation(async (_client, event) => {
         auditRows.push(event);
@@ -134,7 +157,7 @@ describe('GroupBatchLinkService', () => {
       expect(auditRows[0]).toMatchObject({
         event: 'group_batch_link.role_denied',
         reason: 'role_denied',
-        metadata: { allowedRoles: expect.arrayContaining(['admin', 'top_manager']) },
+        requiredPermissions: ['groups.manage_links', 'groups.batch_link'],
       });
 
       vi.restoreAllMocks();
@@ -214,6 +237,8 @@ function repository(overrides: Partial<GroupBatchLinkRepositoryPort> = {}): Grou
   };
 }
 
+/** groups.batch_link goes with the roles the matrix grants it to (admin, top_manager), as the old role list did. */
 function user(role: UserRole, permissions: PermissionName[]): CurrentUser {
-  return { id: '1', username: 'tester', role, roleId: 1, permissions };
+  const batch: PermissionName[] = role === 'admin' || role === 'top_manager' ? ['groups.batch_link'] : [];
+  return { id: '1', username: 'tester', role, roleId: 1, permissions: [...permissions, ...batch] };
 }

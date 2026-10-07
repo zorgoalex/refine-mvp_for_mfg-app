@@ -505,6 +505,19 @@ Legacy Vercel Functions остаются rollback path до полного cutov
 `BACKEND_ENABLE_GROUPS=true`; для записи также
 `BACKEND_GROUPS_READ_ONLY=false`. Связи заказа и группы меняются отдельной
 командой, не order-save payload.
+Пакетная привязка записей к группе требует права `groups.batch_link` (миграция 249 выдаёт его ролям
+admin и top_manager — тем же, кому её разрешал прежний список ролей; у superadmin его нет, как и раньше).
+
+Режим упаковщика (роль `packer`: смена статуса заказа только на разрешённые упаковщику статусы без права
+`orders.update`, урезанные данные формы заказа) остаётся ограничением базовой роли, а не правом: он не выдаётся и
+не снимается через матрицу прав.
+
+### Заявки Bitrix24: область видимости
+
+Какие заявки Bitrix24 видны пользователю, решают права (миграция 249): `bitrix24.requests.view_all` — все
+заявки (superadmin, admin, top_manager), `bitrix24.requests.view_assigned` — только назначенные пользователю
+(manager, operator). При обоих правах действует «все»; без них — 403. Сами действия по-прежнему требуют
+`bitrix24.requests.view`/`update`/`convert`.
 
 ### Deadlines
 

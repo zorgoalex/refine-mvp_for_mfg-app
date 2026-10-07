@@ -6,7 +6,7 @@ describe('Bitrix authorship permission boundary', () => {
     const repository = { getMappedOrderPayments: vi.fn().mockResolvedValue({ linked: true, bitrixDealId: '77' }) };
     const processor = { reconcileMappedOrderPaymentsNow: vi.fn() };
     const controller = new Bitrix24ReverseAdminController(repository as never, processor as never);
-    const request = { user: { id: '7', role: 'manager', permissions: ['orders.view_financials', ...(allowed ? ['bitrix24.requests.view'] : [])] }, requestId: 'test' };
+    const request = { user: { id: '7', role: 'manager', permissions: ['orders.view_financials', 'bitrix24.requests.view_assigned', ...(allowed ? ['bitrix24.requests.view'] : [])] }, requestId: 'test' };
     await controller.getMappedOrderPayments(request as never, '20');
     expect(repository.getMappedOrderPayments).toHaveBeenLastCalledWith(20, { mode: 'assigned', userId: 7 }, allowed);
     await controller.reconcileMappedOrderPayments(request as never, '20');

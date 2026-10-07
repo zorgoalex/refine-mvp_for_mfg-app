@@ -7,7 +7,7 @@ import { CrmSyncRuntimeConfigService } from '../http/crm-sync-runtime-config.ser
 import { Bitrix24OrderConversionController } from './bitrix24-order-conversion.controller';
 
 const request: RequestWithCurrentUser = {
-  user: { id: '3', username: 'E2E-conversion', role: 'admin', roleId: 1, permissions: ['bitrix24.requests.convert'] },
+  user: { id: '3', username: 'E2E-conversion', role: 'admin', roleId: 1, permissions: ['bitrix24.requests.convert', 'bitrix24.requests.view_all'] },
   requestId: 'E2E-conversion-request',
 };
 const body = { version: 1, orderName: 'E2E-converted', createProject: true, idempotencyKey: 'E2E-conversion-key' };
@@ -69,7 +69,7 @@ describe('CRM conversion production readiness', () => {
   });
   it('retains assigned scope for managers', async () => {
     const { controller, repository } = setup();
-    await controller.convert({ ...request, user: { ...request.user!, role: 'manager' } }, '11634', body);
+    await controller.convert({ ...request, user: { ...request.user!, role: 'manager', permissions: ['bitrix24.requests.convert', 'bitrix24.requests.view_assigned'] } }, '11634', body);
     expect(repository.convertCrmRequestToProduction).toHaveBeenCalledWith(expect.objectContaining({ scope: { mode: 'assigned', userId: 3 } }));
   });
   it('presyncs an ACTIVE request and blocks conversion on blocked products', async () => {
@@ -120,7 +120,7 @@ describe('CRM conversion production readiness', () => {
   });
   it('performs the scoped link read before any presync mutation', async () => {
     const { controller, repository, productSync } = setup({}, 'active');
-    const manager = { ...request, user: { ...request.user!, role: 'manager' } };
+    const manager = { ...request, user: { ...request.user!, role: 'manager', permissions: ['bitrix24.requests.convert', 'bitrix24.requests.view_assigned'] } };
     await controller.convert(manager, '11634', body);
     // Scope is computed from the caller and passed to the link lookup BEFORE
     // productSync.syncForOrderId could be invoked.

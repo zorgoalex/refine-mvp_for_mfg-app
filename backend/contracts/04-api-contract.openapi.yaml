@@ -23083,6 +23083,7 @@ components:
         - groups.update
         - groups.archive
         - groups.manage_links
+        - groups.batch_link
         - groups.view_history
         - groups.members.view
         - groups.members.manage

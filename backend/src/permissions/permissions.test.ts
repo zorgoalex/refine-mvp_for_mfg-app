@@ -39,11 +39,11 @@ describe('permissions foundation', () => {
     expect(can('worker', 'users.manage_sso')).toBe(false);
   });
 
-  it('grants superadmin every registered permission', () => {
-    expect(getPermissionsForRole('superadmin')).toHaveLength(PERMISSIONS.length);
+  it('grants superadmin every registered permission except batch linking (never allowed to it, 0A.3)', () => {
+    expect(getPermissionsForRole('superadmin')).toHaveLength(PERMISSIONS.length - 1);
 
     for (const permission of PERMISSIONS) {
-      expect(can('superadmin', permission)).toBe(true);
+      expect(can('superadmin', permission)).toBe(permission !== 'groups.batch_link');
     }
   });
 
@@ -282,6 +282,7 @@ describe('permissions foundation', () => {
       'groups.members.manage',
       'groups.participants.view',
       'groups.participants.manage',
+      'groups.batch_link',
     ];
 
     // Audit event names (groups.*_changed / groups.notification_created) are NOT

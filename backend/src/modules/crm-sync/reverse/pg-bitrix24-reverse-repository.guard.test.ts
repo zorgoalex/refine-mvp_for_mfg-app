@@ -21,7 +21,7 @@ describe('Bitrix24 reverse repository financial guards', () => {
       "@RequirePermissions(['bitrix24.payments.materialize', 'orders.view_financials'])",
     );
     expect(controllerSource).toMatch(
-      /materializeRequestPayments[\s\S]*scope: crmRequestScope\(actor\)/,
+      /materializeRequestPayments[\s\S]*scope: bitrix24RequestScope\(actor\)/,
     );
     expect(source).toMatch(
       /materializeRequestPayments[\s\S]*\(\$2::boolean OR orders\.manager_id=\$3\)/,
