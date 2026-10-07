@@ -7,17 +7,22 @@ import type { DatabaseClient } from '../../../database/database.types';
 import type { OnecUnitCode } from '../domain/onec-document-normalizer';
 import {
   CONSUMPTION_DOC_KINDS,
+  STOCK_PROJECTION_DOC_KINDS,
   type ConsumptionCandidatesFilter,
-  type ConsumptionDocKind,
   type ConsumptionDocumentView,
   type OnecDocumentsReaderPort,
+  type StockProjectionDocKind,
 } from './onec-documents-reader.types';
+
+/** Запрошенные виды, ограниченные теми, что читает порт; без запроса — виды расхода. */
+const allowedKinds = (kinds: readonly StockProjectionDocKind[] | undefined): StockProjectionDocKind[] =>
+  (kinds ?? CONSUMPTION_DOC_KINDS).filter((kind) => (STOCK_PROJECTION_DOC_KINDS as readonly string[]).includes(kind));
 
 interface DocumentRow {
   onec_document_id: string;
   source_id: string;
   onec_ref_key: string;
-  doc_kind: ConsumptionDocKind;
+  doc_kind: StockProjectionDocKind;
   number: string;
   applied_revision: string;
   posted: boolean;
@@ -54,7 +59,7 @@ const LINE_SELECT = `SELECT l.onec_document_id::text, l.onec_document_line_id::t
 
 /**
  * Read-порт слоя документов 1С для проекции склада (план 2026-09-30-onec-consumption-documents-plan.md, §3.5).
- * Только чтение документов видов расхода; сопоставление складов/плёнок и источник склада — у потребителя.
+ * Только чтение документов видов расхода и прихода; сопоставление складов/плёнок и источник склада — у потребителя.
  */
 @Injectable()
 export class OnecDocumentsReader implements OnecDocumentsReaderPort {
@@ -72,7 +77,7 @@ export class OnecDocumentsReader implements OnecDocumentsReaderPort {
 
   async consumptionCandidates(filter: ConsumptionCandidatesFilter, client: DatabaseClient = this.database): Promise<ConsumptionDocumentView[]> {
     this.available();
-    const kinds = (filter.kinds ?? CONSUMPTION_DOC_KINDS).filter((kind) => (CONSUMPTION_DOC_KINDS as readonly string[]).includes(kind));
+    const kinds = allowedKinds(filter.kinds);
     if (filter.sourceIds.length === 0 || kinds.length === 0) return [];
     const params: unknown[] = [filter.sourceIds.map(Number), kinds];
     const clauses = ['d.source_id = ANY($1::bigint[])', 'd.doc_kind = ANY($2::text[])'];
@@ -93,13 +98,15 @@ export class OnecDocumentsReader implements OnecDocumentsReaderPort {
     return this.assemble(documents, lines);
   }
 
-  async lockDocumentForProjection(documentId: number, client: DatabaseClient): Promise<ConsumptionDocumentView | null> {
+  async lockDocumentForProjection(
+    documentId: number, client: DatabaseClient, kinds?: readonly StockProjectionDocKind[],
+  ): Promise<ConsumptionDocumentView | null> {
     this.available();
     // FOR SHARE шапки: загрузчик меняет документ и его строки только под FOR NO KEY UPDATE шапки — ждёт commit вызывающего.
     const documents = (await client.query<DocumentRow>(
       `SELECT ${DOCUMENT_COLUMNS} FROM onec_documents d
         WHERE d.onec_document_id = $1 AND d.doc_kind = ANY($2::text[]) FOR SHARE OF d`,
-      [documentId, CONSUMPTION_DOC_KINDS],
+      [documentId, allowedKinds(kinds)],
     )).rows;
     if (documents.length === 0) return null;
     const lines = (await client.query<LineRow>(

@@ -122,19 +122,19 @@ export const WarehousesPage: React.FC = () => {
     });
   };
 
-  // Откат расхода 1С склада: применённое возвращается в 0 документами-дельтами, дата начала очищается.
+  // Откат учёта 1С склада: всё применённое (расход и приход) возвращается в 0 документами-дельтами, дата начала очищается.
   const compensate = (warehouse: WarehouseDto) => {
     Modal.confirm({
-      title: `Откатить расход из 1С по складу «${warehouse.name}»?`,
-      content: 'Все списания по документам 1С на этом складе вернутся в остатки, дата начала расхода очистится и новые документы 1С перестанут применяться. Записи отката останутся в журнале документов.',
+      title: `Откатить учёт 1С по складу «${warehouse.name}»?`,
+      content: 'Всё, что применено на этом складе по документам 1С, будет отменено: списания вернутся в остатки, а поступления из 1С будут сняты — остаток плёнки может как вырасти, так и уменьшиться. Дата начала очистится, новые документы 1С перестанут применяться. Записи отката останутся в журнале документов.',
       okText: 'Откатить',
       okButtonProps: { danger: true },
       cancelText: 'Отмена',
       // Ключ — на склад и его версию: повтор после сбоя продолжает тот же откат; после нового включения расхода — новый.
       onOk: () => runCommand(`compensate:${warehouse.warehouseId}:${warehouse.version}`, async (key) => {
         const result = await inventoryApi.compensateOnecConsumption(warehouse.warehouseId, key);
-        message.info(`Откат расхода 1С: записано документов ${result.documents}${result.remaining !== 0 ? `, осталось применённого ${formatQuantity(result.remaining)} м — повторите откат` : ''}`);
-      }, 'Расход из 1С по складу откачен'),
+        message.info(`Откат учёта 1С: записано документов ${result.documents}${result.remaining !== 0 ? `, осталось применённого ${formatQuantity(result.remaining)} м — повторите откат` : ''}`);
+      }, 'Учёт 1С по складу откачен'),
     });
   };
 
@@ -170,7 +170,7 @@ export const WarehousesPage: React.FC = () => {
         const block = row.isActive ? warehouseDeactivationBlock(row) : null;
         return <Space>
           <Button size="small" onClick={() => openEditor(row)}>Изменить</Button>
-          {supportsOnecConsumption(row) && <Button size="small" disabled={busy} onClick={() => compensate(row)}>Откатить расход 1С</Button>}
+          {supportsOnecConsumption(row) && <Button size="small" disabled={busy} onClick={() => compensate(row)}>Откатить учёт 1С</Button>}
           <Tooltip title={block ?? undefined}>
             <Button size="small" danger={row.isActive} disabled={busy || block !== null} onClick={() => toggleActive(row)}>{row.isActive ? 'Отключить' : 'Включить'}</Button>
           </Tooltip>
@@ -245,7 +245,7 @@ export const WarehousesPage: React.FC = () => {
             <Form.Item
               name="onecSince"
               label="Расход из 1С с"
-              extra="Документы 1С (реализация, возврат поставщику, списание, перемещение) после этого момента уменьшают остатки склада. Обычно — момент подсчёта последней инвентаризации. Пусто — расход из 1С не ведётся."
+              extra="Документы 1С (реализация, возврат поставщику, списание, перемещение) после этого момента уменьшают остатки склада, а поступления от поставщика (если их учёт включён) — увеличивают. Обычно — момент подсчёта последней инвентаризации. Пусто — расход из 1С не ведётся."
             >
               <DatePicker showTime={{ format: 'HH:mm' }} format="DD.MM.YYYY HH:mm" placeholder="Не ведётся" style={{ width: 220 }} />
             </Form.Item>

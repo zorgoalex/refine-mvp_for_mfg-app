@@ -902,6 +902,8 @@ describe('backend env validation', () => {
 
   it('requires a service actor for the 1C warehouse autosync and keeps it off by default', () => {
     expect(validateEnv({})).toMatchObject({ BACKEND_INVENTORY_ONEC_AUTOSYNC: false });
+    expect(validateEnv({})).toMatchObject({ BACKEND_INVENTORY_ONEC_RECEIPTS: false });
+    expect(validateEnv({ BACKEND_INVENTORY_ONEC_RECEIPTS: 'true' })).toMatchObject({ BACKEND_INVENTORY_ONEC_RECEIPTS: true });
     expect(() => validateEnv({ BACKEND_INVENTORY_ONEC_AUTOSYNC: 'true' })).toThrow(/BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID/);
     expect(validateEnv({ BACKEND_INVENTORY_ONEC_AUTOSYNC: 'true', BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID: '42' }))
       .toMatchObject({ BACKEND_INVENTORY_ONEC_AUTOSYNC: true, BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID: 42 });

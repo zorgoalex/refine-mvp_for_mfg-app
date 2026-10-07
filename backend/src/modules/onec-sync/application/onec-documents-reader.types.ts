@@ -7,6 +7,11 @@ import type { OnecUnitCode } from '../domain/onec-document-normalizer';
 /** Виды документов расхода (§3.2). */
 export const CONSUMPTION_DOC_KINDS = ['sales_shipment', 'supplier_return', 'inventory_writeoff', 'inventory_transfer'] as const;
 export type ConsumptionDocKind = (typeof CONSUMPTION_DOC_KINDS)[number];
+/** Виды документов прихода на склад: проекция учитывает их с плюсом (включаются потребителем отдельно). */
+export const STOCK_RECEIPT_DOC_KINDS = ['purchase_receipt'] as const;
+/** Все виды, которые умеет читать порт проекции склада: расход и приход. */
+export const STOCK_PROJECTION_DOC_KINDS = [...CONSUMPTION_DOC_KINDS, ...STOCK_RECEIPT_DOC_KINDS] as const;
+export type StockProjectionDocKind = (typeof STOCK_PROJECTION_DOC_KINDS)[number];
 
 export interface ConsumptionLineView {
   lineId: number;
@@ -27,7 +32,7 @@ export interface ConsumptionDocumentView {
   documentId: number;
   sourceId: number;
   onecRefKey: string;
-  docKind: ConsumptionDocKind;
+  docKind: StockProjectionDocKind;
   number: string;
   /** Ревизия применённого состояния документа (растёт при каждом изменении). */
   revision: number;
@@ -48,8 +53,8 @@ export interface ConsumptionDocumentView {
 export interface ConsumptionCandidatesFilter {
   /** Источники; пусто — ни одного. */
   sourceIds: readonly number[];
-  /** Виды; по умолчанию все виды расхода. */
-  kinds?: readonly ConsumptionDocKind[];
+  /** Виды; по умолчанию все виды расхода (приход — только по явному запросу потребителя). */
+  kinds?: readonly StockProjectionDocKind[];
   /** Только документы, у которых склад строки или получатель — один из ключей (нижний регистр). */
   warehouseRefKeys?: readonly string[];
   /** Только эти документы. */
@@ -65,7 +70,9 @@ export interface OnecDocumentsReaderPort {
   /**
    * Шапка документа `FOR SHARE` (загрузчик меняет документ под `FOR NO KEY UPDATE` шапки — ждёт commit
    * вызывающего) + строки. null — документа нет (удалён при смене вида → проекция считает его `gone`).
-   * Документ не расхода → null. Модуль выключен → ApiError 409 `ONEC_DOCUMENTS_UNAVAILABLE`.
+   * Документ не из `kinds` (по умолчанию — виды расхода) → null. Модуль выключен → ApiError 409 `ONEC_DOCUMENTS_UNAVAILABLE`.
    */
-  lockDocumentForProjection(documentId: number, client: DatabaseClient): Promise<ConsumptionDocumentView | null>;
+  lockDocumentForProjection(
+    documentId: number, client: DatabaseClient, kinds?: readonly StockProjectionDocKind[],
+  ): Promise<ConsumptionDocumentView | null>;
 }

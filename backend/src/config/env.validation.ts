@@ -315,6 +315,8 @@ export const envSchema = z
       .optional(),
     // Расход склада из документов 1С (проекция; исполнитель — BACKEND_INVENTORY_ONEC_AUTOSYNC_ACTOR_USER_ID).
     BACKEND_INVENTORY_ONEC_CONSUMPTION: booleanFromEnv.default(false),
+    // Приход склада из поступлений 1С — дополнение к проекции расхода (без BACKEND_INVENTORY_ONEC_CONSUMPTION не действует).
+    BACKEND_INVENTORY_ONEC_RECEIPTS: booleanFromEnv.default(false),
     BACKEND_ENABLE_PDF_IMPORT_LAYOUT_PATTERNS: booleanFromEnv.default(false),
     BACKEND_STATUS_AUTOMATION: booleanFromEnv.default(false),
     BACKEND_ENABLE_NOTIFICATION_ENGINE: booleanFromEnv.default(false),

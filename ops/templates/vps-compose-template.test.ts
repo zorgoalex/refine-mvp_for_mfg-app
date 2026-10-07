@@ -149,6 +149,8 @@ describe('VPS compose backend runtime flags', () => {
 
     expect(compose).toContain('BACKEND_INVENTORY_ONEC_CONSUMPTION: ${BACKEND_INVENTORY_ONEC_CONSUMPTION:-false}');
     expect(envExample).toContain('BACKEND_INVENTORY_ONEC_CONSUMPTION=false');
+    expect(compose).toContain('BACKEND_INVENTORY_ONEC_RECEIPTS: ${BACKEND_INVENTORY_ONEC_RECEIPTS:-false}');
+    expect(envExample).toContain('BACKEND_INVENTORY_ONEC_RECEIPTS=false');
   });
 
   it('passes the resource procurement flag with a safe default', () => {
