@@ -11,12 +11,16 @@ export const SNAPSHOT_STATUS_COLOR: Record<OnecSnapshotStatus, string> = {
 
 /** Почему срез ждёт в очереди (не ошибка). Неизвестный код показывается как есть. */
 const WAIT_REASON: Record<string, string> = {
-  AGENT_OFFLINE: 'агент 1С не на связи', QUIET_WINDOW: 'тихое окно агента', SYNC_WINDOW: 'идёт плановая выгрузка 1С',
-  AGENT_TOO_OLD: 'агент 1С старее 1.3.11', ANOTHER_ACTIVE: 'читается другой срез',
+  QUEUED: 'ждёт своей очереди', AGENT_OFFLINE: 'агент 1С не на связи', AGENT_TOO_OLD: 'агент 1С старее 1.3.11', AGENT_BUSY: 'у агента идёт другая выгрузка',
+  AGENT_QUIET_WINDOW: 'тихое окно агента', HOURLY_RUN_WINDOW: 'идёт ежечасная выгрузка 1С', NIGHTLY_SYNC_WINDOW: 'скоро ночная полная выгрузка 1С',
+  CONFIG_PUBLISH_BLOCKED: 'публикация конфигурации агента заблокирована', MODULE_DISABLED: 'срезы выключены на сервере',
 };
 const ERROR_CODE: Record<string, string> = {
   CANCELLED: 'запрос отменён', TOO_MANY_ROWS: 'слишком много строк в срезе', SOURCE_GENERATION_CHANGED: 'база 1С заменена во время чтения',
-  TIMEOUT: 'истёк срок ожидания ответа 1С', ONEC_REJECTED: '1С отклонила запрос', AGENT_REJECTED: 'агент отклонил запрос',
+  SYNC_TIMEOUT: 'истёк срок чтения из 1С', CONFIG_NOT_APPLIED: 'агент не применил конфигурацию за отведённое время', CONFIG_REJECTED: 'агент отклонил конфигурацию',
+  RUN_ABANDONED: 'выгрузка прервана', COMMAND_LOST: 'команда агенту осталась без ответа', COPY_MISMATCH: 'копия данных не совпала с выгрузкой',
+  INVALID_ROWS: '1С вернула некорректные строки', SLOT_LOST: 'чтение прервано другим запросом', SNAPSHOT_MISSING: 'данные среза не получены',
+  SNAPSHOT_REPLACED: 'данные среза заменены другой выгрузкой', MODULE_DISABLED: 'срезы выключены на сервере', UNKNOWN: 'неизвестная ошибка',
 };
 /** Почему нельзя запросить новый срез. */
 const CAPABILITY_REASON: Record<string, string> = {

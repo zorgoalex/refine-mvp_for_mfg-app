@@ -22,7 +22,9 @@ describe('1C snapshot screen helpers', () => {
   });
 
   it('explains a waiting or failed snapshot and keeps unknown codes visible', () => {
-    expect(snapshotStatusDetail(snapshot({ status: 'requested', queuePosition: 3, waitReason: 'QUIET_WINDOW' }))).toBe('3-й в очереди, тихое окно агента');
+    expect(snapshotStatusDetail(snapshot({ status: 'requested', queuePosition: 3, waitReason: 'AGENT_QUIET_WINDOW' }))).toBe('3-й в очереди, тихое окно агента');
+    expect(snapshotStatusDetail(snapshot({ status: 'requested', queuePosition: 1, waitReason: 'HOURLY_RUN_WINDOW' }))).toBe('идёт ежечасная выгрузка 1С');
+    expect(snapshotStatusDetail(snapshot({ status: 'failed', errorCode: 'SYNC_TIMEOUT' }))).toBe('истёк срок чтения из 1С');
     expect(snapshotStatusDetail(snapshot({ status: 'requested', queuePosition: 1, waitReason: null }))).toBeNull();
     expect(snapshotStatusDetail(snapshot({ status: 'failed', errorCode: 'TOO_MANY_ROWS' }))).toBe('слишком много строк в срезе');
     expect(snapshotStatusDetail(snapshot({ status: 'failed', errorCode: 'NEW_CODE' }))).toBe('NEW_CODE');
