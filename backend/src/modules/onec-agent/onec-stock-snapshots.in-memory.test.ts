@@ -55,10 +55,21 @@ describe('in-memory stock snapshots (the contract of the port for consumer tests
     expect(await code(port.request({ momentLocal: '2026-10-08T11:00:00', idempotencyKey: 'request-1' }, actor, 'r'))).toBe('ok');
     expect(await code(port.request({ momentLocal: '2026-09-26T10:14:00', idempotencyKey: 'short' }, actor, 'r'))).toBe('VALIDATION_ERROR');
     expect(await code(port.request({ sourceId: 9, momentLocal: '2026-09-26T10:14:00', idempotencyKey: 'request-2' }, actor, 'r'))).toBe('VALIDATION_ERROR');
+    expect(await port.capabilities()).toEqual({ readAvailable: true, commandsAvailable: true, reason: null });
+    expect(await port.capabilities(9)).toEqual({ readAvailable: true, commandsAvailable: false, reason: 'SOURCE_NOT_CONFIGURED' });
+    port.agentTooOld = true;
+    expect(await port.capabilities()).toEqual({ readAvailable: true, commandsAvailable: false, reason: 'AGENT_TOO_OLD' });
+    expect(await code(port.request({ momentLocal: '2026-09-26T10:14:00', idempotencyKey: 'request-0' }, actor, 'r'))).toBe('ONEC_STOCK_SNAPSHOTS_UNAVAILABLE');
+    port.agentTooOld = false;
     port.enabled = false;
+    expect(await port.capabilities()).toEqual({ readAvailable: true, commandsAvailable: false, reason: 'MODULE_DISABLED' });
     expect(await code(port.request({ momentLocal: '2026-09-26T10:14:00', idempotencyKey: 'request-3' }, actor, 'r'))).toBe('ONEC_STOCK_SNAPSHOTS_UNAVAILABLE');
-    // Existing snapshots stay readable when the module is switched off.
-    expect((await port.list()).total).toBe(1);
+    // Switched off: what is stored stays readable, and the history can still be cleaned.
+    const stored = (await port.list()).items;
+    expect(stored).toHaveLength(1);
+    expect((await port.get(stored[0].id)).status).toBe('requested');
+    await port.delete(stored[0].id, actor, 'r');
+    expect(await port.get(stored[0].id, { includeDeleted: true })).toMatchObject({ status: 'failed', errorCode: 'CANCELLED' });
   });
 
   it('rows and summary only of a ready snapshot; keys in lower case; the warehouse filter', async () => {
@@ -105,12 +116,16 @@ describe('in-memory stock snapshots (the contract of the port for consumer tests
     const old = await port.request({ momentLocal: '2026-09-26T10:14:00', idempotencyKey: 'request-1' }, actor, 'r');
     port.complete(old.id, [row(W1, 1)]);
     const active = await port.request({ momentLocal: '2026-09-27T10:14:00', idempotencyKey: 'request-2' }, actor, 'r');
+    const base = (await port.get(old.id)).baseRef;
+    expect((await port.get(active.id)).baseRef).toBe(base);
     port.replaceBase();
-    expect(await port.get(old.id)).toMatchObject({ status: 'ready', currentSource: false });
+    // The reference of the base never changes for a stored snapshot; snapshots of another base carry another one.
+    expect(await port.get(old.id)).toMatchObject({ status: 'ready', currentSource: false, baseRef: base });
     expect(await port.get(active.id)).toMatchObject({ status: 'failed', errorCode: 'SOURCE_GENERATION_CHANGED', currentSource: false });
     const again = await port.request({ momentLocal: '2026-09-26T10:14:00', idempotencyKey: 'request-3' }, actor, 'r');
     expect(again.id).not.toBe(old.id);
     expect(again.currentSource).toBe(true);
+    expect(again.baseRef).not.toBe(base);
     expect((await port.list({ currentSourceOnly: true })).items.map((item) => item.id)).toEqual([again.id]);
     expect((await port.list({ status: 'ready' })).items.map((item) => item.id)).toEqual([old.id]);
   });

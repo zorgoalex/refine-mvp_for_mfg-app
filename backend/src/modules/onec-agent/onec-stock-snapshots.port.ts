@@ -28,6 +28,11 @@ export interface StockSnapshotView {
    * snapshot was read (a historical snapshot): show it as such, never build current documents from it.
    */
   currentSource: boolean;
+  /**
+   * The 1C base the snapshot was read from: an immutable reference, equal for all snapshots of one base and
+   * different after the base is replaced. Two snapshots may be compared only when their `baseRef` is equal.
+   */
+  baseRef: string;
   /** The moment the snapshot describes, local time of the 1C base: `YYYY-MM-DDTHH:MM:SS`. Movements at exactly this moment are not included. */
   momentLocal: string;
   /** The same moment as an instant (ISO, UTC). */
@@ -97,14 +102,41 @@ export interface StockSnapshotListFilter {
 }
 
 /**
+ * Reading (`get`, `list`, `rows`, `summary`, `capabilities`) uses only the `tx` it is given and takes no locks: it
+ * may run inside the caller's REPEATABLE READ READ ONLY transaction and then sees one snapshot of the database
+ * together with whatever else the caller reads there.
+ *
+ * Switched off (`capabilities().commandsAvailable = false` with reason `MODULE_DISABLED`): no new requests (409);
+ * everything already stored stays readable; `delete` still works — removing a `ready` / `failed` snapshot and
+ * cancelling a `requested` one is cleaning the history, and a snapshot that is being read is refused as always.
+ *
  * Errors are `ApiError`s:
- * - 409 `ONEC_STOCK_SNAPSHOTS_UNAVAILABLE` — the module is switched off (reading of existing snapshots still works);
+ * - 409 `ONEC_STOCK_SNAPSHOTS_UNAVAILABLE` — `request` while new snapshots cannot be requested (see `capabilities`);
  * - 404 `ONEC_STOCK_SNAPSHOT_NOT_FOUND` — no such snapshot, or it is deleted (`get` with `includeDeleted` still returns it);
  * - 409 `ONEC_STOCK_SNAPSHOT_NOT_READY` — `rows` / `summary` of a snapshot that is not `ready`;
  * - 409 `ONEC_STOCK_SNAPSHOT_IN_PROGRESS` — `delete` of a snapshot that is being read (`config_published`, `syncing`);
  * - 422 `VALIDATION_ERROR` — a malformed or future moment, a bad key, an unknown source.
  */
+/**
+ * Why new snapshots cannot be requested: `MODULE_DISABLED` — switched off by the flag; `SOURCE_NOT_CONFIGURED` — no
+ * 1C source with an agent and a published configuration; `AGENT_TOO_OLD` — the agent cannot read balances as of a
+ * moment (needs 1.3.11). A source that is merely offline or in a quiet window is NOT a reason: the request is
+ * accepted and waits (`waitReason`).
+ */
+export type StockSnapshotUnavailableReason = 'MODULE_DISABLED' | 'SOURCE_NOT_CONFIGURED' | 'AGENT_TOO_OLD';
+
+export interface StockSnapshotCapabilities {
+  /** Stored snapshots can be listed and read. */
+  readAvailable: boolean;
+  /** New snapshots can be requested. Deleting follows `readAvailable`, not this. */
+  commandsAvailable: boolean;
+  /** Machine code when `commandsAvailable` is false; null otherwise. */
+  reason: StockSnapshotUnavailableReason | null;
+}
+
 export interface OnecStockSnapshotsPort {
+  /** What the module can do now, for the given source (default: the only one). Never throws for a switched-off module. */
+  capabilities(sourceId?: number, tx?: DatabaseClient): Promise<StockSnapshotCapabilities>;
   /** Queues a snapshot (or returns the existing one, see `force`). `tx` — the caller's transaction, if any. */
   request(input: StockSnapshotRequest, actor: CurrentUser, requestId: string, tx?: DatabaseClient): Promise<StockSnapshotView>;
   /** Newest first; deleted snapshots are never listed. */
@@ -113,6 +145,6 @@ export interface OnecStockSnapshotsPort {
   /** The whole array (at most `STOCK_SNAPSHOT_MAX_ROWS`), optionally of the given warehouses only. */
   rows(id: number, filter?: { warehouseRefKeys?: readonly string[] }, tx?: DatabaseClient): Promise<StockSnapshotRow[]>;
   summary(id: number, tx?: DatabaseClient): Promise<StockSnapshotWarehouseSummary[]>;
-  /** `ready` / `failed` — the rows are removed; `requested` — the request is cancelled; being read — 409. */
+  /** `ready` / `failed` — the rows are removed; `requested` — the request is cancelled; being read — 409. Works when the module is switched off. */
   delete(id: number, actor: CurrentUser, requestId: string, tx?: DatabaseClient): Promise<void>;
 }
