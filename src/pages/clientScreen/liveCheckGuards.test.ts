@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 // @ts-ignore plain ESM helper of the browser scripts, no types
 import {
-  createSettingsChange, isForbiddenDataRequest, isStageRelayTarget, settingsRestorePlan, stageTargetProblem,
+  createSettingsChange, expectedMaterialColumns, isForbiddenDataRequest, isStageRelayTarget, isStageSettingsRequest, settingsRestorePlan,
+  stageTargetProblem,
 } from '../../../tests/helpers/clientScreenLiveGuards.mjs';
 
 describe('live check: stage target only', () => {
@@ -110,3 +112,40 @@ describe('live check: restoring the shared setting', () => {
     expect(settingsRestorePlan(original, failed.outcome()).action).toBe('reconcile');
   });
 });
+
+describe('live check: codes added for its own browser only', () => {
+  it('rewrites the answer of the stage settings address and of nothing else', () => {
+    expect(isStageSettingsRequest('https://backend-test.mebelkz.app/api/v1/client-screen/settings')).toBe(true);
+    expect(isStageSettingsRequest('https://backend-test.mebelkz.app/api/v1/client-screen/settings?x=1')).toBe(true);
+    // Another backend, a look-alike host, another path, the same path elsewhere: all go on to the destination guard.
+    for (const url of ['https://backend-ovh.mebelkz.app/api/v1/client-screen/settings', 'https://backend-test.mebelkz.app.example.com/api/v1/client-screen/settings',
+      'https://backend-test.mebelkz.app/api/v1/client-screen/settings/history', 'https://backend-test.mebelkz.app/api/v1/orders/client-screen/settings',
+      'http://backend-test.mebelkz.app/api/v1/client-screen/settings', 'https://evil.example/api/v1/client-screen/settings', 'not a url']) {
+      expect(isStageSettingsRequest(url), url).toBe(false);
+    }
+  });
+
+  it('the settings rewrite of the script sits behind that predicate', () => {
+    const script = readFileSync(new URL('../../../tests/client-screen-manager-live.mjs', import.meta.url), 'utf8');
+    expect(script).toContain('await context.route((url) => isStageSettingsRequest(url.href), async (route) => {');
+    expect(script).not.toMatch(/context\.route\(\/[^\n]*client-screen[^\n]*settings/);
+  });
+});
+
+describe('live check: columns expected on the customer materials tables', () => {
+  const film = [{ code: 'requirements.film_name', label: 'Пленка' }, { code: 'requirements.film_area', label: 'м²' },
+    { code: 'requirements.film_stock', label: 'На складе, пог. м' }, { code: 'requirements.film_coverage', label: 'Покрытие' }];
+  const manager = ['Пленка', 'м²', 'Детали'];
+
+  it('ticked ∩ what the manager table has, in the order of the tab', () => {
+    expect(expectedMaterialColumns(film, film.map((column) => column.code), manager)).toEqual(['Пленка', 'м²']);
+    expect(expectedMaterialColumns(film, ['requirements.film_area'], manager)).toEqual(['м²']);
+    expect(expectedMaterialColumns(film, film.map((column) => column.code), [...manager, 'На складе, пог. м', 'Покрытие'])).toEqual(['Пленка', 'м²', 'На складе, пог. м', 'Покрытие']);
+  });
+
+  it('only stock columns ticked and the manager has none: no table is expected', () => {
+    expect(expectedMaterialColumns(film, ['requirements.film_stock', 'requirements.film_coverage'], manager)).toEqual([]);
+    expect(expectedMaterialColumns(film, [], manager)).toEqual([]);
+  });
+});
+

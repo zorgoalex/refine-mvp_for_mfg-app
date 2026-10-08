@@ -26,6 +26,25 @@ export function stageTargetProblem(runtimeConfig) {
   return null;
 }
 
+/** The one request whose answer the check may rewrite for its own browser: the stage backend's customer screen settings. */
+export function isStageSettingsRequest(url) {
+  let parsed;
+  try {
+    parsed = new URL(String(url));
+  } catch {
+    return false;
+  }
+  return parsed.origin === STAGE_API_ORIGIN && parsed.pathname === '/api/v1/client-screen/settings';
+}
+
+/**
+ * The columns one materials table of the customer must have: the ticked ones, in the tab's order,
+ * that the manager's own table has. An empty result means the table is not shown at all.
+ */
+export function expectedMaterialColumns(columns, tickedCodes, managerHeaders) {
+  return columns.filter((column) => tickedCodes.includes(column.code) && managerHeaders.includes(column.label)).map((column) => column.label);
+}
+
 /** Only calls to the stage backend and the stage Hasura are relayed for a preview build. */
 export function isStageRelayTarget(url) {
   return STAGE_ORIGINS.has(originOf(url) ?? '');

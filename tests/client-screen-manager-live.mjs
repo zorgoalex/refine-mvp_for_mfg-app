@@ -1,7 +1,8 @@
 import { chromium, expect } from '@playwright/test';
 import assert from 'node:assert/strict';
 import {
-  createSettingsChange, isForbiddenDataRequest, isStageRelayTarget, settingsRestorePlan, stageTargetProblem, STAGE_SITE,
+  createSettingsChange, expectedMaterialColumns, isForbiddenDataRequest, isStageRelayTarget, isStageSettingsRequest, settingsRestorePlan,
+  stageTargetProblem, STAGE_SITE,
 } from './helpers/clientScreenLiveGuards.mjs';
 import { printableError } from './helpers/redactSecrets.mjs';
 import { vercelBypassCookies } from './helpers/vercelBypass.mjs';
@@ -161,7 +162,8 @@ try {
 
   // Registered last, so that it is asked first (before the relay of stage calls).
   if (extraCodes.length) {
-    await context.route(/\/client-screen\/settings(\?|$)/, async (route) => {
+    // Only the stage backend's own settings address: any other request goes on to the destination guard untouched.
+    await context.route((url) => isStageSettingsRequest(url.href), async (route) => {
       if (route.request().method() !== 'GET') return route.fallback();
       const response = await route.fetch({ headers: { ...route.request().headers(), origin: STAGE_SITE, referer: `${STAGE_SITE}/` } });
       if (!response.ok()) return route.fulfill({ response });
@@ -408,38 +410,40 @@ try {
     else {
       await materialsTab.click();
       await expect(selectedTab()).toHaveText(/Материалы/, { timeout: 30000 });
-      // Which tables must be there follows from the ticks; their content is compared with the manager's own tables.
-      const filmTicked = codes.some((code) => code.startsWith('requirements.film_'));
-      const sheetTicked = codes.some((code) => code.startsWith('requirements.sheet_'));
-      const expectedTitles = [...(filmTicked ? ['Пленка'] : []), ...(sheetTicked ? ['Листовые материалы'] : [])];
-      await expect.poll(() => popup.locator('.client-screen__subtitle').allInnerTexts(), { timeout: 30000 }).toEqual(expectedTitles);
-      const customerTables = popup.locator('.client-screen__table');
-      await expect(customerTables).toHaveCount(expectedTitles.length);
+      // What must be there: the ticked columns that the manager's own table has, in the tab's order.
+      // A table with no such column is not shown. Content is compared with the manager's tables.
+      const FILM_COLUMNS = [['film_name', 'Пленка'], ['film_area', 'м²'], ['film_details', 'Детали'], ['film_meters', 'Пог. м'], ['film_sheets', 'Листы'],
+        ['film_cut_jobs', 'Раскрои'], ['film_stock', 'На складе, пог. м'], ['film_coverage', 'Покрытие']].map(([field, label]) => ({ code: `requirements.${field}`, label }));
+      const SHEET_COLUMNS = [['sheet_name', 'Материал'], ['sheet_area', 'Кол-во м²'], ['sheet_details', 'Кол-во деталей'], ['sheet_stock', 'На складе (1С)'],
+        ['sheet_coverage', 'Покрытие']].map(([field, label]) => ({ code: `requirements.${field}`, label }));
       const managerTables = page.locator('.ant-tabs-tabpane-active .ant-table');
+      await expect(managerTables).toHaveCount(2, { timeout: 30000 });
       const managerHeaders = async (index) => (await managerTables.nth(index).locator('thead th').allInnerTexts()).map((text) => text.trim()).filter(Boolean);
-      const checkTable = async (customerIndex, managerIndex, nameCode, nameLabel) => {
-        const customer = customerTables.nth(customerIndex);
-        const headers = await customer.getByRole('columnheader').allInnerTexts();
-        const managerHas = await managerHeaders(managerIndex);
-        // Every customer column is a column of the manager's table: nothing the manager does not have.
-        for (const header of headers) assert.ok(managerHas.includes(header), `materials: the customer column «${header}» is in the manager's table (${managerHas.join(' | ')})`);
-        const managerRows = managerTables.nth(managerIndex).locator('tbody tr.ant-table-row');
+      const expected = [
+        { title: 'Пленка', managerIndex: 0, headers: expectedMaterialColumns(FILM_COLUMNS, codes, await managerHeaders(0)) },
+        { title: 'Листовые материалы', managerIndex: 1, headers: expectedMaterialColumns(SHEET_COLUMNS, codes, await managerHeaders(1)) },
+      ].filter((table) => table.headers.length > 0);
+      await expect.poll(() => popup.locator('.client-screen__subtitle').allInnerTexts(), { timeout: 30000 }).toEqual(expected.map((table) => table.title));
+      const customerTables = popup.locator('.client-screen__table');
+      await expect(customerTables).toHaveCount(expected.length);
+      const described = [];
+      for (const [index, table] of expected.entries()) {
+        const customer = customerTables.nth(index);
+        // Exactly the expected columns, in order: nothing the manager does not have, nothing ticked missing.
+        assert.deepEqual(await customer.getByRole('columnheader').allInnerTexts(), table.headers, `materials «${table.title}»: columns`);
+        const managerRows = managerTables.nth(table.managerIndex).locator('tbody tr.ant-table-row');
         const rowCount = await managerRows.count();
         // The customer has the manager's rows plus the totals row, when there are rows.
         await expect(customer.locator('tbody tr[data-row-id]')).toHaveCount(rowCount > 0 ? rowCount + 1 : 0, { timeout: 20000 });
-        if (rowCount > 0 && has(nameCode)) {
-          assert.equal(headers[0], nameLabel, `materials: «${nameLabel}» is the first column`);
+        if (rowCount > 0 && ['Пленка', 'Материал'].includes(table.headers[0])) {
           const managerName = (await managerRows.first().locator('td').first().innerText()).trim();
           const customerName = (await customer.locator('tbody tr[data-row-id]').first().locator('td').first().innerText()).trim();
-          assert.equal(customerName, managerName, 'materials: the first row names the same material as the manager table');
-          assert.equal((await customer.locator('tbody tr[data-row-id]').last().locator('td').first().innerText()).trim(), 'Итого', 'materials: the totals row is last');
+          assert.equal(customerName, managerName, `materials «${table.title}»: the first row names the same material as the manager table`);
+          assert.equal((await customer.locator('tbody tr[data-row-id]').last().locator('td').first().innerText()).trim(), 'Итого', `materials «${table.title}»: the totals row is last`);
         }
-        return `${headers.length} column(s), ${rowCount} row(s)`;
-      };
-      const described = [];
-      if (filmTicked) described.push(`Пленка — ${await checkTable(0, 0, 'requirements.film_name', 'Пленка')}`);
-      if (sheetTicked) described.push(`Листовые материалы — ${await checkTable(filmTicked ? 1 : 0, 1, 'requirements.sheet_name', 'Материал')}`);
-      results.push(`materials tab mirrored and equal to the manager's tables: ${described.join('; ') || 'no table has a ticked column, none shown'}`);
+        described.push(`${table.title} — ${table.headers.join(' | ')}; ${rowCount} row(s)`);
+      }
+      results.push(`materials tab mirrored and equal to the manager's tables: ${described.join('; ') || 'no ticked column that the manager has — no table shown'}`);
       await managerTab(/Основная информация|Обзор/).click();
       await expect(selectedTab()).toHaveText(/Основная информация|Обзор/, { timeout: 20000 });
     }
