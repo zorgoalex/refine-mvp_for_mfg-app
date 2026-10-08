@@ -32,6 +32,7 @@ import { OnecEtlParserService } from './application/onec-etl-parser.service';
 import { OnecMonitorService } from './application/onec-monitor.service';
 import { OnecCatalogReader } from './onec-catalog-reader';
 import type { OnecRuntimeConfig, OnecRuntimeConfigService } from './onec-runtime-config.service';
+import { PgOnecStockSnapshotStore } from './adapters/pg-onec-stock-snapshot-store';
 
 const actor = { id: '1', username: 'E2E-Тест', role: 'admin', roleId: 1, permissions: ['onec.manage', 'onec.view'] } as CurrentUser;
 const actx = (requestId: string) => ({ requestId, correlationId: null });
@@ -86,7 +87,7 @@ suite('1C agent E3a ETL — isolated PostgreSQL + real spool', () => {
       CREATE TABLE audit_log(LIKE public.audit_log INCLUDING ALL);
       CREATE TABLE audit_log_related_entity(LIKE public.audit_log_related_entity INCLUDING ALL);`);
     for (const file of ['193_onec_agent_foundation.sql', '196_onec_agent_commands.sql', '198_onec_etl.sql', '200_onec_etl_snapshots_revocation.sql',
-      '247_onec_agent_expected_silence.sql']) {
+      '247_onec_agent_expected_silence.sql', '250_onec_stock_snapshots.sql']) {
       await pool.query(readFileSync(new URL(`../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     const values: Partial<BackendEnv> = { DATABASE_URL: url.toString(), DATABASE_QUERY_TIMEOUT_MS: 20000, DATABASE_POOL_MIN: 0, DATABASE_POOL_MAX: 6, DATABASE_SSL: false };
@@ -104,7 +105,7 @@ suite('1C agent E3a ETL — isolated PostgreSQL + real spool', () => {
     commands = new OnecCommandsService(commandsRepo, repo, audit, new OnecCommandWakeups(db, runtime), runtime, etlRepo);
     revocation = new OnecEtlRevocationService(etlRepo, runtime);
     monitor = new OnecMonitorService(runtime, repo, db, new OnecAlertProjector(repo), commandsRepo, etlRepo, audit, revocation);
-    onecAdmin = new OnecAdminService(repo, audit, runtime, etlRepo, revocation);
+    onecAdmin = new OnecAdminService(repo, audit, runtime, etlRepo, revocation, new PgOnecStockSnapshotStore(repo, audit));
     admin = new OnecEtlAdminService(etlRepo, repo, runtime);
   }, 60000);
 

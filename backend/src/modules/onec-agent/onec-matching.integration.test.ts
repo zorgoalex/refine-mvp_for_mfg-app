@@ -38,7 +38,7 @@ suite('1C matching report (E3c) — isolated PostgreSQL', () => {
       CREATE TABLE client_phones(phone_id bigserial PRIMARY KEY, client_id bigint, phone_number text);
       CREATE TABLE suppliers(supplier_id smallint PRIMARY KEY, supplier_name varchar, ref_key_1c uuid);`);
     for (const file of ['193_onec_agent_foundation.sql', '196_onec_agent_commands.sql', '198_onec_etl.sql', '200_onec_etl_snapshots_revocation.sql',
-      '247_onec_agent_expected_silence.sql']) {
+      '247_onec_agent_expected_silence.sql', '250_onec_stock_snapshots.sql']) {
       await pool.query(`SET search_path = ${schema}, public; ${readFileSync(new URL(`../../../db/migrations/${file}`, import.meta.url), 'utf8')}`);
     }
     const values: Partial<BackendEnv> = { DATABASE_URL: url.toString(), DATABASE_QUERY_TIMEOUT_MS: 20000, DATABASE_POOL_MIN: 0, DATABASE_POOL_MAX: 4, DATABASE_SSL: false };

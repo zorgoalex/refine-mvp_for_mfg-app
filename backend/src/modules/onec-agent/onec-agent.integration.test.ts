@@ -25,6 +25,7 @@ import { OnecMonitorService } from './application/onec-monitor.service';
 import { OnecAgentAuthGuard } from './http/onec-agent-auth.guard';
 import { OnecAgentController } from './http/onec-agent.controller';
 import type { OnecRuntimeConfig, OnecRuntimeConfigService } from './onec-runtime-config.service';
+import { PgOnecStockSnapshotStore } from './adapters/pg-onec-stock-snapshot-store';
 
 const suite = process.env.ONEC_AGENT_DOCKER_TEST === 'true' ? describe : describe.skip;
 
@@ -89,7 +90,7 @@ suite('1C agent E1 — isolated PostgreSQL', () => {
       CREATE TABLE audit_log(LIKE public.audit_log INCLUDING ALL);
       CREATE TABLE audit_log_related_entity(LIKE public.audit_log_related_entity INCLUDING ALL);`);
     for (const file of ['193_onec_agent_foundation.sql', '196_onec_agent_commands.sql', '198_onec_etl.sql', '200_onec_etl_snapshots_revocation.sql',
-      '247_onec_agent_expected_silence.sql']) {
+      '247_onec_agent_expected_silence.sql', '250_onec_stock_snapshots.sql']) {
       await pool.query(readFileSync(new URL(`../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     const values: Partial<BackendEnv> = { DATABASE_URL: url.toString(), DATABASE_QUERY_TIMEOUT_MS: 10000, DATABASE_POOL_MIN: 0, DATABASE_POOL_MAX: 4, DATABASE_SSL: false };
@@ -100,7 +101,7 @@ suite('1C agent E1 — isolated PostgreSQL', () => {
     repo = new PgOnecRepository(db);
     const audit = new OnecAuditWriter(repo);
     const etlRepo = new PgOnecEtlRepository(db);
-    admin = new OnecAdminService(repo, audit, runtime, etlRepo, new OnecEtlRevocationService(etlRepo, runtime));
+    admin = new OnecAdminService(repo, audit, runtime, etlRepo, new OnecEtlRevocationService(etlRepo, runtime), new PgOnecStockSnapshotStore(repo, audit));
     protocol = new OnecAgentProtocolService(repo, audit);
     monitor = new OnecMonitorService(runtime, repo, db, new OnecAlertProjector(repo), new PgOnecCommandRepository(db), etlRepo, new OnecAuditWriter(repo), new OnecEtlRevocationService(etlRepo, runtime));
     const rateLimit = { assertAllowed: async () => undefined, refund: async () => undefined } as unknown as RateLimitService;
@@ -330,6 +331,72 @@ suite('1C agent E1 — isolated PostgreSQL', () => {
     expect(versions.map((v) => v.status)).toEqual(['published', 'superseded']);
     await expect(pool.query(`UPDATE onec_agent_config_versions SET config_hash = 'x'`)).rejects.toThrow(/only published -> superseded/);
     await expect(pool.query(`DELETE FROM onec_agent_config_versions`)).rejects.toThrow(/immutable/);
+  });
+
+  it('the service set of stock snapshots: the operator neither sees nor edits it, and every published version takes it from the slot', async () => {
+    await registerAgent();
+    const sourceId = Number((await pool.query(`SELECT source_id FROM onec_agents WHERE agent_id = 'agent-a'`)).rows[0].source_id);
+    const entity = { entityCode: 'items', oDataPath: 'Catalog_Номенклатура', keyField: 'Ref_Key', select: ['Ref_Key'], syncMode: 'incremental', pageSize: 100, overlapMinutes: 0 };
+    const config = (minutes: number, entities: unknown[] = [entity]) => ({ configuration: { mode: 'Normal', commandTypes: [], etlIntervalMinutes: minutes, etlEntities: entities } });
+    const publishedEntities = async () => (JSON.parse((await pool.query(
+      `SELECT configuration_canonical FROM onec_agent_config_versions WHERE agent_id = 'agent-a' AND status = 'published'`)).rows[0].configuration_canonical)
+      .etlEntities as Array<{ entityCode: string; enabled?: boolean; oDataPath: string }>).map((item) => [item.entityCode, item.enabled ?? null, item.oDataPath]);
+    const PATH = (period: string) => `AccumulationRegister_ЗапасыНаСкладах/Balance(Period=datetime'${period}',Dimensions='Организация,Номенклатура,Характеристика,Партия,СтруктурнаяЕдиница,Ячейка')`;
+
+    // No slot yet: nothing is added; an operator document with the reserved code is refused.
+    const first = await admin.saveDraft('agent-a', undefined, config(10), actor, ctx('m1'));
+    await admin.publish('agent-a', { revision: first.revision, configHash: first.configHash }, actor, ctx('m2'));
+    expect(await publishedEntities()).toEqual([['items', null, 'Catalog_Номенклатура']]);
+    const reserved = { ...entity, entityCode: 'stock_balances_at' };
+    expect(await statusOf(() => admin.saveDraft('agent-a', String(first.revision), config(11, [entity, reserved]), actor, ctx('m3')))).toBe('422 ONEC_CONFIG_INVALID');
+    expect(admin.validateConfiguration(config(11, [reserved]))).toMatchObject({ ok: false, issues: [{ path: 'etlEntities.0.entityCode' }] });
+
+    // The slot is switched on for a snapshot: the service publication changes only the managed set, the author is the system.
+    const snapshotId = Number((await pool.query(
+      `INSERT INTO onec_stock_snapshots (source_id, agent_id, generation_ref, source_generation, moment_local, moment_utc, time_zone, idempotency_key, request_id, correlation_id)
+       SELECT $1, 'agent-a', generation_ref, generation, '2026-09-26 10:14:00', '2026-09-26 05:14:00+00', 'Asia/Almaty', 'e2e-slot-1', 'req-s', 'corr-s' FROM onec_sources WHERE source_id = $1
+       RETURNING snapshot_id`, [sourceId])).rows[0].snapshot_id);
+    await pool.query(`INSERT INTO onec_stock_snapshot_slot (source_id, state, period_local, owner_snapshot_id) VALUES ($1, 'active', '2026-09-26 10:14:00', $2)`, [sourceId, snapshotId]);
+    const enable = { requestId: 'req-s', correlationId: 'corr-s', snapshotId, requestedByUserId: 1, action: 'enable' as const };
+    const on = await db.transaction((tx) => admin.publishManaged(tx, 'agent-a', enable));
+    expect(on.changed).toBe(true);
+    expect(await publishedEntities()).toEqual([['items', null, 'Catalog_Номенклатура'], ['stock_balances_at', true, PATH('2026-09-26T10:14:00')]]);
+    // The same state again (a step repeated after a restart): the published version is returned, nothing is written.
+    expect(await db.transaction((tx) => admin.publishManaged(tx, 'agent-a', enable))).toEqual({ configVersion: on.configVersion, configHash: on.configHash, changed: false });
+    const version = (await pool.query(`SELECT published_by, published_from_revision FROM onec_agent_config_versions WHERE agent_id = 'agent-a' AND config_version = $1`, [on.configVersion])).rows[0];
+    expect(version).toEqual({ published_by: null, published_from_revision: '0' });
+    const audit = (await pool.query(
+      `SELECT a.username, a.user_id, a.related_user_id::text AS initiator, a.after_json->>'reason' AS reason, a.after_json->>'action' AS action, l.actor_kind, l.correlation_id,
+              (SELECT entity_id::text FROM audit_log_related_entity r WHERE r.audit_id = a.audit_id AND r.entity_type = 'onec_stock_snapshot') AS snapshot
+         FROM audit_log a JOIN onec_audit_links l ON l.audit_id = a.audit_id WHERE a.event = 'onec.config.published' ORDER BY a.created_at DESC LIMIT 1`)).rows[0];
+    expect(audit).toEqual({ username: 'onec_stock_snapshots', user_id: null, initiator: '1', reason: 'stock_snapshot', action: 'enable', actor_kind: 'system', correlation_id: 'corr-s', snapshot: String(snapshotId) });
+
+    // The operator's view is without the set; a draft built from it saves and publishes, and the set stays.
+    const view = await admin.getConfiguration('agent-a');
+    expect((view.published!.configuration as { etlEntities: Array<{ entityCode: string }> }).etlEntities.map((item) => item.entityCode)).toEqual(['items']);
+    expect(view.managedEntities).toEqual([{ entityCode: 'stock_balances_at', enabled: true, oDataPath: PATH('2026-09-26T10:14:00') }]);
+    // As the editor does: the published document without the generation token is the base of a draft.
+    const { sourceGeneration: _generation, ...operatorBase } = view.published!.configuration as Record<string, unknown>;
+    const edited = await admin.saveDraft('agent-a', String(first.revision), { configuration: { ...operatorBase, etlIntervalMinutes: 15 } }, actor, ctx('m4'));
+    await admin.publish('agent-a', { revision: edited.revision, configHash: edited.configHash }, actor, ctx('m5'));
+    expect(await publishedEntities()).toEqual([['items', null, 'Catalog_Номенклатура'], ['stock_balances_at', true, PATH('2026-09-26T10:14:00')]]);
+    // Publishing the same draft again is still «unchanged» for the operator.
+    expect(await statusOf(() => admin.publish('agent-a', { revision: edited.revision, configHash: edited.configHash }, actor, ctx('m6')))).toBe('409 ONEC_CONFIG_UNCHANGED');
+
+    // Switched off: the set stays in the configuration with enabled:false and the last period.
+    await pool.query(`UPDATE onec_stock_snapshot_slot SET state = 'disabling' WHERE source_id = $1`, [sourceId]);
+    const off = await db.transaction((tx) => admin.publishManaged(tx, 'agent-a', { ...enable, action: 'disable' }));
+    expect(off.changed).toBe(true);
+    expect(await publishedEntities()).toEqual([['items', null, 'Catalog_Номенклатура'], ['stock_balances_at', false, PATH('2026-09-26T10:14:00')]]);
+    expect((await admin.getConfiguration('agent-a')).managedEntities).toEqual([{ entityCode: 'stock_balances_at', enabled: false, oDataPath: PATH('2026-09-26T10:14:00') }]);
+    // Removed (before a rollback of the backend image): the document has no trace of the set.
+    await pool.query(`UPDATE onec_stock_snapshot_slot SET state = 'removed', owner_snapshot_id = NULL WHERE source_id = $1`, [sourceId]);
+    await db.transaction((tx) => admin.publishManaged(tx, 'agent-a', { ...enable, action: 'remove' }));
+    expect(await publishedEntities()).toEqual([['items', null, 'Catalog_Номенклатура']]);
+    expect((await admin.getConfiguration('agent-a')).managedEntities).toEqual([]);
+    // A blocked publication is refused for the service path too.
+    await pool.query(`UPDATE onec_agents SET config_publish_blocked = true, config_publish_blocked_at = now()`);
+    expect(await statusOf(() => db.transaction((tx) => admin.publishManaged(tx, 'agent-a', enable)))).toBe('409 ONEC_CONFIG_PUBLISH_BLOCKED');
   });
 
   it('blocks publication after restore until a fresh heartbeat arrives', async () => {

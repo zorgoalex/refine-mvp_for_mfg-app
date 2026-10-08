@@ -10,6 +10,7 @@ import { OnecMatchingService } from '../application/onec-matching.service';
 import { OnecJournalService } from '../application/onec-journal.service';
 import type { OnecRequestContext } from '../application/onec-audit';
 import { OnecPermissionsGuard } from './onec-permissions.guard';
+import { OnecStockSnapshotsService } from '../application/onec-stock-snapshots.service';
 
 function user(request: RequestWithCurrentUser): CurrentUser {
   if (!request.user) throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication required');
@@ -51,6 +52,7 @@ export class OnecAdminController {
     @Inject(OnecEtlAdminService) private readonly etl: OnecEtlAdminService,
     @Inject(OnecMatchingService) private readonly matching: OnecMatchingService,
     @Inject(OnecJournalService) private readonly journal: OnecJournalService,
+    @Inject(OnecStockSnapshotsService) private readonly stockSnapshots: OnecStockSnapshotsService,
   ) {}
 
   @ApiOperation({ summary: 'Overview of 1C agents: connection, state, queues, certificates, configuration' })
@@ -348,6 +350,16 @@ export class OnecAdminController {
   @RequirePermissions('onec.manage')
   rebaselineSource(@Param('sourceId') sourceId: string, @Body() body: unknown, @Req() request: RequestWithCurrentUser) {
     return this.service.rebaseline(positiveId(sourceId), body, user(request), requestId(request));
+  }
+
+  @ApiOperation({ summary: 'Take the ERP-managed stock snapshot set out of the published configuration (before a rollback of the backend image)' })
+  @Post('sources/:sourceId/stock-snapshots/remove-set')
+  @HttpCode(200)
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.manage')
+  removeStockSnapshotSet(@Param('sourceId') sourceId: string, @Req() request: RequestWithCurrentUser) {
+    this.service.requireEnabled();
+    return this.stockSnapshots.removeManagedSet(positiveId(sourceId), user(request), requestId(request).requestId);
   }
 
   @ApiOperation({ summary: '1C counterparties matched against ERP clients and suppliers (read-only report)' })

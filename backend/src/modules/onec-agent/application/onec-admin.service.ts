@@ -6,6 +6,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type { DatabaseClient } from '../../../database/database.types';
 import { PgOnecEtlRepository } from '../adapters/pg-onec-etl-repository';
 import { PgOnecRepository, type SourceRecord } from '../adapters/pg-onec-repository';
+import { PgOnecStockSnapshotStore } from '../adapters/pg-onec-stock-snapshot-store';
 import { REVOCABLE_ENTITIES } from '../domain/onec-etl';
 import { canonicalizeValue, parseStrictJson, toPlainValue } from '../canonical-json/canonical-json';
 import { formatFingerprint, OnecCertificateError, parseCertificateInput } from '../domain/onec-certificates';
@@ -14,6 +15,7 @@ import {
   validateOnecConfiguration,
   type OnecAgentConfiguration,
 } from '../domain/onec-config';
+import { operatorProjection, withManagedEntities, type ManagedStockSlot } from '../domain/onec-managed-entities';
 import { buildOnecEvent } from '../domain/onec-events';
 import { AGENT_VERSION_PATTERN, sameSourceIdentity } from '../domain/onec-protocol';
 import { expectedSilenceProblem } from '../domain/onec-expected-silence';
@@ -89,7 +91,13 @@ export class OnecAdminService {
     @Inject(OnecRuntimeConfigService) private readonly runtime: OnecRuntimeConfigService,
     @Inject(PgOnecEtlRepository) private readonly etl: PgOnecEtlRepository,
     @Inject(OnecEtlRevocationService) private readonly revocation: OnecEtlRevocationService,
+    @Inject(PgOnecStockSnapshotStore) private readonly stockSnapshots: PgOnecStockSnapshotStore,
   ) {}
+
+  /** 503 when the 1C integration is switched off (for controllers of other services of the module). */
+  requireEnabled(): void {
+    this.runtime.requireEnabled();
+  }
 
   // ------------------------------------------------------------ overview
 
@@ -359,6 +367,7 @@ export class OnecAdminService {
       db.query(`SELECT active_config_version, rejected_config_version, rejected_reason FROM onec_agent_status WHERE agent_id = $1`, [agentId]),
     ]);
     const statusRow = status.rows[0];
+    const projected = published ? operatorProjection(toPlainValue(parseStrictJson(published.configurationCanonical)) as Record<string, unknown>) : null;
     return {
       agentId,
       publishBlocked: agent.configPublishBlocked,
@@ -370,13 +379,10 @@ export class OnecAdminService {
             updatedAt: draft.updated_at,
           }
         : null,
-      published: published
-        ? {
-            configVersion: published.configVersion,
-            configHash: published.configHash,
-            configuration: toPlainValue(parseStrictJson(published.configurationCanonical)),
-          }
-        : null,
+      // The operator's view: without the entities ERP manages itself (a draft built from it stays valid and the
+      // diff does not show them as removed); what was taken out is reported separately, for display only.
+      published: published ? { configVersion: published.configVersion, configHash: published.configHash, configuration: projected!.configuration } : null,
+      managedEntities: projected?.managedEntities ?? [],
       agentReported: {
         activeConfigVersion: statusRow?.active_config_version === null || statusRow?.active_config_version === undefined ? null : Number(statusRow.active_config_version),
         rejectedConfigVersion: statusRow?.rejected_config_version === null || statusRow?.rejected_config_version === undefined ? null : Number(statusRow.rejected_config_version),
@@ -440,7 +446,10 @@ export class OnecAdminService {
     this.runtime.requireEnabled();
     const input = parse(publishSchema, body);
     return this.repository.transaction(async (tx) => {
-      const agent = await this.repository.getAgent(tx, agentId, true);
+      // Lock order of every publication path: agent → draft → source → stock snapshot slot. FOR NO KEY UPDATE on
+      // the agent and the source: compatible with the FOR KEY SHARE of rows that reference them (incidents written
+      // by a run completion), so a publication is never part of a lock cycle through foreign keys.
+      const agent = await this.repository.getAgent(tx, agentId, 'no_key');
       if (!agent) throw new ApiError(404, 'ONEC_AGENT_NOT_FOUND', 'Агент не найден');
       if (agent.configPublishBlocked) {
         throw new ApiError(409, 'ONEC_CONFIG_PUBLISH_BLOCKED', 'Публикация заблокирована до первого heartbeat агента после восстановления');
@@ -449,7 +458,7 @@ export class OnecAdminService {
       if (!draft || Number(draft.revision) !== input.revision || draft.config_hash !== input.configHash) {
         throw new ApiError(409, 'STALE_DRAFT', 'Черновик изменился после подтверждения; проверьте его ещё раз');
       }
-      const source = await this.repository.getSource(tx, agent.sourceId, true);
+      const source = await this.repository.getSource(tx, agent.sourceId, 'no_key');
       if (!source) throw new ApiError(404, 'ONEC_SOURCE_NOT_FOUND', 'Источник не найден');
       const base = toPlainValue(parseStrictJson(draft.configuration_canonical)) as Record<string, unknown>;
       const published = await this.publishConfiguration(tx, agentId, source, base, Number(draft.revision), actor, context, {
@@ -462,9 +471,10 @@ export class OnecAdminService {
   }
 
   /**
-   * Publishes `base` + the source generation token (the agent freezes it per run,
-   * X-Source-Generation, plan §3.2). Caller holds the agent row lock. Returns null
-   * when the result equals the published configuration.
+   * Publishes `base` + the entities ERP manages (the stock snapshot set, from the slot of the source) + the source
+   * generation token (the agent freezes it per run, X-Source-Generation, plan §3.2). The single exit of every
+   * version: whatever `base` carries under a managed code is replaced by the ERP state. Caller holds the agent
+   * and source row locks. Returns null when the result equals the published configuration.
    */
   private async publishConfiguration(
     tx: DatabaseClient,
@@ -476,22 +486,8 @@ export class OnecAdminService {
     context: OnecRequestContext,
     meta: { reason: 'operator' | 'entity_revoked' | 'rebaseline'; draftHash?: string },
   ): Promise<{ configVersion: number; configHash: string } | null> {
-    const { sourceGeneration: _previous, ...plain } = base;
-    const outgoing = canonicalizeValue({ ...plain, sourceGeneration: source.generationRef });
-    const published = await this.repository.getPublishedConfig(tx, agentId);
-    if (published && published.configHash === outgoing.hash) return null;
-    // Never reuse a version the agent may have seen (plan §5.1): above the
-    // table and agent-reported maximum, and not below publication time in ms.
-    const floor = await this.repository.configVersionFloor(tx, agentId);
-    const configVersion = Math.max(floor + 1, Date.now());
-    await this.repository.publishConfigVersion(tx, {
-      agentId,
-      configVersion,
-      canonical: outgoing.canonical,
-      hash: outgoing.hash,
-      revision,
-      actorId: actorId(actor),
-    });
+    const result = await this.writeConfigVersion(tx, agentId, source, base, revision, actorId(actor));
+    if (!result.changed) return null;
     await this.audit.byUser(
       tx,
       actor,
@@ -499,13 +495,84 @@ export class OnecAdminService {
       {
         event: 'onec.config.published',
         entityType: 'onec_agent_config_version',
-        entityId: `${agentId}:${configVersion}`,
-        before: published ? { configVersion: published.configVersion, configHash: published.configHash } : {},
-        after: { configVersion, configHash: outgoing.hash, draftHash: meta.draftHash ?? null, revision, mode: plain.mode ?? null, reason: meta.reason },
+        entityId: `${agentId}:${result.configVersion}`,
+        before: result.previous ? { configVersion: result.previous.configVersion, configHash: result.previous.configHash } : {},
+        after: { configVersion: result.configVersion, configHash: result.configHash, draftHash: meta.draftHash ?? null, revision, mode: result.mode, reason: meta.reason },
       },
-      { agentId, sourceId: source.sourceId, configVersion, sourceGeneration: source.generation },
+      { agentId, sourceId: source.sourceId, configVersion: result.configVersion, sourceGeneration: source.generation },
     );
-    return { configVersion, configHash: outgoing.hash };
+    return { configVersion: result.configVersion, configHash: result.configHash };
+  }
+
+  /**
+   * Service publication (stock snapshots): the LAST PUBLISHED configuration with the managed set taken from the
+   * slot as the caller has just written it. Never publishes an operator's draft and changes nothing but the
+   * managed set. The author is the system (`published_by` NULL); who asked for the snapshot is linked in the audit.
+   * Lock order as in `publish`: agent → source → slot (the caller may already hold them, in that order).
+   * `changed: false` — the configuration already says exactly this: the published version is returned as is.
+   */
+  async publishManaged(
+    tx: DatabaseClient,
+    agentId: string,
+    context: { requestId: string; correlationId: string; snapshotId: number | null; requestedByUserId: number | null; action: 'enable' | 'disable' | 'remove' },
+  ): Promise<{ configVersion: number; configHash: string; changed: boolean }> {
+    const agent = await this.repository.getAgent(tx, agentId, 'no_key');
+    if (!agent) throw new ApiError(404, 'ONEC_AGENT_NOT_FOUND', 'Агент не найден');
+    if (agent.configPublishBlocked) {
+      throw new ApiError(409, 'ONEC_CONFIG_PUBLISH_BLOCKED', 'Публикация заблокирована до первого heartbeat агента после восстановления');
+    }
+    const source = await this.repository.getSource(tx, agent.sourceId, 'no_key');
+    if (!source) throw new ApiError(404, 'ONEC_SOURCE_NOT_FOUND', 'Источник не найден');
+    const published = await this.repository.getPublishedConfig(tx, agentId);
+    if (!published) throw new ApiError(409, 'ONEC_CONFIG_NOT_PUBLISHED', 'У агента ещё нет опубликованной конфигурации');
+    const base = toPlainValue(parseStrictJson(published.configurationCanonical)) as Record<string, unknown>;
+    const result = await this.writeConfigVersion(tx, agentId, source, base, 0, null);
+    if (!result.changed) return { configVersion: published.configVersion, configHash: published.configHash, changed: false };
+    await this.audit.bySystem(
+      tx,
+      'onec_stock_snapshots',
+      context.requestId,
+      {
+        event: 'onec.config.published',
+        entityType: 'onec_agent_config_version',
+        entityId: `${agentId}:${result.configVersion}`,
+        relatedUserId: context.requestedByUserId,
+        relatedEntities: context.snapshotId === null ? [] : [{ entityType: 'onec_stock_snapshot', entityId: context.snapshotId }],
+        before: { configVersion: published.configVersion, configHash: published.configHash },
+        after: {
+          configVersion: result.configVersion, configHash: result.configHash, draftHash: null, revision: 0, mode: result.mode,
+          reason: 'stock_snapshot', action: context.action, snapshotId: context.snapshotId,
+        },
+      },
+      { agentId, sourceId: source.sourceId, configVersion: result.configVersion, sourceGeneration: source.generation, correlationId: context.correlationId },
+    );
+    return { configVersion: result.configVersion, configHash: result.configHash, changed: true };
+  }
+
+  /** The managed set of a source as the configuration must carry it now (null — never requested, or removed). */
+  private async managedSlot(tx: DatabaseClient, sourceId: number): Promise<ManagedStockSlot | null> {
+    const slot = await this.repository.getStockSnapshotSlot(tx, sourceId, 'share');
+    if (!slot || slot.state === 'removed') return null;
+    return { enabled: slot.state === 'active', periodLocal: slot.periodLocal };
+  }
+
+  private async writeConfigVersion(
+    tx: DatabaseClient, agentId: string, source: SourceRecord, base: Record<string, unknown>, revision: number, publishedBy: number | null,
+  ): Promise<{ changed: boolean; configVersion: number; configHash: string; mode: unknown; previous: { configVersion: number; configHash: string } | null }> {
+    const { sourceGeneration: _previous, ...operator } = base;
+    const plain = withManagedEntities(operator, await this.managedSlot(tx, source.sourceId));
+    const outgoing = canonicalizeValue({ ...plain, sourceGeneration: source.generationRef });
+    const published = await this.repository.getPublishedConfig(tx, agentId);
+    const previous = published ? { configVersion: published.configVersion, configHash: published.configHash } : null;
+    if (published && published.configHash === outgoing.hash) {
+      return { changed: false, configVersion: published.configVersion, configHash: published.configHash, mode: plain.mode ?? null, previous };
+    }
+    // Never reuse a version the agent may have seen (plan §5.1): above the
+    // table and agent-reported maximum, and not below publication time in ms.
+    const floor = await this.repository.configVersionFloor(tx, agentId);
+    const configVersion = Math.max(floor + 1, Date.now());
+    await this.repository.publishConfigVersion(tx, { agentId, configVersion, canonical: outgoing.canonical, hash: outgoing.hash, revision, actorId: publishedBy });
+    return { changed: true, configVersion, configHash: outgoing.hash, mode: plain.mode ?? null, previous };
   }
 
   // ------------------------------------------------------------ ETL: revocation, rebaseline (plan §21.3, §3.2)
@@ -631,6 +698,9 @@ export class OnecAdminService {
       if (source.generation !== input.expectedGeneration) {
         throw new ApiError(409, 'ONEC_GENERATION_CHANGED', 'Поколение источника уже изменилось; обновите страницу', { currentGeneration: source.generation });
       }
+      // The 1C base is being replaced: unfinished stock snapshots of the source fail now, before the mirror is
+      // cleared (lock order: agent → source → slot → snapshots → entity state). Rolled back with a refused rebaseline.
+      await this.stockSnapshots.failOnGenerationChange(tx, sourceId, context.requestId);
       let identityAccepted = false;
       if (source.identityStatus === 'identity_changed') {
         // The operator confirms exactly the identity shown (the one the agent reported last).

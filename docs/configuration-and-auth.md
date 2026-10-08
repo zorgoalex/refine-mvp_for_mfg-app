@@ -629,7 +629,9 @@ Backend: `BACKEND_ENABLE_ONEC_AGENT` (по умолчанию `false`), `ONEC_AG
 `ONEC_AGENT_SESSION_TTL_MS`, `ONEC_AGENT_HEARTBEAT_INTERVAL_MS` (агент считается
 молчащим после трёх интервалов), `BACKEND_ONEC_MONITOR_OWNER`
 (`none` | `in_process`: алерты, сроки сертификатов, очистка) и
-`BACKEND_ONEC_MONITOR_INTERVAL_MS`. `BACKEND_ONEC_NIGHTLY_FULL_SYNC_HOUR_UTC` (час UTC 0–23,
+`BACKEND_ONEC_MONITOR_INTERVAL_MS`. `BACKEND_ONEC_STOCK_SNAPSHOTS` (по умолчанию `false`): можно запрашивать срезы
+остатков 1С на дату (нужен агент ≥ 1.3.11 и процесс-владелец монитора); при `false` очередь только доводит начатое и
+выключает служебный набор конфигурации — см. `backend/docs/onec-stock-snapshots.md`. `BACKEND_ONEC_NIGHTLY_FULL_SYNC_HOUR_UTC` (час UTC 0–23,
 по умолчанию `-1` — выключено): раз в сутки в этот час процесс-владелец монитора ставит каждому активному агенту
 `start_full_sync` по всем наборам (одна команда на агента за ночь; пропуск, если полная выгрузка уже доставлена агенту
 в эту ночь или открыта и успеет до срока). Окно запуска и срок команды — 4 ч от часа (21:00 UTC → не позже 01:00 UTC),

@@ -38,6 +38,18 @@ export interface SourceRecord {
   observedIdentity: { databaseId: string; exportEpoch: string; environment: string } | null;
 }
 
+/** State of the ERP-managed service set of stock snapshots (see `onec_stock_snapshot_slot`, migration 250). */
+export interface StockSnapshotSlotRow {
+  sourceId: number;
+  state: 'idle' | 'active' | 'disabling' | 'removed';
+  /** `YYYY-MM-DDTHH:MM:SS`, local time of the 1C base. */
+  periodLocal: string;
+  ownerSnapshotId: number | null;
+  configVersion: number | null;
+  commandId: string | null;
+  stateSince: Date;
+}
+
 export interface PublishedConfig {
   configVersion: number;
   configurationCanonical: string;
@@ -155,9 +167,14 @@ export class PgOnecRepository {
 
   // ---------------------------------------------------------------- sessions / config
 
-  async getAgent(client: DatabaseClient, agentId: string, forUpdate = false): Promise<AgentRecord | null> {
+  /**
+   * `lock`: `true` — FOR UPDATE; `'no_key'` — FOR NO KEY UPDATE: serializes publications of the configuration but,
+   * unlike FOR UPDATE, does not wait for (or block) the FOR KEY SHARE that inserts of rows referencing the agent
+   * take (incidents of a run completion, audit links) — no lock cycle through foreign keys.
+   */
+  async getAgent(client: DatabaseClient, agentId: string, forUpdate: boolean | 'no_key' = false): Promise<AgentRecord | null> {
     const { rows } = await client.query(
-      `SELECT * FROM onec_agents WHERE agent_id = $1 ${forUpdate ? 'FOR UPDATE' : ''}`,
+      `SELECT * FROM onec_agents WHERE agent_id = $1 ${forUpdate === 'no_key' ? 'FOR NO KEY UPDATE' : forUpdate ? 'FOR UPDATE' : ''}`,
       [agentId],
     );
     return rows[0] ? toAgent(rows[0]) : null;
@@ -500,9 +517,34 @@ export class PgOnecRepository {
     return num(rows[0]?.floor ?? 0);
   }
 
+  /**
+   * The state of the ERP-managed service set `stock_balances_at` of a source (migration 250), or null — no row
+   * yet, or the table does not exist (the backend runs ahead of the migration): then the configuration carries no
+   * such set. `lock`: 'share' for a publication that only reads it, 'update' for the owner of the state.
+   */
+  async getStockSnapshotSlot(client: DatabaseClient, sourceId: number, lock: 'share' | 'update' | null = null): Promise<StockSnapshotSlotRow | null> {
+    const exists = await client.query<{ ok: boolean }>(`SELECT to_regclass('onec_stock_snapshot_slot') IS NOT NULL AS ok`);
+    if (exists.rows[0]?.ok !== true) return null;
+    const clause = lock === 'update' ? 'FOR UPDATE' : lock === 'share' ? 'FOR SHARE' : '';
+    const { rows } = await client.query<{
+      state: StockSnapshotSlotRow['state']; period_local: string; owner_snapshot_id: string | null; config_version: string | null;
+      command_id: string | null; state_since: Date;
+    }>(
+      `SELECT state, to_char(period_local, 'YYYY-MM-DD"T"HH24:MI:SS') AS period_local, owner_snapshot_id, config_version, command_id, state_since
+         FROM onec_stock_snapshot_slot WHERE source_id = $1 ${clause}`,
+      [sourceId],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      sourceId, state: row.state, periodLocal: row.period_local, ownerSnapshotId: row.owner_snapshot_id === null ? null : Number(row.owner_snapshot_id),
+      configVersion: row.config_version === null ? null : Number(row.config_version), commandId: row.command_id, stateSince: row.state_since,
+    };
+  }
+
   async publishConfigVersion(
     client: DatabaseClient,
-    input: { agentId: string; configVersion: number; canonical: string; hash: string; revision: number; actorId: number },
+    input: { agentId: string; configVersion: number; canonical: string; hash: string; revision: number; actorId: number | null },
   ): Promise<void> {
     await client.query(
       `UPDATE onec_agent_config_versions SET status = 'superseded' WHERE agent_id = $1 AND status = 'published'`,

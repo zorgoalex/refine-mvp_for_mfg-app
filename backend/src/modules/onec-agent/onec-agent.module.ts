@@ -29,6 +29,9 @@ import { OnecAgentController } from './http/onec-agent.controller';
 import { OnecPermissionsGuard } from './http/onec-permissions.guard';
 import { OnecRuntimeConfigService } from './onec-runtime-config.service';
 import { OnecCatalogReader } from './onec-catalog-reader';
+import { PgOnecStockSnapshotStore } from './adapters/pg-onec-stock-snapshot-store';
+import { OnecStockSnapshotsService } from './application/onec-stock-snapshots.service';
+import { ONEC_STOCK_SNAPSHOTS } from './onec-stock-snapshots.port';
 
 /**
  * 1C agent integration (transport). Business mapping (orders, payments,
@@ -65,8 +68,13 @@ import { OnecCatalogReader } from './onec-catalog-reader';
     PgOnecMatchingRepository,
     OnecMatchingService,
     OnecCatalogReader,
+    PgOnecStockSnapshotStore,
+    OnecStockSnapshotsService,
+    { provide: ONEC_STOCK_SNAPSHOTS, useExisting: OnecStockSnapshotsService },
   ],
   // Port for business modules (E4): OnecCommandsService.enqueue(tx, …).
-  exports: [OnecCommandsService, OnecCatalogReader, OnecEtlEvents, OnecAlertsPort, OnecRuntimeConfigService],
+  // Port of stock snapshots at a date for the inventory module: the token ONEC_STOCK_SNAPSHOTS, or the class behind
+  // it for a consumer that binds the token in its own module (`inject: [OnecStockSnapshotsService]`).
+  exports: [OnecCommandsService, OnecCatalogReader, OnecEtlEvents, OnecAlertsPort, OnecRuntimeConfigService, ONEC_STOCK_SNAPSHOTS, OnecStockSnapshotsService],
 })
 export class OnecAgentModule {}

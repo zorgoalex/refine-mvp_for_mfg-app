@@ -20069,6 +20069,38 @@ paths:
         '403': {description: Permission denied}
         '503': {description: 1C integration is disabled}
         '409': {description: "Not revoked or data not purged yet"}
+  /api/v1/onec/sources/{sourceId}/stock-snapshots/remove-set:
+    post:
+      tags:
+        - 1C integration
+      operationId: removeOnecStockSnapshotSet
+      summary: "Take the ERP-managed stock snapshot set out of the published configuration (before a rollback of the backend image)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: sourceId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      description: >-
+        Publishes the configuration without the service set `stock_balances_at` and marks the slot of the source
+        `removed`. Allowed only with BACKEND_ONEC_STOCK_SNAPSHOTS=false and an idle slot; safe to repeat (the second call
+        changes nothing). Needed before rolling the backend image back to a version that does not know the set: its
+        validator does not accept the path with `Period`. The first snapshot after re-enabling brings the set back.
+      responses:
+        '200':
+          description: The version without the set, or nothing to do
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [configVersion, changed]
+                properties:
+                  configVersion: {type: integer, nullable: true}
+                  changed: {type: boolean}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {description: Source has no agent}
+        '409': {description: "ONEC_STOCK_SNAPSHOTS_ENABLED (switch the flag off first), ONEC_STOCK_SNAPSHOT_SLOT_BUSY (a snapshot is being read or the set is being switched off) or ONEC_CONFIG_PUBLISH_BLOCKED"}
+        '503': {description: 1C integration is disabled}
   /api/v1/onec/sources/{sourceId}/rebaseline:
     post:
       tags:

@@ -471,6 +471,12 @@ export const envSchema = z
     /** Hour (UTC, 0–23) of the nightly start_full_sync per active agent; -1 = off. Runs in the monitor owner process. */
     BACKEND_ONEC_NIGHTLY_FULL_SYNC_HOUR_UTC: z.coerce.number().int().min(-1).max(23).default(-1),
     /**
+     * 1C stock snapshots at a date (plan 2026-10-08-onec-stock-snapshots): new snapshots may be requested. Off — the
+     * queue only finishes what was started and switches the service set of the agent configuration off. Needs agent
+     * ≥ 1.3.11 and the monitor owner process. Default off.
+     */
+    BACKEND_ONEC_STOCK_SNAPSHOTS: booleanFromEnv.default(false),
+    /**
      * 1C incoming payments (plan 2026-10-04-onec-incoming-payments): the «Поступления 1С» tab and its read API, and
      * refunds reducing «Оплачено» of a 1C order through the refunded receipt. Read-only; default off.
      */

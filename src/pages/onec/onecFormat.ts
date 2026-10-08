@@ -100,6 +100,8 @@ export function onecIdentityWarning(identityStatus: OnecSourceIdentityStatus): s
 }
 
 export const ONEC_ALERT_KIND_LABELS: Record<string, string> = {
+  onec_stock_snapshot_slot_stuck: 'Срезы остатков: служебный набор не выключается',
+  onec_stock_snapshot_command_unknown: 'Срезы остатков: команда чтения без результата',
   agent_silent: 'Агент молчит',
   agent_state: 'Состояние агента',
   certificate_expiring: 'Истекает сертификат',
@@ -1023,3 +1025,14 @@ export function normalizeExpectedSilence(value: string | null | undefined): stri
   const text = (value ?? '').trim();
   return text ? text : null;
 }
+
+/**
+ * One line about an ERP-managed entity of the configuration. The service set of stock snapshots carries the moment
+ * of the snapshot in its path (local time of the 1C base): «срез на 26.09.2026 10:14:00».
+ */
+export function onecManagedEntityText(entity: { entityCode: string; enabled: boolean; oDataPath: string | null }): string {
+  const period = entity.oDataPath?.match(/Period=datetime'(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2}:\d{2})'/);
+  const moment = period ? ` — срез на ${period[3]}.${period[2]}.${period[1]} ${period[4]}` : '';
+  return `${entity.entityCode}: ${entity.enabled ? 'включён' : 'выключен'}${moment}`;
+}
+

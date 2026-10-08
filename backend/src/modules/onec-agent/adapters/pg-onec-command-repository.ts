@@ -240,7 +240,8 @@ export class PgOnecCommandRepository {
   }
 
   /** Cancel only before the agent could have it: queued, or leased with the lease expired and no receipt. */
-  async cancel(tx: DatabaseClient, commandId: string, actorId: number): Promise<CommandRow | null> {
+  /** `actorId` null — cancelled by the system (a module of ERP), not by a user. */
+  async cancel(tx: DatabaseClient, commandId: string, actorId: number | null): Promise<CommandRow | null> {
     const { rows } = await tx.query(
       `UPDATE onec_agent_commands SET status = 'cancelled', cancelled_at = now(), cancelled_by = $2,
               lease_expires_at = NULL, updated_at = now()
