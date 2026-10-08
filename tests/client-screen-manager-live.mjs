@@ -116,16 +116,6 @@ try {
   // the settings is rewritten in this browser only). Nothing is written anywhere: it lets a build
   // be checked with codes the deployed backend does not know yet.
   const extraCodes = (process.env.EXTRA_CODES ?? '').split(',').map((code) => code.trim()).filter(Boolean);
-  if (extraCodes.length) {
-    await context.route(/\/client-screen\/settings(\?|$)/, async (route) => {
-      if (route.request().method() !== 'GET') return route.fallback();
-      const response = await route.fetch({ headers: { ...route.request().headers(), origin: STAGE_SITE, referer: `${STAGE_SITE}/` } });
-      if (!response.ok()) return route.fulfill({ response });
-      const json = await response.json();
-      const visibleCodes = [...json.visibleCodes, ...extraCodes.filter((code) => !json.visibleCodes.includes(code))];
-      return route.fulfill({ response, json: { ...json, visibleCodes }, headers: { ...response.headers(), 'access-control-allow-origin': new URL(base).origin, 'access-control-allow-credentials': 'true' } });
-    });
-  }
   await context.route(/runtime-config/, async (route) => {
     const response = await route.fetch();
     const json = await response.json();
@@ -169,6 +159,17 @@ try {
     });
   }
 
+  // Registered last, so that it is asked first (before the relay of stage calls).
+  if (extraCodes.length) {
+    await context.route(/\/client-screen\/settings(\?|$)/, async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      const response = await route.fetch({ headers: { ...route.request().headers(), origin: STAGE_SITE, referer: `${STAGE_SITE}/` } });
+      if (!response.ok()) return route.fulfill({ response });
+      const json = await response.json();
+      const visibleCodes = [...json.visibleCodes, ...extraCodes.filter((code) => !json.visibleCodes.includes(code))];
+      return route.fulfill({ response, json: { ...json, visibleCodes }, headers: { ...response.headers(), 'access-control-allow-origin': new URL(base).origin, 'access-control-allow-credentials': 'true' } });
+    });
+  }
   const page = await context.newPage();
   page.on('pageerror', (e) => errors.push(`manager: ${e.message.split('\n')[0]}`));
   await page.goto(`${base}/login`, { waitUntil: 'domcontentloaded' });
