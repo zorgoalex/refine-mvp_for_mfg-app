@@ -715,6 +715,14 @@ suite('1C stock snapshots at a date — the queue and the port (isolated Postgre
     expect(again).toMatchObject({ currentSource: true });
     expect(again.baseRef).not.toBe(generationRef);
     expect((await snapshots.list({ sourceId: 1, currentSourceOnly: true }, db)).items.map((item) => item.id)).toEqual([again.id]);
+    // Snapshots of one base (the ones that may be compared) and of one moment; a malformed value matches nothing.
+    const ofOldBase = await snapshots.list({ baseRef: generationRef.toUpperCase() }, db);
+    expect(ofOldBase.total).toBe(ofOldBase.items.length);
+    expect(ofOldBase.items.map((item) => item.id)).toContain(old);
+    expect(ofOldBase.items.every((item) => item.baseRef === generationRef)).toBe(true);
+    expect((await snapshots.list({ baseRef: again.baseRef, momentLocal: again.momentLocal }, db)).items.map((item) => item.id)).toEqual([again.id]);
+    expect(await snapshots.list({ baseRef: 'not-a-reference' }, db)).toEqual({ items: [], total: 0 });
+    expect(await snapshots.list({ momentLocal: '26.09.2026' }, db)).toEqual({ items: [], total: 0 });
   });
 
   // ---------------------------------------------------------------- the operator and the slot
