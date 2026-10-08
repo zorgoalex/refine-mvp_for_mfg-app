@@ -13,6 +13,9 @@ export type MaterialSheetField = typeof MATERIAL_SHEET_FIELDS[number];
 type Value = string | null | undefined;
 
 export interface OrderMaterialsMirror {
+  /** Columns the manager's own tables have right now — stated, not guessed from the rows (a table may be empty). */
+  filmColumns: MaterialFilmField[];
+  sheetColumns: MaterialSheetField[];
   films: Array<{ key: string; values: Record<MaterialFilmField, Value> }>;
   sheets: Array<{ key: string; values: Record<MaterialSheetField, Value> }>;
 }
@@ -91,5 +94,10 @@ export function buildOrderMaterialsMirror(input: OrderMaterialsMirrorInput): Ord
       },
     });
   }
-  return { films, sheets };
+  return {
+    filmColumns: MATERIAL_FILM_FIELDS.filter((field) => input.filmStock !== null || (field !== 'film_stock' && field !== 'film_coverage')),
+    sheetColumns: MATERIAL_SHEET_FIELDS.filter((field) => input.sheetStock !== null || (field !== 'sheet_stock' && field !== 'sheet_coverage')),
+    films,
+    sheets,
+  };
 }

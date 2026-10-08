@@ -40,6 +40,7 @@ function source(over: Partial<ClientScreenOrderSource> = {}): ClientScreenOrderS
     },
     services: [1, 2].map((n) => ({ key: `SERVICEKEY-${n}`, values: group('services', ['name', 'quantity', 'price', 'sum'], `#${n}`) })),
     requirements: {
+      filmColumns: [...MATERIAL_FILM_FIELDS], sheetColumns: [...MATERIAL_SHEET_FIELDS],
       films: [1, 2].map((n) => ({ key: `FILMKEY-${n}`, values: group('requirements', MATERIAL_FILM_FIELDS, `#${n}`) })),
       sheets: [1].map((n) => ({ key: `SHEETKEY-${n}`, values: group('requirements', MATERIAL_SHEET_FIELDS, `#${n}`) })),
     },
@@ -248,13 +249,36 @@ describe('buildClientScreenSnapshot', () => {
     const base = source();
     const films = base.requirements!.films.map((row) => ({ key: row.key, values: { ...row.values, film_stock: undefined, film_coverage: undefined } }));
     films.push({ key: 'total', values: { ...films[0].values, film_name: 'Итого', film_cut_jobs: '' } });
-    const snapshot = buildClientScreenSnapshot({ ...base, requirements: { films, sheets: base.requirements!.sheets } }, CLIENT_SCREEN_CODES, ids());
+    const snapshot = buildClientScreenSnapshot({ ...base, requirements: { ...base.requirements!, films } }, CLIENT_SCREEN_CODES, ids());
     const codes = snapshot.requirements!.films!.columns.map((column) => column.code);
     expect(codes).not.toContain('requirements.film_stock');
     expect(codes).not.toContain('requirements.film_coverage');
     const total = snapshot.requirements!.films!.rows[snapshot.requirements!.films!.rows.length - 1].cells;
     expect(total[0]).toBe('Итого');
     expect(total[codes.indexOf('requirements.film_cut_jobs')]).toBe('');
+  });
+
+  it('an empty materials table still has only the columns the manager has: no stock headers without the right to see the stock', () => {
+    const base = source();
+    const noStock = {
+      ...base,
+      requirements: {
+        filmColumns: MATERIAL_FILM_FIELDS.filter((field) => field !== 'film_stock' && field !== 'film_coverage'),
+        sheetColumns: MATERIAL_SHEET_FIELDS.filter((field) => field !== 'sheet_stock' && field !== 'sheet_coverage'),
+        films: [], sheets: [],
+      },
+    };
+    const snapshot = buildClientScreenSnapshot(noStock, CLIENT_SCREEN_CODES, ids());
+    const filmCodes = snapshot.requirements!.films!.columns.map((column) => column.code);
+    const sheetCodes = snapshot.requirements!.sheets!.columns.map((column) => column.code);
+    expect(filmCodes).toEqual(['requirements.film_name', 'requirements.film_area', 'requirements.film_details', 'requirements.film_meters',
+      'requirements.film_sheets', 'requirements.film_cut_jobs']);
+    expect(sheetCodes).toEqual(['requirements.sheet_name', 'requirements.sheet_area', 'requirements.sheet_details']);
+    expect(snapshot.requirements!.films!.rows).toEqual([]);
+    expect(JSON.stringify(snapshot.requirements)).not.toMatch(/На складе|Покрытие/);
+    // Only stock columns ticked and the manager has none of them: the tables are not sent at all.
+    const onlyStock = buildClientScreenSnapshot(noStock, ['tab.requirements', 'requirements.film_stock', 'requirements.film_coverage', 'requirements.sheet_stock'], ids());
+    expect(onlyStock.requirements).toEqual({});
   });
 });
 

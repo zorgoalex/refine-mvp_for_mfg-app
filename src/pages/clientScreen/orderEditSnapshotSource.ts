@@ -413,7 +413,12 @@ export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenO
         }
         : null,
     },
-    ...(input.requirements ? { requirements: { films: input.requirements.films, sheets: input.requirements.sheets } } : {}),
+    ...(input.requirements
+      ? { requirements: {
+        filmColumns: input.requirements.filmColumns, sheetColumns: input.requirements.sheetColumns,
+        films: input.requirements.films, sheets: input.requirements.sheets,
+      } }
+      : {}),
     services: input.catalogLines.map((line) => ({
       key: line.id ? `id:${line.id}` : String(line.clientKey ?? ''),
       values: {

@@ -31,6 +31,7 @@ describe('the materials tab as display text', () => {
 
   it('sheet material rows with their totals', () => {
     const { sheets } = buildOrderMaterialsMirror(input());
+    expect(buildOrderMaterialsMirror(input()).sheetColumns).toEqual(['sheet_name', 'sheet_area', 'sheet_details', 'sheet_stock', 'sheet_coverage']);
     expect(sheets).toEqual([
       { key: 'sheet:3', values: { sheet_name: 'МДФ 16 мм', sheet_area: '4,50', sheet_details: '6', sheet_stock: '12,000 лист ≈ 69,31 м²', sheet_coverage: 'Хватает' } },
       { key: 'total', values: { sheet_name: 'Итого', sheet_area: '4,50', sheet_details: '6', sheet_stock: '', sheet_coverage: '' } },
@@ -38,13 +39,19 @@ describe('the materials tab as display text', () => {
   });
 
   it('a manager who may not see the stock gives no stock columns at all — not in rows, not in totals', () => {
-    const { films, sheets } = buildOrderMaterialsMirror(input({ filmStock: null, sheetStock: null }));
+    const { films, sheets, filmColumns, sheetColumns } = buildOrderMaterialsMirror(input({ filmStock: null, sheetStock: null }));
+    expect(filmColumns).toEqual(['film_name', 'film_area', 'film_details', 'film_meters', 'film_sheets', 'film_cut_jobs']);
+    expect(sheetColumns).toEqual(['sheet_name', 'sheet_area', 'sheet_details']);
+    // The lists hold for empty tables too: they do not depend on the rows.
+    const empty = buildOrderMaterialsMirror(input({ filmRows: [], sheetRows: [], filmStock: null, sheetStock: new Map() }));
+    expect(empty.filmColumns).not.toContain('film_stock');
+    expect(empty.sheetColumns).toContain('sheet_stock');
     for (const row of films) expect([row.values.film_stock, row.values.film_coverage]).toEqual([undefined, undefined]);
     for (const row of sheets) expect([row.values.sheet_stock, row.values.sheet_coverage]).toEqual([undefined, undefined]);
   });
 
   it('an order without materials has empty tables and no totals rows', () => {
-    expect(buildOrderMaterialsMirror(input({ filmRows: [], sheetRows: [] }))).toEqual({ films: [], sheets: [] });
+    expect(buildOrderMaterialsMirror(input({ filmRows: [], sheetRows: [] }))).toMatchObject({ films: [], sheets: [] });
   });
 });
 

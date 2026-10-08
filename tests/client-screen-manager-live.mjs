@@ -14,7 +14,8 @@ import { vercelBypassCookies } from './helpers/vercelBypass.mjs';
 // only: a deployment configured for any other backend is refused before logging in.
 // Env: BASE_URL (a built deployment), ORDER_ID (an existing test order), CODEX_PLAYWRIGHT_USERNAME /
 // CODEX_PLAYWRIGHT_PASSWORD, optional VERCEL_AUTOMATION_BYPASS_SECRET, optional LAYOUT=legacy,
-// optional SELF_INTERRUPT=1 | during, optional ROLLBACK=1.
+// optional SELF_INTERRUPT=1 | during, optional ROLLBACK=1,
+// optional EXTRA_CODES=code,code (read-only mode only).
 // Secrets are never printed.
 const base = (process.env.BASE_URL ?? '').replace(/\/$/, '');
 assert.match(base, /^https:\/\//, 'BASE_URL must be an https URL');
@@ -111,6 +112,20 @@ try {
   // A preview deployment has the customer screen flag off; this run switches it on for its own browser only.
   let runtimeConfig = null;
   let targetProblem = null;
+  // EXTRA_CODES=a,b,c: these codes are added to the settings the app under test reads (its GET of
+  // the settings is rewritten in this browser only). Nothing is written anywhere: it lets a build
+  // be checked with codes the deployed backend does not know yet.
+  const extraCodes = (process.env.EXTRA_CODES ?? '').split(',').map((code) => code.trim()).filter(Boolean);
+  if (extraCodes.length) {
+    await context.route(/\/client-screen\/settings(\?|$)/, async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      const response = await route.fetch({ headers: { ...route.request().headers(), origin: STAGE_SITE, referer: `${STAGE_SITE}/` } });
+      if (!response.ok()) return route.fulfill({ response });
+      const json = await response.json();
+      const visibleCodes = [...json.visibleCodes, ...extraCodes.filter((code) => !json.visibleCodes.includes(code))];
+      return route.fulfill({ response, json: { ...json, visibleCodes }, headers: { ...response.headers(), 'access-control-allow-origin': new URL(base).origin, 'access-control-allow-credentials': 'true' } });
+    });
+  }
   await context.route(/runtime-config/, async (route) => {
     const response = await route.fetch();
     const json = await response.json();
@@ -183,6 +198,8 @@ try {
   // CHANGE_SETTINGS=1 forces the old behaviour: switch on, hide cost and note, tick what the steps need.
   const readOnly = original.enabled === true && process.env.CHANGE_SETTINGS !== '1';
   const codes = readOnly ? [...original.visibleCodes] : original.visibleCodes.filter((code) => code !== 'details.cost' && code !== 'details.note');
+  // Codes added for this browser only (EXTRA_CODES) are in force for the app under test.
+  for (const code of extraCodes) if (readOnly && !codes.includes(code)) codes.push(code);
   if (!readOnly) {
     for (const code of ['summary.number', 'summary.client', 'tab.basic', 'basic.client', 'tab.details', 'details.n', 'details.quantity', 'tab.finance', 'finance.final']) {
       if (!codes.includes(code)) codes.push(code);
@@ -390,8 +407,38 @@ try {
     else {
       await materialsTab.click();
       await expect(selectedTab()).toHaveText(/Материалы/, { timeout: 30000 });
-      const titles = await popup.locator('.client-screen__subtitle').allInnerTexts();
-      results.push(`materials tab mirrored${titles.length ? `: ${titles.join(', ')}` : ' (no table has a ticked column)'}`);
+      // Which tables must be there follows from the ticks; their content is compared with the manager's own tables.
+      const filmTicked = codes.some((code) => code.startsWith('requirements.film_'));
+      const sheetTicked = codes.some((code) => code.startsWith('requirements.sheet_'));
+      const expectedTitles = [...(filmTicked ? ['Пленка'] : []), ...(sheetTicked ? ['Листовые материалы'] : [])];
+      await expect.poll(() => popup.locator('.client-screen__subtitle').allInnerTexts(), { timeout: 30000 }).toEqual(expectedTitles);
+      const customerTables = popup.locator('.client-screen__table');
+      await expect(customerTables).toHaveCount(expectedTitles.length);
+      const managerTables = page.locator('.ant-tabs-tabpane-active .ant-table');
+      const managerHeaders = async (index) => (await managerTables.nth(index).locator('thead th').allInnerTexts()).map((text) => text.trim()).filter(Boolean);
+      const checkTable = async (customerIndex, managerIndex, nameCode, nameLabel) => {
+        const customer = customerTables.nth(customerIndex);
+        const headers = await customer.getByRole('columnheader').allInnerTexts();
+        const managerHas = await managerHeaders(managerIndex);
+        // Every customer column is a column of the manager's table: nothing the manager does not have.
+        for (const header of headers) assert.ok(managerHas.includes(header), `materials: the customer column «${header}» is in the manager's table (${managerHas.join(' | ')})`);
+        const managerRows = managerTables.nth(managerIndex).locator('tbody tr.ant-table-row');
+        const rowCount = await managerRows.count();
+        // The customer has the manager's rows plus the totals row, when there are rows.
+        await expect(customer.locator('tbody tr[data-row-id]')).toHaveCount(rowCount > 0 ? rowCount + 1 : 0, { timeout: 20000 });
+        if (rowCount > 0 && has(nameCode)) {
+          assert.equal(headers[0], nameLabel, `materials: «${nameLabel}» is the first column`);
+          const managerName = (await managerRows.first().locator('td').first().innerText()).trim();
+          const customerName = (await customer.locator('tbody tr[data-row-id]').first().locator('td').first().innerText()).trim();
+          assert.equal(customerName, managerName, 'materials: the first row names the same material as the manager table');
+          assert.equal((await customer.locator('tbody tr[data-row-id]').last().locator('td').first().innerText()).trim(), 'Итого', 'materials: the totals row is last');
+        }
+        return `${headers.length} column(s), ${rowCount} row(s)`;
+      };
+      const described = [];
+      if (filmTicked) described.push(`Пленка — ${await checkTable(0, 0, 'requirements.film_name', 'Пленка')}`);
+      if (sheetTicked) described.push(`Листовые материалы — ${await checkTable(filmTicked ? 1 : 0, 1, 'requirements.sheet_name', 'Материал')}`);
+      results.push(`materials tab mirrored and equal to the manager's tables: ${described.join('; ') || 'no table has a ticked column, none shown'}`);
       await managerTab(/Основная информация|Обзор/).click();
       await expect(selectedTab()).toHaveText(/Основная информация|Обзор/, { timeout: 20000 });
     }

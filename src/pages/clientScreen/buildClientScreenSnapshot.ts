@@ -41,6 +41,9 @@ export interface ClientScreenOrderSource {
   services: ReadonlyArray<ClientScreenRowSource<'name' | 'quantity' | 'price' | 'sum'>>;
   /** The «Материалы» tab as that tab reports it; absent while the tab is not on the manager's screen. */
   requirements?: {
+    /** Columns the manager's own tables have; a column outside these lists is never sent, ticked or not. */
+    filmColumns: ReadonlyArray<MaterialFilmField>;
+    sheetColumns: ReadonlyArray<MaterialSheetField>;
     films: ReadonlyArray<ClientScreenRowSource<MaterialFilmField>>;
     sheets: ReadonlyArray<ClientScreenRowSource<MaterialSheetField>>;
   };
@@ -187,8 +190,11 @@ export function buildClientScreenSnapshot(source: ClientScreenOrderSource, visib
   }
   if (tabOn('requirements') && source.requirements) {
     const requirements = source.requirements;
-    const tableOf = <F extends string>(scope: 'film' | 'sheet', all: readonly F[], rows: ReadonlyArray<ClientScreenRowSource<F>>): ClientScreenTable | undefined => {
-      const order = all.filter((field) => isClientScreenCodeVisible(`requirements.${field}`, visible) && available(rows, field));
+    const tableOf = <F extends string>(
+      scope: 'film' | 'sheet', all: readonly F[], shown: ReadonlyArray<F>, rows: ReadonlyArray<ClientScreenRowSource<F>>,
+    ): ClientScreenTable | undefined => {
+      // The manager's table has the column (said by the tab itself, so it holds for an empty table too), it is ticked, and it has values.
+      const order = all.filter((field) => shown.includes(field) && isClientScreenCodeVisible(`requirements.${field}`, visible) && available(rows, field));
       if (order.length === 0) return undefined;
       return {
         columns: order.map((field) => ({
@@ -198,8 +204,8 @@ export function buildClientScreenSnapshot(source: ClientScreenOrderSource, visib
         rows: rows.map((row) => ({ id: idFor(scope, row.key), cells: order.map((field) => (row.values[field] === '' ? '' : text(row.values[field]))) })),
       };
     };
-    const films = tableOf('film', MATERIAL_FILM_FIELDS, requirements.films);
-    const sheets = tableOf('sheet', MATERIAL_SHEET_FIELDS, requirements.sheets);
+    const films = tableOf('film', MATERIAL_FILM_FIELDS, requirements.filmColumns, requirements.films);
+    const sheets = tableOf('sheet', MATERIAL_SHEET_FIELDS, requirements.sheetColumns, requirements.sheets);
     snapshot.requirements = { ...(films ? { films } : {}), ...(sheets ? { sheets } : {}) };
   }
   return snapshot;
