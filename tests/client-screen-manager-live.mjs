@@ -364,13 +364,18 @@ try {
       await expect(selectedTab()).toHaveText(/Финансы/, { timeout: 20000 });
       await managerTab(/Основная информация|Обзор/).click();
       await expect(selectedTab()).toHaveText(/Основная информация|Обзор/, { timeout: 20000 });
-      await expect(popup.locator('.client-screen__field').first()).toBeVisible();
+      // The tab has fields on screen only when the organisation ticked at least one of them.
+      if (codes.some((code) => code.startsWith('basic.'))) await expect(popup.locator('.client-screen__field').first()).toBeVisible();
+      else await expect(popup.locator('.client-screen__field')).toHaveCount(0);
       results.push('tab switches mirrored');
     } else skipped('tab switches between «Финансы» and «Основная информация»');
 
     // The HDF tab is mirrored only when the organisation ticked it; otherwise the customer keeps the last tab.
     const hdfTab = managerTab(/^ХДФ$/);
-    if (tabSwitches && codes.includes('tab.hdf') && await hdfTab.count()) {
+    if (!has('tab.hdf')) skipped('the HDF tab');
+    else if (!tabSwitches) skipped('the HDF tab (needs the basic and finance tabs to return to)');
+    else if (!(await hdfTab.count())) results.push('this layout of the form has no HDF tab: nothing to mirror');
+    else {
       await hdfTab.click();
       await expect(selectedTab()).toHaveText(/ХДФ/, { timeout: 20000 });
       results.push('HDF tab mirrored');
@@ -432,7 +437,7 @@ try {
   if (!codes.includes('details.cost')) assert.equal(await viewPopup.getByRole('columnheader', { name: 'Сумма', exact: true }).count(), 0, 'view: hidden cost column is absent');
   if (!codes.includes('details.note')) assert.equal(await viewPopup.getByRole('columnheader', { name: 'Примечание', exact: true }).count(), 0, 'view: hidden note column is absent');
   const viewHeaders = await viewPopup.getByRole('columnheader').allInnerTexts();
-  if (codes.includes('details.quantity')) assert.ok(viewHeaders.includes('Кол-во'), `view: ticked quantity column is present (columns: ${viewHeaders.join(' | ')})`);
+  if (has('tab.details') && has('details.quantity')) assert.ok(viewHeaders.includes('Кол-во'), `view: ticked quantity column is present (columns: ${viewHeaders.join(' | ')})`);
   results.push(`view page presented: ${await viewPopup.locator('tbody tr[data-row-id]').count()} detail rows, hidden columns absent`);
   const financePanel = page.locator('.order-show-info-tabs [role="tab"]').filter({ hasText: 'Финансы' });
   if (!(has('tab.finance') && has('tab.details'))) skipped('the finance panel of the view page');
