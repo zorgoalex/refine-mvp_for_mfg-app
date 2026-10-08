@@ -8,7 +8,8 @@ import { vercelBypassCookies } from './helpers/vercelBypass.mjs';
 
 // Live check of the manager side in the real application against the stage backend: log in, open a
 // test order, present it, follow tabs, hide, emergency switch-off. Nothing is saved in the order.
-// The organisation setting is switched on for the run and restored in `finally` (and verified): only
+// When the organisation has not switched the customer screen on, the setting is switched on for the
+// run and restored in `finally` (and verified): only
 // what this run itself changed, and only if nobody changed it since. Runs against the stage backend
 // only: a deployment configured for any other backend is refused before logging in.
 // Env: BASE_URL (a built deployment), ORDER_ID (an existing test order), CODEX_PLAYWRIGHT_USERNAME /
@@ -177,33 +178,43 @@ try {
 
   // Switch the organisation setting on for the run; cost and note stay hidden.
   original = await settingsCall('GET');
-  const codes = original.visibleCodes.filter((code) => code !== 'details.cost' && code !== 'details.note');
-  for (const code of ['summary.number', 'summary.client', 'tab.basic', 'basic.client', 'tab.details', 'details.n', 'details.quantity', 'tab.finance', 'finance.final']) {
-    if (!codes.includes(code)) codes.push(code);
+  // An organisation that already uses the customer screen is not touched at all: the check runs with
+  // the settings in force and writes nothing (a run stopped from outside cannot leave them changed).
+  // CHANGE_SETTINGS=1 forces the old behaviour: switch on, hide cost and note, tick what the steps need.
+  const readOnly = original.enabled === true && process.env.CHANGE_SETTINGS !== '1';
+  const codes = readOnly ? [...original.visibleCodes] : original.visibleCodes.filter((code) => code !== 'details.cost' && code !== 'details.note');
+  if (!readOnly) {
+    for (const code of ['summary.number', 'summary.client', 'tab.basic', 'basic.client', 'tab.details', 'details.n', 'details.quantity', 'tab.finance', 'finance.final']) {
+      if (!codes.includes(code)) codes.push(code);
+    }
   }
   // CLIENT_PHONE=1: the client's phone is ticked for the run (needs a backend that knows the code).
-  if (process.env.CLIENT_PHONE === '1' && !codes.includes('summary.client_phone')) codes.push('summary.client_phone');
+  if (!readOnly && process.env.CLIENT_PHONE === '1' && !codes.includes('summary.client_phone')) codes.push('summary.client_phone');
   // HEADER=1: the lines of the order header are ticked for the run (needs a backend that knows the codes).
   const headerCodes = ['summary.order_name', 'summary.deadline', 'summary.positions', 'summary.material', 'summary.milling_type', 'summary.edge_type',
     'summary.film', 'summary.paid', 'summary.discount', 'summary.surcharge'];
-  if (process.env.HEADER === '1') for (const code of headerCodes) if (!codes.includes(code)) codes.push(code);
+  if (!readOnly && process.env.HEADER === '1') for (const code of headerCodes) if (!codes.includes(code)) codes.push(code);
   // HDF=1: the HDF tab with all its fields and columns is ticked for the run (needs a backend that knows the codes).
-  if (process.env.HDF === '1') {
+  if (!readOnly && process.env.HDF === '1') {
     for (const code of ['tab.hdf', 'hdf.min_threshold', 'hdf.total', 'hdf.position', 'hdf.milling_type', 'hdf.height', 'hdf.width', 'hdf.quantity', 'hdf.area', 'hdf.status']) {
       if (!codes.includes(code)) codes.push(code);
     }
   }
-  const switching = change.run(async () => {
-    const response = await settingsRequest('PUT', { enabled: true, visibleCodes: codes, expectedVersion: original.version });
-    return { ok: response.ok, status: response.status, body: response.ok ? await response.json() : null };
-  });
-  // SELF_INTERRUPT=during proves the interruption path while the change is still on its way.
-  if (process.env.SELF_INTERRUPT === 'during') process.kill(process.pid, 'SIGINT');
-  const switched = await switching;
-  assert.ok(switched.ok, `PUT client-screen settings → ${switched.status}`);
-  results.push('organisation switch turned on for the run');
+  if (readOnly) {
+    results.push(`customer screen is already switched on by the organisation: its ${codes.length} ticks are used as they are, nothing is written`);
+  } else {
+    const switching = change.run(async () => {
+      const response = await settingsRequest('PUT', { enabled: true, visibleCodes: codes, expectedVersion: original.version });
+      return { ok: response.ok, status: response.status, body: response.ok ? await response.json() : null };
+    });
+    // SELF_INTERRUPT=during proves the interruption path while the change is still on its way.
+    if (process.env.SELF_INTERRUPT === 'during') process.kill(process.pid, 'SIGINT');
+    const switched = await switching;
+    assert.ok(switched.ok, `PUT client-screen settings → ${switched.status}`);
+    results.push('organisation switch turned on for the run');
+  }
   // SELF_INTERRUPT=1 proves the interruption path: the run stops itself here, as the load guard would.
-  if (process.env.SELF_INTERRUPT === '1') process.kill(process.pid, 'SIGINT');
+  if (!readOnly && process.env.SELF_INTERRUPT === '1') process.kill(process.pid, 'SIGINT');
 
   await page.goto(`${base}/orders/edit/${orderId}`, { waitUntil: 'domcontentloaded' });
   const present = page.getByRole('button', { name: 'Показать клиенту' });
@@ -288,10 +299,10 @@ try {
     await managerTab(/Детали заказа|Состав/).click();
     await expect(selectedTab()).toHaveText(/Детали заказа|Состав/, { timeout: 20000 });
     await expect(popup.locator('tbody tr[data-row-id]').first()).toBeVisible({ timeout: 20000 });
-    assert.equal(await popup.getByRole('columnheader', { name: 'Сумма', exact: true }).count(), 0, 'hidden cost column is absent');
-    assert.equal(await popup.getByRole('columnheader', { name: 'Примечание', exact: true }).count(), 0, 'hidden note column is absent');
+    if (!codes.includes('details.cost')) assert.equal(await popup.getByRole('columnheader', { name: 'Сумма', exact: true }).count(), 0, 'hidden cost column is absent');
+    if (!codes.includes('details.note')) assert.equal(await popup.getByRole('columnheader', { name: 'Примечание', exact: true }).count(), 0, 'hidden note column is absent');
     const headers = await popup.getByRole('columnheader').allInnerTexts();
-    assert.ok(headers.includes('Кол-во'), `ticked quantity column is present (columns: ${headers.join(' | ')})`);
+    if (codes.includes('details.quantity')) assert.ok(headers.includes('Кол-во'), `ticked quantity column is present (columns: ${headers.join(' | ')})`);
     // The row number is always the first column, and the column headers stay in sight while the list scrolls.
     assert.equal(headers[0], '№', `the row number is the first column (columns: ${headers.join(' | ')})`);
     const firstHeader = popup.getByRole('columnheader').first();
@@ -407,10 +418,10 @@ try {
   await expect(page.getByText('Клиент видит этот заказ')).toBeVisible({ timeout: 30000 });
   await expect(viewPopup.getByRole('tab', { selected: true })).toHaveText(/Детали заказа/, { timeout: 20000 });
   await expect(viewPopup.locator('tbody tr[data-row-id]').first()).toBeVisible({ timeout: 20000 });
-  assert.equal(await viewPopup.getByRole('columnheader', { name: 'Сумма', exact: true }).count(), 0, 'view: hidden cost column is absent');
-  assert.equal(await viewPopup.getByRole('columnheader', { name: 'Примечание', exact: true }).count(), 0, 'view: hidden note column is absent');
+  if (!codes.includes('details.cost')) assert.equal(await viewPopup.getByRole('columnheader', { name: 'Сумма', exact: true }).count(), 0, 'view: hidden cost column is absent');
+  if (!codes.includes('details.note')) assert.equal(await viewPopup.getByRole('columnheader', { name: 'Примечание', exact: true }).count(), 0, 'view: hidden note column is absent');
   const viewHeaders = await viewPopup.getByRole('columnheader').allInnerTexts();
-  assert.ok(viewHeaders.includes('Кол-во'), `view: ticked quantity column is present (columns: ${viewHeaders.join(' | ')})`);
+  if (codes.includes('details.quantity')) assert.ok(viewHeaders.includes('Кол-во'), `view: ticked quantity column is present (columns: ${viewHeaders.join(' | ')})`);
   results.push(`view page presented: ${await viewPopup.locator('tbody tr[data-row-id]').count()} detail rows, hidden columns absent`);
   const financePanel = page.locator('.order-show-info-tabs [role="tab"]').filter({ hasText: 'Финансы' });
   if (await financePanel.count()) {
@@ -426,7 +437,7 @@ try {
 
   // Rollback on a running presentation: the organisation switch is turned off while the customer
   // sees the order; within a minute the customer is back on the splash, without any reload.
-  if (process.env.ROLLBACK === '1') {
+  if (process.env.ROLLBACK === '1' && !readOnly) {
     await page.getByRole('button', { name: 'Показать клиенту' }).click();
     await expect(viewPopup.getByRole('heading', { level: 1 })).toHaveText(/Заказ |Ваш заказ/, { timeout: 30000 });
     const mine = change.outcome().applied;
