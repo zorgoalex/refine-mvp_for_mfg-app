@@ -2,7 +2,7 @@ import { ApiError } from '../../common/errors/api-error';
 import type { CurrentUser } from '../../permissions/current-user';
 import {
   STOCK_SNAPSHOT_MAX_ROWS,
-  type OnecStockSnapshotsPort, type StockSnapshotListFilter, type StockSnapshotRequest, type StockSnapshotRow, type StockSnapshotStatus,
+  type OnecStockSnapshotsPort, type StockSnapshotCapabilities, type StockSnapshotListFilter, type StockSnapshotRequest, type StockSnapshotRow, type StockSnapshotStatus,
   type StockSnapshotView, type StockSnapshotWarehouseSummary,
 } from './onec-stock-snapshots.port';
 
@@ -24,15 +24,29 @@ export class InMemoryOnecStockSnapshots implements OnecStockSnapshotsPort {
   private readonly stored = new Map<number, Stored>();
   private nextId = 1;
   private generation = 1;
+  /** `false` — switched off by the flag: no new requests; reading and deleting still work. */
   enabled = true;
+  /** The agent of the source cannot read balances as of a moment. */
+  agentTooOld = false;
 
   constructor(private readonly options: { sourceId?: number; timeZone?: string; utcOffsetHours?: number; now?: () => Date } = {}) {}
 
   private now(): Date { return this.options.now?.() ?? new Date(); }
+  private baseRefOf(generation: number): string { return `00000000-0000-4000-8000-${String(generation).padStart(12, '0')}`; }
   private get sourceId(): number { return this.options.sourceId ?? 1; }
 
+  async capabilities(sourceId?: number): Promise<StockSnapshotCapabilities> {
+    if (sourceId !== undefined && sourceId !== this.sourceId) return { readAvailable: true, commandsAvailable: false, reason: 'SOURCE_NOT_CONFIGURED' };
+    if (!this.enabled) return { readAvailable: true, commandsAvailable: false, reason: 'MODULE_DISABLED' };
+    if (this.agentTooOld) return { readAvailable: true, commandsAvailable: false, reason: 'AGENT_TOO_OLD' };
+    return { readAvailable: true, commandsAvailable: true, reason: null };
+  }
+
   async request(input: StockSnapshotRequest, actor: CurrentUser, _requestId: string): Promise<StockSnapshotView> {
-    if (!this.enabled) throw new ApiError(409, 'ONEC_STOCK_SNAPSHOTS_UNAVAILABLE', 'Срезы остатков 1С выключены');
+    const capabilities = await this.capabilities();
+    if (!capabilities.commandsAvailable) {
+      throw new ApiError(409, 'ONEC_STOCK_SNAPSHOTS_UNAVAILABLE', 'Запросить срез остатков 1С сейчас нельзя', { reason: capabilities.reason });
+    }
     if (input.sourceId !== undefined && input.sourceId !== this.sourceId) throw new ApiError(422, 'VALIDATION_ERROR', 'Неизвестный источник 1С');
     if (!MOMENT.test(input.momentLocal)) throw new ApiError(422, 'VALIDATION_ERROR', 'Момент среза: ГГГГ-ММ-ДДTЧЧ:ММ:СС');
     if (input.idempotencyKey.length < 8 || input.idempotencyKey.length > 200) throw new ApiError(422, 'VALIDATION_ERROR', 'Ключ запроса: 8–200 символов');
@@ -51,7 +65,7 @@ export class InMemoryOnecStockSnapshots implements OnecStockSnapshotsPort {
     const item: Stored = {
       idempotencyKey: input.idempotencyKey, generation: this.generation, rows: [],
       view: {
-        id: this.nextId++, sourceId: this.sourceId, currentSource: true, momentLocal: input.momentLocal, momentUtc: momentUtc.toISOString(),
+        id: this.nextId++, sourceId: this.sourceId, currentSource: true, baseRef: this.baseRefOf(this.generation), momentLocal: input.momentLocal, momentUtc: momentUtc.toISOString(),
         timeZone: this.options.timeZone ?? 'Asia/Almaty', status: 'requested', waitReason: null, errorCode: null,
         requestedBy: { id: Number(actor.id), name: actor.username }, requestedAt: at, updatedAt: at, readAt: null, readyAt: null, rowsCount: null,
         queuePosition: null, activeAhead: false, deletedAt: null,
