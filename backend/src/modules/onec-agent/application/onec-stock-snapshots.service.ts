@@ -25,6 +25,7 @@ import { OnecEtlEvents } from './onec-etl-events';
 const TICK_MS = 15_000;
 const SOURCE_MODULE = 'onec_stock_snapshots';
 const UUID = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+const MOMENT_LOCAL = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
 const ZERO_GUID = '00000000-0000-0000-0000-000000000000';
 /** A 1C key of the mirror row as a uuid, or NULL for «not set» (empty, the zero guid) or a malformed value. */
 const keyOf = (field: string) =>
@@ -146,11 +147,16 @@ export class OnecStockSnapshotsService implements OnecStockSnapshotsPort, OnModu
   async list(filter: StockSnapshotListFilter = {}, tx: DatabaseClient = this.database): Promise<{ items: StockSnapshotView[]; total: number }> {
     await this.requireReadable(tx);
     const where = `sn.deleted_at IS NULL AND ($1::bigint IS NULL OR sn.source_id = $1) AND ($2::text IS NULL OR sn.status = $2)
-      AND (NOT $3::boolean OR s.generation_ref = sn.generation_ref)`;
-    const params = [filter.sourceId ?? null, filter.status ?? null, filter.currentSourceOnly === true];
+      AND (NOT $3::boolean OR s.generation_ref = sn.generation_ref)
+      AND ($4::uuid IS NULL OR sn.generation_ref = $4) AND ($5::timestamp IS NULL OR sn.moment_local = $5)`;
+    const baseRef = filter.baseRef?.toLowerCase() ?? null;
+    const momentLocal = filter.momentLocal ?? null;
+    // A value that cannot be a base reference or a moment matches nothing.
+    if ((baseRef !== null && !new RegExp(UUID).test(baseRef)) || (momentLocal !== null && !MOMENT_LOCAL.test(momentLocal))) return { items: [], total: 0 };
+    const params = [filter.sourceId ?? null, filter.status ?? null, filter.currentSourceOnly === true, baseRef, momentLocal];
     const limit = Math.min(Math.max(filter.limit ?? 50, 1), 200);
     const offset = Math.max(filter.offset ?? 0, 0);
-    const { rows } = await tx.query(`${VIEW_SELECT} WHERE ${where} ORDER BY sn.requested_at DESC, sn.snapshot_id DESC LIMIT $4 OFFSET $5`, [...params, limit, offset]);
+    const { rows } = await tx.query(`${VIEW_SELECT} WHERE ${where} ORDER BY sn.requested_at DESC, sn.snapshot_id DESC LIMIT $6 OFFSET $7`, [...params, limit, offset]);
     const total = (await tx.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM onec_stock_snapshots sn JOIN onec_sources s ON s.source_id = sn.source_id WHERE ${where}`, params)).rows[0]!.n;
     return { items: rows.map(toView), total };

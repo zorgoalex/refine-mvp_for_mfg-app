@@ -86,6 +86,8 @@ export class InMemoryOnecStockSnapshots implements OnecStockSnapshotsPort {
       .filter((item) => filter.sourceId === undefined || item.view.sourceId === filter.sourceId)
       .filter((item) => filter.status === undefined || item.view.status === filter.status)
       .filter((item) => !filter.currentSourceOnly || item.generation === this.generation)
+      .filter((item) => filter.baseRef === undefined || item.view.baseRef === filter.baseRef.toLowerCase())
+      .filter((item) => filter.momentLocal === undefined || item.view.momentLocal === filter.momentLocal)
       .sort((a, b) => b.view.id - a.view.id).map((item) => this.present(item));
     const offset = filter.offset ?? 0;
     return { items: items.slice(offset, offset + (filter.limit ?? 50)), total: items.length };

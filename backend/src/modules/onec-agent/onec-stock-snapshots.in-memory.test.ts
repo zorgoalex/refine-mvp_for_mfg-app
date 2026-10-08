@@ -144,6 +144,11 @@ describe('in-memory stock snapshots (the contract of the port for consumer tests
     expect(again.baseRef).not.toBe(base);
     expect((await port.list({ currentSourceOnly: true })).items.map((item) => item.id)).toEqual([again.id]);
     expect((await port.list({ status: 'ready' })).items.map((item) => item.id)).toEqual([old.id]);
+    // Snapshots of one base (the ones that may be compared) and of one moment.
+    expect((await port.list({ baseRef: base })).items.map((item) => item.id).sort()).toEqual([old.id, active.id].sort());
+    expect((await port.list({ baseRef: again.baseRef.toUpperCase() })).items.map((item) => item.id)).toEqual([again.id]);
+    expect((await port.list({ momentLocal: '2026-09-26T10:14:00', baseRef: again.baseRef })).items.map((item) => item.id)).toEqual([again.id]);
+    expect((await port.list({ momentLocal: '2020-01-01T00:00:00' })).total).toBe(0);
   });
 
   it('a snapshot over the row limit fails instead of being cut; waiting has a reason and moves updatedAt', async () => {

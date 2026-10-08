@@ -97,6 +97,10 @@ export interface StockSnapshotListFilter {
   status?: StockSnapshotStatus;
   /** Leave out historical snapshots (of a replaced 1C base). */
   currentSourceOnly?: boolean;
+  /** Only snapshots of this 1C base (`StockSnapshotView.baseRef`): the ones a given snapshot may be compared with. */
+  baseRef?: string;
+  /** Only snapshots of exactly this moment (`YYYY-MM-DDTHH:MM:SS`, time of the 1C base). */
+  momentLocal?: string;
   limit?: number;
   offset?: number;
 }
