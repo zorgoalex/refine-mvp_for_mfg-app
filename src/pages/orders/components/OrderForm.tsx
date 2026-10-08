@@ -2545,6 +2545,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
                         <span><kbd>Esc</kbd> отменить правку</span>
                         <span><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> по ячейкам</span>
                         <span><kbd>↓</kbd> на последней строке — новая строка</span>
+                        <span><kbd>Ctrl</kbd><kbd>D</kbd> дублировать строку</span>
                         <span><kbd>Ctrl</kbd><kbd>S</kbd> сохранить заказ</span>
                       </p>
                     ) : null}

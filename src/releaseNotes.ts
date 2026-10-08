@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-08", title: "Детали заказа: Ctrl+D дублирует строку",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "Форма заказа, таблица деталей: Ctrl+D дублирует строку, на ячейке которой стоит выделение, — копия появляется сразу под ней, как при «Копировать строку» из меню. Работает во всех вариантах интерфейса и в русской раскладке; в варианте NewLine сочетание добавлено в подсказки под таблицей.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-08", title: "Склады: срез остатков 1С на дату",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

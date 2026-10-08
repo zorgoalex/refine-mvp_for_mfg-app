@@ -2764,6 +2764,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     if ((editingKey !== null && editingField !== null) || event.defaultPrevented) return;
     if (event.target !== event.currentTarget) return;
 
+    // Ctrl+D / ⌘D дублирует строку под выбранной ячейкой (по коду клавиши — работает и в русской раскладке)
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.code === 'KeyD') {
+      if (!onCopyRow || record.is_placeholder === true) return;
+      event.preventDefault();
+      onCopyRow(record);
+      return;
+    }
+
     const directionByKey: Partial<Record<string, OrderDetailSpreadsheetDirection>> = {
       ArrowUp: 'up',
       ArrowDown: 'down',
