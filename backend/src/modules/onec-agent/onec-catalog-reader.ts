@@ -45,6 +45,20 @@ export interface OnecStockBalance {
   categoryName: string | null;
   quantity: number;
 }
+/** Сведения о позиции 1С по ключу (см. `itemsInfo`); поля отозванных справочников — null. */
+export type OnecItemInfo = Omit<OnecStockBalance, 'quantity'>;
+export const ITEMS_INFO_MAX_KEYS = 20_000;
+/**
+ * Поля позиции и соединения с единицами и категориями — общий фрагмент `stockBalances` и `itemsInfo`: строка
+ * номенклатуры — `i`, источник — `$1`, признаки отзыва номенклатуры, единиц и категорий — `$4`, `$5`, `$6`.
+ */
+const ITEM_INFO_COLUMNS = `CASE WHEN $4 THEN NULL ELSE i.data->>'Code' END AS code,
+              CASE WHEN $4 THEN NULL ELSE i.data->>'Description' END AS name,
+              CASE WHEN $4 OR $5 THEN NULL ELSE COALESCE(u.data->>'Description', u.data->>'Представление') END AS unit_name,
+              CASE WHEN $4 THEN NULL ELSE lower(i.data->>'КатегорияНоменклатуры_Key') END AS category_key,
+              CASE WHEN $4 OR $6 THEN NULL ELSE COALESCE(c.data->>'Description', c.data->>'Представление') END AS category_name`;
+const ITEM_INFO_JOINS = `LEFT JOIN onec_etl_mirror_rows u ON u.source_id = $1 AND u.entity_code = 'units' AND u.source_key = lower(i.data->>'ЕдиницаИзмерения_Key')
+         LEFT JOIN onec_etl_mirror_rows c ON c.source_id = $1 AND c.entity_code = 'item_categories' AND c.source_key = lower(i.data->>'КатегорияНоменклатуры_Key')`;
 /** Контрагент 1С из зеркала (справочник «Контрагенты», без групп). */
 export interface OnecCounterparty {
   refKey: string;
@@ -506,6 +520,39 @@ export class OnecCatalogReader {
    * поля NULL, остаток остаётся. Нулевой/невалидный ключ позиции — строка отбрасывается.
    * Ключи копии (`source_key`, `…_Key`) хранятся в нижнем регистре — соединения по `source_key` без функций.
    */
+  /**
+   * Код, название, единица и категория позиций 1С по ключам — те же поля и те же правила отозванных справочников,
+   * что у `stockBalances` (один фрагмент SQL). Позиции, которых нет в копии, в ответе отсутствуют; при отозванной
+   * номенклатуре ответ пуст. Ключи — в любом регистре, в ответе — в нижнем. Без блокировок: читать в транзакции
+   * REPEATABLE READ READ ONLY вызывающего вместе с `stockState`. До 20 000 ключей за вызов.
+   */
+  async itemsInfo(
+    sourceId: number,
+    itemRefKeys: readonly string[],
+    revoked: OnecStockState['revoked'],
+    client: DatabaseClient = this.db,
+  ): Promise<OnecItemInfo[]> {
+    await this.available(client);
+    if (itemRefKeys.length > ITEMS_INFO_MAX_KEYS) throw new ApiError(422, 'VALIDATION_ERROR', `Не более ${ITEMS_INFO_MAX_KEYS} позиций за запрос`);
+    const keys = [...new Set(itemRefKeys.map((key) => key.toLowerCase()))];
+    if (revoked.items || keys.length === 0) return [];
+    const { rows } = await client.query<{
+      item_key: string; code: string | null; name: string | null; unit_name: string | null; category_key: string | null; category_name: string | null;
+    }>(
+      // Параметры $2 и $3 не используются фрагментом; $4–$6 — признаки отзыва, как в stockBalances.
+      `SELECT i.source_key AS item_key,
+              ${ITEM_INFO_COLUMNS}
+         FROM onec_etl_mirror_rows i
+         ${ITEM_INFO_JOINS}
+        WHERE i.source_id = $1 AND i.entity_code = 'items' AND i.source_key = ANY($2::text[]) AND $3::text IS NOT NULL
+        ORDER BY i.source_key`,
+      [sourceId, keys, ZERO_GUID, revoked.items, revoked.units, revoked.itemCategories],
+    );
+    return rows.map((row) => ({
+      itemRefKey: row.item_key, code: row.code, name: row.name, unitName: row.unit_name, categoryKey: row.category_key, categoryName: row.category_name,
+    }));
+  }
+
   async stockBalances(
     sourceId: number,
     warehouseRefKey: string,
@@ -529,15 +576,10 @@ export class OnecCatalogReader {
             AND data->>'КоличествоBalance' ~ '^-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?$'
           GROUP BY 1)
        SELECT b.item_key, b.quantity::text AS quantity,
-              CASE WHEN $4 THEN NULL ELSE i.data->>'Code' END AS code,
-              CASE WHEN $4 THEN NULL ELSE i.data->>'Description' END AS name,
-              CASE WHEN $4 OR $5 THEN NULL ELSE COALESCE(u.data->>'Description', u.data->>'Представление') END AS unit_name,
-              CASE WHEN $4 THEN NULL ELSE lower(i.data->>'КатегорияНоменклатуры_Key') END AS category_key,
-              CASE WHEN $4 OR $6 THEN NULL ELSE COALESCE(c.data->>'Description', c.data->>'Представление') END AS category_name
+              ${ITEM_INFO_COLUMNS}
          FROM b
          LEFT JOIN onec_etl_mirror_rows i ON i.source_id = $1 AND i.entity_code = 'items' AND i.source_key = b.item_key
-         LEFT JOIN onec_etl_mirror_rows u ON u.source_id = $1 AND u.entity_code = 'units' AND u.source_key = lower(i.data->>'ЕдиницаИзмерения_Key')
-         LEFT JOIN onec_etl_mirror_rows c ON c.source_id = $1 AND c.entity_code = 'item_categories' AND c.source_key = lower(i.data->>'КатегорияНоменклатуры_Key')
+         ${ITEM_INFO_JOINS}
         ORDER BY b.item_key`,
       [sourceId, warehouseRefKey, ZERO_GUID, revoked.items, revoked.units, revoked.itemCategories],
     );

@@ -10,6 +10,7 @@ import type { PerformanceQueryTelemetryService } from '../../performance/perform
 import { PgOnecMatchingRepository } from './adapters/pg-onec-matching-repository';
 import { PgOnecRepository } from './adapters/pg-onec-repository';
 import { OnecMatchingService } from './application/onec-matching.service';
+import { OnecCatalogReader } from './onec-catalog-reader';
 import type { OnecRuntimeConfigService } from './onec-runtime-config.service';
 
 const suite = process.env.ONEC_AGENT_DOCKER_TEST === 'true' ? describe : describe.skip;
@@ -125,6 +126,34 @@ suite('1C matching report (E3c) — isolated PostgreSQL', () => {
     expect((await phoneMatch()).byPhone).toBe(1);
     await pool.query(`UPDATE ${schema}.onec_etl_mirror_rows SET deleted = true WHERE entity_code = 'counterparty_phones'`);
     expect((await phoneMatch()).byPhone).toBe(0);
+  });
+
+  it('item details by keys: the same fields and revocation rules as the stock balances; unknown keys are absent', async () => {
+    const reader = new OnecCatalogReader(db, runtime);
+    const I = { a: randomUUID(), b: randomUUID(), gone: randomUUID() };
+    const unit = randomUUID();
+    const category = randomUUID();
+    await mirror('items', I.a, { Code: 'Н-1', Description: 'Плёнка белая', ЕдиницаИзмерения_Key: unit.toUpperCase(), КатегорияНоменклатуры_Key: category });
+    await mirror('items', I.b, { Code: 'Н-2', Description: 'Без единицы' });
+    await mirror('units', unit, { Description: 'пог. м' });
+    await mirror('item_categories', category, { Description: 'Плёнки' });
+    await mirror('stock_balances', `${I.a}|w`, { Номенклатура_Key: I.a, СтруктурнаяЕдиница_Key: K.a, КоличествоBalance: '3.5' });
+    const none = { stockBalances: false, items: false, units: false, itemCategories: false };
+    const info = await reader.itemsInfo(1, [I.b, I.a.toUpperCase(), I.gone, I.a], none);
+    expect(info).toEqual([
+      { itemRefKey: I.a, code: 'Н-1', name: 'Плёнка белая', unitName: 'пог. м', categoryKey: category, categoryName: 'Плёнки' },
+      { itemRefKey: I.b, code: 'Н-2', name: 'Без единицы', unitName: null, categoryKey: null, categoryName: null },
+    ].sort((x, y) => x.itemRefKey.localeCompare(y.itemRefKey)));
+    // The same position through the balances gives the same details.
+    const [balance] = await reader.stockBalances(1, K.a, none);
+    expect(balance).toEqual({ ...info.find((item) => item.itemRefKey === I.a)!, quantity: 3.5 });
+    // Revoked catalogs: units and categories lose their names; revoked items give nothing at all.
+    expect((await reader.itemsInfo(1, [I.a], { ...none, units: true, itemCategories: true }))[0])
+      .toEqual({ itemRefKey: I.a, code: 'Н-1', name: 'Плёнка белая', unitName: null, categoryKey: category, categoryName: null });
+    expect(await reader.itemsInfo(1, [I.a], { ...none, items: true })).toEqual([]);
+    expect(await reader.itemsInfo(1, [], none)).toEqual([]);
+    expect(await reader.itemsInfo(2, [I.a], none)).toEqual([]);
+    await expect(reader.itemsInfo(1, Array.from({ length: 20_001 }, () => I.a), none)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 
   it('filters by status, role and search, and pages', async () => {
