@@ -1182,7 +1182,7 @@ paths:
       tags: [Party contacts]
       operationId: getClientCounterparty
       summary: 'The 1C counterparty a client is linked to'
-      description: 'counterparty is null when there is no link, or when the stored key is not in the loaded 1C data (deleted or marked for deletion there).'
+      description: 'counterparty is null when there is no link, or when the stored key is not in the loaded 1C data (deleted or marked for deletion there). Without clients.onec_data.view the phones and BIN/IIN are left out (dataHidden = true). Phones are read only from a snapshot that is neither revoked nor older than the retention period.'
       security: [{bearerAuth: []}]
       x-permissions: [clients.view]
       parameters:
@@ -1226,7 +1226,7 @@ paths:
       summary: '1C counterparties to choose from for a client'
       description: 'With search — by name, code, BIN/IIN or phone digits (at most 50). Without it — the counterparties that look like the client (at most 10): the same name, the same phone, a similar name. Not folders, not marked for deletion, still in the source. Requires the right to change clients: the search opens the whole 1C counterparty directory.'
       security: [{bearerAuth: []}]
-      x-permissions: [clients.update]
+      x-permissions: [clients.update, clients.onec_data.view]
       parameters:
         - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
         - {name: search, in: query, required: false, schema: {type: string, maxLength: 100}}
@@ -1242,7 +1242,7 @@ paths:
       summary: 'Bulk view: clients without a 1C counterparty and their exact candidates'
       description: 'Active clients without a counterparty. matches — pairs unambiguous both ways (the client has one exact candidate by name or phone, the counterparty is free and is not an exact candidate of another unlinked client); ambiguous — clients whose candidates must be chosen in the card. At most 2000 rows of each.'
       security: [{bearerAuth: []}]
-      x-permissions: [clients.update]
+      x-permissions: [clients.update, clients.onec_data.view]
       responses:
         '200': {description: Matches, content: {application/json: {schema: {$ref: '#/components/schemas/ClientCounterpartyMatches'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
@@ -1254,7 +1254,7 @@ paths:
       summary: 'Confirm pairs of the bulk view'
       description: 'Each pair is the link command of a client that has no counterparty (its own transaction and audit row, metadata.via = bulk_confirm). A pair that is no longer possible is reported in results and skipped; the others are linked. The request must not be repeated blindly after a lost answer: a pair is the link command with «no counterparty» as the expected state, so a repeat would link again a client whose link was removed meanwhile. After a lost answer or an uncertain pair read GET /clients/{id}/counterparty.'
       security: [{bearerAuth: []}]
-      x-permissions: [clients.update]
+      x-permissions: [clients.update, clients.onec_data.view]
       requestBody:
         required: true
         content:
@@ -31610,12 +31610,13 @@ components:
         holderClientName: {type: string, nullable: true}
     ClientCounterpartyLink:
       type: object
-      required: [clientId, clientName, refKey1c, available, counterparty]
+      required: [clientId, clientName, refKey1c, available, counterparty, dataHidden]
       properties:
         clientId: {type: integer}
         clientName: {type: string}
         refKey1c: {type: string, format: uuid, nullable: true}
         available: {type: boolean, description: 'Counterparties of 1C are loaded'}
+        dataHidden: {type: boolean, description: 'Phones and BIN/IIN are left out: the reader has no clients.onec_data.view'}
         counterparty: {allOf: [{$ref: '#/components/schemas/OnecCounterpartyCard'}], nullable: true}
     EmployeeContacts:
       type: object

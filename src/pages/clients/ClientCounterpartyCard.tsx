@@ -9,8 +9,10 @@ import {
 
 interface Props {
   clientId: number | null | undefined;
-  /** clients.update: may link and unlink; otherwise read-only. */
+  /** clients.update: may unlink; otherwise read-only. */
   editable: boolean;
+  /** clients.update and clients.onec_data.view: may search and choose a counterparty. Defaults to `editable`. */
+  canChoose?: boolean;
 }
 
 /**
@@ -18,7 +20,8 @@ interface Props {
  * changed only by the backend command (checked against the loaded 1C data, audited); the form of the client
  * no longer carries the key.
  */
-export const ClientCounterpartyCard: React.FC<Props> = ({ clientId, editable }) => {
+export const ClientCounterpartyCard: React.FC<Props> = ({ clientId, editable, canChoose = editable }) => {
+  const choosing = editable && canChoose;
   const [link, setLink] = useState<ClientLink | null>(null);
   const [suggestions, setSuggestions] = useState<ClientCounterparty[]>([]);
   const [found, setFound] = useState<ClientCounterparty[]>([]);
@@ -66,7 +69,7 @@ export const ClientCounterpartyCard: React.FC<Props> = ({ clientId, editable }) 
   }, [clientId]);
 
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { if (editable) void suggest(); }, [editable, suggest]);
+  useEffect(() => { if (choosing) void suggest(); }, [choosing, suggest]);
 
   const change = async (refKey1c: string | null) => {
     if (!clientId || !link || saving) return;
@@ -76,7 +79,7 @@ export const ClientCounterpartyCard: React.FC<Props> = ({ clientId, editable }) 
       setChoice(null);
       setFound([]);
       message.success(refKey1c ? 'Клиент сопоставлен с контрагентом 1С' : 'Сопоставление с контрагентом 1С снято');
-      void suggest();
+      if (choosing) void suggest();
     } catch (error) {
       if (isApiError(error, CLIENT_COUNTERPARTY_CONFLICT)) {
         message.warning('Сопоставление уже изменил другой пользователь — показано текущее значение');
@@ -84,7 +87,7 @@ export const ClientCounterpartyCard: React.FC<Props> = ({ clientId, editable }) 
       } else {
         message.error(clientLinkErrorMessage(error));
       }
-      void suggest();
+      if (choosing) void suggest();
     } finally {
       setSaving(false);
     }
@@ -131,7 +134,7 @@ export const ClientCounterpartyCard: React.FC<Props> = ({ clientId, editable }) 
         {link && !link.available ? (
           <Typography.Text type="secondary">Контрагенты 1С ещё не загружены — выбрать не из чего.</Typography.Text>
         ) : null}
-        {editable && link?.available && offered.length > 0 ? (
+        {choosing && link?.available && offered.length > 0 ? (
           <List
             size="small"
             bordered
@@ -166,7 +169,7 @@ export const ClientCounterpartyCard: React.FC<Props> = ({ clientId, editable }) 
             }}
           />
         ) : null}
-        {editable && link?.available ? (
+        {choosing && link?.available ? (
           <Space wrap>
             <Select
               showSearch
@@ -192,6 +195,12 @@ export const ClientCounterpartyCard: React.FC<Props> = ({ clientId, editable }) 
               <Button type="primary" disabled={!choice || saving} loading={saving}>{link.refKey1c ? 'Заменить' : 'Сопоставить'}</Button>
             </Popconfirm>
           </Space>
+        ) : null}
+        {editable && !canChoose && link?.available ? (
+          <Typography.Text type="secondary">Чтобы выбрать контрагента, нужно право «Клиенты: данные контрагента 1С».</Typography.Text>
+        ) : null}
+        {link?.dataHidden && linked ? (
+          <Typography.Text type="secondary">Телефоны и БИН/ИИН контрагента скрыты: нет права «Клиенты: данные контрагента 1С».</Typography.Text>
         ) : null}
         {editable && link?.refKey1c ? (
           <Popconfirm

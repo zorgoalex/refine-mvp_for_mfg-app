@@ -4,7 +4,7 @@ import { ApiError } from '../../common/errors/api-error';
 import { DatabaseService } from '../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../database/database.types';
 import type { CurrentUser } from '../../permissions/current-user';
-import { normalizedName, normalizedPhone } from '../onec-agent/domain/onec-matching-sql';
+import { livePersonalSnapshotJoin, normalizedName, normalizedPhone } from '../onec-agent/domain/onec-matching-sql';
 
 const SOURCE = 'erp_party_contacts';
 /** Similar names (pg_trgm) are offered from this similarity up — the threshold of the 1C «Сопоставление» tab. */
@@ -44,6 +44,8 @@ export interface ClientLink {
   available: boolean;
   /** The linked counterparty as 1C has it now; null — no link, or the key is not in the loaded 1C data. */
   counterparty: CounterpartyCard | null;
+  /** Phones and BIN/IIN are left out: the reader has no `clients.onec_data.view`. */
+  dataHidden: boolean;
 }
 
 export type ClientMatchStrength = 'both' | 'phone' | 'name';
@@ -122,6 +124,8 @@ const COUNTERPARTIES = `
     SELECT DISTINCT lower(m.data->>'Ref_Key') AS ref, btrim(m.data->>'Представление') AS raw,
            ${normalizedPhone("m.data->>'Представление'")} AS p
       FROM onec_etl_mirror_rows m
+      -- Phones are personal data: never read from a revoked or expired snapshot (rows may lie there until the purge).
+      ${livePersonalSnapshotJoin('m')}
      WHERE m.entity_code = 'counterparty_phones' AND NOT m.deleted AND m.missing_in_source_at IS NULL
        AND btrim(COALESCE(m.data->>'Представление', '')) <> '')`;
 
@@ -140,14 +144,20 @@ export class ClientCounterpartyRepository {
 
   constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
 
-  async link(clientId: number, client: DatabaseClient = this.database): Promise<ClientLink> {
+  /**
+   * `withData` — the reader has `clients.onec_data.view`: without it the name and the code of the counterparty
+   * are returned, phones and BIN/IIN are not.
+   */
+  async link(clientId: number, client: DatabaseClient = this.database, withData = true): Promise<ClientLink> {
     const row = (await client.query<{ client_name: string; ref: string | null }>(
       'SELECT client_name::text AS client_name, lower(ref_key_1c::text) AS ref FROM clients WHERE client_id = $1', [clientId])).rows[0];
     if (!row) throw new ApiError(404, 'CLIENT_NOT_FOUND', 'Клиент не найден');
     const available = await this.available(client);
+    const card = row.ref && available ? await this.card(client, row.ref) : null;
     return {
       clientId, clientName: row.client_name, refKey1c: row.ref, available,
-      counterparty: row.ref && available ? await this.card(client, row.ref) : null,
+      counterparty: card && !withData ? { ...card, bin: null, phones: [] } : card,
+      dataHidden: !withData,
     };
   }
 
@@ -291,13 +301,14 @@ export class ClientCounterpartyRepository {
   async setLink(
     clientId: number, refKey1c: string | null, expected: string | null, actor: CurrentUser, requestId: string, via: 'card' | 'bulk_confirm' = 'card',
   ): Promise<ClientLink> {
+    const withData = actor.permissions.includes('clients.onec_data.view');
     return this.database.transaction(async (tx) => {
       // Two clients taking one counterparty wait for each other here; the unique index is the last line of defence.
       if (refKey1c) await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`client-counterparty:${refKey1c}`]);
       const row = (await tx.query<{ ref: string | null }>(
         'SELECT lower(ref_key_1c::text) AS ref FROM clients WHERE client_id = $1 FOR NO KEY UPDATE', [clientId])).rows[0];
       if (!row) throw new ApiError(404, 'CLIENT_NOT_FOUND', 'Клиент не найден');
-      if (row.ref === refKey1c) return this.link(clientId, tx);
+      if (row.ref === refKey1c) return this.link(clientId, tx, withData);
       if (row.ref !== expected) {
         throw new ApiError(409, 'CLIENT_COUNTERPARTY_CONFLICT', 'Сопоставление с контрагентом 1С уже изменено; обновите страницу', { refKey1c: row.ref });
       }
@@ -318,9 +329,10 @@ export class ClientCounterpartyRepository {
         relatedEntities: [{ entityType: 'client', entityId: clientId }],
         before: { refKey1c: row.ref, counterpartyName: before?.name ?? null },
         after: { refKey1c, counterpartyName: after?.name ?? null },
-        metadata: { counterpartyCode: (after ?? before)?.code ?? null, counterpartyBin: (after ?? before)?.bin ?? null, via },
+        // The name and the code identify the counterparty; BIN/IIN is personal data and stays out of the audit.
+        metadata: { counterpartyCode: (after ?? before)?.code ?? null, via },
       });
-      return this.link(clientId, tx);
+      return this.link(clientId, tx, withData);
     }).catch((error: unknown) => { throw taken(error); });
   }
 

@@ -7,7 +7,9 @@ import type { CurrentUser } from '../../permissions/current-user';
 import { ClientCounterpartyRepository } from './client-counterparty.repository';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
-const admin: CurrentUser = { id: '11', username: 'clients-admin', role: 'admin', roleId: 1, permissions: ['clients.update'] };
+const admin: CurrentUser = { id: '11', username: 'clients-admin', role: 'admin', roleId: 1, permissions: ['clients.update', 'clients.onec_data.view'] };
+/** May link, may not see the data of 1C counterparties. */
+const operator: CurrentUser = { id: '11', username: 'clients-admin', role: 'operator', roleId: 3, permissions: ['clients.update'] };
 const REF = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
 describe.skipIf(!databaseUrl)('the client ↔ 1C counterparty link (PostgreSQL, isolated schema)', () => {
@@ -52,6 +54,8 @@ describe.skipIf(!databaseUrl)('the client ↔ 1C counterparty link (PostgreSQL, 
       CREATE TABLE client_phones(phone_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, client_id bigint NOT NULL, phone_number text NOT NULL);
       CREATE TABLE onec_etl_mirror_rows(source_id bigint, entity_code text, source_key text, deleted boolean NOT NULL DEFAULT false,
         data jsonb NOT NULL, missing_in_source_at timestamptz);
+      CREATE TABLE onec_etl_entity_state(source_id bigint NOT NULL, entity_code text NOT NULL, revoked_at timestamptz, snapshot_version timestamptz,
+        PRIMARY KEY(source_id, entity_code));
       INSERT INTO clients(client_id, client_name, notes) VALUES (1, 'Тест Айдын Адилов', 'заметка'), (2, 'ТОО «Тест Ромашка»', NULL), (3, 'Тест Третий', NULL);
       INSERT INTO client_phones(client_id, phone_number) VALUES (1, '+7 (701) 555-01-01'), (1, '8 777 123 45 67'), (3, '87015550909');`);
     database = {
@@ -86,7 +90,9 @@ describe.skipIf(!databaseUrl)('the client ↔ 1C counterparty link (PostgreSQL, 
   });
 
   beforeEach(async () => {
-    await q(`DELETE FROM audit_log_related_entity; DELETE FROM audit_log; DELETE FROM onec_etl_mirror_rows;
+    // The phones set has a fresh, not revoked snapshot unless a test says otherwise.
+    await q(`DELETE FROM onec_etl_entity_state; INSERT INTO onec_etl_entity_state VALUES (1, 'counterparty_phones', NULL, now());
+      DELETE FROM audit_log_related_entity; DELETE FROM audit_log; DELETE FROM onec_etl_mirror_rows;
       DELETE FROM client_phones WHERE client_id > 3; DELETE FROM clients WHERE client_id > 3; UPDATE clients SET ref_key_1c = NULL, edited_by = NULL, is_active = true`);
   });
 
@@ -150,6 +156,7 @@ describe.skipIf(!databaseUrl)('the client ↔ 1C counterparty link (PostgreSQL, 
     expect(linked).toEqual({
       clientId: 1, clientName: 'Тест Айдын Адилов', refKey1c: REF(1), available: true,
       counterparty: { refKey1c: REF(1), name: 'Тест Контрагент 1', code: 'К-1', bin: '111111111111', isBuyer: true, phones: ['87015550101'] },
+      dataHidden: false,
     });
     // The answer was lost and the command repeated: same state, no second audit.
     await links.setLink(1, REF(1), null, admin, 'req-c1-repeat');
@@ -213,7 +220,7 @@ describe.skipIf(!databaseUrl)('the client ↔ 1C counterparty link (PostgreSQL, 
   it('without 1C data: the link is readable, nothing is offered and nothing can be linked; an existing key can still be removed', async () => {
     await q(`UPDATE clients SET ref_key_1c = $1 WHERE client_id = 2`, [REF(5)]);
     const check = async () => {
-      expect(await links.link(2)).toEqual({ clientId: 2, clientName: 'ТОО «Тест Ромашка»', refKey1c: REF(5), available: false, counterparty: null });
+      expect(await links.link(2)).toEqual({ clientId: 2, clientName: 'ТОО «Тест Ромашка»', refKey1c: REF(5), available: false, counterparty: null, dataHidden: false });
       expect(await links.candidates(1, null)).toEqual([]);
       expect(await links.candidates(1, 'тест')).toEqual([]);
       expect(await code(links.setLink(1, REF(1), null, admin, 'req-none'))).toBe('CLIENT_COUNTERPARTY_UNKNOWN');
@@ -352,5 +359,50 @@ describe.skipIf(!databaseUrl)('the client ↔ 1C counterparty link (PostgreSQL, 
   it('bulk view without 1C data: nothing to confirm, the totals are still counted', async () => {
     await q(`UPDATE clients SET ref_key_1c = $1 WHERE client_id = 2`, [REF(5)]);
     expect(await links.matches()).toEqual({ available: false, summary: { clients: 3, linked: 1, both: 0, phone: 0, name: 0, ambiguous: 0, none: 2 }, matches: [], ambiguous: [] });
+  });
+
+  it('phones are personal data: a revoked, expired or never loaded phones set gives no phones — in the card, the search, the suggestions and the bulk view', async () => {
+    await mirror(REF(1), 'Совсем Другое Имя', { Code: 'К-1', 'ИдентификационныйНомер': '900101300123' });
+    await phone(REF(1), '8 701 555 01 01');
+    await q(`UPDATE clients SET ref_key_1c = $1 WHERE client_id = 2`, [REF(1)]);
+    const seen = async () => ({
+      card: (await links.link(2)).counterparty?.phones,
+      search: (await links.candidates(1, '8701555')).length,
+      suggested: (await links.candidates(1, null)).length,
+      bulk: (await links.matches()).ambiguous.length + (await links.matches()).matches.length,
+    });
+    // Fresh snapshot: the phone is shown and is found; client 1 shares it, the counterparty is taken → ambiguous.
+    expect(await seen()).toEqual({ card: ['8 701 555 01 01'], search: 1, suggested: 1, bulk: 1 });
+    for (const state of [
+      `UPDATE onec_etl_entity_state SET revoked_at = now()`,
+      `UPDATE onec_etl_entity_state SET revoked_at = NULL, snapshot_version = now() - interval '31 days'`,
+      `UPDATE onec_etl_entity_state SET snapshot_version = NULL`,
+      `DELETE FROM onec_etl_entity_state`,
+      // The state of another source does not open the rows of this one.
+      `INSERT INTO onec_etl_entity_state VALUES (2, 'counterparty_phones', NULL, now())`,
+    ]) {
+      await q(state);
+      // The rows still lie in the copy (the purge has not run), and nobody reads them.
+      expect([state, await seen()]).toEqual([state, { card: [], search: 0, suggested: 0, bulk: 0 }]);
+    }
+    // The counterparty itself is not personal data of the phones set: the name and the code stay.
+    expect((await links.link(2)).counterparty).toMatchObject({ name: 'Совсем Другое Имя', code: 'К-1', bin: '900101300123' });
+    await q(`DELETE FROM onec_etl_entity_state; INSERT INTO onec_etl_entity_state VALUES (1, 'counterparty_phones', NULL, now() - interval '29 days')`);
+    expect((await seen()).card).toEqual(['8 701 555 01 01']);
+  });
+
+  it('without clients.onec_data.view the name and the code are returned, phones and BIN/IIN are not — on reading and in the answer of the command', async () => {
+    await mirror(REF(1), 'Тест Контрагент 1', { Code: 'К-1', 'ИдентификационныйНомер': '111111111111' });
+    await phone(REF(1), '87015550101');
+    const hidden = { refKey1c: REF(1), name: 'Тест Контрагент 1', code: 'К-1', bin: null, isBuyer: true, phones: [] };
+    expect(await links.setLink(1, REF(1), null, operator, 'req-op')).toMatchObject({ refKey1c: REF(1), counterparty: hidden, dataHidden: true });
+    expect(await links.setLink(1, REF(1), null, operator, 'req-op-repeat')).toMatchObject({ counterparty: hidden, dataHidden: true });
+    expect(await links.link(1, undefined, false)).toMatchObject({ counterparty: hidden, dataHidden: true });
+    expect((await links.link(1, undefined, true)).counterparty).toMatchObject({ bin: '111111111111', phones: ['87015550101'] });
+    // BIN/IIN never reaches the audit, whoever links.
+    const audit = (await q(`SELECT before_json::text || after_json::text || metadata_json::text AS body, metadata_json FROM audit_log`)).rows;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].body).not.toContain('111111111111');
+    expect(audit[0].metadata_json).toEqual({ counterpartyCode: 'К-1', via: 'card' });
   });
 });
