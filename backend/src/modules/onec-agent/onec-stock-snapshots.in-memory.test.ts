@@ -27,7 +27,8 @@ describe('in-memory stock snapshots (the contract of the port for consumer tests
     expect(second).toMatchObject({ id: 2, queuePosition: 2, activeAhead: true });
     port.start(1);
     expect(await port.get(1)).toMatchObject({ status: 'syncing', queuePosition: 0, activeAhead: false });
-    expect(await port.get(2)).toMatchObject({ queuePosition: 2, activeAhead: true });
+    // The one being read is not in the waiting line: the second is next to start, with a snapshot ahead of it.
+    expect(await port.get(2)).toMatchObject({ queuePosition: 1, activeAhead: true });
     port.complete(1, [row(W1, 2)]);
     expect(await port.get(1)).toMatchObject({ status: 'ready', queuePosition: null, rowsCount: 1 });
     expect(await port.get(2)).toMatchObject({ queuePosition: 1, activeAhead: false });
@@ -46,6 +47,21 @@ describe('in-memory stock snapshots (the contract of the port for consumer tests
     port.fail(forced.id, 'SYNC_TIMEOUT');
     await port.delete(first.id, actor, 'r');
     expect((await port.request({ momentLocal: '2026-09-26T10:14:00', idempotencyKey: 'request-5' }, actor, 'r')).id).toBeGreaterThan(forced.id);
+  });
+
+  it('a key answered with an existing snapshot keeps that snapshot: after a forced one, after delete, with force', async () => {
+    const port = fresh();
+    const a = await port.request({ momentLocal: '2026-09-26T10:14:00', idempotencyKey: 'request-a' }, actor, 'r');
+    port.complete(a.id, []);
+    expect((await port.request({ momentLocal: '2026-09-26T10:14:00', idempotencyKey: 'request-k2' }, actor, 'r')).id).toBe(a.id);
+    const b = await port.request({ momentLocal: '2026-09-26T10:14:00', force: true, idempotencyKey: 'request-b' }, actor, 'r');
+    port.complete(b.id, []);
+    expect((await port.request({ momentLocal: '2026-09-26T10:14:00', idempotencyKey: 'request-k3' }, actor, 'r')).id).toBe(b.id);
+    expect((await port.request({ momentLocal: '2026-09-26T10:14:00', idempotencyKey: 'request-k2' }, actor, 'r')).id).toBe(a.id);
+    expect((await port.request({ momentLocal: '2026-09-26T10:14:00', force: true, idempotencyKey: 'request-k2' }, actor, 'r')).id).toBe(a.id);
+    await port.delete(a.id, actor, 'r');
+    const repeated = await port.request({ momentLocal: '2026-09-26T10:14:00', idempotencyKey: 'request-k2' }, actor, 'r');
+    expect([repeated.id, repeated.deletedAt !== null]).toEqual([a.id, true]);
   });
 
   it('refuses a malformed or future moment, a bad key, an unknown source and a switched-off module', async () => {

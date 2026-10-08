@@ -15,7 +15,11 @@ export type OnecEventType =
   | 'onec.etl.nightly_full_sync_missed'
   | 'onec.etl.entity_revoked'
   | 'onec.etl.entity_restored'
-  | 'onec.source.generation_bumped';
+  | 'onec.source.generation_bumped'
+  | 'onec.stock_snapshot.requested'
+  | 'onec.stock_snapshot.ready'
+  | 'onec.stock_snapshot.failed'
+  | 'onec.stock_snapshot.deleted';
 
 export type OnecEventSeverity = 'info' | 'warning' | 'critical';
 

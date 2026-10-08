@@ -350,6 +350,38 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText.slice(verifyStart, verifyEnd)).toContain('237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*');
   });
 
+  it('probes the end state of the clients analytics view before ledgering migration 246', () => {
+    const arm = probeFn.slice(probeFn.indexOf('246_clients_analytics_view_real_orders*)'), probeFn.indexOf('242_supplier_phone_contact_sync*)'));
+    // the whole end state: the order kind in all three CTEs and each counter bound to its own status rule —
+    // a view fixed only in part (verified on the stage database: without the kind in pay_agg or last_order,
+    // with one counter left on completion_date, with the two rules swapped) stays PENDING
+    for (const marker of ["to_regclass('public.clients_analytics_view') IS NOT NULL",
+      "/ length('production_order') = 3 FROM", ")+ AS orders_in_progress_count'", ")+ AS orders_completed_count'",
+      "<> ALL", "= ANY", "NOT LIKE '%completion_date IS%'"]) {
+      expect(arm).toContain(marker);
+    }
+    expect(arm.match(/^\s+"SELECT /gm)).toHaveLength(5);
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('245_onec_operator_role*|246_clients_analytics_view_real_orders*');
+    expect(files).toContain('246_clients_analytics_view_real_orders.sql');
+    expect(files).not.toContain('246_clients_analytics_view_real_orders_rollback.sql');
+  });
+
+  it('probes the three stock snapshot tables, their indexes and checks before ledgering migration 250', () => {
+    const armStart = probeFn.indexOf('250_onec_stock_snapshots*)');
+    const arm = probeFn.slice(armStart, probeFn.indexOf(';;', armStart));
+    for (const table of ['onec_stock_snapshots', 'onec_stock_snapshot_requests', 'onec_stock_snapshot_rows', 'onec_stock_snapshot_slot']) expect(arm).toContain(`q_tbl ${table})`);
+    for (const index of ['uq_onec_stock_snapshots_reading', 'idx_onec_stock_snapshots_queue', 'idx_onec_stock_snapshots_moment', 'idx_onec_stock_snapshot_rows_warehouse']) {
+      expect(arm).toContain(`q_idx ${index}`);
+    }
+    expect(arm).toContain('q_con_on onec_stock_snapshots chk_onec_stock_snapshots_final');
+    expect(arm).toContain('q_con_on onec_stock_snapshot_slot chk_onec_stock_snapshot_slot_owner');
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    expect(scriptText.slice(verifyStart, verifyEnd)).toMatch(/\|250_onec_stock_snapshots\*[|)]/);
+  });
+
   it('probes the expected-silence column and its format check before ledgering migration 247', () => {
     const arm = probeFn.slice(probeFn.indexOf('247_onec_agent_expected_silence*)'), probeFn.indexOf('245_onec_operator_role*)'));
     expect(arm).toContain('q_col onec_agents expected_silence_utc');

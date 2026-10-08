@@ -474,6 +474,12 @@ export const envSchema = z
      */
     BACKEND_ONEC_ALERT_NOTIFICATIONS: booleanFromEnv.default(false),
     /**
+     * 1C stock snapshots at a date (plan 2026-10-08-onec-stock-snapshots): new snapshots may be requested. Off — the
+     * queue only finishes what was started and switches the service set of the agent configuration off. Needs agent
+     * ≥ 1.3.11 and the monitor owner process. Default off.
+     */
+    BACKEND_ONEC_STOCK_SNAPSHOTS: booleanFromEnv.default(false),
+    /**
      * 1C incoming payments (plan 2026-10-04-onec-incoming-payments): the «Поступления 1С» tab and its read API, and
      * refunds reducing «Оплачено» of a 1C order through the refunded receipt. Read-only; default off.
      */

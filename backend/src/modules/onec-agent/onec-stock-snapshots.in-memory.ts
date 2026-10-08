@@ -22,6 +22,8 @@ interface Stored {
  */
 export class InMemoryOnecStockSnapshots implements OnecStockSnapshotsPort {
   private readonly stored = new Map<number, Stored>();
+  /** Every accepted request key → the snapshot it was answered with (for ever). */
+  private readonly keys = new Map<string, number>();
   private nextId = 1;
   private generation = 1;
   /** `false` — switched off by the flag: no new requests; reading and deleting still work. */
@@ -54,12 +56,15 @@ export class InMemoryOnecStockSnapshots implements OnecStockSnapshotsPort {
     if (Number.isNaN(momentUtc.getTime())) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный момент среза');
     if (momentUtc.getTime() > this.now().getTime()) throw new ApiError(422, 'VALIDATION_ERROR', 'Момент среза не может быть в будущем');
     const all = [...this.stored.values()];
-    const repeated = all.find((item) => item.idempotencyKey === input.idempotencyKey);
-    if (repeated) return this.present(repeated);
+    const repeated = this.keys.get(input.idempotencyKey);
+    if (repeated !== undefined) return this.present(this.stored.get(repeated)!);
     if (!input.force) {
       const same = all.filter((item) => item.view.deletedAt === null && item.generation === this.generation && item.view.momentLocal === input.momentLocal
         && item.view.status !== 'failed').sort((a, b) => b.view.id - a.view.id)[0];
-      if (same) return this.present(same);
+      if (same) {
+        this.keys.set(input.idempotencyKey, same.view.id);
+        return this.present(same);
+      }
     }
     const at = this.now().toISOString();
     const item: Stored = {
@@ -72,6 +77,7 @@ export class InMemoryOnecStockSnapshots implements OnecStockSnapshotsPort {
       },
     };
     this.stored.set(item.view.id, item);
+    this.keys.set(input.idempotencyKey, item.view.id);
     return this.present(item);
   }
 
@@ -179,14 +185,15 @@ export class InMemoryOnecStockSnapshots implements OnecStockSnapshotsPort {
   private present(item: Stored): StockSnapshotView {
     const final = item.view.status === 'ready' || item.view.status === 'failed';
     const reading = item.view.status === 'config_published' || item.view.status === 'syncing';
-    // Earlier snapshots of the source that are not final yet: being read or waiting.
-    const ahead = final ? 0 : [...this.stored.values()].filter((other) => other.view.id < item.view.id && other.view.deletedAt === null
-      && other.view.status !== 'ready' && other.view.status !== 'failed').length;
+    const others = [...this.stored.values()].filter((other) => other !== item && other.view.deletedAt === null);
+    // The waiting line: snapshots requested earlier that have not started yet; the one being read is not in it.
+    const waitingAhead = others.filter((other) => other.view.status === 'requested' && other.view.id < item.view.id).length;
+    const someoneReading = others.some((other) => other.view.status === 'config_published' || other.view.status === 'syncing');
     return {
       ...item.view, requestedBy: item.view.requestedBy ? { ...item.view.requestedBy } : null,
       currentSource: item.generation === this.generation,
-      queuePosition: final ? null : reading ? 0 : ahead + 1,
-      activeAhead: !final && !reading && ahead > 0,
+      queuePosition: final ? null : reading ? 0 : waitingAhead + 1,
+      activeAhead: !final && !reading && (waitingAhead > 0 || someoneReading),
     };
   }
 }

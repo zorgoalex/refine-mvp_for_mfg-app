@@ -244,6 +244,12 @@ export class OnecAlertProjector {
       case 'onec.source.generation_bumped':
         // Operator actions: audited and published for subscribers; no alert of their own.
         return;
+      case 'onec.stock_snapshot.requested':
+      case 'onec.stock_snapshot.ready':
+      case 'onec.stock_snapshot.failed':
+      case 'onec.stock_snapshot.deleted':
+        // Transitions of stock snapshots: published for subscribers; the queue raises its own alerts.
+        return;
       default:
         throw new UnknownOnecEventError(event.eventType);
     }

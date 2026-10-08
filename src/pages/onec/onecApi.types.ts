@@ -260,11 +260,21 @@ export interface OnecAgentReportedConfig {
   rejectedReason: string | null;
 }
 
+/** An ETL entity ERP manages itself (the service set of stock snapshots): shown, never edited. */
+export interface OnecManagedEntity {
+  entityCode: string;
+  enabled: boolean;
+  oDataPath: string | null;
+}
+
 export interface OnecAgentConfigState {
   agentId: string;
   publishBlocked: boolean;
   draft: OnecConfigDraft | null;
+  /** The published configuration as the operator works with it: without the managed entities. */
   published: OnecPublishedConfig | null;
+  /** Absent on a backend before stock snapshots. */
+  managedEntities?: OnecManagedEntity[];
   agentReported: OnecAgentReportedConfig;
   defaults: OnecAgentConfiguration;
 }

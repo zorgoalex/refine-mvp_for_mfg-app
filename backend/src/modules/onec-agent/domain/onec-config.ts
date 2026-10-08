@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { canonicalizeValue, foldKey, type CanonicalResult } from '../canonical-json/canonical-json';
+import { managedCodesIn } from './onec-managed-entities';
 
 /** Agent operating modes (spec §6). */
 export const ONEC_AGENT_MODES = ['Normal', 'PauseEtl', 'PauseCommands', 'Drain', 'Maintenance', 'Disabled'] as const;
@@ -25,7 +26,9 @@ const identifier = z.string().trim().min(1).max(200);
 const odataName = z.string().min(1).max(200).regex(/^[^\s/?#]+$/u, 'must be a single OData name');
 /**
  * Entity set, or strictly one of the register function forms the agent reads (same check as agent ≥ 1.1.3):
- * `<set>/Balance(Dimensions='<a>,<b>,…')` (balances, agent to-erp/0029) or
+ * `<set>/Balance(Dimensions='<a>,<b>,…')` (balances, agent to-erp/0029),
+ * `<set>/Balance(Period=datetime'YYYY-MM-DDTHH:MM:SS',Dimensions='<a>,…')` (balances as of a moment, local time of
+ * the 1C base, `Period` strictly before `Dimensions`; agent ≥ 1.3.11, to-erp/0172) or
  * `<set>/BalanceAndTurnovers(StartPeriod=datetime'YYYY-MM-DDTHH:MM:SS'[,EndPeriod=datetime'…'],Dimensions='<a>,…')`
  * (balances and turnovers over the window, agent to-erp/0091/0093).
  */
@@ -33,11 +36,11 @@ const ODATA_NAME = "[^\\s/?#()',]+";
 const ODATA_DIMENSIONS = `Dimensions='${ODATA_NAME}(,${ODATA_NAME})*'`;
 const ODATA_DATETIME = "datetime'\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}'";
 export const ODATA_PATH_PATTERN = new RegExp(
-  `^${ODATA_NAME}(\\/Balance\\(${ODATA_DIMENSIONS}\\)` +
+  `^${ODATA_NAME}(\\/Balance\\((Period=${ODATA_DATETIME},)?${ODATA_DIMENSIONS}\\)` +
     `|\\/BalanceAndTurnovers\\(StartPeriod=${ODATA_DATETIME}(,EndPeriod=${ODATA_DATETIME})?,${ODATA_DIMENSIONS}\\))?$`,
   'u',
 );
-const odataPath = z.string().min(1).max(400).regex(ODATA_PATH_PATTERN, "must be an entity set, <set>/Balance(Dimensions='…') or <set>/BalanceAndTurnovers(StartPeriod=datetime'…',Dimensions='…')");
+const odataPath = z.string().min(1).max(400).regex(ODATA_PATH_PATTERN, "must be an entity set, <set>/Balance([Period=datetime'…',]Dimensions='…') or <set>/BalanceAndTurnovers(StartPeriod=datetime'…',Dimensions='…')");
 
 export const onecEtlEntitySchema = z
   .object({
@@ -150,6 +153,17 @@ export function validateOnecConfiguration(input: unknown): OnecConfigValidation 
     return {
       ok: false,
       issues: parsed.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message })),
+    };
+  }
+  // Managed entities come from the ERP state at publication; an operator's document must not carry them.
+  const managed = managedCodesIn(parsed.data);
+  if (managed.length > 0) {
+    return {
+      ok: false,
+      issues: managed.map((code) => ({
+        path: `etlEntities.${parsed.data.etlEntities.findIndex((entity) => entity.entityCode === code)}.entityCode`,
+        message: `${code} is a service entity managed by ERP and cannot be edited`,
+      })),
     };
   }
   const canonical = canonicalizeValue(parsed.data);
