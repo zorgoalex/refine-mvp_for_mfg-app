@@ -12,6 +12,7 @@ import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 import { CLIENT_PERSON_TYPE_LABELS, ClientPersonType } from "../../types/clients";
 import { can } from "../../utils/permissions";
 import { ClientCounterpartyBulkModal } from "./ClientCounterpartyBulkModal";
+import { canChooseCounterparty } from "./clientCounterpartyModel";
 
 export const ClientList: React.FC<IResourceComponentsProps> = () => {
   const [searchValue, setSearchValue] = useState<string>("");
@@ -154,7 +155,7 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
               Найти
             </Button>
           </Space.Compact>
-          {can("clients.update") ? (
+          {canChooseCounterparty(can) ? (
             <Button style={{ marginRight: 8 }} onClick={() => setMatchingOpen(true)}>Сопоставить с 1С</Button>
           ) : null}
           <CreateButton>Создать</CreateButton>

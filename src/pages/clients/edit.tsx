@@ -11,6 +11,7 @@ import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder"
 import { Form, Input, Checkbox, notification, Spin, Radio, Typography } from "antd";
 import { ClientPhonesSection } from "./components/ClientPhonesSection";
 import { ClientCounterpartyCard } from "./ClientCounterpartyCard";
+import { canChooseCounterparty } from "./clientCounterpartyModel";
 import { ContactsCard } from "../../components/contacts/ContactsCard";
 import { CLIENT_CONTACTS } from "../../components/contacts/partyContactsSources";
 import { can } from "../../utils/permissions";
@@ -186,7 +187,7 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
       </div>
       {/* Сопоставление с контрагентом 1С — отдельной командой, вне формы клиента. */}
       <div style={{ marginTop: 12 }}>
-        <ClientCounterpartyCard clientId={Number(id) || null} editable={can("clients.update")} />
+        <ClientCounterpartyCard clientId={Number(id) || null} editable={can("clients.update")} canChoose={canChooseCounterparty(can)} />
       </div>
     </Edit>
   );

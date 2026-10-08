@@ -45,6 +45,11 @@ export function counterpartyOptions(items: readonly ClientCounterparty[], client
   });
 }
 
+/** Choosing a counterparty shows phones and BIN/IIN of the whole 1C directory: both rights are needed. */
+export function canChooseCounterparty(can: (permission: 'clients.update' | 'clients.onec_data.view') => boolean): boolean {
+  return can('clients.update') && can('clients.onec_data.view');
+}
+
 const LINK_ERRORS: Record<string, string> = {
   CLIENT_COUNTERPARTY_UNKNOWN: 'Такого контрагента нет в загруженных данных 1С.',
   CLIENT_NOT_FOUND: 'Клиент не найден — обновите страницу.',

@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { QueryResultRow } from 'pg';
 import { DatabaseService } from '../../../database/database.service';
-import { normalizedName, normalizedPhone } from '../domain/onec-matching-sql';
+import { livePersonalSnapshotJoin, normalizedName, normalizedPhone } from '../domain/onec-matching-sql';
 
 /**
  * Read-only matching of the 1C copy against ERP reference data (plan §9 «Сопоставление»): nothing is
@@ -28,8 +28,11 @@ const MATCHES_CTE = `
      WHERE m.source_id = $1 AND m.entity_code = 'counterparties' AND NOT COALESCE((m.data->>'IsFolder')::boolean, false)),
   cl AS (SELECT client_id, client_name::text AS name, ref_key_1c, ${normalizedName('client_name::text')} AS n FROM clients),
   sp AS (SELECT supplier_id, supplier_name AS name, ref_key_1c, ${normalizedName('supplier_name')} AS n FROM suppliers),
-  ph AS (SELECT data->>'Ref_Key' AS source_key, ${normalizedPhone("data->>'Представление'")} AS p
-           FROM onec_etl_mirror_rows WHERE source_id = $1 AND entity_code = 'counterparty_phones'),
+  ph AS (SELECT m.data->>'Ref_Key' AS source_key, ${normalizedPhone("m.data->>'Представление'")} AS p
+           FROM onec_etl_mirror_rows m
+           -- Phones are personal data: a revoked or expired snapshot is not compared either.
+           ${livePersonalSnapshotJoin('m')}
+          WHERE m.source_id = $1 AND m.entity_code = 'counterparty_phones' AND NOT m.deleted AND m.missing_in_source_at IS NULL),
   cph AS (SELECT DISTINCT client_id, ${normalizedPhone('phone_number')} AS p FROM client_phones),
   hits AS (
     SELECT cp.source_key, 'client' AS kind, cl.client_id::bigint AS id, cl.name, 'ref_key' AS by

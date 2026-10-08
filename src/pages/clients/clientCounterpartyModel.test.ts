@@ -4,7 +4,7 @@ import { ApiError } from '../../api/apiError';
 import type { ClientCounterparty } from '../../api/partyContactsApi';
 import {
   chunks, clientLinkErrorMessage, clientsCount, confirmHeadline, confirmSummary, counterpartyDetails, counterpartyOptions, defaultSelection,
-  isCounterpartyApiMissing, matchReasons, pairsToVerify, runConfirmation, takenBy, verifyPairs,
+  canChooseCounterparty, isCounterpartyApiMissing, matchReasons, pairsToVerify, runConfirmation, takenBy, verifyPairs,
 } from './clientCounterpartyModel';
 
 const item = (patch: Partial<ClientCounterparty> = {}): ClientCounterparty => ({
@@ -53,7 +53,7 @@ describe('client ↔ 1C counterparty model', () => {
 
   it('the client forms no longer carry the 1C key: it is changed only by the card command', () => {
     for (const file of ['./create.tsx', './edit.tsx']) expect(read(file)).not.toMatch(/name="ref_key_1c"/);
-    expect(read('./edit.tsx')).toMatch(/<ClientCounterpartyCard clientId=\{Number\(id\) \|\| null\} editable=\{can\("clients\.update"\)\} \/>/);
+    expect(read('./edit.tsx')).toMatch(/<ClientCounterpartyCard clientId=\{Number\(id\) \|\| null\} editable=\{can\("clients\.update"\)\} canChoose=\{canChooseCounterparty\(can\)\} \/>/);
     expect(read('./show.tsx')).toMatch(/<ClientCounterpartyCard [^>]*editable=\{false\} \/>/);
     expect(read('./ClientCounterpartyCard.tsx')).not.toMatch(/from 'antd'[^;]*\bTooltip\b/);
   });
@@ -200,8 +200,25 @@ describe('client ↔ 1C counterparty model', () => {
     ]);
   });
 
-  it('bulk: the window is opened from the clients list only with the right to change clients', () => {
-    expect(read('./list.tsx')).toMatch(/\{can\("clients\.update"\) \? \(\s*<Button[^>]*onClick=\{\(\) => setMatchingOpen\(true\)\}>Сопоставить с 1С<\/Button>/);
+  it('bulk: the window is opened from the clients list only with the rights to change clients and to see 1C counterparty data', () => {
+    expect(read('./list.tsx')).toMatch(/\{canChooseCounterparty\(can\) \? \(\s*<Button[^>]*onClick=\{\(\) => setMatchingOpen\(true\)\}>Сопоставить с 1С<\/Button>/);
     expect(read('./ClientCounterpartyBulkModal.tsx')).not.toMatch(/from 'antd'[^;]*\b(Table|Tooltip)\b/);
+  });
+
+  it('choosing a counterparty needs both rights; the card asks for candidates only then and says why data is hidden', () => {
+    const having = (...granted: string[]) => (permission: string) => granted.includes(permission);
+    expect(canChooseCounterparty(having('clients.update', 'clients.onec_data.view'))).toBe(true);
+    expect(canChooseCounterparty(having('clients.update'))).toBe(false);
+    expect(canChooseCounterparty(having('clients.onec_data.view'))).toBe(false);
+    const card = read('./ClientCounterpartyCard.tsx');
+    expect(card).toMatch(/const choosing = editable && canChoose;/);
+    expect(card).toMatch(/useEffect\(\(\) => \{ if \(choosing\) void suggest\(\); \}, \[choosing, suggest\]\);/);
+    // Candidates are never requested by a user who cannot choose (the backend would answer 403).
+    expect(card.match(/void suggest\(\)/g)).toHaveLength(3);
+    expect(card.match(/if \(choosing\) void suggest\(\)/g)).toHaveLength(3);
+    expect(card).toMatch(/\{choosing && link\?\.available \? \(\s*<Space wrap>\s*<Select/);
+    expect(card).toMatch(/link\?\.dataHidden && linked/);
+    // The read-only card of the «Основное» tab never chooses.
+    expect(read('./show.tsx')).toMatch(/<ClientCounterpartyCard [^>]*editable=\{false\} \/>/);
   });
 });

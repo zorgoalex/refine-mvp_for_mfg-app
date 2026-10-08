@@ -108,11 +108,15 @@ export class PartyContactsController {
 
   @ApiOperation({ summary: 'The 1C counterparty a client is linked to' })
   @Get('clients/:id/counterparty') @RequirePermissions(['clients.view'])
-  clientCounterparty(@Param('id') id: string) { return this.clientCounterparties.link(parseId(id)); }
+  clientCounterparty(@Param('id') id: string, @Req() request: RequestWithCurrentUser) {
+    // Phones and BIN/IIN of the counterparty — only with `clients.onec_data.view`; the name and the code — with `clients.view`.
+    return this.clientCounterparties.link(parseId(id), undefined, actor(request).user.permissions.includes('clients.onec_data.view'));
+  }
 
-  // The search opens the whole 1C counterparty directory (names, BIN/IIN, phones): only for those who may link.
+  // The search opens the whole 1C counterparty directory (names, BIN/IIN, phones): only for those who may link
+  // and may see the data of 1C counterparties.
   @ApiOperation({ summary: '1C counterparties for a client: by a search text, or the ones that look like the client (name, phone)' })
-  @Get('clients/:id/counterparty-candidates') @RequirePermissions(['clients.update'])
+  @Get('clients/:id/counterparty-candidates') @RequirePermissions(['clients.update', 'clients.onec_data.view'])
   async clientCounterpartyCandidates(@Param('id') id: string, @Query('search') search: unknown) {
     const text = typeof search === 'string' && search.trim() ? search.trim().slice(0, 100) : null;
     return { items: await this.clientCounterparties.candidates(parseId(id), text) };
@@ -129,11 +133,11 @@ export class PartyContactsController {
   }
 
   @ApiOperation({ summary: 'Bulk view: clients without a 1C counterparty and their exact candidates (unambiguous pairs and ambiguous clients)' })
-  @Get('client-counterparty-matches') @RequirePermissions(['clients.update'])
+  @Get('client-counterparty-matches') @RequirePermissions(['clients.update', 'clients.onec_data.view'])
   clientCounterpartyMatches() { return this.clientCounterparties.matches(); }
 
   @ApiOperation({ summary: 'Confirm pairs of the bulk view: link each client that has no counterparty yet; impossible pairs are reported and skipped' })
-  @Post('client-counterparty-matches/confirm') @HttpCode(200) @RequirePermissions(['clients.update'])
+  @Post('client-counterparty-matches/confirm') @HttpCode(200) @RequirePermissions(['clients.update', 'clients.onec_data.view'])
   async confirmClientCounterparties(@Body() body: unknown, @Req() request: RequestWithCurrentUser) {
     const parsed = confirmSchema.safeParse(body);
     if (!parsed.success) throw new ApiError(422, 'VALIDATION_ERROR', `Некорректный запрос подтверждения (не более ${CONFIRM_MAX} пар)`);

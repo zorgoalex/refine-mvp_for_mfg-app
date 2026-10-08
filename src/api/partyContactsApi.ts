@@ -60,6 +60,8 @@ export interface ClientLink {
   available: boolean;
   /** null — no link, or the key is not in the loaded 1C data. */
   counterparty: CounterpartyCard | null;
+  /** Phones and BIN/IIN are left out: the viewer has no `clients.onec_data.view`. */
+  dataHidden?: boolean;
 }
 
 export type ClientMatchStrength = 'both' | 'phone' | 'name';
