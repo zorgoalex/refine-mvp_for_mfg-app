@@ -155,3 +155,79 @@ export type OnecConsumptionRunDto =
   | { status: 'skipped'; reason: 'disabled' | 'onec_unavailable' | 'busy' }
   | { status: 'done'; candidates: number; processed: number; documents: number; failed: number };
 export interface OnecCompensateDto { documents: number; remaining: number }
+
+/** Срез остатков 1С на дату (владелец данных — интеграция 1С; склад показывает и сравнивает). */
+export type OnecSnapshotStatus = 'requested' | 'config_published' | 'syncing' | 'ready' | 'failed';
+export interface OnecSnapshotDto {
+  id: number;
+  sourceId: number;
+  /** false — срез снят с прежней (заменённой) базы 1С: исторический. */
+  currentSource: boolean;
+  /** Ссылка на базу 1С: сравнивать срезы можно только при равной. */
+  baseRef: string;
+  /** Местное время базы 1С: YYYY-MM-DDTHH:MM:SS. */
+  momentLocal: string;
+  momentUtc: string;
+  timeZone: string;
+  status: OnecSnapshotStatus;
+  waitReason: string | null;
+  errorCode: string | null;
+  requestedBy: { id: number; name: string | null } | null;
+  requestedAt: string;
+  updatedAt: string;
+  readAt: string | null;
+  readyAt: string | null;
+  rowsCount: number | null;
+  /** 0 — читается сейчас; n ≥ 1 — n-й в очереди; null — завершён. */
+  queuePosition: number | null;
+  activeAhead: boolean;
+}
+export interface OnecSnapshotsPage {
+  /** false — срезы не подключены на сервере (вкладка скрыта). */
+  readAvailable: boolean;
+  /** false — история читается, новые срезы не запрашиваются (причина в reason). */
+  commandsAvailable: boolean;
+  reason: string | null;
+  items: OnecSnapshotDto[];
+  total: number;
+}
+export interface OnecSnapshotWarehouseDto {
+  warehouseRefKey: string | null;
+  /** null — склад 1С не заведён в ERP. */
+  warehouseId: number | null;
+  name: string | null;
+  rows: number;
+  quantityTotal: number;
+}
+export interface OnecSnapshotCardDto { snapshot: OnecSnapshotDto; warehouses: OnecSnapshotWarehouseDto[] }
+export interface OnecSnapshotItemDto {
+  source: '1c'; group: string; groupLabel: string; itemRefKey: string; code: string | null; name: string;
+  categoryKey: string | null; categoryName: string | null; unitName: string | null;
+  /** Количество в срезе. */
+  quantity: number;
+  /** Сравнение: количество второй стороны и разница (вторая − срез); без сравнения — null. */
+  otherQuantity: number | null;
+  delta: number | null;
+  sheetMaterialTypeId: number | null; ambiguousLink: boolean;
+}
+export interface OnecSnapshotStockDto {
+  snapshot: OnecSnapshotDto;
+  warehouses: Array<{ warehouseId: number; name: string }>;
+  other: { kind: 'current'; asOf: string | null } | { kind: 'snapshot'; snapshot: OnecSnapshotDto } | null;
+  tabs: Array<{ key: string; label: string; count: number }>;
+  categories: Array<{ key: string; name: string; count: number }>;
+  total: number;
+  items: OnecSnapshotItemDto[];
+}
+export interface OnecSnapshotStockQuery {
+  /** id складов ERP через запятую; пусто — все склады среза. */
+  warehouseIds?: string;
+  group?: string;
+  categoryKey?: string;
+  search?: string;
+  nonZero?: boolean;
+  negative?: boolean;
+  changedOnly?: boolean;
+  offset?: number;
+  limit?: number;
+}

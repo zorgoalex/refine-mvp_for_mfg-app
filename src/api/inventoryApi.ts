@@ -6,6 +6,7 @@ import type {
   OrderFilmStockDto, OrderSheetStockDto, StockBalanceDto, StockDocumentDto, StockDocumentSummaryDto, StockImportInput,
   OnecCompensateDto, OnecConsumptionRunDto, OnecIssuesPage, OnecIssuesQuery, OnecWarehouseOptionDto, StockLinePatch, WarehouseCreateInput, WarehouseDto, WarehousePatch, WarehouseSyncResultDto,
   WarehouseStockDto, WarehouseStockQuery,
+  OnecSnapshotCardDto, OnecSnapshotDto, OnecSnapshotsPage, OnecSnapshotStatus, OnecSnapshotStockDto, OnecSnapshotStockQuery,
 } from './types/inventoryApi.types';
 
 const root = backendApiPath('/inventory');
@@ -71,6 +72,31 @@ export const inventoryApi = {
    */
   compensateOnecConsumption(warehouseId: number, key = createInventoryIdempotencyKey()) {
     return httpClient.post<OnecCompensateDto>(`${root}/warehouses/${warehouseId}/onec-consumption/compensate`, { includesReceipts: true }, commandOptions(key));
+  },
+  /** Срезы остатков 1С на дату: возможности сервера и страница срезов (от новых). */
+  onecSnapshots(params: { status?: OnecSnapshotStatus; offset?: number; limit?: number } = {}) {
+    return httpClient.get<OnecSnapshotsPage>(withQuery(`${root}/onec-snapshots`, params));
+  },
+  /** Запросить срез на момент (местное время базы 1С); без `force` вернётся уже существующий срез этого момента. */
+  requestOnecSnapshot(body: { momentLocal: string; force?: boolean }, key = createInventoryIdempotencyKey()) {
+    return httpClient.post<OnecSnapshotDto>(`${root}/onec-snapshots`, body, commandOptions(key));
+  },
+  onecSnapshot(id: number) {
+    return httpClient.get<OnecSnapshotCardDto>(`${root}/onec-snapshots/${id}`);
+  },
+  onecSnapshotStock(id: number, params: OnecSnapshotStockQuery = {}) {
+    return httpClient.get<OnecSnapshotStockDto>(withQuery(`${root}/onec-snapshots/${id}/stock`, params));
+  },
+  /** Сравнение среза с текущими остатками 1С (`current`) или с другим срезом; разница — вторая сторона минус срез. */
+  compareOnecSnapshot(id: number, other: 'current' | number, params: OnecSnapshotStockQuery = {}) {
+    return httpClient.get<OnecSnapshotStockDto>(withQuery(`${root}/onec-snapshots/${id}/compare`, { ...params, with: String(other) }));
+  },
+  /** Готовые срезы той же базы 1С, с которыми можно сравнить срез (поиск по номеру или дате). */
+  comparableOnecSnapshots(id: number, params: { search?: string; offset?: number; limit?: number } = {}) {
+    return httpClient.get<{ items: OnecSnapshotDto[]; total: number }>(withQuery(`${root}/onec-snapshots/${id}/comparable`, params));
+  },
+  deleteOnecSnapshot(id: number, key = createInventoryIdempotencyKey()) {
+    return httpClient.delete<void>(`${root}/onec-snapshots/${id}`, commandOptions(key));
   },
   /** Остатки листовых материалов заказа по данным 1С. */
   orderSheetStock(orderId: number) {

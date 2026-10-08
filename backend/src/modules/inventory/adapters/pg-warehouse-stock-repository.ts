@@ -31,6 +31,14 @@ export class PgWarehouseStockRepository {
     return row ? { warehouseId: Number(row.warehouse_id), name: row.warehouse_name, refKey1c: row.ref_key_1c?.toLowerCase() ?? null } : null;
   }
 
+  /** Склады ERP, связанные с 1С (для сопоставления складов среза остатков). */
+  async warehousesWithOnecKey(client: DatabaseClient): Promise<Array<StockWarehouseRow & { refKey1c: string; isActive: boolean }>> {
+    const { rows } = await client.query<{ warehouse_id: number; warehouse_name: string; ref_key_1c: string; is_active: boolean }>(
+      'SELECT warehouse_id, warehouse_name, ref_key_1c::text AS ref_key_1c, is_active FROM warehouses WHERE ref_key_1c IS NOT NULL ORDER BY warehouse_id',
+    );
+    return rows.map((row) => ({ warehouseId: Number(row.warehouse_id), name: row.warehouse_name, refKey1c: row.ref_key_1c.toLowerCase(), isActive: row.is_active === true }));
+  }
+
   /** Все остатки плёнки ERP склада (как «Остатки плёнки»; объём ограничен справочником плёнок). */
   async filmBalances(client: DatabaseClient, warehouseId: number): Promise<ErpFilmBalanceRow[]> {
     const { rows } = await client.query<{ film_id: string; film_name: string; vendor_name: string | null; quantity: string }>(
