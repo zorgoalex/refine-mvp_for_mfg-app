@@ -164,8 +164,9 @@ export class InventoryOnecSnapshotsService {
 
   /**
    * Срезы, с которыми можно сравнить данный: готовые, той же базы 1С (`sourceId` + `baseRef`), кроме него самого.
-   * База фильтруется ДО пагинации (перебором страниц порта в той же транзакции): исторические срезы находятся и
-   * тогда, когда новее их накопились сотни срезов другой базы. `search` — по номеру или дате (`ДД.ММ.ГГГГ ЧЧ:ММ`).
+   * Базу фильтрует порт (`baseRef`) до пагинации: исторические срезы находятся и тогда, когда новее их накопились
+   * сотни срезов другой базы. Без поиска страница берётся у порта напрямую; `search` — по номеру или дате
+   * (`ДД.ММ.ГГГГ ЧЧ:ММ`) — перебором срезов этой базы в той же транзакции.
    */
   async comparable(user: CurrentUser, snapshotId: number, filter: { search: string | null; offset: number; limit: number }): Promise<{ items: SnapshotDto[]; total: number }> {
     this.requireView(user);
@@ -173,12 +174,17 @@ export class InventoryOnecSnapshotsService {
       const base = await this.port.get(snapshotId, {}, tx);
       const needle = filter.search?.toLocaleLowerCase('ru') ?? '';
       const matched: StockSnapshotView[] = [];
+      // Сам срез входит в выборку порта (он той же базы и готов) — исключается здесь; порядок — от новых.
       for (let offset = 0; ; offset += PORT_PAGE) {
-        const page = await this.port.list({ sourceId: base.sourceId, status: 'ready', offset, limit: PORT_PAGE }, tx);
+        const page = await this.port.list({ sourceId: base.sourceId, baseRef: base.baseRef, status: 'ready', offset, limit: PORT_PAGE }, tx);
         for (const item of page.items) {
           if (item.id === base.id || item.baseRef !== base.baseRef) continue;
           if (needle && !`№ ${item.id} ${momentLabel(item.momentLocal)}`.toLocaleLowerCase('ru').includes(needle)) continue;
           matched.push(item);
+        }
+        // Без поиска достаточно срезов до конца запрошенной страницы; число всех — из ответа порта.
+        if (!needle && matched.length >= filter.offset + filter.limit) {
+          return { items: matched.slice(filter.offset, filter.offset + filter.limit).map(dto), total: page.total - (base.status === 'ready' ? 1 : 0) };
         }
         if (page.items.length === 0 || offset + page.items.length >= page.total) break;
       }
