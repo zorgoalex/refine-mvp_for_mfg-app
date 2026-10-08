@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { HDF_FIELDS } from './buildClientScreenSnapshot';
+import { MATERIAL_FILM_FIELDS, MATERIAL_SHEET_FIELDS } from './orderMaterialsMirror';
 import {
   buildClientScreenSnapshot, createClientScreenIdMap, filterClientScreenUi, resolveClientScreenTab, type ClientScreenOrderSource, type DetailField,
 } from './buildClientScreenSnapshot';
@@ -16,7 +17,7 @@ function source(over: Partial<ClientScreenOrderSource> = {}): ClientScreenOrderS
   return {
     tabs: [
       { key: 'basic', label: 'Обзор' }, { key: 'details', label: 'Состав' }, { key: 'hdf', label: 'ХДФ' }, { key: 'dates', label: 'Логистика' },
-      { key: 'finance', label: 'Финансы' }, { key: 'services', label: 'Услуги/товары' },
+      { key: 'finance', label: 'Финансы' }, { key: 'services', label: 'Услуги/товары' }, { key: 'requirements', label: 'Материалы' },
     ],
     summary: group('summary', ['number', 'order_name', 'client', 'client_phone', 'client_phones', 'deadline', 'positions', 'parts', 'area', 'material', 'milling_type',
       'edge_type', 'film', 'final', 'discount', 'surcharge', 'paid', 'debt', 'designer', 'basis_project', 'project', 'order_status', 'payment_status',
@@ -38,6 +39,10 @@ function source(over: Partial<ClientScreenOrderSource> = {}): ClientScreenOrderS
       grouping: null,
     },
     services: [1, 2].map((n) => ({ key: `SERVICEKEY-${n}`, values: group('services', ['name', 'quantity', 'price', 'sum'], `#${n}`) })),
+    requirements: {
+      films: [1, 2].map((n) => ({ key: `FILMKEY-${n}`, values: group('requirements', MATERIAL_FILM_FIELDS, `#${n}`) })),
+      sheets: [1].map((n) => ({ key: `SHEETKEY-${n}`, values: group('requirements', MATERIAL_SHEET_FIELDS, `#${n}`) })),
+    },
     ...over,
   };
 }
@@ -83,7 +88,7 @@ describe('buildClientScreenSnapshot', () => {
       });
       const snapshot = buildClientScreenSnapshot(grouped, codes, ids());
       const json = JSON.stringify(snapshot);
-      expect(json).not.toMatch(/DETAILKEY|PAYKEY|SERVICEKEY|GROUPKEY|HDFKEY/);
+      expect(json).not.toMatch(/DETAILKEY|PAYKEY|SERVICEKEY|GROUPKEY|HDFKEY|FILMKEY|SHEETKEY/);
       for (const code of sentinelCodes(json)) {
         expect(isClientScreenCodeVisible(code, visible), `${code} leaked with [${codes.join(',')}]`).toBe(true);
       }
@@ -218,6 +223,38 @@ describe('buildClientScreenSnapshot', () => {
     const viewLike = buildClientScreenSnapshot(withoutHdf, CLIENT_SCREEN_CODES, ids());
     expect(viewLike.hdf).toBeUndefined();
     expect(viewLike.tabs.map((tab) => tab.key)).not.toContain('hdf');
+  });
+
+  it('the materials tab: two tables, each with its ticked columns only; a table without a ticked column is not sent', () => {
+    const both = buildClientScreenSnapshot(source(), ['tab.requirements', 'requirements.film_name', 'requirements.film_area', 'requirements.sheet_name'], ids());
+    expect(both.tabs).toEqual([{ key: 'requirements', label: 'Материалы' }]);
+    expect(both.requirements!.films!.columns.map((column) => `${column.code}:${column.label}`)).toEqual(['requirements.film_name:Пленка', 'requirements.film_area:м²']);
+    expect(both.requirements!.films!.rows[0].cells).toEqual([S('requirements.film_name', '#1'), S('requirements.film_area', '#1')]);
+    expect(both.requirements!.sheets!.columns.map((column) => column.label)).toEqual(['Материал']);
+    expect(clientScreenSnapshotSchema.safeParse(both).success).toBe(true);
+    const filmsOnly = buildClientScreenSnapshot(source(), ['tab.requirements', 'requirements.film_stock'], ids());
+    expect(filmsOnly.requirements).toEqual({ films: expect.objectContaining({ columns: [{ code: 'requirements.film_stock', label: 'На складе, пог. м', align: 'right' }] }) });
+    // Without the tab ticked, or while the tab does not report (it is not on the manager's screen), nothing of it goes.
+    const noTab = buildClientScreenSnapshot(source(), ['requirements.film_name', 'tab.details'], ids());
+    expect(noTab.requirements).toBeUndefined();
+    expect(JSON.stringify(noTab)).not.toContain('<<requirements.');
+    const { requirements: _omitted, ...notReporting } = source();
+    const silent = buildClientScreenSnapshot(notReporting, CLIENT_SCREEN_CODES, ids());
+    expect(silent.requirements).toBeUndefined();
+    expect(silent.tabs.map((tab) => tab.key)).not.toContain('requirements');
+  });
+
+  it('a column the manager does not have (stock without the right to see it) is not sent; a blank totals cell stays blank', () => {
+    const base = source();
+    const films = base.requirements!.films.map((row) => ({ key: row.key, values: { ...row.values, film_stock: undefined, film_coverage: undefined } }));
+    films.push({ key: 'total', values: { ...films[0].values, film_name: 'Итого', film_cut_jobs: '' } });
+    const snapshot = buildClientScreenSnapshot({ ...base, requirements: { films, sheets: base.requirements!.sheets } }, CLIENT_SCREEN_CODES, ids());
+    const codes = snapshot.requirements!.films!.columns.map((column) => column.code);
+    expect(codes).not.toContain('requirements.film_stock');
+    expect(codes).not.toContain('requirements.film_coverage');
+    const total = snapshot.requirements!.films!.rows[snapshot.requirements!.films!.rows.length - 1].cells;
+    expect(total[0]).toBe('Итого');
+    expect(total[codes.indexOf('requirements.film_cut_jobs')]).toBe('');
   });
 });
 

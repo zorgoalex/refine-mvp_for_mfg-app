@@ -29,6 +29,10 @@ export const CLIENT_SCREEN_CODES = [
   'finance.payments', 'finance.payments_note',
   'tab.services',
   'services.name', 'services.quantity', 'services.price', 'services.sum',
+  'tab.requirements',
+  'requirements.film_name', 'requirements.film_area', 'requirements.film_details', 'requirements.film_meters', 'requirements.film_sheets',
+  'requirements.film_cut_jobs', 'requirements.film_stock', 'requirements.film_coverage',
+  'requirements.sheet_name', 'requirements.sheet_area', 'requirements.sheet_details', 'requirements.sheet_stock', 'requirements.sheet_coverage',
 ] as const;
 
 export type ClientScreenCode = typeof CLIENT_SCREEN_CODES[number];

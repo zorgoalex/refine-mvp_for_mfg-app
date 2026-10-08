@@ -13,6 +13,7 @@ import { describeHdfConfigErrors, HDF_STATUS_LABELS } from '../orders/components
 import { formatBazisCutSetsGroupLabel, formatCutJobGroupLabel } from '../orders/detailGrouping';
 import { buildOrderHeaderMaterialSummaryItems } from '../orders/orderMaterialsSummary';
 import type { OrderDetailTableCells } from './orderDetailTableMirror';
+import type { OrderMaterialsMirror } from './orderMaterialsMirror';
 import type { ClientScreenOrderSource, ClientScreenValue, DetailField, HdfField } from './buildClientScreenSnapshot';
 import { CLIENT_SCREEN_TAB_KEYS, type ClientScreenTabKey } from './clientScreenSnapshotSchema';
 
@@ -44,6 +45,8 @@ export interface OrderEditSourceInput {
     client: NameOf; orderStatus: NameOf; paymentStatus: NameOf; productionStatus: NameOf; employee: NameOf;
     sheetMaterial: NameOf; millingType: NameOf; edgeType: NameOf; film: NameOf; paymentType: NameOf;
   };
+  /** What the «Материалы» tab reports while it is on the manager's screen; null otherwise. */
+  requirements?: OrderMaterialsMirror | null;
   /** Cells only the detail table knows (cut jobs, the HDF cell), when the table is on screen. */
   tableCellsOf?: ((rowKey: string) => OrderDetailTableCells | null) | null;
   /** Keys of the visible detail table columns in the manager's order (table column keys). */
@@ -410,6 +413,7 @@ export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenO
         }
         : null,
     },
+    ...(input.requirements ? { requirements: { films: input.requirements.films, sheets: input.requirements.sheets } } : {}),
     services: input.catalogLines.map((line) => ({
       key: line.id ? `id:${line.id}` : String(line.clientKey ?? ''),
       values: {

@@ -33,9 +33,9 @@ describe('order form bridge helpers', () => {
   it('mirrors the tabs with the labels and order of the layout the manager uses', () => {
     expect(orderFormMirrorTabs(false)).toEqual([
       { key: 'basic', label: 'Основная информация' }, { key: 'details', label: 'Детали заказа' }, { key: 'hdf', label: 'ХДФ' }, { key: 'dates', label: 'Даты' },
-      { key: 'finance', label: 'Финансы' }, { key: 'services', label: 'Услуги/товары' },
+      { key: 'finance', label: 'Финансы' }, { key: 'services', label: 'Услуги/товары' }, { key: 'requirements', label: 'Материалы' },
     ]);
-    expect(orderFormMirrorTabs(true).map((tab) => `${tab.key}:${tab.label}`)).toEqual(['basic:Обзор', 'details:Состав', 'finance:Финансы', 'dates:Логистика', 'services:Услуги/товары']);
+    expect(orderFormMirrorTabs(true).map((tab) => `${tab.key}:${tab.label}`)).toEqual(['basic:Обзор', 'details:Состав', 'requirements:Материалы', 'finance:Финансы', 'dates:Логистика', 'services:Услуги/товары']);
   });
 
   it('offers for mirroring exactly the tabs the form itself has in each layout, in its order', () => {
@@ -46,7 +46,7 @@ describe('order form bridge helpers', () => {
     expect(end).toBeGreaterThan(start);
     // Tabs of the default layout, in the order the form declares them.
     const declared = [...form.slice(start, end).matchAll(/^ {8}key: '([a-z_]+)',$/gm)].map((match) => match[1]);
-    expect(declared).toEqual(expect.arrayContaining(['basic', 'details', 'hdf', 'dates', 'finance', 'services']));
+    expect(declared).toEqual(expect.arrayContaining(['basic', 'details', 'hdf', 'dates', 'finance', 'services', 'requirements']));
     // Tabs of the operational layout: the form's own list (it leaves some tabs out, HDF among them).
     const listStart = form.indexOf('const operationalOrder = [', end);
     const operational = [...form.slice(listStart, form.indexOf('];', listStart)).matchAll(/'([a-z_]+)'/g)].map((match) => match[1]);
@@ -113,8 +113,9 @@ describe('customer screen control in the order header', () => {
   });
 
   it('maps the manager tab to a mirrored tab or to nothing', () => {
-    expect(['basic', 'details', 'hdf', 'dates', 'finance', 'services'].map(mirroredTab)).toEqual(['basic', 'details', 'hdf', 'dates', 'finance', 'services']);
-    expect(['cut', 'workshops', 'requirements', 'additional', ''].map(mirroredTab)).toEqual([null, null, null, null, null]);
+    expect(['basic', 'details', 'hdf', 'dates', 'finance', 'services', 'requirements'].map(mirroredTab))
+      .toEqual(['basic', 'details', 'hdf', 'dates', 'finance', 'services', 'requirements']);
+    expect(['cut', 'workshops', 'additional', ''].map(mirroredTab)).toEqual([null, null, null, null]);
   });
 });
 

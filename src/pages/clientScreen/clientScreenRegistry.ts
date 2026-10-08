@@ -27,6 +27,10 @@ export const CLIENT_SCREEN_CODES = [
   'finance.payments', 'finance.payments_note',
   'tab.services',
   'services.name', 'services.quantity', 'services.price', 'services.sum',
+  'tab.requirements',
+  'requirements.film_name', 'requirements.film_area', 'requirements.film_details', 'requirements.film_meters', 'requirements.film_sheets',
+  'requirements.film_cut_jobs', 'requirements.film_stock', 'requirements.film_coverage',
+  'requirements.sheet_name', 'requirements.sheet_area', 'requirements.sheet_details', 'requirements.sheet_stock', 'requirements.sheet_coverage',
 ] as const;
 
 export type ClientScreenCode = typeof CLIENT_SCREEN_CODES[number];
@@ -204,6 +208,26 @@ export const CLIENT_SCREEN_GROUPS: readonly ClientScreenGroup[] = [
       { code: 'services.quantity', label: 'Количество' },
       { code: 'services.price', label: 'Цена' },
       { code: 'services.sum', label: 'Сумма' },
+    ],
+  },
+  {
+    key: 'requirements',
+    label: 'Материалы',
+    tabCode: 'tab.requirements',
+    fields: [
+      { code: 'requirements.film_name', label: 'Пленка: название' },
+      { code: 'requirements.film_area', label: 'Пленка: м²' },
+      { code: 'requirements.film_details', label: 'Пленка: детали' },
+      { code: 'requirements.film_meters', label: 'Пленка: пог. м' },
+      { code: 'requirements.film_sheets', label: 'Пленка: листы' },
+      { code: 'requirements.film_cut_jobs', label: 'Пленка: раскрои' },
+      { code: 'requirements.film_stock', label: 'Пленка: на складе, пог. м' },
+      { code: 'requirements.film_coverage', label: 'Пленка: покрытие' },
+      { code: 'requirements.sheet_name', label: 'Листовой материал: название' },
+      { code: 'requirements.sheet_area', label: 'Листовой материал: м²' },
+      { code: 'requirements.sheet_details', label: 'Листовой материал: детали' },
+      { code: 'requirements.sheet_stock', label: 'Листовой материал: на складе (1С)' },
+      { code: 'requirements.sheet_coverage', label: 'Листовой материал: покрытие' },
     ],
   },
 ];

@@ -25,6 +25,8 @@ export interface MirrorView {
   table: MirrorTable | null;
   /** The finance tab has both fields and the payments table. */
   tableTitle: string | null;
+  /** Further tables of the tab, each under its title (the «Материалы» tab has two tables). */
+  moreTables: Array<{ title: string; table: MirrorTable }>;
 }
 
 function mirrorTable(table: ClientScreenTable, ui: ClientScreenUi | null, options: { editable: boolean; paged: boolean }): MirrorTable {
@@ -82,6 +84,7 @@ export function buildMirrorView(snapshot: ClientScreenSnapshot, ui: ClientScreen
   let fields: MirrorField[] = [];
   let table: MirrorTable | null = null;
   let tableTitle: string | null = null;
+  const moreTables: Array<{ title: string; table: MirrorTable }> = [];
   if (activeTab === 'basic') fields = withFocus(snapshot.basic);
   else if (activeTab === 'dates') fields = withFocus(snapshot.dates);
   else if (activeTab === 'hdf') {
@@ -95,6 +98,17 @@ export function buildMirrorView(snapshot: ClientScreenSnapshot, ui: ClientScreen
     }
   } else if (activeTab === 'details' && snapshot.details) table = mirrorTable(snapshot.details, ui, { editable: true, paged: true });
   else if (activeTab === 'services' && snapshot.services) table = mirrorTable(snapshot.services, ui, { editable: false, paged: false });
+  else if (activeTab === 'requirements') {
+    const plain = { editable: false, paged: false };
+    if (snapshot.requirements?.films) {
+      table = mirrorTable(snapshot.requirements.films, ui, plain);
+      tableTitle = 'Пленка';
+      if (snapshot.requirements.sheets) moreTables.push({ title: 'Листовые материалы', table: mirrorTable(snapshot.requirements.sheets, ui, plain) });
+    } else if (snapshot.requirements?.sheets) {
+      table = mirrorTable(snapshot.requirements.sheets, ui, plain);
+      tableTitle = 'Листовые материалы';
+    }
+  }
 
   return {
     title: snapshot.title,
@@ -104,5 +118,6 @@ export function buildMirrorView(snapshot: ClientScreenSnapshot, ui: ClientScreen
     fields,
     table,
     tableTitle,
+    moreTables,
   };
 }

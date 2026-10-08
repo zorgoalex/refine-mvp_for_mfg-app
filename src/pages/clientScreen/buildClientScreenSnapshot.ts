@@ -1,4 +1,5 @@
 import { CLIENT_SCREEN_GROUPS, isClientScreenCodeVisible, type ClientScreenCode } from './clientScreenRegistry';
+import { MATERIAL_FILM_FIELDS, MATERIAL_SHEET_FIELDS, type MaterialFilmField, type MaterialSheetField } from './orderMaterialsMirror';
 import {
   CLIENT_SCREEN_TAB_KEYS, type ClientScreenField, type ClientScreenSnapshot, type ClientScreenTabKey, type ClientScreenTable,
   type ClientScreenUi,
@@ -38,6 +39,11 @@ export interface ClientScreenOrderSource {
     grouping?: { field: DetailField | null; groups: ReadonlyArray<{ key: string; title: string; rowKeys: ReadonlyArray<string> }> } | null;
   };
   services: ReadonlyArray<ClientScreenRowSource<'name' | 'quantity' | 'price' | 'sum'>>;
+  /** The «Материалы» tab as that tab reports it; absent while the tab is not on the manager's screen. */
+  requirements?: {
+    films: ReadonlyArray<ClientScreenRowSource<MaterialFilmField>>;
+    sheets: ReadonlyArray<ClientScreenRowSource<MaterialSheetField>>;
+  };
 }
 
 /** Columns of the HDF table, in the order of the manager's tab. */
@@ -51,11 +57,11 @@ export type DetailField = 'n' | 'name' | 'height' | 'width' | 'quantity' | 'area
   | 'basis_designation';
 
 /** Issues opaque ids for rows and groups; the manager window keeps one per presentation. */
-export type ClientScreenIdFor = (scope: 'detail' | 'detail-group' | 'payment' | 'service' | 'hdf', key: string) => string;
+export type ClientScreenIdFor = (scope: 'detail' | 'detail-group' | 'payment' | 'service' | 'hdf' | 'film' | 'sheet', key: string) => string;
 
 const EMPTY = '—';
 const RIGHT_ALIGNED = new Set(['height', 'width', 'quantity', 'area', 'price_per_sqm', 'cost', 'amount', 'price', 'sum', 'hdf_parameter', 'priority',
-  'source_height', 'source_width', 'source_quantity', 'parameter']);
+  'source_height', 'source_width', 'source_quantity', 'parameter', 'film_area', 'film_meters', 'film_stock', 'sheet_area', 'sheet_stock']);
 const LABELS = new Map<string, string>(CLIENT_SCREEN_GROUPS.flatMap((group) => group.fields.map((field) => [field.code, field.label] as const)));
 /** The longest text the wire takes for one value; longer text is cut, visibly, instead of failing the whole snapshot. */
 export const CLIENT_SCREEN_TEXT_LIMIT = 2000;
@@ -91,7 +97,8 @@ export function buildClientScreenSnapshot(source: ClientScreenOrderSource, visib
     // The name is a header line of its own only when the title is made of the number.
     summary: fields('summary', SUMMARY_ORDER.filter((key) => key !== 'order_name' || clientScreenTitle(source, visible).by === 'number'), source.summary, visible),
     tabs: source.tabs
-      .filter((tab) => (CLIENT_SCREEN_TAB_KEYS as readonly string[]).includes(tab.key) && tabOn(tab.key) && (tab.key !== 'hdf' || Boolean(source.hdf)))
+      .filter((tab) => (CLIENT_SCREEN_TAB_KEYS as readonly string[]).includes(tab.key) && tabOn(tab.key) && (tab.key !== 'hdf' || Boolean(source.hdf))
+        && (tab.key !== 'requirements' || Boolean(source.requirements)))
       .map((tab) => (tab.key === 'details' ? { key: tab.key, label: tab.label.slice(0, 200), counter: String(source.details.rows.length) } : { key: tab.key, label: tab.label.slice(0, 200) })),
   };
 
@@ -178,8 +185,42 @@ export function buildClientScreenSnapshot(source: ClientScreenOrderSource, visib
       rows: source.services.map((row) => ({ id: idFor('service', row.key), cells: order.map((field) => text(row.values[field])) })),
     };
   }
+  if (tabOn('requirements') && source.requirements) {
+    const requirements = source.requirements;
+    const tableOf = <F extends string>(scope: 'film' | 'sheet', all: readonly F[], rows: ReadonlyArray<ClientScreenRowSource<F>>): ClientScreenTable | undefined => {
+      const order = all.filter((field) => isClientScreenCodeVisible(`requirements.${field}`, visible) && available(rows, field));
+      if (order.length === 0) return undefined;
+      return {
+        columns: order.map((field) => ({
+          code: `requirements.${field}` as ClientScreenCode, label: MATERIAL_COLUMN_LABELS[field] ?? field, align: RIGHT_ALIGNED.has(field) ? 'right' : 'left',
+        })),
+        // An empty string is a cell the tab leaves blank on purpose (the totals row), not a missing value.
+        rows: rows.map((row) => ({ id: idFor(scope, row.key), cells: order.map((field) => (row.values[field] === '' ? '' : text(row.values[field]))) })),
+      };
+    };
+    const films = tableOf('film', MATERIAL_FILM_FIELDS, requirements.films);
+    const sheets = tableOf('sheet', MATERIAL_SHEET_FIELDS, requirements.sheets);
+    snapshot.requirements = { ...(films ? { films } : {}), ...(sheets ? { sheets } : {}) };
+  }
   return snapshot;
 }
+
+/** Column headers of the two «Материалы» tables, as the manager's tab names them. */
+const MATERIAL_COLUMN_LABELS: Readonly<Record<string, string>> = {
+  film_name: 'Пленка',
+  film_area: 'м²',
+  film_details: 'Детали',
+  film_meters: 'Пог. м',
+  film_sheets: 'Листы',
+  film_cut_jobs: 'Раскрои',
+  film_stock: 'На складе, пог. м',
+  film_coverage: 'Покрытие',
+  sheet_name: 'Материал',
+  sheet_area: 'Кол-во м²',
+  sheet_details: 'Кол-во деталей',
+  sheet_stock: 'На складе (1С)',
+  sheet_coverage: 'Покрытие',
+};
 
 /** Groupings whose titles are taken from the cells of their rows. */
 const TITLE_FROM_CELL: ReadonlySet<DetailField> = new Set<DetailField>(['cut_job', 'bath_cut_job']);
@@ -211,6 +252,7 @@ export function filterClientScreenUi(ui: ClientScreenUi, snapshot: ClientScreenS
   const tabs = new Set<string>(snapshot.tabs.map((tab) => tab.key));
   const rowIds = new Set<string>([
     ...(snapshot.details?.rows ?? []), ...(snapshot.services?.rows ?? []), ...(snapshot.finance?.payments?.rows ?? []), ...(snapshot.hdf?.table?.rows ?? []),
+    ...(snapshot.requirements?.films?.rows ?? []), ...(snapshot.requirements?.sheets?.rows ?? []),
   ].map((row) => row.id));
   const detailRowIds = new Set<string>((snapshot.details?.rows ?? []).map((row) => row.id));
   const detailCodes = new Set<string>((snapshot.details?.columns ?? []).map((column) => column.code));

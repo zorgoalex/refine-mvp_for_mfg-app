@@ -114,6 +114,12 @@ export const ClientScreenMirror: React.FC<{ view: MirrorView; bodyRef?: React.Re
           <>
             {view.tableTitle ? <h2 className="client-screen__subtitle">{view.tableTitle}</h2> : null}
             <Table table={view.table} />
+            {view.moreTables.map((item) => (
+              <React.Fragment key={item.title}>
+                <h2 className="client-screen__subtitle">{item.title}</h2>
+                <Table table={item.table} />
+              </React.Fragment>
+            ))}
           </>
         ) : null}
       </div>

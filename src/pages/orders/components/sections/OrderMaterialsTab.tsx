@@ -5,7 +5,7 @@ import { Table } from '../../../../ui/tooltipDelay';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Row, Col, Typography } from 'antd';
 import { useList, useOrderAsyncReadGuard } from '../../../../query/orderLifecycleQueries';
-import { useOrderFormStore } from '../../../../stores/orderFormStore';
+import { useOrderDraftStoreApi, useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { resolveDetailMaterialName } from '../../../../utils/materialDisplayName';
 import { can } from '../../../../utils/permissions';
@@ -16,9 +16,12 @@ import { computeOrderBathFilmUsage } from '../../../cut/cutFilmUsage';
 import { buildCutJobNameById, CutJobLinks } from '../../CutJobLinks';
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from '../../orderMaterialsSummary';
 import { businessOrderDetails } from '../../../../utils/orderDetailRows';
-import { ORDER_FILM_COLUMN_WIDTH, OrderFilmStockCaption, orderFilmStockColumns, OrderSheetStockCaption, orderSheetStockColumns } from '../../../inventory/orderFilmStockColumns';
+import { ORDER_FILM_COLUMN_WIDTH, OrderFilmStockCaption, orderFilmStockColumns, OrderSheetStockCaption, orderSheetStockColumns, orderSheetStockText, sheetStockCoverage } from '../../../inventory/orderFilmStockColumns';
 import { useOrderSheetStock } from '../../../inventory/useOrderSheetStock';
 import { useOrderFilmStock } from '../../../inventory/useOrderFilmStock';
+import { filmStockAvailability } from '../../../inventory/filmStock';
+import { buildOrderMaterialsMirror } from '../../../clientScreen/orderMaterialsMirror';
+import { clearOrderTabMirror, publishOrderTabMirror } from '../../../clientScreen/orderTabMirror';
 
 const { Text } = Typography;
 
@@ -172,6 +175,24 @@ export const OrderMaterialsTab: React.FC = () => {
     ),
     [businessDetails, hdfDetails, materialsMap],
   );
+
+  // Customer screen: what this tab shows right now (both tables with their totals, stock only when
+  // the manager may see it). Write-only for the tab; nothing here changes the tab or the order.
+  const draftStoreApi = useOrderDraftStoreApi();
+  useEffect(() => {
+    publishOrderTabMirror(draftStoreApi, 'requirements', buildOrderMaterialsMirror({
+      filmRows: filmMaterialRows,
+      sheetRows: sheetMaterialRows,
+      cutJobNameById,
+      filmStock: inventoryViewAllowed
+        ? new Map([...filmStock.byFilmId].map(([id, item]) => [id, { stockLm: item.stockLm, coverage: filmStockAvailability(item.status) }]))
+        : null,
+      sheetStock: sheetStock.allowed
+        ? new Map([...sheetStock.byId].map(([id, item]) => [id, { text: orderSheetStockText(item), coverage: sheetStockCoverage(item.status) }]))
+        : null,
+    }));
+  }, [cutJobNameById, draftStoreApi, filmMaterialRows, filmStock.byFilmId, inventoryViewAllowed, sheetMaterialRows, sheetStock.allowed, sheetStock.byId]);
+  useEffect(() => () => clearOrderTabMirror(draftStoreApi, 'requirements'), [draftStoreApi]);
 
   const sheetMaterialColumns = [
     {

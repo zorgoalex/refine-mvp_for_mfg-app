@@ -7,7 +7,7 @@ import { CLIENT_SCREEN_CODES } from './clientScreenRegistry';
  * manager window for one presentation. The schema is strict on purpose: a message that carries
  * anything else is dropped by the customer window.
  */
-export const CLIENT_SCREEN_TAB_KEYS = ['basic', 'details', 'hdf', 'dates', 'finance', 'services'] as const;
+export const CLIENT_SCREEN_TAB_KEYS = ['basic', 'details', 'hdf', 'dates', 'finance', 'services', 'requirements'] as const;
 export type ClientScreenTabKey = typeof CLIENT_SCREEN_TAB_KEYS[number];
 
 const code = z.enum(CLIENT_SCREEN_CODES);
@@ -38,6 +38,8 @@ export const clientScreenSnapshotSchema = z.object({
   finance: z.object({ fields: z.array(field).max(40), payments: table.optional() }).strict().optional(),
   details: table.optional(),
   services: table.optional(),
+  /** The «Материалы» tab: the film table and the sheet material table, each present only when it has a ticked column. */
+  requirements: z.object({ films: table.optional(), sheets: table.optional() }).strict().optional(),
 }).strict();
 
 export const clientScreenUiSchema = z.object({

@@ -6,6 +6,8 @@ import { isOrderDetailPlaceholder } from '../../utils/orderDetailRows';
 import type { ClientScreenIdFor } from './buildClientScreenSnapshot';
 import { getClientScreenPresenter } from './clientScreenInstance';
 import { clientScreenUnmountAction } from './clientScreenOrderKeys';
+import type { OrderMaterialsMirror } from './orderMaterialsMirror';
+import { readOrderTabMirror, subscribeOrderTabMirror } from './orderTabMirror';
 import type { ClientScreenOrderProvider } from './clientScreenPresenter';
 import { CLIENT_SCREEN_TAB_KEYS, type ClientScreenTabKey, type ClientScreenUi } from './clientScreenSnapshotSchema';
 import {
@@ -44,14 +46,15 @@ const TAB_LABELS: Record<ClientScreenTabKey, [string, string]> = {
   basic: ['Основная информация', 'Обзор'],
   details: ['Детали заказа', 'Состав'],
   hdf: ['ХДФ', 'ХДФ'],
+  requirements: ['Материалы', 'Материалы'],
   dates: ['Даты', 'Логистика'],
   finance: ['Финансы', 'Финансы'],
   services: ['Услуги/товары', 'Услуги/товары'],
 };
 const TAB_ORDER: Record<'default' | 'operational', ClientScreenTabKey[]> = {
-  default: ['basic', 'details', 'hdf', 'dates', 'finance', 'services'],
+  default: ['basic', 'details', 'hdf', 'dates', 'finance', 'services', 'requirements'],
   // The operational layout of the form has no HDF tab (a test keeps both lists equal to the form's own).
-  operational: ['basic', 'details', 'finance', 'dates', 'services'],
+  operational: ['basic', 'details', 'requirements', 'finance', 'dates', 'services'],
 };
 
 /** Tabs of the form the customer screen can mirror, with the labels and order the manager sees. */
@@ -243,6 +246,7 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
         clientContacts: current.clientContacts,
         hdfDetails: state.hdfDetails,
         tableCellsOf: mirror?.getTableCells ?? null,
+        requirements: readOrderTabMirror<OrderMaterialsMirror>(store, 'requirements'),
         tabs: orderFormMirrorTabs(current.operational),
         names: orderFormNames(current.references, current.sheetMaterialName, current.filmNameById),
         // The manager's own columns, sorting and grouping, once the detail table has been on screen.
@@ -304,6 +308,10 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
       // order and groups): a new snapshot, built once per frame, and the interface state with it.
       presenter.notifyChanged(orderKey);
     });
+    // A tab that reports its own content (materials) has shown something new.
+    const unsubscribeTabs = subscribeOrderTabMirror(store, () => {
+      if (presented()) presenter.notifyChanged(orderKey);
+    });
     const timer = window.setInterval(() => {
       if (!presented()) return;
       const mirror = readOrderDetailTableMirror(store);
@@ -319,6 +327,7 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
     }, EDITOR_POLL_MS);
     return () => {
       unsubscribe();
+      unsubscribeTabs();
       window.clearInterval(timer);
     };
   }, [orderKey]);

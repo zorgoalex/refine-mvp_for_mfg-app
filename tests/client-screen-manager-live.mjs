@@ -382,7 +382,20 @@ try {
       await managerTab(/Основная информация|Обзор/).click();
       await expect(selectedTab()).toHaveText(/Основная информация|Обзор/, { timeout: 20000 });
     }
-    const unmirrored = managerTab(codes.includes('tab.hdf') ? /Материалы|Дополнительно|Бирки|Цеха/ : /ХДФ|Материалы|Дополнительно|Бирки/);
+    // The «Материалы» tab reports its own tables; it is mirrored once the manager opens it.
+    const materialsTab = managerTab(/^Материалы$/);
+    if (!has('tab.requirements')) skipped('the materials tab');
+    else if (!tabSwitches) skipped('the materials tab (needs the basic and finance tabs to return to)');
+    else if (!(await materialsTab.count())) results.push('this layout of the form has no materials tab: nothing to mirror');
+    else {
+      await materialsTab.click();
+      await expect(selectedTab()).toHaveText(/Материалы/, { timeout: 30000 });
+      const titles = await popup.locator('.client-screen__subtitle').allInnerTexts();
+      results.push(`materials tab mirrored${titles.length ? `: ${titles.join(', ')}` : ' (no table has a ticked column)'}`);
+      await managerTab(/Основная информация|Обзор/).click();
+      await expect(selectedTab()).toHaveText(/Основная информация|Обзор/, { timeout: 20000 });
+    }
+    const unmirrored = managerTab(/Дополнительно|Бирки|Цеха|Раскрой/);
     if (tabSwitches && await unmirrored.count() && await unmirrored.isEnabled()) {
       await unmirrored.click();
       await page.waitForTimeout(1500);
