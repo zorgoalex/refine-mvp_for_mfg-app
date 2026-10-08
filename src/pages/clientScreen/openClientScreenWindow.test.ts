@@ -1,5 +1,10 @@
 import { clientScreenOrderPath, clientScreenUnmountAction, orderShowPresentationKey } from './clientScreenOrderKeys';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { buildClientScreenSnapshot, createClientScreenIdMap } from './buildClientScreenSnapshot';
+import { CLIENT_SCREEN_CODES } from './clientScreenRegistry';
+import { CLIENT_SCREEN_TAB_KEYS } from './clientScreenSnapshotSchema';
+import { buildOrderEditSource } from './orderEditSnapshotSource';
 import { CLIENT_SCREEN_PATH } from './clientScreenPath';
 import { clientScreenWindowFeatures, pickCustomerScreen } from './openClientScreenWindow';
 import { clientScreenControlModel } from './clientScreenControlModel';
@@ -30,7 +35,46 @@ describe('order form bridge helpers', () => {
       { key: 'basic', label: 'Основная информация' }, { key: 'details', label: 'Детали заказа' }, { key: 'hdf', label: 'ХДФ' }, { key: 'dates', label: 'Даты' },
       { key: 'finance', label: 'Финансы' }, { key: 'services', label: 'Услуги/товары' },
     ]);
-    expect(orderFormMirrorTabs(true).map((tab) => `${tab.key}:${tab.label}`)).toEqual(['basic:Обзор', 'details:Состав', 'hdf:ХДФ', 'finance:Финансы', 'dates:Логистика', 'services:Услуги/товары']);
+    expect(orderFormMirrorTabs(true).map((tab) => `${tab.key}:${tab.label}`)).toEqual(['basic:Обзор', 'details:Состав', 'finance:Финансы', 'dates:Логистика', 'services:Услуги/товары']);
+  });
+
+  it('offers for mirroring exactly the tabs the form itself has in each layout, in its order', () => {
+    const form = readFileSync(new URL('../orders/components/OrderForm.tsx', import.meta.url), 'utf8');
+    const start = form.indexOf('const items = [');
+    const end = form.indexOf('if (!isOperational) return items;');
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    // Tabs of the default layout, in the order the form declares them.
+    const declared = [...form.slice(start, end).matchAll(/^ {8}key: '([a-z_]+)',$/gm)].map((match) => match[1]);
+    expect(declared).toEqual(expect.arrayContaining(['basic', 'details', 'hdf', 'dates', 'finance', 'services']));
+    // Tabs of the operational layout: the form's own list (it leaves some tabs out, HDF among them).
+    const listStart = form.indexOf('const operationalOrder = [', end);
+    const operational = [...form.slice(listStart, form.indexOf('];', listStart)).matchAll(/'([a-z_]+)'/g)].map((match) => match[1]);
+    expect(operational.length).toBeGreaterThan(3);
+    const mirrored = (keys: string[]) => keys.filter((key) => (CLIENT_SCREEN_TAB_KEYS as readonly string[]).includes(key));
+    expect(orderFormMirrorTabs(false).map((tab) => tab.key)).toEqual(mirrored(declared));
+    expect(orderFormMirrorTabs(true).map((tab) => tab.key)).toEqual(mirrored(operational.filter((key) => declared.includes(key))));
+    expect(orderFormMirrorTabs(true).map((tab) => tab.key)).not.toContain('hdf');
+  });
+
+  it('a tab the layout does not have is never sent, whatever is ticked', () => {
+    const hdfDetails = [{ order_hdf_detail_id: 501, source_order_detail_id_snapshot: 71, source_detail_number: 1, area_m2: 1, status: 'ok', version: 1 }];
+    const sourceOf = (operational: boolean) => buildOrderEditSource({
+      header: { order_name: 'К-1' }, details: [], payments: [], catalogLines: [], dowelingLinks: [], orderNumber: null, tabs: orderFormMirrorTabs(operational),
+      names: orderFormNames(null, () => undefined), detailColumnOrder: [], grouping: null, canViewServiceMoney: false, hdfDetails: hdfDetails as never,
+    });
+    const ids = () => createClientScreenIdMap(() => `id${Math.random().toString(36).slice(2, 10)}`);
+    const classic = buildClientScreenSnapshot(sourceOf(false), CLIENT_SCREEN_CODES, ids());
+    expect(classic.tabs.map((tab) => tab.key)).toContain('hdf');
+    expect(classic.hdf?.table?.rows).toHaveLength(1);
+    const operational = buildClientScreenSnapshot(sourceOf(true), CLIENT_SCREEN_CODES, ids());
+    expect(operational.tabs.map((tab) => tab.key)).not.toContain('hdf');
+    expect(operational.hdf).toBeUndefined();
+    expect(JSON.stringify(operational)).not.toContain('hdf.');
+    // …also when HDF is the only thing ticked.
+    const only = buildClientScreenSnapshot(sourceOf(true), ['tab.hdf', 'hdf.total', 'hdf.position'], ids());
+    expect(only.tabs).toEqual([]);
+    expect(only.hdf).toBeUndefined();
   });
 
   it('resolves names from the references the form has loaded; unknown ids and missing references give no name', () => {

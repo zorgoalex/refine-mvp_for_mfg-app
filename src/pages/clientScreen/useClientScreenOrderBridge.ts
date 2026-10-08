@@ -50,7 +50,8 @@ const TAB_LABELS: Record<ClientScreenTabKey, [string, string]> = {
 };
 const TAB_ORDER: Record<'default' | 'operational', ClientScreenTabKey[]> = {
   default: ['basic', 'details', 'hdf', 'dates', 'finance', 'services'],
-  operational: ['basic', 'details', 'hdf', 'finance', 'dates', 'services'],
+  // The operational layout of the form has no HDF tab (a test keeps both lists equal to the form's own).
+  operational: ['basic', 'details', 'finance', 'dates', 'services'],
 };
 
 /** Tabs of the form the customer screen can mirror, with the labels and order the manager sees. */

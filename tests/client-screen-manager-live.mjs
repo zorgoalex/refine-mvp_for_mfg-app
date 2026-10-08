@@ -293,9 +293,13 @@ try {
   await expect(page.locator('[role="dialog"][aria-label="Экран клиента"]')).toHaveCount(0, { timeout: 10000 });
   results.push('switching to another page keeps the order on the customer screen; «Перейти к заказу» returns to it');
 
+  // Steps follow the ticks in force: what the organisation has not ticked is not expected, and is reported as skipped.
+  const has = (code) => codes.includes(code);
+  const skipped = (what) => results.push(`skipped (not ticked in the settings in force): ${what}`);
   const selectedTab = () => popup.getByRole('tab', { selected: true });
   const managerTab = (name) => page.getByRole('tab', { name }).first();
-  if (await managerTab(/Детали заказа|Состав/).count()) {
+  if (!has('tab.details')) skipped('the detail list and everything on it');
+  else if (await managerTab(/Детали заказа|Состав/).count()) {
     await managerTab(/Детали заказа|Состав/).click();
     await expect(selectedTab()).toHaveText(/Детали заказа|Состав/, { timeout: 20000 });
     await expect(popup.locator('tbody tr[data-row-id]').first()).toBeVisible({ timeout: 20000 });
@@ -334,6 +338,7 @@ try {
 
     // A value being typed is seen at once, in the same cell, and disappears when the edit is cancelled.
     // Nothing is saved: the edit is cancelled with Escape and the order is never submitted.
+    if (has('details.height')) {
     const editable = managerRows.first().locator('td[data-order-detail-spreadsheet-cell="true"][aria-keyshortcuts^="Enter"]').first();
     await editable.dblclick();
     await expect(page.locator('.ant-table-tbody input:focus')).toHaveCount(1, { timeout: 20000 });
@@ -351,17 +356,21 @@ try {
     await expect(popup.locator('td.client-screen__cell--edited')).toHaveCount(0, { timeout: 20000 });
     await expect.poll(async () => (await popup.locator('tbody tr[data-row-id]').first().innerText()).replace(/\D/g, '').includes(typed), { timeout: 20000 }).toBe(false);
     results.push(`live edit mirrored: the customer saw the typed value in the same cell (${editedCells} cell(s) changed live), back to the saved value after Escape`);
+    } else skipped('live edit of a cell (the height column)');
 
-    await managerTab(/Финансы/).click();
-    await expect(selectedTab()).toHaveText(/Финансы/, { timeout: 20000 });
-    await managerTab(/Основная информация|Обзор/).click();
-    await expect(selectedTab()).toHaveText(/Основная информация|Обзор/, { timeout: 20000 });
-    await expect(popup.locator('.client-screen__field').first()).toBeVisible();
-    results.push('tab switches mirrored');
+    const tabSwitches = has('tab.finance') && has('tab.basic');
+    if (tabSwitches) {
+      await managerTab(/Финансы/).click();
+      await expect(selectedTab()).toHaveText(/Финансы/, { timeout: 20000 });
+      await managerTab(/Основная информация|Обзор/).click();
+      await expect(selectedTab()).toHaveText(/Основная информация|Обзор/, { timeout: 20000 });
+      await expect(popup.locator('.client-screen__field').first()).toBeVisible();
+      results.push('tab switches mirrored');
+    } else skipped('tab switches between «Финансы» and «Основная информация»');
 
     // The HDF tab is mirrored only when the organisation ticked it; otherwise the customer keeps the last tab.
     const hdfTab = managerTab(/^ХДФ$/);
-    if (codes.includes('tab.hdf') && await hdfTab.count()) {
+    if (tabSwitches && codes.includes('tab.hdf') && await hdfTab.count()) {
       await hdfTab.click();
       await expect(selectedTab()).toHaveText(/ХДФ/, { timeout: 20000 });
       results.push('HDF tab mirrored');
@@ -369,7 +378,7 @@ try {
       await expect(selectedTab()).toHaveText(/Основная информация|Обзор/, { timeout: 20000 });
     }
     const unmirrored = managerTab(codes.includes('tab.hdf') ? /Материалы|Дополнительно|Бирки|Цеха/ : /ХДФ|Материалы|Дополнительно|Бирки/);
-    if (await unmirrored.count() && await unmirrored.isEnabled()) {
+    if (tabSwitches && await unmirrored.count() && await unmirrored.isEnabled()) {
       await unmirrored.click();
       await page.waitForTimeout(1500);
       await expect(selectedTab()).toHaveText(/Основная информация|Обзор/);
@@ -416,15 +425,18 @@ try {
   viewPopup.on('pageerror', (e) => errors.push(`customer (view): ${e.message.split('\n')[0]}`));
   await expect(viewPopup.getByRole('heading', { level: 1 })).toHaveText(/Заказ |Ваш заказ/, { timeout: 60000 });
   await expect(page.getByText('Клиент видит этот заказ')).toBeVisible({ timeout: 30000 });
-  await expect(viewPopup.getByRole('tab', { selected: true })).toHaveText(/Детали заказа/, { timeout: 20000 });
-  await expect(viewPopup.locator('tbody tr[data-row-id]').first()).toBeVisible({ timeout: 20000 });
+  if (has('tab.details')) {
+    await expect(viewPopup.getByRole('tab', { selected: true })).toHaveText(/Детали заказа/, { timeout: 20000 });
+    await expect(viewPopup.locator('tbody tr[data-row-id]').first()).toBeVisible({ timeout: 20000 });
+  } else skipped('the detail list of the view page');
   if (!codes.includes('details.cost')) assert.equal(await viewPopup.getByRole('columnheader', { name: 'Сумма', exact: true }).count(), 0, 'view: hidden cost column is absent');
   if (!codes.includes('details.note')) assert.equal(await viewPopup.getByRole('columnheader', { name: 'Примечание', exact: true }).count(), 0, 'view: hidden note column is absent');
   const viewHeaders = await viewPopup.getByRole('columnheader').allInnerTexts();
   if (codes.includes('details.quantity')) assert.ok(viewHeaders.includes('Кол-во'), `view: ticked quantity column is present (columns: ${viewHeaders.join(' | ')})`);
   results.push(`view page presented: ${await viewPopup.locator('tbody tr[data-row-id]').count()} detail rows, hidden columns absent`);
   const financePanel = page.locator('.order-show-info-tabs [role="tab"]').filter({ hasText: 'Финансы' });
-  if (await financePanel.count()) {
+  if (!(has('tab.finance') && has('tab.details'))) skipped('the finance panel of the view page');
+  else if (await financePanel.count()) {
     await financePanel.first().click();
     await expect(viewPopup.getByRole('tab', { selected: true })).toHaveText(/Финансы/, { timeout: 20000 });
     await page.locator('.order-show-info-tabs [role="tab"]').filter({ hasText: 'Группы заказа' }).first().click();
