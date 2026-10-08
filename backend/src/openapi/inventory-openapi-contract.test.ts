@@ -11,6 +11,19 @@ function file(...candidates: string[]): string {
   return readFileSync(found as string, 'utf8');
 }
 
+describe('inventory OpenAPI: 1C snapshot request', () => {
+  it('the momentLocal pattern accepts a local moment without a zone and rejects others', () => {
+    const contract = load(file('backend/contracts/04-api-contract.openapi.yaml', 'contracts/04-api-contract.openapi.yaml')) as {
+      paths: Record<string, Record<string, { requestBody?: { content: Record<string, { schema: { properties: Record<string, { pattern?: string }> } }> } }>>;
+    };
+    const pattern = contract.paths['/api/v1/inventory/onec-snapshots'].post.requestBody?.content['application/json'].schema.properties.momentLocal.pattern;
+    expect(pattern).toBeDefined();
+    const regex = new RegExp(pattern as string);
+    expect(regex.test('2026-09-26T10:14:00')).toBe(true);
+    for (const bad of ['2026-09-26 10:14:00', '2026-09-26T10:14', '2026-09-26T10:14:00+05:00', '2026-09-26T10:14:00Z']) expect(regex.test(bad)).toBe(false);
+  });
+});
+
 describe('inventory OpenAPI success codes', () => {
   it('match the controller decorators', () => {
     const controller = file('backend/src/modules/inventory/http/inventory.controller.ts', 'src/modules/inventory/http/inventory.controller.ts');

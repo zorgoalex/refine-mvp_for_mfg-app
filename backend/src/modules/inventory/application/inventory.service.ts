@@ -227,7 +227,7 @@ export class InventoryService {
   }
 
   /** Остатки 1С склада из единственного источника с этим ключом; причина, если недоступны. */
-  private async onecStock(tx: DatabaseClient, refKey1c: string | null): Promise<{
+  async onecStock(tx: DatabaseClient, refKey1c: string | null): Promise<{
     reason: OnecStockUnavailableReason | null; sourceId: number | null; warehouseName: string | null;
     state: OnecStockState | null; rows: OnecStockBalance[];
   }> {

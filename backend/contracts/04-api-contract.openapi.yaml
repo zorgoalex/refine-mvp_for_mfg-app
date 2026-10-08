@@ -20656,6 +20656,130 @@ paths:
         '404': {description: WAREHOUSE_NOT_FOUND}
         '409': {description: 'ONEC_COMPENSATION_SUPERSEDED (прерванный откат, а расход снова включён), IDEMPOTENCY_IN_PROGRESS не возвращается — прерванный откат продолжается; ONEC_COMPENSATION_CONFIRM_REQUIRED — приход 1С включён или на складе есть применённое с плюсом, а тело запроса не содержит includesReceipts: true (ничего не изменено)'}
         '422': {description: IDEMPOTENCY_KEY_REUSED}
+  /api/v1/inventory/onec-snapshots:
+    get:
+      tags: [Inventory]
+      operationId: listInventoryOnecSnapshots
+      summary: 1C stock snapshots at a date — capabilities and a page of snapshots (newest first)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: status, in: query, required: false, schema: {type: string, enum: [requested, config_published, syncing, ready, failed]}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200}}
+      responses:
+        '200': {description: '{readAvailable, commandsAvailable, reason: MODULE_DISABLED|SOURCE_NOT_CONFIGURED|AGENT_TOO_OLD|null, items: [{id, sourceId, currentSource, baseRef, momentLocal, momentUtc, timeZone, status, waitReason, errorCode, requestedBy, requestedAt, updatedAt, readAt, readyAt, rowsCount, queuePosition, activeAhead}], total}; readAvailable=false — срезы не подключены (items пуст); commandsAvailable=false — история читается, новые срезы не запрашиваются'}
+        '404': {description: Склад выключен}
+    post:
+      tags: [Inventory]
+      operationId: requestInventoryOnecSnapshot
+      summary: Request a 1C stock snapshot at a moment; the existing ready or active snapshot of the same moment is returned unless force
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [momentLocal]
+              properties:
+                momentLocal: {type: string, pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$', description: 'Местное время базы 1С; движения ровно в этот момент в срез не входят'}
+                force: {type: boolean, description: 'Всегда новый срез (например, документы проведены задним числом)'}
+      responses:
+        '200': {description: 'Срез (существующий или поставленный в очередь); готовность — опросом GET'}
+        '403': {description: 'FORBIDDEN; отказ записывается в аудит (inventory.onec_snapshot_command_denied)'}
+        '409': {description: 'ONEC_STOCK_SNAPSHOTS_UNAVAILABLE — новые срезы сейчас не запрашиваются (details.reason)'}
+        '422': {description: 'VALIDATION_ERROR — момент в будущем, неверный ключ запроса'}
+  /api/v1/inventory/onec-snapshots/{snapshotId}:
+    get:
+      tags: [Inventory]
+      operationId: getInventoryOnecSnapshot
+      summary: A 1C stock snapshot with its warehouses matched to ERP warehouses by the 1C key
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: '{snapshot, warehouses: [{warehouseRefKey, warehouseId, name, rows, quantityTotal}]}; warehouses пуст, пока срез не ready; warehouseId null — склад 1С не заведён в ERP'}
+        '404': {description: ONEC_STOCK_SNAPSHOT_NOT_FOUND (нет или удалён)}
+    delete:
+      tags: [Inventory]
+      operationId: deleteInventoryOnecSnapshot
+      summary: Delete a ready or failed 1C stock snapshot, or cancel a queued one
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      responses:
+        '204': {description: Удалён (строки среза удалены) или отменён}
+        '403': {description: 'FORBIDDEN; отказ записывается в аудит'}
+        '404': {description: ONEC_STOCK_SNAPSHOT_NOT_FOUND}
+        '409': {description: ONEC_STOCK_SNAPSHOT_IN_PROGRESS — срез сейчас читается из 1С}
+  /api/v1/inventory/onec-snapshots/{snapshotId}/comparable:
+    get:
+      tags: [Inventory]
+      operationId: listInventoryOnecSnapshotComparable
+      summary: Ready snapshots of the same 1C base (sourceId + baseRef) a snapshot can be compared with, newest first
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: search, in: query, required: false, schema: {type: string, maxLength: 50}, description: 'Номер среза или дата ДД.ММ.ГГГГ ЧЧ:ММ'}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200}}
+      responses:
+        '200': {description: '{items: [snapshot], total}; база фильтруется до пагинации — исторические срезы одной базы находятся независимо от числа более новых срезов'}
+        '404': {description: ONEC_STOCK_SNAPSHOT_NOT_FOUND}
+  /api/v1/inventory/onec-snapshots/{snapshotId}/stock:
+    get:
+      tags: [Inventory]
+      operationId: getInventoryOnecSnapshotStock
+      summary: Stock of a 1C snapshot by material tabs for the chosen ERP warehouses (film is shown as a 1C item)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: warehouseIds, in: query, required: false, schema: {type: string}, description: 'До 50 id складов ERP через запятую; пусто — все склады среза, включая склады 1С без пары в ERP'}
+        - {name: group, in: query, required: false, schema: {type: string}, description: 'all | film | film_unlinked | no_type | unlinked | material:<id>'}
+        - {name: categoryKey, in: query, required: false, schema: {type: string}, description: 'Ключ категории 1С или none'}
+        - {name: search, in: query, required: false, schema: {type: string, maxLength: 200}}
+        - {name: nonZero, in: query, required: false, schema: {type: boolean}}
+        - {name: negative, in: query, required: false, schema: {type: boolean}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 40000}, description: 'До 40000 — всё представление одним запросом (выгрузка из одного снимка данных)'}
+      responses:
+        '200': {description: '{snapshot, warehouses: [{warehouseId, name}], other: null, tabs, categories, total, items: [{source: 1c, group, groupLabel, itemRefKey, code, name, unitName, categoryKey, categoryName, quantity, otherQuantity: null, delta: null, sheetMaterialTypeId, ambiguousLink}]}; количество — сумма строк регистра по позиции на выбранных складах; чтение — одна транзакция REPEATABLE READ READ ONLY'}
+        '404': {description: 'ONEC_STOCK_SNAPSHOT_NOT_FOUND, WAREHOUSE_NOT_FOUND'}
+        '409': {description: 'ONEC_STOCK_SNAPSHOT_NOT_READY, WAREHOUSE_UNLINKED (склад ERP без ключа 1С)'}
+  /api/v1/inventory/onec-snapshots/{snapshotId}/compare:
+    get:
+      tags: [Inventory]
+      operationId: compareInventoryOnecSnapshot
+      summary: Compare a 1C snapshot (A) with the current 1C stock or another snapshot (B); delta = B − A
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: with, in: query, required: true, schema: {type: string}, description: 'current или id другого среза'}
+        - {name: warehouseIds, in: query, required: false, schema: {type: string}, description: 'Как у stock; при with=current пусто — все активные склады ERP с ключом 1С'}
+        - {name: changedOnly, in: query, required: false, schema: {type: boolean}, description: 'Только позиции с разницей'}
+        - {name: group, in: query, required: false, schema: {type: string}}
+        - {name: categoryKey, in: query, required: false, schema: {type: string}}
+        - {name: search, in: query, required: false, schema: {type: string, maxLength: 200}}
+        - {name: nonZero, in: query, required: false, schema: {type: boolean}}
+        - {name: negative, in: query, required: false, schema: {type: boolean}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 40000}, description: 'До 40000 — всё представление одним запросом (выгрузка из одного снимка данных)'}
+      responses:
+        '200': {description: 'Как stock, плюс other: {kind: current, asOf} | {kind: snapshot, snapshot}; у строк quantity (A), otherQuantity (B), delta = B − A; позиция только с одной стороны — с другой 0'}
+        '400': {description: 'VALIDATION_FAILED — нет with, срез сравнивается сам с собой'}
+        '404': {description: 'ONEC_STOCK_SNAPSHOT_NOT_FOUND, WAREHOUSE_NOT_FOUND'}
+        '409': {description: 'ONEC_SNAPSHOT_HISTORICAL — срез прежней базы 1С не сравнивается с текущими остатками; ONEC_SNAPSHOT_SOURCE_MISMATCH — срезы разных баз (baseRef); ONEC_SNAPSHOT_COMPARE_UNAVAILABLE — текущие остатки 1С доступны не по всем складам (details.warehouses с причинами; нули не подставляются); ONEC_STOCK_SNAPSHOT_NOT_READY'}
   /api/v1/orders/{orderId}/sheet-stock:
     get:
       tags: [Inventory]

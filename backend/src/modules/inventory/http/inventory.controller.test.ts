@@ -1,10 +1,12 @@
 import { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
+import { ApiError } from '../../../common/errors/api-error';
 import type { BackendEnv } from '../../../config/env.validation';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { OnecCatalogReader } from '../../onec-agent/onec-catalog-reader';
 import type { InventoryOnecProjectionService } from '../application/inventory-onec-projection.service';
+import type { InventoryOnecSnapshotsService } from '../application/inventory-onec-snapshots.service';
 import { InventoryService } from '../application/inventory.service';
 import { InventoryController } from './inventory.controller';
 
@@ -17,8 +19,12 @@ function setup(enabled: boolean) {
   const onec = { listWarehouses: vi.fn().mockResolvedValue([]) } as unknown as OnecCatalogReader;
   const service = new InventoryService({} as DatabaseService, config, onec);
   const projection = { listIssues: vi.fn(), runNow: vi.fn(), compensate: vi.fn() } as unknown as InventoryOnecProjectionService;
-  const controller = new InventoryController(service, projection);
-  return { service, controller, projection };
+  const snapshots = {
+    list: vi.fn(), request: vi.fn(), remove: vi.fn(), card: vi.fn(), stockOf: vi.fn(), compare: vi.fn(), comparable: vi.fn(),
+    assertEnabled: vi.fn(() => { if (!enabled) throw new ApiError(404, 'NOT_FOUND', 'Склад выключен'); }),
+  } as unknown as InventoryOnecSnapshotsService;
+  const controller = new InventoryController(service, projection, snapshots);
+  return { service, controller, projection, snapshots };
 }
 
 async function expectError(run: () => unknown, status: number, code: string) {
@@ -128,6 +134,68 @@ describe('InventoryController', () => {
   it('warehouse stock answers 404 when the feature flag is off', async () => {
     const { controller } = setup(false);
     await expectError(() => controller.warehouseStock({ user: user(['inventory.view']) }, { warehouseId: '2' }), 404, 'NOT_FOUND');
+  });
+
+  it('1C stock snapshot routes: moment, ids, warehouses and filters validated before the service', async () => {
+    const { controller, snapshots } = setup(true);
+    const view = { user: user(['inventory.view']) };
+    const manage = { user: user(['inventory.manage']), requestId: 'req-1' };
+    await expectError(() => controller.onecSnapshots(view, { status: 'done' }), 400, 'VALIDATION_FAILED');
+    await controller.onecSnapshots(view, { status: 'ready', limit: '20' });
+    expect(snapshots.list).toHaveBeenLastCalledWith(view.user, { status: 'ready', offset: 0, limit: 20 });
+    // Запрос: местное время без пояса, лишние поля и отсутствие ключа — отказ до сервиса.
+    for (const body of [{}, { momentLocal: '2026-09-26 10:14' }, { momentLocal: '2026-09-26T10:14:00+05:00' }, { momentLocal: '2026-09-26T10:14:00', extra: 1 }]) {
+      await expectError(() => controller.requestOnecSnapshot(manage, 'key-12345', body), 400, 'VALIDATION_FAILED');
+    }
+    await expectError(() => controller.requestOnecSnapshot(manage, undefined, { momentLocal: '2026-09-26T10:14:00' }), 400, 'VALIDATION_FAILED');
+    await controller.requestOnecSnapshot(manage, 'key-12345', { momentLocal: '2026-09-26T10:14:00', force: true });
+    expect(snapshots.request).toHaveBeenLastCalledWith({ currentUser: manage.user, requestId: 'req-1', idempotencyKey: 'key-12345' }, { momentLocal: '2026-09-26T10:14:00', force: true });
+    await controller.requestOnecSnapshot(manage, 'key-12345', { momentLocal: '2026-09-26T10:14:00' });
+    expect(snapshots.request).toHaveBeenLastCalledWith(expect.anything(), { momentLocal: '2026-09-26T10:14:00', force: false });
+    await expectError(() => controller.onecSnapshot(view, 'abc'), 400, 'VALIDATION_FAILED');
+    await controller.onecSnapshot(view, '7');
+    expect(snapshots.card).toHaveBeenLastCalledWith(view.user, 7);
+    // Просмотр: склады через запятую, вкладка, категория (ключ или none), флаги.
+    await expectError(() => controller.onecSnapshotStock(view, '7', { warehouseIds: '2,x' }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.onecSnapshotStock(view, '7', { warehouseIds: '40000' }), 404, 'WAREHOUSE_NOT_FOUND');
+    await expectError(() => controller.onecSnapshotStock(view, '7', { warehouseIds: Array.from({ length: 51 }, (_, i) => i + 1).join(',') }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.onecSnapshotStock(view, '7', { group: 'films' }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.onecSnapshotStock(view, '7', { categoryKey: 'bad key' }), 400, 'VALIDATION_FAILED');
+    await controller.onecSnapshotStock(view, '7', { warehouseIds: '2,4', group: 'film', categoryKey: 'none', search: '  мдф ', nonZero: 'true', limit: '50' });
+    expect(snapshots.stockOf).toHaveBeenLastCalledWith(view.user, 7, {
+      warehouseIds: [2, 4], group: 'film', categoryKey: 'none', search: 'мдф', nonZero: true, negative: false, changedOnly: false, offset: 0, limit: 50,
+    });
+    // Сравнение: with обязателен — current или id среза.
+    await expectError(() => controller.onecSnapshotCompare(view, '7', {}), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.onecSnapshotCompare(view, '7', { with: 'now' }), 400, 'VALIDATION_FAILED');
+    await controller.onecSnapshotCompare(view, '7', { with: 'current', changedOnly: 'true' });
+    expect(snapshots.compare).toHaveBeenLastCalledWith(view.user, 7, 'current', expect.objectContaining({ warehouseIds: [], changedOnly: true }));
+    await controller.onecSnapshotCompare(view, '7', { with: '9' });
+    expect(snapshots.compare).toHaveBeenLastCalledWith(view.user, 7, 9, expect.anything());
+    // Кандидаты для сравнения и страница на всё представление (выгрузка одним запросом).
+    await controller.onecSnapshotComparable(view, '7', { search: ' 26.09 ', limit: '100' });
+    expect(snapshots.comparable).toHaveBeenLastCalledWith(view.user, 7, { search: '26.09', offset: 0, limit: 100 });
+    await expectError(() => controller.onecSnapshotComparable(view, '7', { limit: '201' }), 400, 'VALIDATION_FAILED');
+    await controller.onecSnapshotStock(view, '7', { limit: '40000' });
+    expect(snapshots.stockOf).toHaveBeenLastCalledWith(view.user, 7, expect.objectContaining({ limit: 40000 }));
+    await expectError(() => controller.onecSnapshotStock(view, '7', { limit: '40001' }), 400, 'VALIDATION_FAILED');
+    await expectError(() => controller.deleteOnecSnapshot(manage, 'key-1', '0'), 400, 'VALIDATION_FAILED');
+    await controller.deleteOnecSnapshot(manage, 'key-1', '7');
+    expect(snapshots.remove).toHaveBeenLastCalledWith({ currentUser: manage.user, requestId: 'req-1', idempotencyKey: 'key-1' }, 7);
+  });
+
+  it('1C stock snapshot routes with the warehouse switched off answer 404 before validating the request', async () => {
+    const { controller, snapshots } = setup(false);
+    const view = { user: user(['inventory.view']) };
+    const manage = { user: user(['inventory.manage']), requestId: 'req-1' };
+    await expectError(() => controller.onecSnapshots(view, { status: 'done' }), 404, 'NOT_FOUND');
+    await expectError(() => controller.requestOnecSnapshot(manage, undefined, {}), 404, 'NOT_FOUND');
+    await expectError(() => controller.onecSnapshot(view, 'abc'), 404, 'NOT_FOUND');
+    await expectError(() => controller.onecSnapshotStock(view, '7', { group: 'films' }), 404, 'NOT_FOUND');
+    await expectError(() => controller.onecSnapshotCompare(view, '7', {}), 404, 'NOT_FOUND');
+    await expectError(() => controller.onecSnapshotComparable(view, 'x', {}), 404, 'NOT_FOUND');
+    await expectError(() => controller.deleteOnecSnapshot(manage, undefined, '0'), 404, 'NOT_FOUND');
+    for (const method of [snapshots.list, snapshots.request, snapshots.card, snapshots.stockOf, snapshots.compare, snapshots.remove]) expect(method).not.toHaveBeenCalled();
   });
 
   it('1C consumption routes: codes validated, compensate needs a warehouse id, forwarded to the projection service', async () => {

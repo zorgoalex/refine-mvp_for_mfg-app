@@ -1,2 +1,6 @@
 .film-inventory-page .film-stock-negative td { color: #cf1322; background: #fff1f0; }
 .film-inventory-page .film-stock-unresolved td { background: #fff1f0; }
+/* Срезы 1С: разница при сравнении — рост и убыль. */
+.film-inventory-page .stock-delta[data-delta="plus"] { color: #389e0d; }
+.film-inventory-page .stock-delta[data-delta="minus"] { color: #cf1322; }
+.film-inventory-page .stock-delta[data-delta="zero"] { color: rgba(0, 0, 0, 0.45); }

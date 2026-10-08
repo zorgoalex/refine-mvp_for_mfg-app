@@ -11,6 +11,8 @@ import dayjs from 'dayjs';
 import { can } from '../../utils/permissions';
 import { lineFilmOptions, lineFilmValue, operationWarehouse, preferredWarehouseIds, parseStockCsv, parseStockRows, resolveActiveWarehouse, selectDefaultStockSheet, unresolvedLineIds, type ParsedStockSheet } from './filmStock';
 import { WarehouseStockTable } from './WarehouseStockTable';
+import { OnecSnapshotsTab } from './OnecSnapshotsTab';
+import { snapshotsMode } from './onecSnapshots';
 import { OnecIssuesTab } from './OnecIssuesTab';
 import { documentBasis, formatMoment, supportsOnecConsumption } from './onecConsumption';
 import { FILM_GROUP, isOnecGroup, isStockUnsupported, nextStockSupport, pageTitle, readStoredGroup, resolveGroup, stockExportRows, stockQuantityTone, stockTabs, storeGroup } from './warehouseStock';
@@ -30,6 +32,14 @@ export const FilmInventoryPage: React.FC = () => {
   const viewAllowed = can('inventory.view');
   const manageAllowed = can('inventory.manage');
   const [tab, setTab] = useState('balances');
+  // Срезы остатков 1С на дату: вкладка и кнопка — только если сервер их умеет (прежний backend — 404, без повторов).
+  const [snapshotRequestOpen, setSnapshotRequestOpen] = useState(false);
+  const snapshotsQuery = useQuery({
+    queryKey: ['inventory', 'onec-snapshots', 'capabilities'],
+    queryFn: () => inventoryApi.onecSnapshots({ limit: 1 }),
+    enabled: viewAllowed, retry: false, staleTime: 60_000,
+  });
+  const snapshotsState = snapshotsMode(snapshotsQuery.data, snapshotsQuery.isError);
   const [warehouseId, setWarehouseId] = useState<number>();
   const [vendorId, setVendorId] = useState<number>();
   const [search, setSearch] = useState('');
@@ -325,6 +335,7 @@ export const FilmInventoryPage: React.FC = () => {
           <Checkbox checked={nonZero} onChange={(event) => setNonZero(event.target.checked)}>Только ненулевые</Checkbox>
           <Checkbox checked={negative} onChange={(event) => setNegative(event.target.checked)}>Только отрицательные</Checkbox>
           <Button onClick={() => { void (stockGroup === FILM_GROUP ? exportBalances() : exportStock()).catch(() => message.error('Не удалось выгрузить остатки')); }}>Выгрузить XLSX</Button>
+          {snapshotsState === 'full' && manageAllowed && <Button onClick={() => { setTab('onec-snapshots'); setSnapshotRequestOpen(true); }}>Срез 1С на дату</Button>}
         </Space>
         {stockUnsupported && <Alert style={{ marginBottom: 12 }} type="info" showIcon message="Остатки других материалов из 1С недоступны в этой версии сервера — показана плёнка." />}
         {stockQuery.isError && !stockUnsupported && <Alert style={{ marginBottom: 12 }} type="error" showIcon message="Не удалось загрузить вкладки материалов" />}
@@ -351,6 +362,11 @@ export const FilmInventoryPage: React.FC = () => {
         <Table rowKey="documentId" dataSource={documentsQuery.data?.items ?? []} columns={documentColumns} loading={documentsQuery.isLoading} onRow={(row) => ({ onClick: () => void openDocument(row.documentId), style: { cursor: 'pointer' } })} pagination={{ current: docPage.current, pageSize: docPage.pageSize, total: documentsQuery.data?.total ?? 0, showSizeChanger: true, onChange: (current, pageSize) => setDocPage({ current, pageSize }) }} />
       </Card> },
       ...(consumptionSupported ? [{ key: 'onec-issues', label: 'Не учтено из 1С', children: tab === 'onec-issues' ? <OnecIssuesTab warehouseId={activeWarehouseId} manageAllowed={manageAllowed} warehouseOptions={(warehousesQuery.data?.items ?? []).map((item) => ({ value: item.warehouseId, label: item.name }))} onWarehouseChange={chooseWarehouse} /> : null }] : []),
+      ...(snapshotsState !== 'hidden' ? [{ key: 'onec-snapshots', label: 'Срезы 1С', children: tab === 'onec-snapshots' ? <OnecSnapshotsTab
+        mode={snapshotsState} reason={snapshotsQuery.data?.reason ?? null} manageAllowed={manageAllowed}
+        warehouseOptions={(warehousesQuery.data?.items ?? []).filter((item) => item.refKey1c).map((item) => ({ value: item.warehouseId, label: item.name }))}
+        defaultWarehouseId={warehousesQuery.data?.items.find((item) => item.warehouseId === activeWarehouseId && item.refKey1c)?.warehouseId}
+        requestOpen={snapshotRequestOpen} onRequestOpenChange={setSnapshotRequestOpen} /> : null }] : []),
     ]} />
 
     <Modal {...scrollingModal} title={manualType ? `${docTypeName[manualType]} · склад «${warehouseName(operationWarehouseId)}»` : ''} open={Boolean(manualType)} onCancel={() => setManualType(undefined)} onOk={() => void createManual()} confirmLoading={operationBusy} width={720} okText="Провести">
