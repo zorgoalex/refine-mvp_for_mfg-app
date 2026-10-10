@@ -105,16 +105,20 @@ interface Drawn {
 const sameStyles = (a: readonly string[] | null, b: readonly string[]): boolean => a !== null && a.length === b.length && a.every((text, index) => text === b[index]);
 const sameSurroundings = (a: Frame, b: Frame): boolean => a.tab === b.tab && JSON.stringify([a.shells, a.root]) === JSON.stringify([b.shells, b.root]);
 
-function fill(doc: Document, frame: Frame, drawn: Drawn): void {
+/** Returns how the copy was drawn: `place` — brought up to date in place, otherwise why it was drawn anew. */
+function fill(doc: Document, frame: Frame, drawn: Drawn): string {
   const place = `left:${frame.left}px;top:${frame.top}px;width:${frame.width}px`;
   const roomStyle = `position:absolute;left:0;top:0;width:1px;height:${frame.top + frame.height + frame.viewport.h}px;visibility:hidden`;
-  if (drawn.frame?.tree && frame.tree && drawn.tab?.isConnected && sameStyles(drawn.styles, frame.styles) && sameSurroundings(drawn.frame, frame)) {
+  const anew = !drawn.frame?.tree || !drawn.tab?.isConnected ? 'first'
+    : !sameStyles(drawn.styles, frame.styles) ? 'styles'
+      : !sameSurroundings(drawn.frame, frame) ? 'surroundings' : null;
+  if (anew === null && drawn.frame?.tree && frame.tree && drawn.tab) {
     drawn.tab.setAttribute('style', place);
     doc.body.lastElementChild?.setAttribute('style', roomStyle);
     update(doc, drawn.tab, [drawn.frame.tree], [frame.tree]);
     drawn.frame = frame;
     applyScroll(drawn.tab);
-    return;
+    return 'place';
   }
   setRoot(doc.documentElement, frame.root.htmlCls, frame.root.htmlData, frame.root.htmlStyle);
   setRoot(doc.body, frame.root.bodyCls, frame.root.bodyData, frame.root.bodyStyle);
@@ -148,6 +152,7 @@ function fill(doc: Document, frame: Frame, drawn: Drawn): void {
   drawn.frame = frame;
   drawn.tab = tab;
   applyScroll(tab);
+  return anew ?? 'first';
 }
 
 /** Inner areas of the tab are scrolled as far as the manager's. */
@@ -191,7 +196,8 @@ export const ClientScreenFrame: React.FC<{ frame: Frame; frameTop: number }> = (
   useEffect(() => {
     const doc = boxRef.current?.contentDocument;
     if (!ready || !doc?.body || frame.tree === null) return;
-    fill(doc, frame, drawn.current);
+    // How the copy was drawn last, for whoever looks into a slow or blinking screen.
+    boxRef.current?.setAttribute('data-cs-drawn', fill(doc, frame, drawn.current));
   }, [frame, ready]);
 
   const shown = clientScreenFrameWindow(frame, frameTop, available);

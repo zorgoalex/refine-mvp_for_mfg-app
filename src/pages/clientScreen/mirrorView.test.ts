@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ClientScreenSnapshot, ClientScreenUi } from './clientScreenSnapshotSchema';
 import { clientScreenSwitchedOn } from './clientScreenPath';
-import { buildMirrorView } from './mirrorView';
+import { buildMirrorView, clientScreenDrawnPair } from './mirrorView';
 
 const snapshot: ClientScreenSnapshot = {
   title: 'Заказ № 2418',
@@ -104,3 +104,32 @@ describe('clientScreenSwitchedOn', () => {
   });
 });
 
+
+describe('a snapshot is drawn together with the interface state that follows it', () => {
+  const onCut: ClientScreenUi = { tab: 'cut', focus: null, editing: null, scroll: null, page: null };
+  const first = { seq: 1 };
+  const second = { seq: 2 };
+
+  it('the first snapshot is drawn at once; a blank is never held back', () => {
+    expect(clientScreenDrawnPair(null, first, null, null)).toEqual({ shown: first, ui: null });
+    expect(clientScreenDrawnPair({ shown: first, ui: onCut }, null, null, null)).toBeNull();
+    expect(clientScreenDrawnPair({ shown: first, ui: onCut }, null, onCut, first)).toBeNull();
+  });
+
+  it('a new snapshot waits for its interface state: the previous pair stays, so the tab on screen does not change', () => {
+    const drawn = { shown: first, ui: onCut };
+    // The snapshot has come, its interface state has not: nothing changes on screen.
+    expect(clientScreenDrawnPair(drawn, second, null, null)).toBe(drawn);
+    // …it has come: both are drawn.
+    expect(clientScreenDrawnPair(drawn, second, onCut, null)).toEqual({ shown: second, ui: onCut });
+    // …or it never does: after the wait the snapshot is drawn without it.
+    expect(clientScreenDrawnPair(drawn, second, null, second)).toEqual({ shown: second, ui: null });
+    // A wait that ran out for an earlier snapshot says nothing about this one.
+    expect(clientScreenDrawnPair(drawn, second, null, first)).toBe(drawn);
+  });
+
+  it('the interface state of the snapshot on screen is applied as it changes', () => {
+    const onBasic: ClientScreenUi = { ...onCut, tab: 'basic' };
+    expect(clientScreenDrawnPair({ shown: first, ui: onCut }, first, onBasic, null)).toEqual({ shown: first, ui: onBasic });
+  });
+});

@@ -573,6 +573,8 @@ try {
     if (tab.key === 'cut') {
       // A job opened on the tab brings its sheets: drawings and pictures are in the copy as well.
       const job = page.locator('[data-client-screen-frame="cut"] .cut-jobs-actions').getByRole('button', { name: 'Открыть' }).first();
+      // The list of jobs is loaded by the tab itself, a moment after the tab is opened.
+      await job.waitFor({ state: 'visible', timeout: 20000 }).catch(() => undefined);
       if (await job.count()) {
         await job.click();
         // The pointer leaves the button: a hover colour is the manager's own, the copy has none.
@@ -584,7 +586,7 @@ try {
         // The copy is brought up to date in place: the same node is still there a moment later, with its pictures drawn.
         await page.waitForTimeout(2500);
         const later = await copyEquals(tab.key, popup, '.client-screen', 'cut tab with a job opened, a moment later');
-        assert.ok(later.copy.sameNode > opened.copy.sameNode, 'the copy is updated in place, not redrawn as a whole');
+        assert.ok(later.copy.sameNode > opened.copy.sameNode, `the copy is updated in place, not redrawn as a whole (drawn last: ${later.copy.drawn})`);
         await shot('job-later');
       } else {
         notes.push(`no job to open on the tab (buttons: ${(await page.locator('[data-client-screen-frame="cut"] button').allInnerTexts()).slice(0, 12).join(' | ').replace(/\d/g, '#')})`);
@@ -619,8 +621,8 @@ try {
           const node = document.querySelector(`[data-client-screen-frame="${key}"]`);
           return node ? `kept in the page, ${Math.round(node.getBoundingClientRect().width)} px wide` : 'removed from the page';
         }, tab.key);
-        await popup.reload({ waitUntil: 'domcontentloaded' });
-        const kept = async (where, scope) => {
+        const kept = async (where, label) => {
+          const scope = label.split(' ')[0];
           let state = 'not read yet';
           const deadline = Date.now() + 45000;
           while (state !== 'whole' && Date.now() < deadline) {
@@ -639,9 +641,13 @@ try {
             else if (copy.brokenImages || copy.images !== last.manager.images) state = `pictures: ${copy.images} in the copy (${copy.brokenImages} broken), ${last.manager.images} on the tab`;
             else state = 'whole';
           }
-          assert.ok(state === 'whole', `${tab.key} tab: the kept copy in ${scope}: ${state}`);
+          assert.ok(state === 'whole', `${tab.key} tab: the kept copy in ${label}: ${state}`);
         };
+        // First with the customer window as it is, then with one opened anew.
+        await page.waitForTimeout(1500);
         await kept(popup, '.client-screen');
+        await popup.reload({ waitUntil: 'domcontentloaded' });
+        await kept(popup, '.client-screen (after a reload)');
         await page.getByRole('button', { name: 'Что видит клиент' }).click();
         await kept(page, '.client-screen-preview');
         results.push(`${tab.key} tab: the copy with its pictures survives leaving the order screen (the tab is ${left}), a reload of the customer window and the miniature`);

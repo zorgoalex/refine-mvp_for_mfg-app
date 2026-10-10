@@ -125,3 +125,25 @@ export function buildMirrorView(snapshot: ClientScreenSnapshot, ui: ClientScreen
     frame: snapshot.frame && snapshot.frame.tab === activeTab ? snapshot.frame : null,
   };
 }
+
+/** How long a new snapshot waits for its interface state before it is drawn without one. */
+export const CLIENT_SCREEN_PAIR_WAIT_MS = 250;
+
+export interface DrawnPair<S> {
+  shown: S;
+  ui: ClientScreenUi | null;
+}
+
+/**
+ * What the customer window draws. A snapshot arrives first and its interface state (the tab, the
+ * page, the scroll) right after it, as a separate message. Drawing the snapshot alone in between
+ * would throw the customer to the first tab for a moment and back — and a tab shown whole would be
+ * built anew every time. So a new snapshot is drawn together with its interface state; until that
+ * comes (or the wait runs out) the previous pair stays. Nothing is ever held when there is nothing
+ * to show: a blank is immediate.
+ */
+export function clientScreenDrawnPair<S>(previous: DrawnPair<S> | null, shown: S | null, ui: ClientScreenUi | null, waitedOutFor: S | null): DrawnPair<S> | null {
+  if (shown === null) return null;
+  if (ui !== null || previous === null || previous.shown === shown || waitedOutFor === shown) return { shown, ui };
+  return previous;
+}

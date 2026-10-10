@@ -1,9 +1,9 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useSyncExternalStore } from 'react';
 import type { ViewerState } from './clientScreenArbiter';
 import { browserClientScreenEnvironment } from './clientScreenEnvironment';
 import { startClientScreenViewer, type ClientScreenViewer } from './clientScreenViewerRuntime';
 import { ClientScreenMirror } from './ClientScreenMirror';
-import { buildMirrorView } from './mirrorView';
+import { buildMirrorView, CLIENT_SCREEN_PAIR_WAIT_MS, clientScreenDrawnPair, type DrawnPair } from './mirrorView';
 import './clientScreen.css';
 
 /**
@@ -80,8 +80,25 @@ const Splash: React.FC<{ text: string; hint?: string }> = ({ text, hint }) => (
 
 export const ClientScreenPage: React.FC = () => {
   const { state, role } = useViewer();
-  const shown = state?.shown ?? null;
-  const ui = state?.ui ?? null;
+  const received = state?.shown ?? null;
+  const receivedUi = state?.ui ?? null;
+  // A snapshot is drawn together with the interface state that follows it (see clientScreenDrawnPair).
+  const held = useRef<DrawnPair<NonNullable<typeof received>> | null>(null);
+  const waitedOutFor = useRef<typeof received>(null);
+  const [, redraw] = useReducer((count: number) => count + 1, 0);
+  const pair = clientScreenDrawnPair(held.current, received, receivedUi, waitedOutFor.current);
+  held.current = pair;
+  const waiting = received !== null && pair !== null && pair.shown !== received;
+  useEffect(() => {
+    if (!waiting) return undefined;
+    const timer = window.setTimeout(() => {
+      waitedOutFor.current = received;
+      redraw();
+    }, CLIENT_SCREEN_PAIR_WAIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [waiting, received]);
+  const shown = pair?.shown ?? null;
+  const ui = pair?.ui ?? null;
   const view = useMemo(() => (shown ? buildMirrorView(shown.snapshot, ui) : null), [shown, ui]);
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
