@@ -796,11 +796,19 @@ describe('customer screen: a tab shown whole', () => {
     expect(viewer.getState().ui?.tab).toBe('cut');
     expect(shownFrame(viewer)?.tree).toEqual({ t: 'div', c: ['Задание 1'] });
 
-    // A fresh customer window (reload) gets the kept copy as well.
+    // A fresh customer window (reload) gets the kept copy as well. While the window is away the tick
+    // cannot be told — it is never reported as taken off, so nothing kept is thrown away.
     viewer.stop();
+    const seen = new Set<string>();
+    const watch = setInterval(() => seen.add(a.codeVisibility('tab.cut')), 2);
+    disposables.push(() => clearInterval(watch));
     const again = startViewer();
     await until(() => shownFrame(again) !== null, 'copy after reload');
     await until(() => again.getState().ui?.tab === 'cut', 'tab after reload');
+    clearInterval(watch);
+    expect([...seen]).not.toContain('off');
+    expect(a.codeVisibility('tab.cut')).toBe('on');
+    expect(a.codeVisibility('tab.additional')).toBe('off');
 
     // On a tab the customer sees, the heavy copy is no longer sent…
     shown.ui = { ...shown.ui, tab: 'details' };

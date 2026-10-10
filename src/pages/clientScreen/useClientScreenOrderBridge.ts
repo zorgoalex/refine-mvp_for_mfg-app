@@ -359,7 +359,7 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
     const presented = () => presenter.getView().presentedOrderKey === orderKey;
     const source = createClientScreenFrameSource({
       node: (tab) => readOrderTabMirror<HTMLElement>(store, clientScreenFrameNodeKey(tab)),
-      allowed: (tab) => presented() && presenter.isCodeVisible(`tab.${tab}`),
+      allowed: (tab) => presenter.codeVisibility(`tab.${tab}`),
       changed: () => presenter.notifyChanged(orderKey),
       scrolled: () => presenter.notifyUi(orderKey),
     });

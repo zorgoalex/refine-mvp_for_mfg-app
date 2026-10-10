@@ -513,12 +513,14 @@ try {
     let manager = null;
     let copy = null;
     let problems = ['not compared yet'];
-    await expect.poll(async () => {
+    const deadline = Date.now() + 45000;
+    while (problems.length && Date.now() < deadline) {
+      await page.waitForTimeout(400);
       manager = await page.evaluate(readManagerTab, [key, FRAME_CONTROL_SELECTOR]);
       copy = await where.evaluate(readCopy, [scope, FRAME_CONTROL_SELECTOR]);
       if (!manager || !copy) {
         problems = [`${manager ? 'the copy' : 'the tab of the manager'} is not on screen`];
-        return problems;
+        continue;
       }
       problems = [];
       if (frameText(manager.text) !== frameText(copy.text)) problems.push(`texts differ (${frameText(manager.text).length} and ${frameText(copy.text).length} characters)`);
@@ -527,8 +529,8 @@ try {
       if (manager.width !== copy.width) problems.push(`width ${manager.width} → ${copy.width}`);
       if (manager.viewport.join('x') !== copy.viewport.join('x')) problems.push(`window ${manager.viewport.join('x')} → ${copy.viewport.join('x')}`);
       problems.push(...frameDifferences(manager.controls, copy.controls));
-      return problems;
-    }, { timeout: 45000, message: `${what}: the copy equals the manager's tab` }).toEqual([]);
+    }
+    assert.deepEqual(problems, [], `${what}: the copy equals the manager's tab`);
     assert.equal(copy.sandbox, 'allow-same-origin', `${what}: the box runs no scripts`);
     assert.equal(copy.policy, `default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data: ${new URL(base).origin}/assets/`, `${what}: the content policy of the box`);
     assert.equal(copy.policyFirst, true, `${what}: the policy is the first thing in the box`);
@@ -548,6 +550,13 @@ try {
     }
     await expect(selectedTab()).toHaveText(tab.name, { timeout: 30000 });
     const first = await copyEquals(tab.key, popup, '.client-screen', `${tab.key} tab`);
+    // SHOTS=<folder>: pictures of both windows, to look at the copy with one's own eyes.
+    const shot = async (name) => {
+      if (!process.env.SHOTS) return;
+      await page.screenshot({ path: `${process.env.SHOTS}/${tab.key}-${name}-manager.png` });
+      await popup.screenshot({ path: `${process.env.SHOTS}/${tab.key}-${name}-customer.png` });
+    };
+    await shot('first');
     const notes = [`${first.copy.controls.length} control node(s) at the same place`, `${first.copy.images} picture(s) inline`];
     // The other side of the layout breakpoint: a narrower manager window.
     await page.setViewportSize({ width: 1200, height: 900 });
@@ -555,11 +564,27 @@ try {
     await page.setViewportSize({ width: 1500, height: 900 });
     await copyEquals(tab.key, popup, '.client-screen', `${tab.key} tab back in a 1500 px window`);
     // Scrolling: what is pinned inside the tab is pinned at the same place in the copy.
-    await page.mouse.move(750, 600);
-    await page.mouse.wheel(0, 260);
+    if (tab.key === 'cut') {
+      // A job opened on the tab brings its sheets: drawings and pictures are in the copy as well.
+      const job = page.locator('[data-client-screen-frame="cut"] .cut-jobs-actions').getByRole('button', { name: 'Открыть' }).first();
+      if (await job.count()) {
+        await job.click();
+        await page.waitForTimeout(2500);
+        const opened = await copyEquals(tab.key, popup, '.client-screen', 'cut tab with a job opened');
+        notes.push(`with a job opened: ${opened.copy.controls.length} control node(s), ${opened.copy.images} picture(s) inline`);
+        await shot('job');
+      } else {
+        notes.push(`no job to open on the tab (buttons: ${(await page.locator('[data-client-screen-frame="cut"] button').allInnerTexts()).slice(0, 12).join(' | ').replace(/\d/g, '#')})`);
+      }
+    }
+    const before = await page.evaluate(() => window.scrollY);
+    await page.evaluate(() => window.scrollBy(0, 260));
+    const moved = await page.evaluate(() => window.scrollY) - before;
     const scrolled = await copyEquals(tab.key, popup, '.client-screen', `${tab.key} tab after scrolling`);
-    notes.push(`after scrolling the box is at ${scrolled.copy.scrollTop} px`);
-    await page.mouse.wheel(0, -2000);
+    const last = scrolled;
+    notes.push(moved > 0 ? `the manager scrolled ${moved} px, the box is at ${scrolled.copy.scrollTop} px` : 'the page of the manager does not scroll with this tab open');
+    if (moved > 0) await expect.poll(async () => (await popup.evaluate(readCopy, ['.client-screen', FRAME_CONTROL_SELECTOR]))?.scrollTop ?? -1, { timeout: 10000 }).toBeGreaterThan(0);
+    await page.evaluate(() => window.scrollTo(0, 0));
     // The miniature in the manager's header draws the same copy.
     await page.getByRole('button', { name: 'Что видит клиент' }).hover();
     await copyEquals(tab.key, page, '.client-screen-preview', `${tab.key} tab in the miniature`);
@@ -571,27 +596,39 @@ try {
     if (tab.key === 'cut' || !has('tab.cut')) {
       // The manager leaves the order screen with the order still presented: the copy stays whole,
       // also for a customer window opened anew and for the miniature.
-      const away = page.getByRole('link', { name: 'Заказы', exact: true }).first();
-      if (await away.count()) {
-        await away.click();
-        await page.waitForURL((url) => !url.pathname.includes('/orders/edit/'), { timeout: 30000 });
+      {
+        await page.evaluate(() => {
+          window.history.pushState({}, '', '/orders');
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        });
+        await page.waitForURL((url) => url.pathname === '/orders', { timeout: 20000 });
+        const left = await page.evaluate((key) => {
+          const node = document.querySelector(`[data-client-screen-frame="${key}"]`);
+          return node ? `kept in the page, ${Math.round(node.getBoundingClientRect().width)} px wide` : 'removed from the page';
+        }, tab.key);
         await popup.reload({ waitUntil: 'domcontentloaded' });
         const kept = async (where, scope) => {
-          let copy = null;
-          await expect.poll(async () => {
-            copy = await where.evaluate(readCopy, [scope, FRAME_CONTROL_SELECTOR]);
-            return Boolean(copy && frameText(copy.text) === frameText(first.manager.text) && copy.brokenImages === 0 && copy.images === first.manager.images);
-          }, { timeout: 45000, message: `${tab.key} tab: the kept copy is whole` }).toBe(true);
+          let state = 'not read yet';
+          const deadline = Date.now() + 45000;
+          while (state !== 'whole' && Date.now() < deadline) {
+            await page.waitForTimeout(400);
+            const copy = await where.evaluate(readCopy, [scope, FRAME_CONTROL_SELECTOR]);
+            if (!copy) state = 'no copy on screen';
+            else if (frameText(copy.text) !== frameText(last.manager.text)) state = `text differs (${frameText(copy.text).length} and ${frameText(last.manager.text).length} characters)`;
+            else if (copy.brokenImages || copy.images !== last.manager.images) state = `pictures: ${copy.images} in the copy (${copy.brokenImages} broken), ${last.manager.images} on the tab`;
+            else state = 'whole';
+          }
+          assert.ok(state === 'whole', `${tab.key} tab: the kept copy in ${scope}: ${state}`);
         };
         await kept(popup, '.client-screen');
-        await page.getByRole('button', { name: 'Что видит клиент' }).hover();
+        await page.getByRole('button', { name: 'Что видит клиент' }).click();
         await kept(page, '.client-screen-preview');
+        results.push(`${tab.key} tab: the copy with its pictures survives leaving the order screen (the tab is ${left}), a reload of the customer window and the miniature`);
+        await page.locator('[role="dialog"][aria-label="Экран клиента"]').getByRole('button', { name: 'Перейти к заказу' }).click();
+        await page.waitForURL((url) => url.pathname === `/orders/edit/${orderId}`, { timeout: 20000 });
+        await expect(page.getByText('Клиент видит этот заказ')).toBeVisible({ timeout: 30000 });
         await page.mouse.move(5, 400);
-        results.push(`${tab.key} tab: the copy with its pictures survives leaving the order screen, a reload of the customer window and the miniature`);
-        await page.goBack();
-        await expect(page.getByText('Клиент видит этот заказ')).toBeVisible({ timeout: 120000 });
-      } else {
-        results.push('no in-app link away from the order in this layout: the kept copy is not exercised');
+        await expect(page.locator('[role="dialog"][aria-label="Экран клиента"]')).toHaveCount(0, { timeout: 10000 });
       }
     }
     if (!(await openSection(/Основная информация|Обзор/))) results.push('no way back to the first tab in this layout');

@@ -6,6 +6,7 @@ import {
   type FrameSourceElement, type FrameSourceNode,
 } from './clientScreenFrameCapture';
 import { clientScreenFrameWindow } from './clientScreenFrameLayout';
+import { keepsClientScreenFrame } from './clientScreenFrameSource';
 import { CLIENT_SCREEN_FRAME_LIMITS } from './clientScreenFrameTree';
 import { CLIENT_SCREEN_CODES, CLIENT_SCREEN_DEFAULT_VISIBLE_CODES } from './clientScreenRegistry';
 import { clientScreenFrameSchema, clientScreenSnapshotSchema, clientScreenUiSchema, type ClientScreenFrame, type ClientScreenUi } from './clientScreenSnapshotSchema';
@@ -272,6 +273,16 @@ describe('whole-tab copy: only with the tick of that tab', () => {
     expect(on('cut').table).toBeNull();
     expect(on('basic').frame).toBeNull();
     expect(on('cut').tabs.find((tab) => tab.active)?.label).toBe('Раскрой');
+  });
+});
+
+describe('whole-tab copy: how long the manager side keeps it', () => {
+  it('goes with the presentation and with a tick known to be off; a moment of not knowing keeps it', () => {
+    expect(keepsClientScreenFrame(true, 'on')).toBe(true);
+    // The customer window is being reopened, or the settings are not confirmed yet.
+    expect(keepsClientScreenFrame(true, 'unknown')).toBe(true);
+    expect(keepsClientScreenFrame(true, 'off')).toBe(false);
+    for (const tick of ['on', 'off', 'unknown'] as const) expect(keepsClientScreenFrame(false, tick)).toBe(false);
   });
 });
 

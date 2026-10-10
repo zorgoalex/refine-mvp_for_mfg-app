@@ -248,11 +248,20 @@ export class ClientScreenPresenter {
     else setTimeout(run, 16);
   }
 
-  /** Is this code ticked in the settings in force right now? False whenever nothing may be shown. */
+  /**
+   * Is this code ticked in the settings in force right now? `unknown` while that cannot be told —
+   * the customer window is being reopened, the settings are not confirmed: nothing is shown then
+   * either way, but what the manager side keeps for the presentation is not thrown away on a guess.
+   */
+  codeVisibility(code: string): 'on' | 'off' | 'unknown' {
+    if (this.state.phase !== 'owner' || !this.state.policy) return 'unknown';
+    if (!publisherCanPublish(this.state, this.deps.env.readWorkstation(), this.deps.env.now())) return 'unknown';
+    return this.state.policy.visibleCodes.includes(code) ? 'on' : 'off';
+  }
+
+  /** True only when the code is known to be ticked right now. */
   isCodeVisible(code: string): boolean {
-    if (this.state.phase !== 'owner' || !this.state.policy) return false;
-    if (!publisherCanPublish(this.state, this.deps.env.readWorkstation(), this.deps.env.now())) return false;
-    return this.state.policy.visibleCodes.includes(code);
+    return this.codeVisibility(code) === 'on';
   }
 
   /** Only the interface state changed (tab, focus, scroll, the row being edited). */

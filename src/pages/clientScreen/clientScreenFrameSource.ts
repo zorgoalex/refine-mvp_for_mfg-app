@@ -59,11 +59,23 @@ export function createFrameImageEncoder(doc: Document, ratio: number): { encode:
 export interface FrameSourceDeps {
   /** The area of the tab on the page, or null while the tab is not there. */
   node(tab: ClientScreenFrameTabKey): HTMLElement | null;
-  /** Is the tick of this tab on in the settings in force, for the order presented from this form? */
-  allowed(tab: ClientScreenFrameTabKey): boolean;
+  /**
+   * The tick of this tab in the settings in force. `unknown` — it cannot be told right now (the
+   * customer window is being reopened, the settings are not confirmed): nothing is read from the
+   * page then, and the copy already taken is kept until the answer is known.
+   */
+  allowed(tab: ClientScreenFrameTabKey): 'on' | 'off' | 'unknown';
   changed(): void;
   /** Only the scroll offset of the area the tab lives in changed. */
   scrolled(): void;
+}
+
+/**
+ * Does the copy taken earlier stay? It goes with the presentation and with the tick of its tab,
+ * and only when the tick is known to be off: a moment when that cannot be told is not a reason.
+ */
+export function keepsClientScreenFrame(presented: boolean, tick: 'on' | 'off' | 'unknown'): boolean {
+  return presented && tick !== 'off';
 }
 
 export interface ClientScreenFrameSource {
@@ -121,7 +133,7 @@ export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window
 
   const capture = () => {
     timer = 0;
-    if (!watched || !watched.node.isConnected || !deps.allowed(watched.tab)) return;
+    if (!watched || !watched.node.isConnected || deps.allowed(watched.tab) !== 'on') return;
     const box = watched.node.getBoundingClientRect();
     // A hidden tab (another screen of the app is on top) has no size: the last copy stays.
     if (box.width < 200 || box.height < 1) return;
@@ -220,8 +232,8 @@ export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window
         return;
       }
       // The tick was taken off: the copy is gone at once, whatever tab the manager is on.
-      if (frame && !deps.allowed(frame.tab)) set(null, '');
-      const node = tab && deps.allowed(tab) ? deps.node(tab) : null;
+      if (frame && !keepsClientScreenFrame(presented, deps.allowed(frame.tab))) set(null, '');
+      const node = tab && deps.allowed(tab) === 'on' ? deps.node(tab) : null;
       if (!tab || !node) {
         // Not on a whole tab, or it is not on the page: nothing is read; the last copy stays.
         unwatch();
