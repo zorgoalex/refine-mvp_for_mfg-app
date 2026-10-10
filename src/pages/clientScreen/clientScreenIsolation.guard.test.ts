@@ -78,7 +78,7 @@ describe('customer window isolation', () => {
     for (const file of [
       'clientScreenPresenter.ts', 'orderEditSnapshotSource.ts', 'buildClientScreenSnapshot.ts', 'clientScreenPublisherCore.ts',
       // Reading the manager's tab is the manager window's business only.
-      'clientScreenFrameCapture.ts', 'clientScreenFrameSource.ts', 'ClientScreenFrameSlot.tsx',
+      'clientScreenFrameCapture.ts', 'clientScreenFrameSource.ts', 'clientScreenFrameKeeper.ts', 'ClientScreenFrameSlot.tsx',
     ]) {
       expect(window.files).not.toContain(`src/pages/clientScreen/${file}`);
     }

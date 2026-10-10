@@ -2,6 +2,7 @@ import {
   captureClientScreenFrame, captureFrameStyles, captureFrameSurroundings,
   type FrameImageEncoder, type FrameSourceElement,
 } from './clientScreenFrameCapture';
+import { createClientScreenFrameKeeper, type FrameKeeperDeps } from './clientScreenFrameKeeper';
 import { clientScreenFrameSchema, type ClientScreenFrame, type ClientScreenFrameTabKey } from './clientScreenSnapshotSchema';
 
 /**
@@ -77,38 +78,25 @@ export function createFrameImageEncoder(doc: Document, ratio: number): { encode:
   };
 }
 
-export interface FrameSourceDeps {
+/**
+ * `allowed` — the tick of a tab in the settings in force. `unknown` — it cannot be told right now
+ * (the customer window is being reopened, the settings are not confirmed): nothing is read from the
+ * page then, and the copy already taken is kept until the answer is known.
+ */
+export interface FrameSourceDeps extends FrameKeeperDeps {
   /** The area of the tab on the page, or null while the tab is not there. */
   node(tab: ClientScreenFrameTabKey): HTMLElement | null;
-  /**
-   * The tick of this tab in the settings in force. `unknown` — it cannot be told right now (the
-   * customer window is being reopened, the settings are not confirmed): nothing is read from the
-   * page then, and the copy already taken is kept until the answer is known.
-   */
-  allowed(tab: ClientScreenFrameTabKey): 'on' | 'off' | 'unknown';
-  changed(): void;
   /** Only the scroll offset of the area the tab lives in changed. */
   scrolled(): void;
-}
-
-/**
- * Does the copy taken earlier stay? It belongs to one presentation and goes with it and with the
- * tick of its tab — and only when the tick is known to be off: a moment when that cannot be told is
- * not a reason.
- */
-export function keepsClientScreenFrame(presented: boolean, tick: 'on' | 'off' | 'unknown', samePresentation = true): boolean {
-  return presented && samePresentation && tick !== 'off';
 }
 
 export interface ClientScreenFrameSource {
   get(): ClientScreenFrame | null;
   /** How far the area the copied tab lives in is scrolled right now; the last known value when the tab is away. */
   scrollTop(): number;
-  /**
-   * Called on every change of what decides the capture: the manager's tab, the presentation (and its
-   * number: a copy is never carried from one presentation into another), the settings.
-   */
-  sync(tab: ClientScreenFrameTabKey | null, presented: boolean, presentationNo: number): void;
+  /** Called on every change of what decides the capture: the manager's tab, the presentation, the settings. */
+  sync(tab: ClientScreenFrameTabKey | null): void;
+  /** The form goes off the page: nothing is watched any more; the copy stays with its keeper. */
   stop(): void;
 }
 
@@ -135,10 +123,8 @@ export const existingClientScreenFrameSource = (owner: object): ClientScreenFram
 export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window = window): ClientScreenFrameSource {
   const doc = win.document;
   const images = createFrameImageEncoder(doc, win.devicePixelRatio);
-  let frame: ClientScreenFrame | null = null;
-  let frameKey = '';
-  let frameOf = -1;
-  let presentation = -1;
+  // The copy itself lives in the keeper, which lets it go without any form on the page.
+  const keeper = createClientScreenFrameKeeper(deps);
   let watched: { tab: ClientScreenFrameTabKey; node: HTMLElement; scroller: HTMLElement | null; stop(): void } | null = null;
   let lastScrollTop = 0;
 
@@ -159,14 +145,6 @@ export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window
   /** A copy that took long is taken less often, so the manager's own work is never held up by it. */
   let pause = FRAME_CAPTURE_MS;
   let styles: { signature: string; blocks: string[] | null } | null = null;
-
-  const set = (next: ClientScreenFrame | null, key: string) => {
-    if (key === frameKey) return;
-    frame = next;
-    frameKey = key;
-    frameOf = next ? presentation : -1;
-    deps.changed();
-  };
 
   const pageStyles = (): string[] | null => {
     const sheets = Array.from(doc.styleSheets);
@@ -217,7 +195,7 @@ export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window
     const parsed = clientScreenFrameSchema.safeParse(candidate);
     if (!parsed.success) return;
     const { styles: _styles, ...rest } = parsed.data;
-    set(parsed.data, `${styles?.signature ?? ''}|${JSON.stringify(rest)}`);
+    keeper.put(parsed.data, `${styles?.signature ?? ''}|${JSON.stringify(rest)}`);
     const spent = (win.performance?.now?.() ?? 0) - startedAt;
     // Pictures still owed come with the next copy, at the usual pace.
     pause = images.pending() ? FRAME_CAPTURE_MS : Math.min(4000, Math.max(FRAME_CAPTURE_MS, Math.round(spent * 8)));
@@ -275,20 +253,18 @@ export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window
   };
 
   return {
-    get: () => frame,
+    get: keeper.get,
     scrollTop: readScrollTop,
-    sync(tab, presented, presentationNo) {
-      presentation = presentationNo;
-      if (!presented) {
+    sync(tab) {
+      // The presentation is over, another one has begun, or the tick is off: the copy is gone at once.
+      keeper.check();
+      if (!deps.presented()) {
         lastScrollTop = 0;
         unwatch();
         images.clear();
         styles = null;
-        set(null, '');
         return;
       }
-      // The tick was taken off: the copy is gone at once, whatever tab the manager is on.
-      if (frame && !keepsClientScreenFrame(presented, deps.allowed(frame.tab), frameOf === presentationNo)) set(null, '');
       const node = tab && deps.allowed(tab) === 'on' ? deps.node(tab) : null;
       if (!tab || !node) {
         // Not on a whole tab, or it is not on the page: nothing is read; the last copy stays.

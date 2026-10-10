@@ -1,12 +1,12 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildClientScreenSnapshot, createClientScreenIdMap, filterClientScreenUi, resolveClientScreenTab, withShownFrameOnly, type ClientScreenOrderSource } from './buildClientScreenSnapshot';
 import {
   captureClientScreenFrame, captureFrameStyles, captureFrameSurroundings, CLIENT_SCREEN_FRAME_SCROLL_ATTRIBUTE, CLIENT_SCREEN_FRAME_STYLE_LIMITS,
   type FrameSourceElement, type FrameSourceNode,
 } from './clientScreenFrameCapture';
 import { clientScreenFrameWindow } from './clientScreenFrameLayout';
-import { keepsClientScreenFrame } from './clientScreenFrameSource';
+import { createClientScreenFrameKeeper, FRAME_KEEPER_CHECK_MS, keepsClientScreenFrame, type FrameTick } from './clientScreenFrameKeeper';
 import { CLIENT_SCREEN_FRAME_LIMITS } from './clientScreenFrameTree';
 import { CLIENT_SCREEN_CODES, CLIENT_SCREEN_DEFAULT_VISIBLE_CODES } from './clientScreenRegistry';
 import { clientScreenFrameSchema, clientScreenSnapshotSchema, clientScreenUiSchema, type ClientScreenFrame, type ClientScreenUi } from './clientScreenSnapshotSchema';
@@ -301,6 +301,92 @@ describe('whole-tab copy: how long the manager side keeps it', () => {
   });
 });
 
+describe('whole-tab copy: the keeper lets it go by itself, with no order form on the page', () => {
+  afterEach(() => vi.useRealTimers());
+  const world = () => {
+    const state = { presented: true, no: 1, tick: 'on' as FrameTick, changed: 0, listeners: new Set<() => void>() };
+    const keeper = createClientScreenFrameKeeper({
+      presented: () => state.presented,
+      presentationNo: () => state.no,
+      allowed: () => state.tick,
+      changed: () => { state.changed += 1; },
+      subscribe: (listener) => {
+        state.listeners.add(listener);
+        return () => state.listeners.delete(listener);
+      },
+    });
+    return { state, keeper, tell: () => state.listeners.forEach((listener) => listener()) };
+  };
+
+  it('keeps a copy, tells about a new one, and does not take the same one for a change', () => {
+    const { state, keeper } = world();
+    expect(keeper.get()).toBeNull();
+    expect(state.listeners.size).toBe(0);
+    keeper.put(goodFrame(), 'a');
+    expect(keeper.get()).toEqual(goodFrame());
+    expect(state.changed).toBe(1);
+    keeper.put(goodFrame(), 'a');
+    expect(state.changed).toBe(1);
+    keeper.put(goodFrame({ height: 701 }), 'b');
+    expect(state.changed).toBe(2);
+    expect(keeper.get()?.height).toBe(701);
+    keeper.drop();
+  });
+
+  it('the presentation ends: the copy is gone at once, the keeper stops listening', () => {
+    const { state, keeper, tell } = world();
+    keeper.put(goodFrame(), 'a');
+    expect(state.listeners.size).toBe(1);
+    state.presented = false;
+    tell();
+    expect(state.changed).toBe(2);
+    expect(state.listeners.size).toBe(0);
+    expect(keeper.get()).toBeNull();
+  });
+
+  it('the tick is taken off without any word from the presenter: gone on the next check, and not back when the tick returns', () => {
+    vi.useFakeTimers();
+    const { state, keeper } = world();
+    keeper.put(goodFrame(), 'a');
+    state.tick = 'off';
+    vi.advanceTimersByTime(FRAME_KEEPER_CHECK_MS);
+    expect(state.changed).toBe(2);
+    state.tick = 'on';
+    vi.advanceTimersByTime(FRAME_KEEPER_CHECK_MS * 3);
+    expect(keeper.get()).toBeNull();
+    expect(state.changed).toBe(2);
+    expect(state.listeners.size).toBe(0);
+  });
+
+  it('a moment of not knowing the tick keeps the copy; asking for the copy is a check too', () => {
+    const { state, keeper } = world();
+    keeper.put(goodFrame(), 'a');
+    state.tick = 'unknown';
+    expect(keeper.get()).not.toBeNull();
+    state.tick = 'off';
+    expect(keeper.get()).toBeNull();
+  });
+
+  it('a copy is never carried into another presentation, nor taken while nothing is presented or the tick is off', () => {
+    const { state, keeper } = world();
+    keeper.put(goodFrame(), 'a');
+    state.no = 2;
+    expect(keeper.get()).toBeNull();
+    // The same picture taken in the new presentation is a new copy.
+    keeper.put(goodFrame(), 'a');
+    expect(keeper.get()).not.toBeNull();
+    keeper.drop();
+    state.presented = false;
+    keeper.put(goodFrame(), 'c');
+    expect(keeper.get()).toBeNull();
+    state.presented = true;
+    state.tick = 'off';
+    keeper.put(goodFrame(), 'd');
+    expect(keeper.get()).toBeNull();
+    expect(state.listeners.size).toBe(0);
+  });
+});
+
 describe('whole-tab copy: the box it is drawn in', () => {
   const read = (file: string) => readFileSync(new URL(file, import.meta.url), 'utf8');
 
@@ -312,6 +398,13 @@ describe('whole-tab copy: the box it is drawn in', () => {
     expect(component).toContain("return `default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data: ${origin}/assets/`;");
     // The policy is the first thing in the page of the box.
     expect(component).toContain('`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${clientScreenFramePolicy(origin)}">');
+  });
+
+  it('the holder of the box stays on the page for a tab too large to show, so the width is measured when the tab fits again', () => {
+    const component = read('./ClientScreenFrame.tsx');
+    expect(component).toContain('<div ref={outerRef} className="client-screen__frame client-screen__frame--note">');
+    expect(component.match(/ref=\{outerRef\}/g)).toHaveLength(2);
+    expect(component).not.toMatch(/return <div className="client-screen__empty">/);
   });
 
   it('no markup is parsed anywhere in the customer screen: elements are created one by one', () => {

@@ -10,7 +10,7 @@ import {
   POLICY_REFRESH_MS, createPublisherState, publisherApplyPolicy, publisherCanPublish, publisherClaim, publisherConfirm, publisherOnLockHeld,
   publisherOnMessage, publisherRelease, publisherState, publisherTick, publisherUi, type ClientScreenPolicy, type PublisherLoss, type PublisherState,
 } from './clientScreenPublisherCore';
-import type { ClientScreenSnapshot, ClientScreenTabKey, ClientScreenUi } from './clientScreenSnapshotSchema';
+import { isClientScreenFrameTab, type ClientScreenFrame, type ClientScreenSnapshot, type ClientScreenTabKey, type ClientScreenUi } from './clientScreenSnapshotSchema';
 import { clientScreenAllowed } from './clientScreenWorkstation';
 
 /** The shortest time between two full snapshots when the previous one carried a whole-tab copy. */
@@ -30,6 +30,12 @@ export interface ClientScreenOrderProvider {
    * on a tab the customer screen does not mirror); the presenter decides what the customer sees.
    */
   getUi(idFor: ClientScreenIdFor): ClientScreenUi;
+  /**
+   * The whole-tab copy kept for this presentation, or null. It is asked for anew every time — also
+   * after the order screen has gone away — so a copy that was let go (the tick taken off) never
+   * comes back from what the presenter itself remembers.
+   */
+  getFrame?(): ClientScreenFrame | null;
 }
 
 export interface ClientScreenPresenterView {
@@ -144,7 +150,19 @@ export class ClientScreenPresenter {
       const kept = { source, ui: ui ?? { tab: null, focus: null, editing: null, scroll: null, page: null } };
       // Nothing is being typed or pointed at any more.
       const still: ClientScreenUi = { ...kept.ui, focus: null, editing: null };
-      this.provider = { getSource: () => kept.source, getUi: () => still };
+      // Everything is as the screen left it, except the whole-tab copy: that is asked for every time.
+      const { frame: _left, ...rest } = kept.source;
+      const frameNow = provider.getFrame ? () => provider.getFrame!() : () => kept.source.frame ?? null;
+      const getSource = (): ClientScreenOrderSource => {
+        let frame: ClientScreenFrame | null = null;
+        try {
+          frame = frameNow();
+        } catch {
+          frame = null;
+        }
+        return frame ? { ...rest, frame } : rest;
+      };
+      this.provider = { getSource, getUi: () => still, getFrame: () => getSource().frame ?? null };
       this.publish();
     });
   }
@@ -277,6 +295,18 @@ export class ClientScreenPresenter {
     this.guard(() => {
       if (orderKey !== this.orderKey || this.blanked) return;
       if (!publisherCanPublish(this.state, this.deps.env.readWorkstation(), this.deps.env.now())) return;
+      // The customer comes (back) to a tab shown whole whose copy is kept but did not travel with the
+      // last snapshot: the snapshot goes again, with the copy, and the interface state right after it.
+      if (this.provider && this.lastSnapshot) {
+        const tab = resolveClientScreenTab(this.provider.getUi(this.idFor).tab, this.lastCustomerTab, this.lastSnapshot);
+        if (isClientScreenFrameTab(tab) && this.lastSnapshot.frame?.tab !== tab) {
+          const kept = this.provider.getFrame ? this.provider.getFrame() : this.provider.getSource().frame ?? null;
+          if (kept?.tab === tab) {
+            this.publish();
+            return;
+          }
+        }
+      }
       this.sendUi();
     });
   }

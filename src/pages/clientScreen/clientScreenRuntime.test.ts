@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ClientScreenIdFor, ClientScreenOrderSource } from './buildClientScreenSnapshot';
 import { createClientScreenEnvironment, type ClientScreenEnvironment, type ClientScreenLocks } from './clientScreenEnvironment';
+import { createClientScreenFrameKeeper } from './clientScreenFrameKeeper';
 import { ClientScreenPresenter, FRAME_PUBLISH_MS, type ClientScreenOrderProvider } from './clientScreenPresenter';
 import type { ClientScreenPolicy } from './clientScreenPublisherCore';
 import { CLIENT_SCREEN_CODES } from './clientScreenRegistry';
@@ -815,10 +816,12 @@ describe('customer screen: a tab shown whole', () => {
     a.notifyUi('order-1');
     a.notifyChanged('order-1');
     await until(() => again.getState().ui?.tab === 'details' && shownFrame(again) === null, 'details without the copy');
-    // …and is back at once when the manager returns.
+    // …and is back at once when the manager returns: only the tab has changed, nothing of the order
+    // or of the copy, so nothing but the interface state is reported — the kept copy travels again.
     shown.ui = { ...shown.ui, tab: 'cut' };
-    a.notifyChanged('order-1');
+    a.notifyUi('order-1');
     await until(() => shownFrame(again) !== null && again.getState().ui?.tab === 'cut', 'copy back');
+    expect(shownFrame(again)?.tree).toEqual({ t: 'div', c: ['Задание 1'] });
   });
 
   it('is kept when the order screen goes away with its order still presented', async () => {
@@ -838,6 +841,75 @@ describe('customer screen: a tab shown whole', () => {
     expect(shownFrame(again)?.tree).toEqual({ t: 'div', c: ['Задание 1'] });
     a.hide('order-1');
     await until(() => again.getState().shown === null, 'gone with the presentation');
+  });
+
+  it('the order screen is gone: the copy kept for the presentation still goes with a tick taken off, and does not come back with the tick', async () => {
+    const policy = { current: ticked('tab.cut') };
+    const { startViewer, presenter } = setup(policy);
+    const viewer = startViewer();
+    await until(() => viewer.getRole() === 'viewer', 'viewer lock');
+    const a = presenter();
+    const shown = withCut('A1');
+    // The copy lives in a keeper of its own, as with the real order form.
+    const keeper = createClientScreenFrameKeeper({
+      presented: () => a.getView().presentedOrderKey === 'order-1',
+      presentationNo: () => a.getPresentationNo(),
+      allowed: (tab) => a.codeVisibility(`tab.${tab}`),
+      changed: () => a.notifyChanged('order-1'),
+      subscribe: a.subscribe,
+    });
+    const live = { ...shown, getSource: () => ({ ...shown.source, frame: keeper.get() ?? undefined }), getFrame: () => keeper.get() };
+    (shown as { source: ClientScreenOrderSource }).source = { ...shown.source, frame: undefined };
+    a.present('order-1', live);
+    await until(() => shownTitle(viewer) === 'Заказ № A1', 'snapshot shown');
+    keeper.put(frame('Задание 1'), 'k1');
+    await until(() => shownFrame(viewer) !== null, 'copy shown');
+
+    a.detach('order-1', live);
+    policy.current = { ...ticked(), version: 2 };
+    await a.reloadPolicy();
+    await until(() => viewer.getState().shown?.policyVersion === 2, 'settings without the tick shown');
+    expect(shownFrame(viewer)).toBeNull();
+    // Nobody is on the order screen, and still the kept copy itself is gone.
+    await until(() => keeper.get() === null, 'kept copy let go', 2500);
+
+    policy.current = { ...ticked('tab.cut'), version: 3 };
+    await a.reloadPolicy();
+    await until(() => viewer.getState().shown?.policyVersion === 3, 'settings with the tick again');
+    await wait(300);
+    expect(shownFrame(viewer)).toBeNull();
+    expect(JSON.stringify(viewer.getState().shown)).not.toContain('Задание 1');
+  });
+
+  it('the order screen is gone and the presentation ends: nothing of the copy is kept; a new presentation starts without it', async () => {
+    const { startViewer, presenter } = setup({ current: ticked('tab.cut') });
+    const viewer = startViewer();
+    await until(() => viewer.getRole() === 'viewer', 'viewer lock');
+    const a = presenter();
+    const shown = withCut('A1');
+    const keeper = createClientScreenFrameKeeper({
+      presented: () => a.getView().presentedOrderKey === 'order-1',
+      presentationNo: () => a.getPresentationNo(),
+      allowed: (tab) => a.codeVisibility(`tab.${tab}`),
+      changed: () => a.notifyChanged('order-1'),
+      subscribe: a.subscribe,
+    });
+    const live = { ...shown, getSource: () => ({ ...shown.source, frame: keeper.get() ?? undefined }), getFrame: () => keeper.get() };
+    (shown as { source: ClientScreenOrderSource }).source = { ...shown.source, frame: undefined };
+    a.present('order-1', live);
+    await until(() => shownTitle(viewer) === 'Заказ № A1', 'snapshot shown');
+    keeper.put(frame('Задание 1'), 'k1');
+    await until(() => shownFrame(viewer) !== null, 'copy shown');
+    a.detach('order-1', live);
+    a.hide('order-1');
+    await until(() => viewer.getState().shown === null, 'gone with the presentation');
+    expect(keeper.get()).toBeNull();
+
+    a.present('order-1', live);
+    await until(() => shownTitle(viewer) === 'Заказ № A1', 'presented again');
+    await wait(200);
+    expect(shownFrame(viewer)).toBeNull();
+    expect(keeper.get()).toBeNull();
   });
 
   it('snapshots with a copy go no more often than the limit, however fast the order changes; a blank is never delayed', async () => {

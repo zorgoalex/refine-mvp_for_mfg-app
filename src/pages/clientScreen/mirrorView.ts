@@ -126,7 +126,7 @@ export function buildMirrorView(snapshot: ClientScreenSnapshot, ui: ClientScreen
   };
 }
 
-/** How long a new snapshot waits for its interface state before it is drawn without one. */
+/** How long, at most, the screen stays as it is while a new snapshot waits for its interface state. */
 export const CLIENT_SCREEN_PAIR_WAIT_MS = 250;
 
 export interface DrawnPair<S> {
@@ -139,11 +139,18 @@ export interface DrawnPair<S> {
  * page, the scroll) right after it, as a separate message. Drawing the snapshot alone in between
  * would throw the customer to the first tab for a moment and back — and a tab shown whole would be
  * built anew every time. So a new snapshot is drawn together with its interface state; until that
- * comes (or the wait runs out) the previous pair stays. Nothing is ever held when there is nothing
- * to show: a blank is immediate.
+ * comes the previous pair stays.
+ *
+ * What stays is strictly limited, because it may show what the new snapshot no longer has:
+ *  - nothing is held when there is nothing to show (a blank is immediate);
+ *  - nothing is held across a change of the settings (`mayHold` is false then);
+ *  - the hold is one fixed stretch of time counted from the first snapshot left waiting — later
+ *    snapshots do not prolong it (`waitedOut`): after it the newest snapshot is drawn as it is.
  */
-export function clientScreenDrawnPair<S>(previous: DrawnPair<S> | null, shown: S | null, ui: ClientScreenUi | null, waitedOutFor: S | null): DrawnPair<S> | null {
+export function clientScreenDrawnPair<S>(
+  previous: DrawnPair<S> | null, shown: S | null, ui: ClientScreenUi | null, hold: { waitedOut: boolean; mayHold: boolean },
+): DrawnPair<S> | null {
   if (shown === null) return null;
-  if (ui !== null || previous === null || previous.shown === shown || waitedOutFor === shown) return { shown, ui };
+  if (ui !== null || previous === null || previous.shown === shown || hold.waitedOut || !hold.mayHold) return { shown, ui };
   return previous;
 }

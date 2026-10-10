@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { ClientScreenSnapshot, ClientScreenUi } from './clientScreenSnapshotSchema';
 import { clientScreenSwitchedOn } from './clientScreenPath';
@@ -109,27 +110,49 @@ describe('a snapshot is drawn together with the interface state that follows it'
   const onCut: ClientScreenUi = { tab: 'cut', focus: null, editing: null, scroll: null, page: null };
   const first = { seq: 1 };
   const second = { seq: 2 };
+  const third = { seq: 3 };
+  const holding = { waitedOut: false, mayHold: true };
 
   it('the first snapshot is drawn at once; a blank is never held back', () => {
-    expect(clientScreenDrawnPair(null, first, null, null)).toEqual({ shown: first, ui: null });
-    expect(clientScreenDrawnPair({ shown: first, ui: onCut }, null, null, null)).toBeNull();
-    expect(clientScreenDrawnPair({ shown: first, ui: onCut }, null, onCut, first)).toBeNull();
+    expect(clientScreenDrawnPair(null, first, null, holding)).toEqual({ shown: first, ui: null });
+    expect(clientScreenDrawnPair({ shown: first, ui: onCut }, null, null, holding)).toBeNull();
+    expect(clientScreenDrawnPair({ shown: first, ui: onCut }, null, onCut, { waitedOut: true, mayHold: true })).toBeNull();
   });
 
   it('a new snapshot waits for its interface state: the previous pair stays, so the tab on screen does not change', () => {
     const drawn = { shown: first, ui: onCut };
     // The snapshot has come, its interface state has not: nothing changes on screen.
-    expect(clientScreenDrawnPair(drawn, second, null, null)).toBe(drawn);
+    expect(clientScreenDrawnPair(drawn, second, null, holding)).toBe(drawn);
     // …it has come: both are drawn.
-    expect(clientScreenDrawnPair(drawn, second, onCut, null)).toEqual({ shown: second, ui: onCut });
+    expect(clientScreenDrawnPair(drawn, second, onCut, holding)).toEqual({ shown: second, ui: onCut });
     // …or it never does: after the wait the snapshot is drawn without it.
-    expect(clientScreenDrawnPair(drawn, second, null, second)).toEqual({ shown: second, ui: null });
-    // A wait that ran out for an earlier snapshot says nothing about this one.
-    expect(clientScreenDrawnPair(drawn, second, null, first)).toBe(drawn);
+    expect(clientScreenDrawnPair(drawn, second, null, { waitedOut: true, mayHold: true })).toEqual({ shown: second, ui: null });
+  });
+
+  it('the wait is one fixed stretch: snapshots that keep coming without an interface state do not prolong it', () => {
+    const drawn = { shown: first, ui: onCut };
+    // While the stretch runs, the newer and newer snapshots all wait…
+    expect(clientScreenDrawnPair(drawn, second, null, holding)).toBe(drawn);
+    expect(clientScreenDrawnPair(drawn, third, null, holding)).toBe(drawn);
+    // …and when it is over, the newest one is drawn, whichever it is: what the first one showed is gone.
+    expect(clientScreenDrawnPair(drawn, third, null, { waitedOut: true, mayHold: true })).toEqual({ shown: third, ui: null });
+  });
+
+  it('nothing drawn under other settings is held, not even for the wait', () => {
+    const drawn = { shown: first, ui: onCut };
+    expect(clientScreenDrawnPair(drawn, second, null, { waitedOut: false, mayHold: false })).toEqual({ shown: second, ui: null });
   });
 
   it('the interface state of the snapshot on screen is applied as it changes', () => {
     const onBasic: ClientScreenUi = { ...onCut, tab: 'basic' };
-    expect(clientScreenDrawnPair({ shown: first, ui: onCut }, first, onBasic, null)).toEqual({ shown: first, ui: onBasic });
+    expect(clientScreenDrawnPair({ shown: first, ui: onCut }, first, onBasic, holding)).toEqual({ shown: first, ui: onBasic });
+  });
+
+  it('the customer window holds by a timer that later snapshots do not restart, and never across a change of the settings', () => {
+    const page = readFileSync(new URL('./ClientScreenPage.tsx', import.meta.url), 'utf8');
+    expect(page).toContain('}, [waiting]);');
+    expect(page).not.toContain('}, [waiting, received]);');
+    expect(page).toContain('mayHold: held.current !== null && received !== null && held.current.shown.policyVersion === received.policyVersion,');
+    expect(page).toContain('if (!waiting) waitedOut.current = false;');
   });
 });

@@ -84,19 +84,26 @@ export const ClientScreenPage: React.FC = () => {
   const receivedUi = state?.ui ?? null;
   // A snapshot is drawn together with the interface state that follows it (see clientScreenDrawnPair).
   const held = useRef<DrawnPair<NonNullable<typeof received>> | null>(null);
-  const waitedOutFor = useRef<typeof received>(null);
+  // One stretch of holding: it starts with the first snapshot left waiting and is never prolonged.
+  const waitedOut = useRef(false);
   const [, redraw] = useReducer((count: number) => count + 1, 0);
-  const pair = clientScreenDrawnPair(held.current, received, receivedUi, waitedOutFor.current);
+  const pair = clientScreenDrawnPair(held.current, received, receivedUi, {
+    waitedOut: waitedOut.current,
+    // What was drawn under other settings is not kept on screen for a moment longer.
+    mayHold: held.current !== null && received !== null && held.current.shown.policyVersion === received.policyVersion,
+  });
   held.current = pair;
   const waiting = received !== null && pair !== null && pair.shown !== received;
+  if (!waiting) waitedOut.current = false;
   useEffect(() => {
     if (!waiting) return undefined;
     const timer = window.setTimeout(() => {
-      waitedOutFor.current = received;
+      waitedOut.current = true;
       redraw();
     }, CLIENT_SCREEN_PAIR_WAIT_MS);
     return () => window.clearTimeout(timer);
-  }, [waiting, received]);
+    // Deliberately not restarted by the snapshots that keep coming while the screen waits.
+  }, [waiting]);
   const shown = pair?.shown ?? null;
   const ui = pair?.ui ?? null;
   const view = useMemo(() => (shown ? buildMirrorView(shown.snapshot, ui) : null), [shown, ui]);

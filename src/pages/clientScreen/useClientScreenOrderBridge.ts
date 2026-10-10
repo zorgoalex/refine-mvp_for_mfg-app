@@ -272,6 +272,10 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
         canViewServiceMoney: current.canViewServiceMoney,
       });
     },
+    // The whole-tab copy alone: the presenter asks for it also after this form has left the page.
+    getFrame() {
+      return existingClientScreenFrameSource(getOrderDraftStore(latest.current.orderKey))?.get() ?? null;
+    },
     getUi(idFor: ClientScreenIdFor): ClientScreenUi {
       const current = latest.current;
       const store = getOrderDraftStore(current.orderKey);
@@ -362,15 +366,18 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
     const presented = () => presenter.getView().presentedOrderKey === orderKey;
     const source = clientScreenFrameSourceOf(store, () => createClientScreenFrameSource({
       node: (tab) => readOrderTabMirror<HTMLElement>(store, clientScreenFrameNodeKey(tab)),
+      presented,
+      presentationNo: () => presenter.getPresentationNo(),
       allowed: (tab) => presenter.codeVisibility(`tab.${tab}`),
       changed: () => presenter.notifyChanged(orderKey),
       scrolled: () => presenter.notifyUi(orderKey),
+      subscribe: presenter.subscribe,
     }));
     frameSource.current = source;
     const sync = () => {
       try {
         const current = latest.current;
-        source.sync(current.active && isClientScreenFrameTab(current.activeTab) ? current.activeTab : null, presented(), presenter.getPresentationNo());
+        source.sync(current.active && isClientScreenFrameTab(current.activeTab) ? current.activeTab : null);
       } catch {
         // a tab that cannot be copied is simply not shown
       }
@@ -391,12 +398,7 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
   useEffect(() => {
     const current = latest.current;
     try {
-      const presenter = getClientScreenPresenter();
-      frameSource.current?.sync(
-        current.active && isClientScreenFrameTab(current.activeTab) ? current.activeTab : null,
-        presenter?.getView().presentedOrderKey === orderKey,
-        presenter?.getPresentationNo() ?? 0,
-      );
+      frameSource.current?.sync(current.active && isClientScreenFrameTab(current.activeTab) ? current.activeTab : null);
     } catch {
       // as above
     }

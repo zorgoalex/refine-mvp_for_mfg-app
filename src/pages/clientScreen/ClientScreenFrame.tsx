@@ -222,7 +222,15 @@ export const ClientScreenFrame: React.FC<{ frame: Frame; frameTop: number }> = (
     boxRef.current?.contentWindow?.scrollTo(0, shown.scrollTop);
   }, [frame, ready, shown.scrollTop]);
 
-  if (frame.tree === null) return <div className="client-screen__empty">Вкладка слишком большая для показа</div>;
+  // The holder stays on the page whatever is inside it, so the width at hand is always measured —
+  // also when a tab that was too large to show becomes small enough again.
+  if (frame.tree === null) {
+    return (
+      <div ref={outerRef} className="client-screen__frame client-screen__frame--note">
+        <div className="client-screen__empty">Вкладка слишком большая для показа</div>
+      </div>
+    );
+  }
 
   return (
     <div ref={outerRef} className="client-screen__frame" style={{ height: Math.ceil(shown.shownHeight) }}>
