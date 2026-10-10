@@ -30,9 +30,18 @@ export interface FrameWindow {
   pageHeight: number;
 }
 
+/** Less of the tab than this in the manager's sight counts as the tab being out of sight. */
+export const CLIENT_SCREEN_FRAME_MIN_SIGHT = 160;
+
 export function clientScreenFrameWindow(frame: FrameGeometry, frameTop: number, available: number): FrameWindow {
   const scale = available > 0 && frame.width > 0 ? available / frame.width : 1;
-  const scrollTop = Math.max(0, Math.min(frameTop, frame.top + frame.height));
+  let scrollTop = Math.max(0, Math.min(frameTop, frame.top + frame.height));
+  // The manager has scrolled the tab out of sight (the form is one long page in some layouts): the
+  // customer is not left with an empty area — the nearest end of the tab is shown instead.
+  const sight = Math.min(frame.port.h, frame.top + frame.height - scrollTop) - Math.max(0, frame.top - scrollTop);
+  if (sight < Math.min(CLIENT_SCREEN_FRAME_MIN_SIGHT, frame.height)) {
+    scrollTop = frame.top > scrollTop ? frame.top : Math.max(frame.top, frame.top + frame.height - frame.port.h);
+  }
   const from = Math.max(0, frame.top - scrollTop);
   const to = Math.min(frame.port.h, frame.top + frame.height - scrollTop);
   return {

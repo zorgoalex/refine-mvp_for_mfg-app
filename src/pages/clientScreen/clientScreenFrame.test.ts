@@ -158,7 +158,20 @@ describe('whole-tab copy: where it stands on the customer\'s screen', () => {
     expect(clientScreenFrameWindow(frame, 1000, 1200)).toMatchObject({ scrollTop: 1000, shiftY: -0, shownHeight: 900 });
     // The end of the tab is in sight: only what is left of it.
     expect(clientScreenFrameWindow(frame, 2000, 1200)).toMatchObject({ scrollTop: 2000, shownHeight: 300 });
-    expect(clientScreenFrameWindow(frame, 99_999, 1200)).toMatchObject({ scrollTop: 2300, shownHeight: 0 });
+  });
+
+  it('a tab scrolled out of the manager\'s sight is still shown: its nearest end, never an empty area', () => {
+    // The tab is far below the manager's window (a long one-page form scrolled to its top): its beginning.
+    const low = { ...frame, top: 2340 };
+    expect(clientScreenFrameWindow(low, 0, 1200)).toMatchObject({ scrollTop: 2340, shiftY: -0, shownHeight: 900 });
+    expect(clientScreenFrameWindow(low, 1500, 1200)).toMatchObject({ scrollTop: 2340, shownHeight: 900 });
+    // Enough of it has come into sight: exactly what the manager sees.
+    expect(clientScreenFrameWindow(low, 1700, 1200)).toMatchObject({ scrollTop: 1700, shiftY: -640, shownHeight: 260 });
+    // The manager has scrolled past the tab: its end.
+    expect(clientScreenFrameWindow(frame, 2250, 1200)).toMatchObject({ scrollTop: 1400, shownHeight: 900 });
+    expect(clientScreenFrameWindow(frame, 99_999, 1200)).toMatchObject({ scrollTop: 1400, shownHeight: 900 });
+    // A short tab is shown whole.
+    expect(clientScreenFrameWindow({ ...frame, top: 2340, height: 120 }, 0, 1200)).toMatchObject({ scrollTop: 2340, shownHeight: 120 });
   });
 
   it('a tab inside a scrolled panel is cut by that panel, not by the window', () => {

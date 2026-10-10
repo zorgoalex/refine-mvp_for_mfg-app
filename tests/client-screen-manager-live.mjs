@@ -529,7 +529,11 @@ try {
       if (manager.width !== copy.width) problems.push(`width ${manager.width} → ${copy.width}`);
       if (manager.viewport.join('x') !== copy.viewport.join('x')) problems.push(`window ${manager.viewport.join('x')} → ${copy.viewport.join('x')}`);
       problems.push(...frameDifferences(manager.controls, copy.controls));
-      if (manager.seen.join(' | ') !== copy.seen.join(' | ')) problems.push(`on the glass: «${manager.seen.join(' | ')}» → «${copy.seen.join(' | ')}»`);
+      // Where a pinned bar of the app itself covers the tab on the manager's screen there is nothing to
+      // compare: those bars are not part of the tab, the customer sees the tab's own content there.
+      const glass = manager.seen.map((seen, index) => (seen === 'outside the tab' || seen === copy.seen[index] ? null : `«${seen}» → «${copy.seen[index]}»`)).filter(Boolean);
+      if (glass.length) problems.push(`on the glass: ${glass.join('; ')}`);
+
       // The tab fills the area the customer looks at: its left edge at the edge, no blank above or below.
       const place = copy.place;
       if (Math.abs(place.left) > 2 || Math.abs(place.right - place.holderWidth) > 3 || place.top > 2 || place.bottom < place.holderHeight - 3 || place.holderHeight < 20) {
@@ -598,7 +602,8 @@ try {
     const scrolled = await copyEquals(tab.key, popup, '.client-screen', `${tab.key} tab after scrolling`);
     notes.push(moved > 0 ? `the manager scrolled ${moved} px, the box is at ${scrolled.copy.scrollTop} px` : 'the page of the manager does not scroll with this tab open');
     if (moved > 0) await expect.poll(async () => (await popup.evaluate(readCopy, ['.client-screen', FRAME_CONTROL_SELECTOR]))?.scrollTop ?? -1, { timeout: 10000 }).toBeGreaterThan(0);
-    await page.evaluate(() => window.scrollTo(0, 0));
+    // Back to the tab (a one-page form scrolls to its section), then the page as it was.
+    if (moved > 0) await page.evaluate((top) => window.scrollTo(0, top), before);
     // The miniature in the manager's header draws the same copy.
     await page.getByRole('button', { name: 'Что видит клиент' }).hover();
     await copyEquals(tab.key, page, '.client-screen-preview', `${tab.key} tab in the miniature`);
