@@ -85,6 +85,8 @@ export class ClientScreenPresenter {
   /** The tab the customer saw last: kept while the manager is on a tab the customer may not see. */
   private lastCustomerTab: ClientScreenTabKey | null = null;
   private scheduled = false;
+  /** Counts presentations of this window: what is kept for one presentation is not carried into the next. */
+  private presentationNo = 0;
   /** When a snapshot with a whole-tab copy was sent last: the next full snapshot waits out FRAME_PUBLISH_MS. */
   private frameSentAt: number | null = null;
   private elsewhere = false;
@@ -169,6 +171,7 @@ export class ClientScreenPresenter {
       this.releaseLock();
       this.provider = provider;
       this.orderKey = orderKey;
+      this.presentationNo += 1;
       // A customer window of an earlier build cannot show this build's data: it is told to close,
       // and the window of this version is found (or opened) below.
       this.deps.env.retireOldViewers();
@@ -246,6 +249,11 @@ export class ClientScreenPresenter {
     });
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
     else setTimeout(run, 16);
+  }
+
+  /** The number of the presentation going on (or of the last one): a new «Показать клиенту» gives a new number. */
+  getPresentationNo(): number {
+    return this.presentationNo;
   }
 
   /**

@@ -92,27 +92,53 @@ export interface FrameSourceDeps {
 }
 
 /**
- * Does the copy taken earlier stay? It goes with the presentation and with the tick of its tab,
- * and only when the tick is known to be off: a moment when that cannot be told is not a reason.
+ * Does the copy taken earlier stay? It belongs to one presentation and goes with it and with the
+ * tick of its tab — and only when the tick is known to be off: a moment when that cannot be told is
+ * not a reason.
  */
-export function keepsClientScreenFrame(presented: boolean, tick: 'on' | 'off' | 'unknown'): boolean {
-  return presented && tick !== 'off';
+export function keepsClientScreenFrame(presented: boolean, tick: 'on' | 'off' | 'unknown', samePresentation = true): boolean {
+  return presented && samePresentation && tick !== 'off';
 }
 
 export interface ClientScreenFrameSource {
   get(): ClientScreenFrame | null;
   /** How far the area the copied tab lives in is scrolled right now; the last known value when the tab is away. */
   scrollTop(): number;
-  /** Called on every change of what decides the capture: the manager's tab, the presentation, the settings. */
-  sync(tab: ClientScreenFrameTabKey | null, presented: boolean): void;
+  /**
+   * Called on every change of what decides the capture: the manager's tab, the presentation (and its
+   * number: a copy is never carried from one presentation into another), the settings.
+   */
+  sync(tab: ClientScreenFrameTabKey | null, presented: boolean, presentationNo: number): void;
   stop(): void;
 }
+
+const sources = new WeakMap<object, ClientScreenFrameSource>();
+
+/**
+ * The one source of an order draft (the draft store object is the owner). The order form may be
+ * taken off the page and put back while its order is presented — on another screen of the app, in
+ * another workspace tab; the copy taken for the presentation must not go with the form, so it lives
+ * with the draft, like the other records of the tabs.
+ */
+export function clientScreenFrameSourceOf(owner: object, create: () => ClientScreenFrameSource): ClientScreenFrameSource {
+  let source = sources.get(owner);
+  if (!source) {
+    source = create();
+    sources.set(owner, source);
+  }
+  return source;
+}
+
+/** The source of an order draft when it has one: reading never creates it. */
+export const existingClientScreenFrameSource = (owner: object): ClientScreenFrameSource | null => sources.get(owner) ?? null;
 
 export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window = window): ClientScreenFrameSource {
   const doc = win.document;
   const images = createFrameImageEncoder(doc, win.devicePixelRatio);
   let frame: ClientScreenFrame | null = null;
   let frameKey = '';
+  let frameOf = -1;
+  let presentation = -1;
   let watched: { tab: ClientScreenFrameTabKey; node: HTMLElement; scroller: HTMLElement | null; stop(): void } | null = null;
   let lastScrollTop = 0;
 
@@ -138,6 +164,7 @@ export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window
     if (key === frameKey) return;
     frame = next;
     frameKey = key;
+    frameOf = next ? presentation : -1;
     deps.changed();
   };
 
@@ -250,7 +277,8 @@ export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window
   return {
     get: () => frame,
     scrollTop: readScrollTop,
-    sync(tab, presented) {
+    sync(tab, presented, presentationNo) {
+      presentation = presentationNo;
       if (!presented) {
         lastScrollTop = 0;
         unwatch();
@@ -260,7 +288,7 @@ export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window
         return;
       }
       // The tick was taken off: the copy is gone at once, whatever tab the manager is on.
-      if (frame && !keepsClientScreenFrame(presented, deps.allowed(frame.tab))) set(null, '');
+      if (frame && !keepsClientScreenFrame(presented, deps.allowed(frame.tab), frameOf === presentationNo)) set(null, '');
       const node = tab && deps.allowed(tab) === 'on' ? deps.node(tab) : null;
       if (!tab || !node) {
         // Not on a whole tab, or it is not on the page: nothing is read; the last copy stays.

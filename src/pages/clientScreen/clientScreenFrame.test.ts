@@ -283,6 +283,8 @@ describe('whole-tab copy: how long the manager side keeps it', () => {
     expect(keepsClientScreenFrame(true, 'unknown')).toBe(true);
     expect(keepsClientScreenFrame(true, 'off')).toBe(false);
     for (const tick of ['on', 'off', 'unknown'] as const) expect(keepsClientScreenFrame(false, tick)).toBe(false);
+    // A copy of an earlier presentation of the same order is never shown in a new one.
+    for (const tick of ['on', 'unknown'] as const) expect(keepsClientScreenFrame(true, tick, false)).toBe(false);
   });
 });
 

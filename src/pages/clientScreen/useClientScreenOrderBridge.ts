@@ -5,7 +5,9 @@ import { useTabStore } from '../../stores/tabStore';
 import { isOrderDetailPlaceholder } from '../../utils/orderDetailRows';
 import type { ClientScreenIdFor } from './buildClientScreenSnapshot';
 import { getClientScreenPresenter } from './clientScreenInstance';
-import { clientScreenFrameNodeKey, createClientScreenFrameSource, type ClientScreenFrameSource } from './clientScreenFrameSource';
+import {
+  clientScreenFrameNodeKey, clientScreenFrameSourceOf, createClientScreenFrameSource, existingClientScreenFrameSource, type ClientScreenFrameSource,
+} from './clientScreenFrameSource';
 import { clientScreenUnmountAction } from './clientScreenOrderKeys';
 import type { OrderMaterialsMirror } from './orderMaterialsMirror';
 import { readOrderTabMirror, subscribeOrderTabMirror } from './orderTabMirror';
@@ -258,7 +260,7 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
         tableCellsOf: mirror?.getTableCells ?? null,
         requirements: readOrderTabMirror<OrderMaterialsMirror>(store, 'requirements'),
         // The copy of a tab shown whole: the live one, or the last one taken during this presentation.
-        frame: frameSource.current?.get() ?? null,
+        frame: existingClientScreenFrameSource(store)?.get() ?? null,
         tabs: orderFormMirrorTabs(current.operational, current.cutTab),
         names: orderFormNames(current.references, current.sheetMaterialName, current.filmNameById),
         // The manager's own columns, sorting and grouping, once the detail table has been on screen.
@@ -275,11 +277,12 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
       const store = getOrderDraftStore(current.orderKey);
       const mirror = readOrderDetailTableMirror(store);
       const names = orderFormNames(current.references, current.sheetMaterialName, current.filmNameById);
+      const frames = existingClientScreenFrameSource(store);
       return {
         // The manager's own tab; on a tab that is not mirrored the presenter keeps the customer's last one.
         tab: mirroredTab(current.activeTab),
         ...mirroredEditing(mirror, store.getState().details, names, idFor),
-        scroll: { ratio: scrollRatio(), ...(frameSource.current?.get() ? { frameTop: frameSource.current.scrollTop() } : {}) },
+        scroll: { ratio: scrollRatio(), ...(frames?.get() ? { frameTop: frames.scrollTop() } : {}) },
         page: mirroredPage(mirror, store.getState().details),
       };
     },
@@ -350,24 +353,24 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
 
   // Tabs shown whole (cut, workshops, additional): while this order is presented, the manager is on
   // such a tab and its tick is on, the area of the tab is copied; the last copy is kept until the
-  // presentation ends. The source outlives this effect's cleanup on purpose: the presenter reads the
-  // last copy when the form goes away with its order still presented.
+  // presentation ends. The source belongs to the order draft, not to this form: the form may leave
+  // the page and come back while its order is presented, and the copy must still be there.
   useEffect(() => {
     const presenter = getClientScreenPresenter();
     if (!presenter || typeof window === 'undefined' || typeof MutationObserver === 'undefined') return undefined;
     const store = getOrderDraftStore(orderKey);
     const presented = () => presenter.getView().presentedOrderKey === orderKey;
-    const source = createClientScreenFrameSource({
+    const source = clientScreenFrameSourceOf(store, () => createClientScreenFrameSource({
       node: (tab) => readOrderTabMirror<HTMLElement>(store, clientScreenFrameNodeKey(tab)),
       allowed: (tab) => presenter.codeVisibility(`tab.${tab}`),
       changed: () => presenter.notifyChanged(orderKey),
       scrolled: () => presenter.notifyUi(orderKey),
-    });
+    }));
     frameSource.current = source;
     const sync = () => {
       try {
         const current = latest.current;
-        source.sync(current.active && isClientScreenFrameTab(current.activeTab) ? current.activeTab : null, presented());
+        source.sync(current.active && isClientScreenFrameTab(current.activeTab) ? current.activeTab : null, presented(), presenter.getPresentationNo());
       } catch {
         // a tab that cannot be copied is simply not shown
       }
@@ -388,9 +391,11 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
   useEffect(() => {
     const current = latest.current;
     try {
+      const presenter = getClientScreenPresenter();
       frameSource.current?.sync(
         current.active && isClientScreenFrameTab(current.activeTab) ? current.activeTab : null,
-        getClientScreenPresenter()?.getView().presentedOrderKey === orderKey,
+        presenter?.getView().presentedOrderKey === orderKey,
+        presenter?.getPresentationNo() ?? 0,
       );
     } catch {
       // as above
