@@ -529,8 +529,14 @@ try {
       if (manager.width !== copy.width) problems.push(`width ${manager.width} → ${copy.width}`);
       if (manager.viewport.join('x') !== copy.viewport.join('x')) problems.push(`window ${manager.viewport.join('x')} → ${copy.viewport.join('x')}`);
       problems.push(...frameDifferences(manager.controls, copy.controls));
+      if (manager.seen.join(' | ') !== copy.seen.join(' | ')) problems.push(`on the glass: «${manager.seen.join(' | ')}» → «${copy.seen.join(' | ')}»`);
+      // The tab fills the area the customer looks at: its left edge at the edge, no blank above or below.
+      const place = copy.place;
+      if (Math.abs(place.left) > 2 || Math.abs(place.right - place.holderWidth) > 3 || place.top > 2 || place.bottom < place.holderHeight - 3 || place.holderHeight < 20) {
+        problems.push(`the tab is not where the customer looks: ${JSON.stringify(place)}`);
+      }
     }
-    assert.deepEqual(problems, [], `${what}: the copy equals the manager's tab`);
+    assert.ok(problems.length === 0, `${what}: the copy does not equal the manager's tab: ${problems.join('; ').replace(/\d{5,}/g, '#')}`);
     assert.equal(copy.sandbox, 'allow-same-origin', `${what}: the box runs no scripts`);
     assert.equal(copy.policy, `default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data: ${new URL(base).origin}/assets/`, `${what}: the content policy of the box`);
     assert.equal(copy.policyFirst, true, `${what}: the policy is the first thing in the box`);
@@ -569,6 +575,8 @@ try {
       const job = page.locator('[data-client-screen-frame="cut"] .cut-jobs-actions').getByRole('button', { name: 'Открыть' }).first();
       if (await job.count()) {
         await job.click();
+        // The pointer leaves the button: a hover colour is the manager's own, the copy has none.
+        await page.mouse.move(5, 400);
         await page.waitForTimeout(2500);
         const opened = await copyEquals(tab.key, popup, '.client-screen', 'cut tab with a job opened');
         notes.push(`with a job opened: ${opened.copy.controls.length} control node(s), ${opened.copy.images} picture(s) inline`);

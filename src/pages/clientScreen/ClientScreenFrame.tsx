@@ -30,7 +30,10 @@ const SCROLL_ATTRIBUTE = 'data-cs-scroll';
 const OWN_STYLE = 'html,body{margin:0!important;padding:0!important;overflow:hidden!important;min-width:0!important}'
   + '[data-cs-shell]{display:contents!important}'
   + '[data-cs-tab]{display:block!important;box-sizing:border-box!important;margin:0!important;position:absolute!important}'
-  + '*{animation:none!important;transition:none!important;caret-color:transparent!important}';
+  // The copy is redrawn as a whole, so nothing in it may start moving again — but an animation is
+  // taken to its end, not removed: what it leaves on screen (an element faded in) stays as the manager sees it.
+  + '*,*::before,*::after{animation-duration:0s!important;animation-delay:0s!important;animation-iteration-count:1!important;'
+  + 'transition:none!important;caret-color:transparent!important}';
 
 function build(doc: Document, node: ClientScreenFrameNode): Node {
   if (typeof node === 'string') return doc.createTextNode(node);
