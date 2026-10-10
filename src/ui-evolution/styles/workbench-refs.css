@@ -1,0 +1,246 @@
+/* «NewLine»: экраны-справочники. Слева — панель «все справочники» (`WorkbenchReferenceRail`),
+   справа — сам справочник одной панелью: группа, название, пояснение, таблица. Только оформление. */
+
+/* --- раскладка: панель слева от экрана --- */
+:root[data-ui-variant="workbench"] .evolution-shell .evolution-shell__content.ant-layout-content:has(> .wb-refs-rail) {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell__content:has(> .wb-refs-rail) > .evolution-screen-frame {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail {
+  position: sticky;
+  top: calc(var(--wb-chrome-height, 88px) + 20px);
+  display: flex;
+  flex: 0 0 236px;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  max-height: calc(100vh - var(--wb-chrome-height, 88px) - 76px);
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail--hidden {
+  flex-basis: 32px;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail__search {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-md, 8px);
+  background: var(--evo-surface);
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail__search:focus-within {
+  border-color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail__search input {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--evo-text);
+  font: inherit;
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail__search input::placeholder {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail__toggle {
+  display: grid;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--evo-radius-md, 8px);
+  background: transparent;
+  color: var(--evo-text-secondary);
+  cursor: pointer;
+  place-items: center;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail__toggle:hover {
+  background: var(--evo-surface-muted);
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0 -6px;
+  padding: 0 6px 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail__group {
+  margin-top: 10px;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail__group:first-child {
+  margin-top: 2px;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail__group-label {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 8px;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail__item {
+  display: block;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--evo-radius-md, 8px);
+  background: transparent;
+  color: var(--evo-text-secondary);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 32px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail__item:hover {
+  background: var(--evo-surface-muted);
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail__item[aria-current="true"] {
+  background: var(--evo-surface);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08), 0 0 0 1px var(--evo-border);
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail__item:focus-visible,
+:root[data-ui-variant="workbench"] .wb-refs-rail__toggle:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: 1px;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail__none {
+  padding: 14px 8px;
+  color: var(--evo-text-secondary);
+  font-size: 13.5px;
+}
+
+/* --- сам справочник: одна панель --- */
+:root[data-ui-variant="workbench"] .wb-refs > .ant-page-header {
+  padding: 0;
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .wb-refs > .ant-page-header > .ant-page-header-heading {
+  align-items: flex-start;
+  margin: 0;
+  padding: 14px 16px 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs > .ant-page-header > .ant-page-header-heading .ant-page-header-heading-left {
+  align-items: flex-start;
+  min-width: 0;
+  margin: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs > .ant-page-header > .ant-page-header-heading .ant-page-header-heading-title {
+  overflow: visible;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 26px;
+  white-space: normal;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs > .ant-page-header > .ant-page-header-heading .ant-page-header-heading-extra {
+  margin: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs__group,
+:root[data-ui-variant="workbench"] .wb-refs__desc {
+  color: var(--evo-text-secondary);
+  font-weight: 400;
+  line-height: 18px;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs__group {
+  font-size: 12.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs__desc {
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs > .ant-page-header > .ant-page-header-content {
+  padding: 0 16px 16px;
+}
+
+/* простой случай — в панели только таблица: она доходит до краёв панели */
+:root[data-ui-variant="workbench"] .wb-refs > .ant-page-header > .ant-page-header-content > div > .ant-table-wrapper.reference-table {
+  margin: 0 -16px -16px;
+  border: 0;
+  border-top: 1px solid var(--evo-border);
+  border-radius: 0 0 var(--evo-radius-lg) var(--evo-radius-lg);
+}
+
+:root[data-ui-variant="workbench"] .wb-refs .reference-table .ant-table-thead > tr > th:first-child,
+:root[data-ui-variant="workbench"] .wb-refs .reference-table .ant-table-tbody > tr > td:first-child {
+  padding-left: 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs .reference-table .ant-table-tbody > tr.ant-table-row > td {
+  height: 40px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+/* действия в строке не раздувают её высоту */
+:root[data-ui-variant="workbench"] .wb-refs .reference-table .ant-table-tbody > tr > td .ant-btn-icon-only.ant-btn-sm {
+  width: 28px;
+  height: 28px;
+}
+
+/* служебный id приглушён: главное в строке — название */
+:root[data-ui-variant="workbench"] .wb-refs .reference-table .ant-table-tbody > tr.ant-table-row > td:first-child {
+  color: var(--evo-text-secondary);
+}

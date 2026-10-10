@@ -26,6 +26,7 @@ import { EvolutionMobileNavigation } from './EvolutionMobileNavigation';
 import { EvolutionSider } from './EvolutionSider';
 import { EvolutionTabletNavigation } from './EvolutionTabletNavigation';
 import { EvolutionWorkspaceTabs } from './EvolutionWorkspaceTabs';
+import { WorkbenchReferenceRail } from './WorkbenchReferenceRail';
 import { nextTabletHeaderCompactState } from './tabletHeaderScroll';
 import { resolveModernRouteFamily, resolveOperationalPageKind } from './tabletRouteFamily';
 import '../styles/evolution.css';
@@ -40,6 +41,7 @@ import '../styles/workbench-procurement.css';
 import '../styles/workbench-payments.css';
 import '../styles/workbench-lists.css';
 import '../styles/workbench-stock.css';
+import '../styles/workbench-refs.css';
 
 const EvolutionRouteSkeleton: React.FC = () => (
   <div
@@ -233,6 +235,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
           tabIndex={-1}
         >
           <GlobalTableTopScrollbars />
+          {isWorkbenchDesktop ? <WorkbenchReferenceRail /> : null}
           <div className="evolution-screen-frame" data-modern-route={routeFamily}>
             <React.Suspense fallback={<EvolutionRouteSkeleton />}>
               <KeepAliveOutlet />
