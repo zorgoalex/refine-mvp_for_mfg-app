@@ -70,7 +70,8 @@ export function readCopy([scope, selector]) {
   }
   const box = document.querySelector(`${scope} iframe.client-screen__frame-box`);
   const doc = box?.contentDocument;
-  const node = doc?.querySelector('[data-cs-tab]');
+  // The area of the tab itself (the node the manager's tab is marked with), inside its holder.
+  const node = doc?.querySelector('[data-cs-tab]')?.firstElementChild;
   if (!box || !doc || !node) return null;
   const origin = node.getBoundingClientRect();
   const handlers = [...doc.querySelectorAll('*')].filter((element) => [...element.attributes].some((attribute) => /^on/i.test(attribute.name))).length;

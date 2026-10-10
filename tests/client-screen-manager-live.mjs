@@ -596,7 +596,6 @@ try {
     await page.evaluate(() => window.scrollBy(0, 260));
     const moved = await page.evaluate(() => window.scrollY) - before;
     const scrolled = await copyEquals(tab.key, popup, '.client-screen', `${tab.key} tab after scrolling`);
-    const last = scrolled;
     notes.push(moved > 0 ? `the manager scrolled ${moved} px, the box is at ${scrolled.copy.scrollTop} px` : 'the page of the manager does not scroll with this tab open');
     if (moved > 0) await expect.poll(async () => (await popup.evaluate(readCopy, ['.client-screen', FRAME_CONTROL_SELECTOR]))?.scrollTop ?? -1, { timeout: 10000 }).toBeGreaterThan(0);
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -612,6 +611,9 @@ try {
       // The manager leaves the order screen with the order still presented: the copy stays whole,
       // also for a customer window opened anew and for the miniature.
       {
+        // What the tab shows right before the manager leaves (it may tick on by itself: counters, times).
+        const before = await copyEquals(tab.key, popup, '.client-screen', `${tab.key} tab before leaving`);
+        const settled = (text) => frameText(text).replace(/\d+/g, '#');
         await page.evaluate(() => {
           window.history.pushState({}, '', '/orders');
           window.dispatchEvent(new PopStateEvent('popstate'));
@@ -637,8 +639,8 @@ try {
                 note: document.querySelector(`${selector} .client-screen__empty`)?.textContent ?? null,
               }), scope))}`;
             }
-            else if (frameText(copy.text) !== frameText(last.manager.text)) state = `text differs (${frameText(copy.text).length} and ${frameText(last.manager.text).length} characters)`;
-            else if (copy.brokenImages || copy.images !== last.manager.images) state = `pictures: ${copy.images} in the copy (${copy.brokenImages} broken), ${last.manager.images} on the tab`;
+            else if (settled(copy.text) !== settled(before.manager.text)) state = `text differs (${frameText(copy.text).length} and ${frameText(before.manager.text).length} characters)`;
+            else if (copy.brokenImages || copy.images !== before.manager.images) state = `pictures: ${copy.images} in the copy (${copy.brokenImages} broken), ${before.manager.images} on the tab`;
             else state = 'whole';
           }
           assert.ok(state === 'whole', `${tab.key} tab: the kept copy in ${label}: ${state}`);

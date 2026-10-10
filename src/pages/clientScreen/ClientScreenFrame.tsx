@@ -117,6 +117,7 @@ function fill(doc: Document, frame: Frame, drawn: Drawn): string {
     doc.body.lastElementChild?.setAttribute('style', roomStyle);
     update(doc, drawn.tab, [drawn.frame.tree], [frame.tree]);
     drawn.frame = frame;
+    settle(drawn.tab, frame);
     applyScroll(drawn.tab);
     return 'place';
   }
@@ -151,8 +152,21 @@ function fill(doc: Document, frame: Frame, drawn: Drawn): string {
   doc.body.replaceChildren(top, room);
   drawn.frame = frame;
   drawn.tab = tab;
+  settle(tab, frame);
   applyScroll(tab);
   return anew ?? 'first';
+}
+
+/**
+ * The area of the tab stands exactly where it stood on the manager's page. A top margin of what is
+ * inside the tab (an empty-state picture, a heading) is outside the tab on the manager's page; in
+ * the box it would push the tab down, so the holder is moved up by as much.
+ */
+function settle(tab: HTMLElement, frame: Frame): void {
+  const area = tab.firstElementChild;
+  if (!area) return;
+  const push = Math.round(area.getBoundingClientRect().top - tab.getBoundingClientRect().top);
+  if (push !== 0) tab.setAttribute('style', `left:${frame.left}px;top:${frame.top - push}px;width:${frame.width}px`);
 }
 
 /** Inner areas of the tab are scrolled as far as the manager's. */
