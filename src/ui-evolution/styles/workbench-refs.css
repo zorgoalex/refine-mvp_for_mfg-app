@@ -278,3 +278,11 @@
 :root[data-ui-variant="workbench"] .wb-refs .films-list .ant-table-wrapper table {
   min-width: 1120px;
 }
+
+/* «Плёнки»: узкая колонка id — номер не переносится */
+:root[data-ui-variant="workbench"] .wb-refs .films-list .reference-table .ant-table-thead > tr > th:first-child,
+:root[data-ui-variant="workbench"] .wb-refs .films-list .reference-table .ant-table-tbody > tr > td:first-child {
+  padding-right: 4px;
+  padding-left: 10px;
+  white-space: nowrap;
+}
