@@ -6,6 +6,7 @@ import {
   buildReferenceRail,
   filterReferenceRail,
   findReferenceByPath,
+  isReferenceRailHidden,
   referenceGroupLabel,
 } from './referenceCatalog';
 import { RESOURCE_LABELS } from './tabLabels';
@@ -63,5 +64,13 @@ describe('reference catalog of the NewLine rail', () => {
     expect(referenceGroupLabel('milling_types')).toBe('Материалы');
     expect(referenceGroupLabel('orders_view')).toBeNull();
     expect(referenceGroupLabel(undefined)).toBeNull();
+  });
+
+  it('folds the rail by default only for wide references on a narrow screen; an explicit choice wins', () => {
+    expect(isReferenceRailHidden(null, 'films', 1440)).toBe(true);
+    expect(isReferenceRailHidden(null, 'films', 1920)).toBe(false);
+    expect(isReferenceRailHidden(null, 'milling_types', 1440)).toBe(false);
+    expect(isReferenceRailHidden(false, 'films', 1440)).toBe(false);
+    expect(isReferenceRailHidden(true, 'milling_types', 1920)).toBe(true);
   });
 });

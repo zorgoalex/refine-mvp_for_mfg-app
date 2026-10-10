@@ -1,18 +1,25 @@
 import React from 'react';
 import { MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
-import { buildReferenceRail, filterReferenceRail, findReferenceByPath } from '../../utils/referenceCatalog';
+import { buildReferenceRail, filterReferenceRail, findReferenceByPath, isReferenceRailHidden, isWideReference } from '../../utils/referenceCatalog';
 import { useEvolutionNavigation } from './useEvolutionNavigation';
 
 const RAIL_HIDDEN_KEY = 'erp.references.railHidden';
 
-const readHidden = (): boolean => {
+type RailKind = 'wide' | 'regular';
+type RailChoices = Record<RailKind, boolean | null>;
+const storageKey = (kind: RailKind) => (kind === 'wide' ? `${RAIL_HIDDEN_KEY}.wide` : RAIL_HIDDEN_KEY);
+
+/** Явный выбор пользователя в этом браузере; `null` — не выбирал. */
+const readChoice = (kind: RailKind): boolean | null => {
   try {
-    return window.localStorage.getItem(RAIL_HIDDEN_KEY) === '1';
+    const stored = window.localStorage.getItem(storageKey(kind));
+    return stored === '1' ? true : stored === '0' ? false : null;
   } catch {
-    return false;
+    return null;
   }
 };
+const readChoices = (): RailChoices => ({ wide: readChoice('wide'), regular: readChoice('regular') });
 
 /**
  * «NewLine»: левая панель «все справочники» на экранах-списках справочников — переход между ними
@@ -22,7 +29,7 @@ export const WorkbenchReferenceRail: React.FC = () => {
   const { sider } = useEvolutionNavigation();
   const { pathname } = useLocation();
   const [query, setQuery] = React.useState('');
-  const [hidden, setHidden] = React.useState(readHidden);
+  const [choices, setChoices] = React.useState(readChoices);
 
   const groups = React.useMemo(() => buildReferenceRail(sider.categorizedResources), [sider.categorizedResources]);
   const current = React.useMemo(() => findReferenceByPath(groups, pathname), [groups, pathname]);
@@ -30,16 +37,16 @@ export const WorkbenchReferenceRail: React.FC = () => {
 
   if (!current) return null;
 
+  const kind: RailKind = isWideReference(current.name) ? 'wide' : 'regular';
+  const hidden = isReferenceRailHidden(choices[kind], current.name, window.innerWidth);
   const toggleHidden = () => {
-    setHidden((value) => {
-      const next = !value;
-      try {
-        window.localStorage.setItem(RAIL_HIDDEN_KEY, next ? '1' : '0');
-      } catch {
-        // панель просто не запомнит выбор
-      }
-      return next;
-    });
+    const next = !hidden;
+    try {
+      window.localStorage.setItem(storageKey(kind), next ? '1' : '0');
+    } catch {
+      // панель просто не запомнит выбор
+    }
+    setChoices((value) => ({ ...value, [kind]: next }));
   };
 
   if (hidden) {

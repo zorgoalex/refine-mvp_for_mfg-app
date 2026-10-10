@@ -24,8 +24,16 @@
   max-height: calc(100vh - var(--wb-chrome-height, 88px) - 76px);
 }
 
+/* свёрнутая панель места не занимает: кнопка «показать» стоит в левом поле страницы */
 :root[data-ui-variant="workbench"] .wb-refs-rail--hidden {
-  flex-basis: 32px;
+  flex: 0 0 0;
+  margin-right: -20px;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs-rail--hidden .wb-refs-rail__toggle {
+  flex: 0 0 22px;
+  width: 22px;
+  margin-left: -23px;
 }
 
 :root[data-ui-variant="workbench"] .wb-refs-rail__head {
@@ -217,6 +225,8 @@
 
 /* простой случай — в панели только таблица: она доходит до краёв панели */
 :root[data-ui-variant="workbench"] .wb-refs > .ant-page-header > .ant-page-header-content > div > .ant-table-wrapper.reference-table {
+  width: calc(100% + 32px);
+  max-width: none;
   margin: 0 -16px -16px;
   border: 0;
   border-top: 1px solid var(--evo-border);
@@ -243,4 +253,28 @@
 /* служебный id приглушён: главное в строке — название */
 :root[data-ui-variant="workbench"] .wb-refs .reference-table .ant-table-tbody > tr.ant-table-row > td:first-child {
   color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-refs .reference-table .ant-badge-status {
+  white-space: nowrap;
+}
+
+/* «Плёнки»: широкая таблица со своей липкой шапкой — без общей панели, во всю ширину экрана */
+:root[data-ui-variant="workbench"] .wb-refs > .ant-page-header:has(.films-list) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs > .ant-page-header:has(.films-list) > .ant-page-header-heading {
+  padding: 0 0 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-refs > .ant-page-header:has(.films-list) > .ant-page-header-content {
+  padding: 0;
+}
+
+/* название плёнки занимает остаток ширины: не даём ему схлопнуться, когда панель показана на узком экране */
+:root[data-ui-variant="workbench"] .wb-refs .films-list .ant-table-wrapper table {
+  min-width: 1120px;
 }
