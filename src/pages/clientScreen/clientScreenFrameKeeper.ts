@@ -31,6 +31,11 @@ export interface FrameKeeperDeps {
   changed(): void;
   /** Changes of the presentation; returns the way to stop listening. */
   subscribe(listener: () => void): () => void;
+  /**
+   * The copy has been let go: whatever was prepared for it (pictures redrawn for the copy, the
+   * styles of the page) is to be thrown away as well — nothing of a presentation outlives it.
+   */
+  released?(): void;
 }
 
 export interface ClientScreenFrameKeeper {
@@ -51,10 +56,14 @@ export function createClientScreenFrameKeeper(deps: FrameKeeperDeps): ClientScre
   const drop = () => {
     stopGuard?.();
     stopGuard = null;
-    if (frame === null) return;
+    const had = frame !== null;
     frame = null;
     key = '';
-    deps.changed();
+    try {
+      deps.released?.();
+    } finally {
+      if (had) deps.changed();
+    }
   };
   const check = () => {
     if (frame !== null && !keepsClientScreenFrame(deps.presented(), deps.allowed(frame.tab), presentation === deps.presentationNo())) drop();
@@ -83,7 +92,11 @@ export function createClientScreenFrameKeeper(deps: FrameKeeperDeps): ClientScre
       return frame;
     },
     put(next, nextKey) {
-      if (!keepsClientScreenFrame(deps.presented(), deps.allowed(next.tab))) return;
+      if (!keepsClientScreenFrame(deps.presented(), deps.allowed(next.tab))) {
+        // Taken a moment too late (the presentation has just ended): nothing is kept, nothing prepared stays.
+        drop();
+        return;
+      }
       if (frame !== null && nextKey === key && presentation === deps.presentationNo()) return;
       frame = next;
       key = nextKey;

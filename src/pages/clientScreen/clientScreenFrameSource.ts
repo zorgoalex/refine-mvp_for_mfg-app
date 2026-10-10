@@ -25,7 +25,7 @@ const IMAGE_CACHE_LIMIT = 200;
  * empty boxes in that copy and come with the next ones (`begin` starts a copy, `pending` tells
  * whether pictures are still owed).
  */
-export function createFrameImageEncoder(doc: Document, ratio: number): { encode: FrameImageEncoder; begin(): void; pending(): boolean; clear(): void } {
+export function createFrameImageEncoder(doc: Document, ratio: number): { encode: FrameImageEncoder; begin(): void; pending(): boolean; clear(): void; size(): number } {
   const cache = new Map<string, string>();
   let fresh = 0;
   let owed = false;
@@ -75,6 +75,7 @@ export function createFrameImageEncoder(doc: Document, ratio: number): { encode:
     },
     pending: () => owed,
     clear: () => cache.clear(),
+    size: () => cache.size,
   };
 }
 
@@ -98,6 +99,8 @@ export interface ClientScreenFrameSource {
   sync(tab: ClientScreenFrameTabKey | null): void;
   /** The form goes off the page: nothing is watched any more; the copy stays with its keeper. */
   stop(): void;
+  /** How many redrawn pictures are held for the copy (they go when the copy is let go). */
+  heldPictures(): number;
 }
 
 const sources = new WeakMap<object, ClientScreenFrameSource>();
@@ -123,8 +126,6 @@ export const existingClientScreenFrameSource = (owner: object): ClientScreenFram
 export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window = window): ClientScreenFrameSource {
   const doc = win.document;
   const images = createFrameImageEncoder(doc, win.devicePixelRatio);
-  // The copy itself lives in the keeper, which lets it go without any form on the page.
-  const keeper = createClientScreenFrameKeeper(deps);
   let watched: { tab: ClientScreenFrameTabKey; node: HTMLElement; scroller: HTMLElement | null; stop(): void } | null = null;
   let lastScrollTop = 0;
 
@@ -145,6 +146,16 @@ export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window
   /** A copy that took long is taken less often, so the manager's own work is never held up by it. */
   let pause = FRAME_CAPTURE_MS;
   let styles: { signature: string; blocks: string[] | null } | null = null;
+  // The copy itself lives in the keeper, which lets it go without any form on the page — and with
+  // it goes everything prepared for the copy: the redrawn pictures and the text of the styles.
+  const keeper = createClientScreenFrameKeeper({
+    ...deps,
+    released() {
+      images.clear();
+      styles = null;
+      deps.released?.();
+    },
+  });
 
   const pageStyles = (): string[] | null => {
     const sheets = Array.from(doc.styleSheets);
@@ -274,5 +285,6 @@ export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window
       if (watched?.tab !== tab || watched.node !== node) watch(tab, node);
     },
     stop: unwatch,
+    heldPictures: images.size,
   };
 }

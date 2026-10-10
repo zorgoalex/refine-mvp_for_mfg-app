@@ -6,6 +6,7 @@ import {
   type FrameSourceElement, type FrameSourceNode,
 } from './clientScreenFrameCapture';
 import { clientScreenFrameWindow } from './clientScreenFrameLayout';
+import { createClientScreenFrameSource, FRAME_CAPTURE_MS } from './clientScreenFrameSource';
 import { createClientScreenFrameKeeper, FRAME_KEEPER_CHECK_MS, keepsClientScreenFrame, type FrameTick } from './clientScreenFrameKeeper';
 import { CLIENT_SCREEN_FRAME_LIMITS } from './clientScreenFrameTree';
 import { CLIENT_SCREEN_CODES, CLIENT_SCREEN_DEFAULT_VISIBLE_CODES } from './clientScreenRegistry';
@@ -384,6 +385,126 @@ describe('whole-tab copy: the keeper lets it go by itself, with no order form on
     keeper.put(goodFrame(), 'd');
     expect(keeper.get()).toBeNull();
     expect(state.listeners.size).toBe(0);
+  });
+});
+
+describe('whole-tab copy: the source with a page under it', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  /** The few members of a page the source touches: one tab with one picture in it. */
+  function page() {
+    const state = { presented: true, no: 1, tick: 'on' as FrameTick, changed: 0, redrawn: 0, listeners: new Set<() => void>() };
+    const html = 'http://www.w3.org/1999/xhtml';
+    const element = (tagName: string, attributes: Record<string, string>, extra: Record<string, unknown> = {}) => ({
+      nodeType: 1, tagName, namespaceURI: html, className: attributes.class ?? '', isConnected: true, childNodes: [] as unknown[],
+      attributes: Object.entries(attributes).map(([name, value]) => ({ name, value })),
+      getAttribute: (name: string) => attributes[name] ?? null,
+      addEventListener() {}, removeEventListener() {},
+      getBoundingClientRect: () => ({ left: 0, top: 100, width: 1200, height: 600 }),
+      scrollHeight: 600, scrollTop: 0, scrollLeft: 0, parentElement: null as unknown,
+      ...extra,
+    });
+    const root = element('HTML', {});
+    const body = element('BODY', {}, { parentElement: root });
+    const picture = element('IMG', { src: 'blob:https://app-test.mebelkz.app/1b2c', alt: 'Лист 1' }, {
+      complete: true, naturalWidth: 40, naturalHeight: 20, currentSrc: 'blob:https://app-test.mebelkz.app/1b2c', src: 'blob:https://app-test.mebelkz.app/1b2c',
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 40, height: 20 }),
+    });
+    const tab = element('DIV', { 'data-client-screen-frame': 'cut' }, { parentElement: body, childNodes: [picture] });
+    const canvas = { width: 0, height: 0, getContext: () => ({ drawImage() {} }), toDataURL: () => { state.redrawn += 1; return PIXEL; } };
+    const win = {
+      document: { documentElement: root, body, styleSheets: [{ cssRules: [{ cssText: '.cut-page { color: red; }' }] }], createElement: () => canvas },
+      devicePixelRatio: 1, innerWidth: 1500, innerHeight: 900, scrollX: 0, scrollY: 0,
+      getComputedStyle: () => ({ overflowY: 'visible' }),
+      setTimeout: (run: () => void, ms: number) => setTimeout(run, ms), clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
+      addEventListener() {}, removeEventListener() {},
+      performance: { now: () => 0, measure() {} },
+    };
+    const source = createClientScreenFrameSource({
+      node: () => tab as never,
+      presented: () => state.presented,
+      presentationNo: () => state.no,
+      allowed: () => state.tick,
+      changed: () => { state.changed += 1; },
+      scrolled() {},
+      subscribe: (listener) => {
+        state.listeners.add(listener);
+        return () => state.listeners.delete(listener);
+      },
+    }, win as never);
+    return { state, source, tell: () => state.listeners.forEach((listener) => listener()) };
+  }
+  const withPage = () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} });
+    return page();
+  };
+
+  it('takes a copy of the tab with its picture inside, and redraws a picture it has seen only once', () => {
+    const { state, source } = withPage();
+    source.sync('cut');
+    expect(source.get()).toBeNull();
+    vi.advanceTimersByTime(FRAME_CAPTURE_MS + 50);
+    const frame = source.get();
+    expect(frame).toMatchObject({ tab: 'cut', viewport: { w: 1500, h: 900 }, left: 0, top: 100, width: 1200, height: 600, styles: ['.cut-page { color: red; }\n'] });
+    expect(frame?.tree).toEqual({ t: 'div', a: { 'data-client-screen-frame': 'cut' }, c: [{ t: 'img', a: { alt: 'Лист 1', src: PIXEL } }] });
+    expect(JSON.stringify(frame)).not.toContain('blob:');
+    expect(state.redrawn).toBe(1);
+    expect(source.heldPictures()).toBe(1);
+    expect(state.changed).toBe(1);
+  });
+
+  it('the form is gone and the presentation ends: the copy and the pictures redrawn for it are thrown away, with no form to do it', () => {
+    const { state, source, tell } = withPage();
+    source.sync('cut');
+    vi.advanceTimersByTime(FRAME_CAPTURE_MS + 50);
+    expect(source.heldPictures()).toBe(1);
+    // The order form leaves the page; from here on nobody calls the source.
+    source.stop();
+    expect(source.get()).not.toBeNull();
+    state.presented = false;
+    tell();
+    expect(source.heldPictures()).toBe(0);
+    expect(source.get()).toBeNull();
+    expect(state.listeners.size).toBe(0);
+  });
+
+  it('the form is gone and the tick is taken off: the same, on the keeper\'s own timer', () => {
+    const { state, source } = withPage();
+    source.sync('cut');
+    vi.advanceTimersByTime(FRAME_CAPTURE_MS + 50);
+    source.stop();
+    state.tick = 'off';
+    vi.advanceTimersByTime(FRAME_KEEPER_CHECK_MS);
+    expect(source.heldPictures()).toBe(0);
+    expect(source.get()).toBeNull();
+  });
+
+  it('a copy taken a moment after the presentation ended is not kept, and neither are its pictures', () => {
+    const { state, source } = withPage();
+    source.sync('cut');
+    // The capture is already on its way when the presentation ends.
+    state.presented = false;
+    vi.advanceTimersByTime(FRAME_CAPTURE_MS + 50);
+    expect(source.get()).toBeNull();
+    expect(source.heldPictures()).toBe(0);
+    expect(state.changed).toBe(0);
+  });
+
+  it('nothing of the page is read without the tick', () => {
+    const { state, source } = withPage();
+    state.tick = 'off';
+    source.sync('cut');
+    vi.advanceTimersByTime(FRAME_CAPTURE_MS * 3);
+    expect(state.redrawn).toBe(0);
+    expect(source.get()).toBeNull();
+    state.tick = 'unknown';
+    source.sync('cut');
+    vi.advanceTimersByTime(FRAME_CAPTURE_MS * 3);
+    expect(state.redrawn).toBe(0);
   });
 });
 
