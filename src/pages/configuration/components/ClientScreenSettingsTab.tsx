@@ -146,8 +146,13 @@ export const ClientScreenSettingsTab: React.FC = () => {
                 group.label
               )
             }
-            extra={<Text type="secondary">{ticked} из {group.fields.length}</Text>}
+            extra={group.whole ? null : <Text type="secondary">{ticked} из {group.fields.length}</Text>}
           >
+            {group.whole ? (
+              <Text type="secondary">
+                Вкладка показывается клиенту целиком, как у менеджера: всё, что на ней видно, включая суммы и имена. Отдельных галочек для полей нет
+              </Text>
+            ) : null}
             <div
               style={{
                 display: 'grid',

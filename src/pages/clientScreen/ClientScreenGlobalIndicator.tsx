@@ -36,7 +36,7 @@ const Preview: React.FC<{ presenter: ClientScreenPresenter }> = ({ presenter }) 
     <div className="client-screen-preview" aria-hidden="true">
       {view ? (
         <div className="client-screen-preview__page" ref={pageRef}>
-          <div className="client-screen"><ClientScreenMirror view={view} /></div>
+          <div className="client-screen"><ClientScreenMirror view={view} frameTop={preview?.ui?.scroll?.frameTop ?? 0} /></div>
         </div>
       ) : (
         <div className="client-screen-preview__empty">У клиента сейчас заставка</div>

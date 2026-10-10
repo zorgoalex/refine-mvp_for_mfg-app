@@ -22,9 +22,11 @@ interface Props {
   orderNumber: string | null;
   activeTab: string;
   operational: boolean;
+  /** The form has the cut tab. */
+  cutTab: boolean;
 }
 
-const Connected: React.FC<Props> = ({ orderKey, orderNumber, activeTab, operational }) => {
+const Connected: React.FC<Props> = ({ orderKey, orderNumber, activeTab, operational, cutTab }) => {
   const formData = useOrderFormData();
   const keepAlive = useKeepAlive();
   const sheetMaterials = useSheetMaterialOptions();
@@ -42,7 +44,7 @@ const Connected: React.FC<Props> = ({ orderKey, orderNumber, activeTab, operatio
   const filmIds = useMemo(() => (presentedHere ? details.map((detail) => detail.film_id ?? null) : []), [details, presentedHere]);
   const filmNameById = useFilmNamesWithInactive(formData.references.filmNameById, filmIds, presentedHere);
   const { provider } = useClientScreenOrderBridge({
-    orderKey, orderNumber, activeTab, operational, references: formData.references, sheetMaterialName, filmNameById, clientContacts,
+    orderKey, orderNumber, activeTab, operational, cutTab, references: formData.references, sheetMaterialName, filmNameById, clientContacts,
     canViewServiceMoney: can('orders.view_financials'),
     active: keepAlive.isActive,
   });

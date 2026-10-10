@@ -38,6 +38,7 @@ import { featureFlags } from '../../../config/featureFlags';
 import { OrderCatalogLinesTable } from './OrderCatalogLinesTable';
 import { orderCatalogSubtotal } from '../../../utils/orderCatalogLines';
 import { can } from '../../../utils/permissions';
+import { ClientScreenFrameSlot } from '../../clientScreen/ClientScreenFrameSlot';
 import { ClientScreenOrderHeader } from '../../clientScreen/ClientScreenOrderHeader';
 import { authSession } from '../../../api/authSession';
 import { useOrderFinancialVisibility } from '../../../hooks/useOrderFinancialVisibility';
@@ -1888,9 +1889,11 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
               key: 'cut',
               label: 'Раскрой',
               children: header.order_id ? (
-                <OrderLifecycleReadSurface active={isFormSectionActive('cut')}>
-                  <CutPage embeddedOrderId={header.order_id} />
-                </OrderLifecycleReadSurface>
+                <ClientScreenFrameSlot orderKey={orderKey} tab="cut">
+                  <OrderLifecycleReadSurface active={isFormSectionActive('cut')}>
+                    <CutPage embeddedOrderId={header.order_id} />
+                  </OrderLifecycleReadSurface>
+                </ClientScreenFrameSlot>
               ) : null,
               disabled: mode === 'create' && !header.order_id,
             },
@@ -1907,7 +1910,11 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       {
         key: 'workshops',
         label: isOperational ? 'Производство' : 'Цеха',
-        children: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={isOperational ? 'Производственные операции не добавлены' : 'Цеха не назначены'} />,
+        children: (
+          <ClientScreenFrameSlot orderKey={orderKey} tab="workshops">
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={isOperational ? 'Производственные операции не добавлены' : 'Цеха не назначены'} />
+          </ClientScreenFrameSlot>
+        ),
         disabled: mode === 'create' && !header.order_id,
       },
       {
@@ -1924,6 +1931,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         key: 'additional',
         label: isOperational ? 'Бирки' : 'Дополнительно',
         children: (
+          <ClientScreenFrameSlot orderKey={orderKey} tab="additional">
           <OrderLifecycleReadSurface active={isFormSectionActive('additional')}>
             {isOperational ? (
               <Space direction="vertical" style={{ width: '100%' }} size="large">
@@ -1944,6 +1952,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
               </Space>
             )}
           </OrderLifecycleReadSurface>
+          </ClientScreenFrameSlot>
         ),
       },
       ];
@@ -2246,6 +2255,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       orderNumber={(headerNameData?.data as { order_full_number?: string | null } | undefined)?.order_full_number ?? null}
       activeTab={activeTab}
       operational={isOperational}
+      cutTab={cutTabEnabled}
     />
   );
 

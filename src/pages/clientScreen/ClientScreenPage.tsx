@@ -114,7 +114,7 @@ export const ClientScreenPage: React.FC = () => {
   else if (state?.screen === 'disabled') content = <Splash text="Экран клиента отключён" />;
   else if (!view) content = <Splash text="Экран клиента" hint="Здесь появится ваш заказ" />;
   else {
-    content = <ClientScreenMirror view={view} bodyRef={bodyRef} />;
+    content = <ClientScreenMirror view={view} bodyRef={bodyRef} frameTop={ui?.scroll?.frameTop ?? 0} />;
   }
   return <div className="client-screen">{content}</div>;
 };

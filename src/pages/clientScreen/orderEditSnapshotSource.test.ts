@@ -69,7 +69,7 @@ describe('buildOrderEditSource', () => {
 
   it('maps only known tabs, columns and grouping fields; everything else is left out', () => {
     const source = buildOrderEditSource(input({ grouping: { field: 'unknown_grouping', groups: [{ key: '__sep__:x:8:0', label: 'Нечто 8', rowKeys: [71] }] } }));
-    expect(source.tabs.map((tab) => tab.key)).toEqual(['basic', 'details', 'hdf', 'dates', 'finance', 'services']);
+    expect(source.tabs.map((tab) => tab.key)).toEqual(['basic', 'details', 'hdf', 'dates', 'finance', 'cut', 'services']);
     // (The test input lists the form's tabs by hand; «Материалы» is covered with its own tests.)
     expect(source.tabs[1].label).toBe('Детали заказа');
     // Every column of the manager's table has a field; only «Действия» has none.

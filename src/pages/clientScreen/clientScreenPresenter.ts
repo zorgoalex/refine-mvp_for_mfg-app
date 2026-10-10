@@ -1,5 +1,5 @@
 import {
-  buildClientScreenSnapshot, createClientScreenIdMap, filterClientScreenUi, resolveClientScreenTab, type ClientScreenIdFor,
+  buildClientScreenSnapshot, createClientScreenIdMap, filterClientScreenUi, withShownFrameOnly, resolveClientScreenTab, type ClientScreenIdFor,
   type ClientScreenOrderSource,
 } from './buildClientScreenSnapshot';
 import type { ClientScreenEnvironment } from './clientScreenEnvironment';
@@ -12,6 +12,9 @@ import {
 } from './clientScreenPublisherCore';
 import type { ClientScreenSnapshot, ClientScreenTabKey, ClientScreenUi } from './clientScreenSnapshotSchema';
 import { clientScreenAllowed } from './clientScreenWorkstation';
+
+/** The shortest time between two full snapshots when the previous one carried a whole-tab copy. */
+export const FRAME_PUBLISH_MS = 400;
 
 /**
  * The manager window side of the customer screen: one per app window. It claims the presentation,
@@ -82,6 +85,8 @@ export class ClientScreenPresenter {
   /** The tab the customer saw last: kept while the manager is on a tab the customer may not see. */
   private lastCustomerTab: ClientScreenTabKey | null = null;
   private scheduled = false;
+  /** When a snapshot with a whole-tab copy was sent last: the next full snapshot waits out FRAME_PUBLISH_MS. */
+  private frameSentAt: number | null = null;
   private elsewhere = false;
   private elsewhereCheckedAt = 0;
   /** One press of «Показать клиенту»: its number and the workstation generation read at the press. */
@@ -221,16 +226,33 @@ export class ClientScreenPresenter {
     });
   }
 
-  /** The presented order changed: send a new snapshot on the next frame. */
+  /**
+   * The presented order changed: send a new snapshot on the next frame. A snapshot that carries a
+   * whole-tab copy is large, so after one the next full snapshot goes no sooner than
+   * FRAME_PUBLISH_MS later; every change in between is folded into that one send. Blanking and
+   * releasing never come through here and are never delayed.
+   */
   notifyChanged(orderKey: string): void {
     if (orderKey !== this.orderKey || this.scheduled) return;
     this.scheduled = true;
     const run = () => this.guard(() => {
+      const wait = this.frameSentAt === null ? 0 : FRAME_PUBLISH_MS - (this.deps.env.now() - this.frameSentAt);
+      if (wait > 0 && wait <= FRAME_PUBLISH_MS) {
+        setTimeout(run, wait);
+        return;
+      }
       this.scheduled = false;
       this.publish();
     });
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
     else setTimeout(run, 16);
+  }
+
+  /** Is this code ticked in the settings in force right now? False whenever nothing may be shown. */
+  isCodeVisible(code: string): boolean {
+    if (this.state.phase !== 'owner' || !this.state.policy) return false;
+    if (!publisherCanPublish(this.state, this.deps.env.readWorkstation(), this.deps.env.now())) return false;
+    return this.state.policy.visibleCodes.includes(code);
   }
 
   /** Only the interface state changed (tab, focus, scroll, the row being edited). */
@@ -389,8 +411,13 @@ export class ClientScreenPresenter {
     let snapshot: ClientScreenSnapshot | null = null;
     if (allowed && this.state.policy) {
       this.lastSource = this.provider.getSource();
-      snapshot = buildClientScreenSnapshot(this.lastSource, this.state.policy.visibleCodes, this.idFor);
+      const built = buildClientScreenSnapshot(this.lastSource, this.state.policy.visibleCodes, this.idFor);
+      // The copy of a whole tab goes only while the customer is on that tab.
+      snapshot = built.frame
+        ? withShownFrameOnly(built, resolveClientScreenTab(this.provider.getUi(this.idFor).tab, this.lastCustomerTab, built))
+        : built;
     }
+    this.frameSentAt = snapshot?.frame ? this.deps.env.now() : null;
     const next = publisherState(this.state, snapshot);
     this.state = next.state;
     this.blanked = snapshot === null;
@@ -466,6 +493,7 @@ export class ClientScreenPresenter {
   /** Everything this window holds for a presentation is dropped; never throws, sends nothing. */
   private afterLoss(): void {
     this.cancelPending();
+    this.frameSentAt = null;
     this.attempt += 1;
     this.releaseLock();
     this.provider = null;

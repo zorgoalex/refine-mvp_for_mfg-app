@@ -21,12 +21,22 @@ describe('client screen registry', () => {
   });
 
   it('has the summary group first without a tab code, then one group per tab', () => {
-    expect(CLIENT_SCREEN_GROUPS.map((g) => g.key)).toEqual(['summary', 'basic', 'details', 'hdf', 'dates', 'finance', 'services', 'requirements']);
+    expect(CLIENT_SCREEN_GROUPS.map((g) => g.key)).toEqual(['summary', 'basic', 'details', 'hdf', 'dates', 'finance', 'services', 'requirements', 'cut', 'workshops', 'additional']);
     expect(CLIENT_SCREEN_GROUPS[0].tabCode).toBeNull();
     for (const group of CLIENT_SCREEN_GROUPS.slice(1)) {
       expect(group.tabCode).toBe(`tab.${group.key}`);
       for (const field of group.fields) expect(field.code.startsWith(`${group.key}.`)).toBe(true);
     }
+  });
+
+  it('tabs shown whole have one tick each, no field ticks, and are off by default', () => {
+    const whole = CLIENT_SCREEN_GROUPS.filter((group) => group.whole);
+    expect(whole.map((group) => group.tabCode)).toEqual(['tab.cut', 'tab.workshops', 'tab.additional']);
+    for (const group of whole) {
+      expect(group.fields).toEqual([]);
+      expect(CLIENT_SCREEN_DEFAULT_VISIBLE_CODES).not.toContain(group.tabCode);
+    }
+    expect(CLIENT_SCREEN_CODES.filter((code) => /^(cut|workshops|additional)\./.test(code))).toEqual([]);
   });
 
   it('has non-empty labels', () => {

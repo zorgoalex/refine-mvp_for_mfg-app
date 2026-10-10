@@ -33,9 +33,16 @@ describe('order form bridge helpers', () => {
   it('mirrors the tabs with the labels and order of the layout the manager uses', () => {
     expect(orderFormMirrorTabs(false)).toEqual([
       { key: 'basic', label: 'Основная информация' }, { key: 'details', label: 'Детали заказа' }, { key: 'hdf', label: 'ХДФ' }, { key: 'dates', label: 'Даты' },
-      { key: 'finance', label: 'Финансы' }, { key: 'services', label: 'Услуги/товары' }, { key: 'requirements', label: 'Материалы' },
+      { key: 'finance', label: 'Финансы' }, { key: 'cut', label: 'Раскрой' }, { key: 'services', label: 'Услуги/товары' }, { key: 'workshops', label: 'Цеха' },
+      { key: 'requirements', label: 'Материалы' }, { key: 'additional', label: 'Дополнительно' },
     ]);
-    expect(orderFormMirrorTabs(true).map((tab) => `${tab.key}:${tab.label}`)).toEqual(['basic:Обзор', 'details:Состав', 'requirements:Материалы', 'finance:Финансы', 'dates:Логистика', 'services:Услуги/товары']);
+    expect(orderFormMirrorTabs(true).map((tab) => `${tab.key}:${tab.label}`)).toEqual([
+      'basic:Обзор', 'details:Состав', 'requirements:Материалы', 'cut:Раскрой', 'workshops:Производство', 'finance:Финансы', 'dates:Логистика',
+      'additional:Бирки', 'services:Услуги/товары',
+    ]);
+    // A manager who may not see cut jobs has no cut tab in the form, so the customer has none either.
+    expect(orderFormMirrorTabs(false, false).map((tab) => tab.key)).not.toContain('cut');
+    expect(orderFormMirrorTabs(true, false).map((tab) => tab.key)).not.toContain('cut');
   });
 
   it('offers for mirroring exactly the tabs the form itself has in each layout, in its order', () => {
@@ -45,8 +52,11 @@ describe('order form bridge helpers', () => {
     expect(start).toBeGreaterThan(0);
     expect(end).toBeGreaterThan(start);
     // Tabs of the default layout, in the order the form declares them.
-    const declared = [...form.slice(start, end).matchAll(/^ {8}key: '([a-z_]+)',$/gm)].map((match) => match[1]);
-    expect(declared).toEqual(expect.arrayContaining(['basic', 'details', 'hdf', 'dates', 'finance', 'services', 'requirements']));
+    const declared = [...form.slice(start, end).matchAll(/^ {8}(?: {6})?key: '([a-z_]+)',$/gm)].map((match) => match[1]);
+    expect(declared).toEqual(['basic', 'details', 'hdf', 'dates', 'finance', 'cut', 'services', 'workshops', 'requirements', 'additional']);
+    // The three tabs shown whole are marked in the form with the slot the copy is taken from.
+    for (const tab of ['cut', 'workshops', 'additional']) expect(form).toContain(`<ClientScreenFrameSlot orderKey={orderKey} tab="${tab}">`);
+    expect(form).toContain('cutTab={cutTabEnabled}');
     // Tabs of the operational layout: the form's own list (it leaves some tabs out, HDF among them).
     const listStart = form.indexOf('const operationalOrder = [', end);
     const operational = [...form.slice(listStart, form.indexOf('];', listStart)).matchAll(/'([a-z_]+)'/g)].map((match) => match[1]);
@@ -115,7 +125,8 @@ describe('customer screen control in the order header', () => {
   it('maps the manager tab to a mirrored tab or to nothing', () => {
     expect(['basic', 'details', 'hdf', 'dates', 'finance', 'services', 'requirements'].map(mirroredTab))
       .toEqual(['basic', 'details', 'hdf', 'dates', 'finance', 'services', 'requirements']);
-    expect(['cut', 'workshops', 'additional', ''].map(mirroredTab)).toEqual([null, null, null, null]);
+    expect(['cut', 'workshops', 'additional'].map(mirroredTab)).toEqual(['cut', 'workshops', 'additional']);
+    expect(['', 'groups', 'unknown'].map(mirroredTab)).toEqual([null, null, null]);
   });
 });
 

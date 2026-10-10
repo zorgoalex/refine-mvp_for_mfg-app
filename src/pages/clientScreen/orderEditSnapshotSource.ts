@@ -15,7 +15,7 @@ import { buildOrderHeaderMaterialSummaryItems } from '../orders/orderMaterialsSu
 import type { OrderDetailTableCells } from './orderDetailTableMirror';
 import type { OrderMaterialsMirror } from './orderMaterialsMirror';
 import type { ClientScreenOrderSource, ClientScreenValue, DetailField, HdfField } from './buildClientScreenSnapshot';
-import { CLIENT_SCREEN_TAB_KEYS, type ClientScreenTabKey } from './clientScreenSnapshotSchema';
+import { CLIENT_SCREEN_TAB_KEYS, type ClientScreenFrame, type ClientScreenTabKey } from './clientScreenSnapshotSchema';
 
 /**
  * Turns the state of the order edit form into display text, the way the manager sees it on the
@@ -47,6 +47,8 @@ export interface OrderEditSourceInput {
   };
   /** What the «Материалы» tab reports while it is on the manager's screen; null otherwise. */
   requirements?: OrderMaterialsMirror | null;
+  /** The whole-tab copy of the tab the manager is on, when that tab is shown whole; null otherwise. */
+  frame?: ClientScreenFrame | null;
   /** Cells only the detail table knows (cut jobs, the HDF cell), when the table is on screen. */
   tableCellsOf?: ((rowKey: string) => OrderDetailTableCells | null) | null;
   /** Keys of the visible detail table columns in the manager's order (table column keys). */
@@ -413,6 +415,7 @@ export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenO
         }
         : null,
     },
+    ...(input.frame ? { frame: input.frame } : {}),
     ...(input.requirements
       ? { requirements: {
         filmColumns: input.requirements.filmColumns, sheetColumns: input.requirements.sheetColumns,

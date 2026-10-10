@@ -97,3 +97,6 @@
 .client-screen__cell--edited { font-weight: 600; }
 .client-screen__group td { background: var(--cs-soft); font-weight: 600; }
 .client-screen__empty { color: var(--cs-muted); padding: 24px; text-align: center; }
+/* A tab shown whole: the copy of the manager's tab in its own box, scaled to the width at hand. */
+.client-screen__frame { position: relative; width: 100%; overflow: hidden; background: var(--cs-surface); border: 1px solid var(--cs-line); border-radius: 8px; }
+.client-screen__frame-box { display: block; border: 0; transform-origin: top left; pointer-events: none; user-select: none; }

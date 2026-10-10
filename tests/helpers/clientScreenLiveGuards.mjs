@@ -133,3 +133,67 @@ export function settingsRestorePlan(original, outcome) {
   }
   return { action: 'reconcile', reason: "it is not known whether this run's change was written; check the stage setting by hand" };
 }
+
+/**
+ * The customer window has no session and asks the network for nothing but its own page: the
+ * document, the files of the build, the runtime configuration. Returns what is wrong with a
+ * request made by that window or by any frame inside it, or null. Stricter than the destination
+ * guard above, and separate from it: here a call to the stage backend is a failure too.
+ */
+export function customerWindowRequestProblem(url, resourceType, pageOrigin) {
+  const text = String(url);
+  if (text.startsWith('data:') || text === 'about:blank' || text === 'about:srcdoc') return null;
+  let parsed;
+  try {
+    parsed = new URL(text);
+  } catch {
+    return `unreadable address: ${text.slice(0, 80)}`;
+  }
+  if (parsed.origin !== pageOrigin || !['http:', 'https:'].includes(parsed.protocol)) return `${resourceType} outside the page's own site: ${parsed.origin}${parsed.pathname}`;
+  const path = parsed.pathname;
+  const allowed = (resourceType === 'document' && path === '/client-screen.html')
+    || (['script', 'stylesheet', 'font', 'other'].includes(resourceType) && /^\/assets\/[A-Za-z0-9_.@-]+\.(?:js|css|woff2?)$/.test(path))
+    || (resourceType === 'image' && (path === '/vite.svg' || path === '/favicon.ico'))
+    || (['fetch', 'xhr'].includes(resourceType) && path === '/runtime-config.json');
+  return allowed ? null : `${resourceType} ${path}`;
+}
+
+/**
+ * A load the box of a whole-tab copy refused (the browser reports it in the console). Refusing a
+ * file of this build that the copied styles name is the policy at work; an attempt at anything else
+ * means the copy carried an address. Returns the problem, or null.
+ */
+export function customerWindowBlockedProblem(consoleText, pageOrigin) {
+  const text = String(consoleText);
+  if (!/Content Security Policy|Refused to/i.test(text)) return null;
+  const address = /'((?:https?:|blob:|data:|\/)[^']*)'/.exec(text)?.[1] ?? '';
+  if (address.startsWith('data:')) return null;
+  let parsed;
+  try {
+    parsed = new URL(address, pageOrigin);
+  } catch {
+    return `refused load of an unreadable address: ${text.slice(0, 160)}`;
+  }
+  if (parsed.origin === pageOrigin && /^\/assets\/[A-Za-z0-9_.@-]+\.(?:png|jpe?g|gif|webp|svg|woff2?|ttf|css)$/.test(parsed.pathname)) return null;
+  return `refused load: ${text.slice(0, 200)}`;
+}
+
+/** Texts of a tab as one string without layout differences. */
+export const frameText = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
+
+/**
+ * Compares control nodes of the manager's tab with the same nodes of the customer's copy: their
+ * number, their boxes relative to the tab (±tolerance) and the styles that make the look.
+ */
+export function frameDifferences(manager, customer, tolerance = 1.5) {
+  const problems = [];
+  if (manager.length !== customer.length) return [`control nodes: ${manager.length} on the manager's tab, ${customer.length} in the copy`];
+  manager.forEach((node, index) => {
+    const copy = customer[index];
+    for (const key of ['x', 'y', 'w', 'h']) {
+      if (Math.abs(node[key] - copy[key]) > tolerance) problems.push(`#${index} ${node.tag}.${node.cls.split(' ')[0] ?? ''}: ${key} ${node[key]} → ${copy[key]}`);
+    }
+    for (const key of ['color', 'font', 'position']) if (node[key] !== copy[key]) problems.push(`#${index} ${node.tag}: ${key} «${node[key]}» → «${copy[key]}»`);
+  });
+  return problems.slice(0, 12);
+}

@@ -1,7 +1,7 @@
 import { CLIENT_SCREEN_GROUPS, isClientScreenCodeVisible, type ClientScreenCode } from './clientScreenRegistry';
 import { MATERIAL_FILM_FIELDS, MATERIAL_SHEET_FIELDS, type MaterialFilmField, type MaterialSheetField } from './orderMaterialsMirror';
 import {
-  CLIENT_SCREEN_TAB_KEYS, type ClientScreenField, type ClientScreenSnapshot, type ClientScreenTabKey, type ClientScreenTable,
+  CLIENT_SCREEN_TAB_KEYS, type ClientScreenField, type ClientScreenFrame, type ClientScreenSnapshot, type ClientScreenTabKey, type ClientScreenTable,
   type ClientScreenUi,
 } from './clientScreenSnapshotSchema';
 
@@ -47,6 +47,11 @@ export interface ClientScreenOrderSource {
     films: ReadonlyArray<ClientScreenRowSource<MaterialFilmField>>;
     sheets: ReadonlyArray<ClientScreenRowSource<MaterialSheetField>>;
   };
+  /**
+   * The inert copy of a tab that is shown whole (cut, workshops, additional), taken while the manager
+   * is on that tab. It reaches the customer only when the tick of that very tab is on.
+   */
+  frame?: ClientScreenFrame;
 }
 
 /** Columns of the HDF table, in the order of the manager's tab. */
@@ -188,6 +193,7 @@ export function buildClientScreenSnapshot(source: ClientScreenOrderSource, visib
       rows: source.services.map((row) => ({ id: idFor('service', row.key), cells: order.map((field) => text(row.values[field])) })),
     };
   }
+  if (source.frame && tabOn(source.frame.tab)) snapshot.frame = source.frame;
   if (tabOn('requirements') && source.requirements) {
     const requirements = source.requirements;
     const tableOf = <F extends string>(
@@ -270,7 +276,12 @@ export function filterClientScreenUi(ui: ClientScreenUi, snapshot: ClientScreenS
     tab: ui.tab && tabs.has(ui.tab) ? ui.tab : null,
     focus,
     editing: ui.editing && values.length ? { rowId: ui.editing.rowId, values } : null,
-    scroll: ui.scroll ? { ratio: ui.scroll.ratio, ...(ui.scroll.anchorRowId && rowIds.has(ui.scroll.anchorRowId) ? { anchorRowId: ui.scroll.anchorRowId } : {}) } : null,
+    scroll: ui.scroll ? {
+      ratio: ui.scroll.ratio,
+      ...(ui.scroll.anchorRowId && rowIds.has(ui.scroll.anchorRowId) ? { anchorRowId: ui.scroll.anchorRowId } : {}),
+      // The scroll offset of a whole-tab copy means something only next to that copy.
+      ...(ui.scroll.frameTop !== undefined && snapshot.frame && snapshot.frame.tab === ui.tab ? { frameTop: ui.scroll.frameTop } : {}),
+    } : null,
     page: ui.page && tabs.has('details') ? ui.page : null,
   };
 }
@@ -290,6 +301,16 @@ export function createClientScreenIdMap(random: () => string): ClientScreenIdFor
 }
 
 /** The tab the customer sees: the manager's tab when it is visible, otherwise the last visible one. */
+/**
+ * A whole-tab copy is heavy: it travels only while the customer is on that very tab. The manager
+ * side keeps it meanwhile, so it is back at once when the customer returns to the tab.
+ */
+export function withShownFrameOnly(snapshot: ClientScreenSnapshot, customerTab: ClientScreenTabKey | null): ClientScreenSnapshot {
+  if (!snapshot.frame || snapshot.frame.tab === customerTab) return snapshot;
+  const { frame: _frame, ...rest } = snapshot;
+  return rest;
+}
+
 export function resolveClientScreenTab(
   managerTab: string | null, lastVisible: ClientScreenTabKey | null, snapshot: Pick<ClientScreenSnapshot, 'tabs'>,
 ): ClientScreenTabKey | null {

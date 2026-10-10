@@ -1,4 +1,5 @@
 import React, { useLayoutEffect, useRef } from 'react';
+import { ClientScreenFrame } from './ClientScreenFrame';
 import type { MirrorTable, MirrorView } from './mirrorView';
 
 /**
@@ -45,7 +46,7 @@ const Table: React.FC<{ table: MirrorTable }> = ({ table }) => (
   </div>
 );
 
-export const ClientScreenMirror: React.FC<{ view: MirrorView; bodyRef?: React.Ref<HTMLDivElement> }> = ({ view, bodyRef }) => {
+export const ClientScreenMirror: React.FC<{ view: MirrorView; bodyRef?: React.Ref<HTMLDivElement>; frameTop?: number }> = ({ view, bodyRef, frameTop = 0 }) => {
   const orderRef = useRef<HTMLDivElement | null>(null);
   const headRef = useRef<HTMLDivElement | null>(null);
 
@@ -100,6 +101,7 @@ export const ClientScreenMirror: React.FC<{ view: MirrorView; bodyRef?: React.Re
         </div>
       </div>
       <div className="client-screen__body" ref={bodyRef}>
+        {view.frame ? <ClientScreenFrame frame={view.frame} frameTop={frameTop} /> : null}
         {view.fields.length ? (
           <div className="client-screen__fields">
             {view.fields.map((field) => (

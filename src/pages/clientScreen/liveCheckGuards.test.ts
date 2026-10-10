@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 // @ts-ignore plain ESM helper of the browser scripts, no types
 import {
-  createSettingsChange, expectedMaterialColumns, isForbiddenDataRequest, isStageRelayTarget, isStageSettingsRequest, settingsRestorePlan,
-  stageTargetProblem,
+  createSettingsChange, customerWindowBlockedProblem, customerWindowRequestProblem, expectedMaterialColumns, frameDifferences, isForbiddenDataRequest,
+  isStageRelayTarget, isStageSettingsRequest, settingsRestorePlan, stageTargetProblem,
 } from '../../../tests/helpers/clientScreenLiveGuards.mjs';
 
 describe('live check: stage target only', () => {
@@ -149,3 +149,51 @@ describe('live check: columns expected on the customer materials tables', () => 
   });
 });
 
+
+describe('live check: the customer window asks the network only for its own page', () => {
+  const origin = 'https://app-test.mebelkz.app';
+  const problem = (url: string, type: string) => customerWindowRequestProblem(url, type, origin);
+
+  it('lets through the page, the files of the build, the runtime configuration and inline data', () => {
+    expect(problem(`${origin}/client-screen.html`, 'document')).toBeNull();
+    expect(problem(`${origin}/client-screen.html?x-vercel-set-bypass-cookie=true`, 'document')).toBeNull();
+    expect(problem(`${origin}/assets/clientScreen-B1a2.js`, 'script')).toBeNull();
+    expect(problem(`${origin}/assets/clientScreen-B1a2.css`, 'stylesheet')).toBeNull();
+    expect(problem(`${origin}/assets/Onest-cyrillic-400-700.woff2`, 'font')).toBeNull();
+    expect(problem(`${origin}/runtime-config.json`, 'fetch')).toBeNull();
+    expect(problem(`${origin}/vite.svg`, 'image')).toBeNull();
+    expect(problem('data:image/webp;base64,UklGRg==', 'image')).toBeNull();
+    expect(problem('about:srcdoc', 'document')).toBeNull();
+  });
+
+  it('fails on a data call, whatever carries it: fetch, picture, stylesheet, font, navigation', () => {
+    const bad: Array<[string, string]> = [
+      [`${origin}/api/v1/orders/5`, 'fetch'], ['https://backend-test.mebelkz.app/api/v1/orders/5', 'fetch'], ['https://hasura-test.mebelkz.app/v1/graphql', 'xhr'],
+      [`${origin}/api/v1/files/7`, 'image'], ['https://backend-test.mebelkz.app/api/v1/files/7', 'image'], [`${origin}/assets/sheet.png`, 'image'],
+      [`${origin}/api/v1/styles.css`, 'stylesheet'], ['https://evil.example/a.css', 'stylesheet'], [`${origin}/api/v1/font.woff2`, 'font'],
+      [`${origin}/orders/edit/5`, 'document'], [`${origin}/index.html`, 'document'], [`${origin}/`, 'document'], ['https://evil.example/', 'document'],
+      [`${origin}/assets/../api/v1/x.js`, 'script'], [`${origin}/runtime-config.json`, 'image'], ['blob:https://app-test.mebelkz.app/1b2c', 'image'],
+      ['wss://backend-test.mebelkz.app/socket', 'websocket'], [`${origin}/api/v1/events`, 'eventsource'], ['not a url', 'fetch'],
+    ];
+    for (const [url, type] of bad) expect(problem(url, type), `${type} ${url}`).not.toBeNull();
+  });
+
+  it('a refused load is fine only for a file of this build named by the copied styles', () => {
+    const refusedLoad = (address: string) => `Refused to load the image '${address}' because it violates the following Content Security Policy directive: "img-src data:".`;
+    expect(customerWindowBlockedProblem(refusedLoad(`${origin}/assets/bg-1a2b.png`), origin)).toBeNull();
+    expect(customerWindowBlockedProblem(refusedLoad('/assets/icons.svg'), origin)).toBeNull();
+    expect(customerWindowBlockedProblem('Failed to load resource: net::ERR_FAILED', origin)).toBeNull();
+    for (const address of [`${origin}/api/v1/files/7`, 'https://backend-test.mebelkz.app/api/v1/files/7', 'blob:https://app-test.mebelkz.app/1b2c', 'https://evil.example/a.png', `${origin}/orders/edit/5`]) {
+      expect(customerWindowBlockedProblem(refusedLoad(address), origin), address).not.toBeNull();
+    }
+    expect(customerWindowBlockedProblem("Refused to execute inline script because it violates the following Content Security Policy directive: \"default-src 'none'\".", origin)).not.toBeNull();
+  });
+
+  it('compares the copy with the tab node by node', () => {
+    const node = (over = {}) => ({ tag: 'div', cls: 'cut-sheet', x: 10, y: 20, w: 300, h: 40, color: 'rgb(0, 0, 0)', font: '14px 400 Onest', position: 'static', ...over });
+    expect(frameDifferences([node()], [node({ x: 11, h: 41 })])).toEqual([]);
+    expect(frameDifferences([node()], [node({ y: 23 })])).toEqual(['#0 div.cut-sheet: y 20 → 23']);
+    expect(frameDifferences([node()], [node({ position: 'sticky' })])).toEqual(['#0 div: position «static» → «sticky»']);
+    expect(frameDifferences([node(), node()], [node()])).toEqual(["control nodes: 2 on the manager's tab, 1 in the copy"]);
+  });
+});

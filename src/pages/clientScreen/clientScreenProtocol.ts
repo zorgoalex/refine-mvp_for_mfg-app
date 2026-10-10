@@ -16,7 +16,7 @@ import { clientScreenSnapshotSchema, clientScreenUiSchema } from './clientScreen
  * needs a new version here, and the previous one added to CLIENT_SCREEN_RETIRED_VIEWERS (a test pins
  * the registry to the version).
  */
-export const CLIENT_SCREEN_PROTOCOL_VERSION = 6 as const;
+export const CLIENT_SCREEN_PROTOCOL_VERSION = 7 as const;
 export const CLIENT_SCREEN_CHANNEL = `erp-client-screen-v${CLIENT_SCREEN_PROTOCOL_VERSION}`;
 /**
  * Customer windows of earlier builds: the channel each listens on and the message that makes it
@@ -29,6 +29,7 @@ export const CLIENT_SCREEN_RETIRED_VIEWERS: ReadonlyArray<{ channel: string; shu
   { channel: 'erp-client-screen-v3', shutdown: { v: 3, t: 'shutdown' } },
   { channel: 'erp-client-screen-v4', shutdown: { v: 4, t: 'shutdown' } },
   { channel: 'erp-client-screen-v5', shutdown: { v: 5, t: 'shutdown' } },
+  { channel: 'erp-client-screen-v6', shutdown: { v: 6, t: 'shutdown' } },
 ];
 
 const v = z.literal(CLIENT_SCREEN_PROTOCOL_VERSION);

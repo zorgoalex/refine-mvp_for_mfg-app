@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ClientScreenIdFor, ClientScreenOrderSource } from './buildClientScreenSnapshot';
 import { createClientScreenEnvironment, type ClientScreenEnvironment, type ClientScreenLocks } from './clientScreenEnvironment';
-import { ClientScreenPresenter, type ClientScreenOrderProvider } from './clientScreenPresenter';
+import { ClientScreenPresenter, FRAME_PUBLISH_MS, type ClientScreenOrderProvider } from './clientScreenPresenter';
 import type { ClientScreenPolicy } from './clientScreenPublisherCore';
 import { CLIENT_SCREEN_CODES } from './clientScreenRegistry';
-import type { ClientScreenUi } from './clientScreenSnapshotSchema';
+import type { ClientScreenFrame, ClientScreenUi } from './clientScreenSnapshotSchema';
 import { startClientScreenViewer, type ClientScreenViewer } from './clientScreenViewerRuntime';
 import { CLIENT_SCREEN_WORKSTATION_KEY } from './clientScreenWorkstation';
 
@@ -732,5 +732,142 @@ describe('customer screen: manager windows and the customer window together', ()
     await until(() => first.getRole() === 'viewer', 'first viewer');
     const second = startViewer();
     await until(() => second.getRole() === 'duplicate', 'second is a duplicate');
+  });
+});
+
+describe('customer screen: a tab shown whole', () => {
+  const frame = (label: string): ClientScreenFrame => ({
+    tab: 'cut', viewport: { w: 1500, h: 900 }, port: { w: 1500, h: 900 }, left: 0, top: 100, width: 1200, height: 600,
+    tree: { t: 'div', c: [label] }, shells: [], root: { htmlCls: '', bodyCls: '', htmlData: {}, bodyData: {}, htmlStyle: '', bodyStyle: '' }, styles: ['.a { }'],
+  });
+  const withCut = (name: string) => {
+    const provider = order(name);
+    (provider as { source: ClientScreenOrderSource }).source = { ...provider.source, tabs: [...provider.source.tabs, { key: 'cut' as const, label: 'Раскрой' }, { key: 'additional' as const, label: 'Дополнительно' }], frame: frame('Задание 1') };
+    provider.ui = { ...provider.ui, tab: 'cut', scroll: { ratio: 0, frameTop: 40 } };
+    return provider;
+  };
+  const shownFrame = (viewer: ClientScreenViewer) => viewer.getState().shown?.snapshot.frame ?? null;
+  const ticked = (...codes: string[]): ClientScreenPolicy => ({ enabled: true, visibleCodes: ['summary.number', 'tab.basic', 'tab.details', 'details.name', ...codes], version: 1 });
+
+  it('reaches the customer only with the tick of that tab, and goes away when the tick is taken off', async () => {
+    const policy = { current: ticked() };
+    const { startViewer, presenter } = setup(policy);
+    const viewer = startViewer();
+    await until(() => viewer.getRole() === 'viewer', 'viewer lock');
+    const a = presenter();
+    const shown = withCut('A1');
+    a.present('order-1', shown);
+    await until(() => shownTitle(viewer) === 'Заказ № A1', 'snapshot shown');
+    expect(a.isCodeVisible('tab.cut')).toBe(false);
+    expect(a.isCodeVisible('tab.details')).toBe(true);
+    expect(shownFrame(viewer)).toBeNull();
+    expect(JSON.stringify(viewer.getState().shown)).not.toContain('Задание 1');
+
+    policy.current = { ...ticked('tab.cut'), version: 2 };
+    await a.reloadPolicy();
+    await until(() => shownFrame(viewer) !== null, 'copy shown');
+    expect(a.isCodeVisible('tab.cut')).toBe(true);
+    expect(shownFrame(viewer)?.tree).toEqual({ t: 'div', c: ['Задание 1'] });
+    await until(() => viewer.getState().ui?.scroll?.frameTop === 40, 'scroll offset shown');
+
+    policy.current = { ...ticked(), version: 3 };
+    await a.reloadPolicy();
+    await until(() => viewer.getState().shown?.policyVersion === 3, 'new settings shown');
+    expect(shownFrame(viewer)).toBeNull();
+    expect(viewer.getState().shown?.snapshot.tabs.map((tab) => tab.key)).not.toContain('cut');
+    expect(a.isCodeVisible('tab.cut')).toBe(false);
+  });
+
+  it('stays while the manager is on a tab the customer does not see, and stops travelling on a tab the customer does see', async () => {
+    const { startViewer, presenter } = setup({ current: ticked('tab.cut', 'basic.order_name') });
+    const viewer = startViewer();
+    await until(() => viewer.getRole() === 'viewer', 'viewer lock');
+    const a = presenter();
+    const shown = withCut('A1');
+    a.present('order-1', shown);
+    await until(() => shownFrame(viewer) !== null, 'copy shown');
+
+    // «Дополнительно» is not ticked: the customer stays on the cut tab with its copy.
+    shown.ui = { ...shown.ui, tab: 'additional' };
+    a.notifyUi('order-1');
+    shown.source = { ...shown.source, basic: { ...shown.source.basic, order_name: 'переименован' } };
+    a.notifyChanged('order-1');
+    await until(() => JSON.stringify(viewer.getState().shown).includes('переименован'), 'change shown');
+    expect(viewer.getState().ui?.tab).toBe('cut');
+    expect(shownFrame(viewer)?.tree).toEqual({ t: 'div', c: ['Задание 1'] });
+
+    // A fresh customer window (reload) gets the kept copy as well.
+    viewer.stop();
+    const again = startViewer();
+    await until(() => shownFrame(again) !== null, 'copy after reload');
+    await until(() => again.getState().ui?.tab === 'cut', 'tab after reload');
+
+    // On a tab the customer sees, the heavy copy is no longer sent…
+    shown.ui = { ...shown.ui, tab: 'details' };
+    a.notifyUi('order-1');
+    a.notifyChanged('order-1');
+    await until(() => again.getState().ui?.tab === 'details' && shownFrame(again) === null, 'details without the copy');
+    // …and is back at once when the manager returns.
+    shown.ui = { ...shown.ui, tab: 'cut' };
+    a.notifyChanged('order-1');
+    await until(() => shownFrame(again) !== null && again.getState().ui?.tab === 'cut', 'copy back');
+  });
+
+  it('is kept when the order screen goes away with its order still presented', async () => {
+    const { startViewer, presenter } = setup({ current: ticked('tab.cut') });
+    const viewer = startViewer();
+    await until(() => viewer.getRole() === 'viewer', 'viewer lock');
+    const a = presenter();
+    const shown = withCut('A1');
+    a.present('order-1', shown);
+    await until(() => shownFrame(viewer) !== null, 'copy shown');
+    a.detach('order-1', shown);
+    // The form is gone: whatever it would answer now must not matter.
+    shown.source = { ...shown.source, frame: undefined };
+    viewer.stop();
+    const again = startViewer();
+    await until(() => shownFrame(again) !== null, 'copy after the form went away');
+    expect(shownFrame(again)?.tree).toEqual({ t: 'div', c: ['Задание 1'] });
+    a.hide('order-1');
+    await until(() => again.getState().shown === null, 'gone with the presentation');
+  });
+
+  it('snapshots with a copy go no more often than the limit, however fast the order changes; a blank is never delayed', async () => {
+    const states: Array<{ at: number; mode: string; frame: boolean }> = [];
+    const clock = { offset: 0 };
+    const { startViewer, presenter } = setup({ current: ticked('tab.cut') }, clock);
+    const viewer = startViewer();
+    await until(() => viewer.getRole() === 'viewer', 'viewer lock');
+    const a = presenter({
+      wrapPost: (post) => (message) => {
+        if (message.t === 'state') states.push({ at: Date.now(), mode: message.mode, frame: Boolean(message.snapshot?.frame) });
+        post(message);
+      },
+    });
+    const shown = withCut('A1');
+    a.present('order-1', shown);
+    await until(() => shownFrame(viewer) !== null, 'copy shown');
+    await wait(FRAME_PUBLISH_MS + 50);
+    states.length = 0;
+
+    const started = Date.now();
+    for (let i = 0; i < 50; i += 1) {
+      shown.source = { ...shown.source, frame: frame(`Задание ${i}`) };
+      a.notifyChanged('order-1');
+      await wait(4);
+    }
+    const spent = Date.now() - started;
+    await until(() => JSON.stringify(shownFrame(viewer)?.tree).includes('Задание 49'), 'last state shown', 2000);
+    const sent = states.filter((state) => state.frame);
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent.length).toBeLessThanOrEqual(Math.floor(spent / FRAME_PUBLISH_MS) + 2);
+    for (let i = 1; i < sent.length; i += 1) expect(sent[i].at - sent[i - 1].at).toBeGreaterThanOrEqual(FRAME_PUBLISH_MS - 30);
+
+    // The settings can no longer be confirmed: the blank goes on the next tick, not after the limit.
+    shown.source = { ...shown.source, frame: frame('после') };
+    a.notifyChanged('order-1');
+    clock.offset += 61_000;
+    await until(() => viewer.getState().shown === null, 'blank shown', 1500);
+    expect(JSON.stringify(states.filter((state) => state.mode === 'order').at(-1) ?? {})).not.toContain('после');
   });
 });

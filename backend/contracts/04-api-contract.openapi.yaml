@@ -21567,6 +21567,9 @@ components:
         - requirements.sheet_details
         - requirements.sheet_stock
         - requirements.sheet_coverage
+        - tab.cut
+        - tab.workshops
+        - tab.additional
     CatalogImportCreate:
       oneOf:
         - type: object

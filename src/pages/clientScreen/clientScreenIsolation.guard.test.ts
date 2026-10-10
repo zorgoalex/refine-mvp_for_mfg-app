@@ -66,13 +66,20 @@ describe('customer window isolation', () => {
     // The runtime config is the one thing the window reads from the network: is the screen switched on.
     expect(outside).toEqual(['src/config/featureFlags.ts', 'src/config/runtimeConfig.ts']);
     expect(window.packages).toEqual(['react', 'react-dom/client', 'zod']);
-    for (const file of ['src/pages/clientScreen/ClientScreenPage.tsx', 'src/pages/clientScreen/clientScreenViewerRuntime.ts', 'src/pages/clientScreen/clientScreenArbiter.ts']) {
+    for (const file of [
+      'src/pages/clientScreen/ClientScreenPage.tsx', 'src/pages/clientScreen/clientScreenViewerRuntime.ts', 'src/pages/clientScreen/clientScreenArbiter.ts',
+      'src/pages/clientScreen/ClientScreenFrame.tsx', 'src/pages/clientScreen/clientScreenFrameTree.ts', 'src/pages/clientScreen/clientScreenFrameLayout.ts',
+    ]) {
       expect(window.files).toContain(file);
     }
   });
 
   it('nothing of the manager side or of the app is in that graph', () => {
-    for (const file of ['clientScreenPresenter.ts', 'orderEditSnapshotSource.ts', 'buildClientScreenSnapshot.ts', 'clientScreenPublisherCore.ts']) {
+    for (const file of [
+      'clientScreenPresenter.ts', 'orderEditSnapshotSource.ts', 'buildClientScreenSnapshot.ts', 'clientScreenPublisherCore.ts',
+      // Reading the manager's tab is the manager window's business only.
+      'clientScreenFrameCapture.ts', 'clientScreenFrameSource.ts', 'ClientScreenFrameSlot.tsx',
+    ]) {
       expect(window.files).not.toContain(`src/pages/clientScreen/${file}`);
     }
     for (const file of window.files) {

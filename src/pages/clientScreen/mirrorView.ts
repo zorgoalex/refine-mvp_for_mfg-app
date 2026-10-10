@@ -1,4 +1,4 @@
-import type { ClientScreenField, ClientScreenSnapshot, ClientScreenTabKey, ClientScreenTable, ClientScreenUi } from './clientScreenSnapshotSchema';
+import type { ClientScreenField, ClientScreenFrame, ClientScreenSnapshot, ClientScreenTabKey, ClientScreenTable, ClientScreenUi } from './clientScreenSnapshotSchema';
 
 /**
  * What the customer window draws: the snapshot with the interface state applied — the active tab,
@@ -27,6 +27,8 @@ export interface MirrorView {
   tableTitle: string | null;
   /** Further tables of the tab, each under its title (the «Материалы» tab has two tables). */
   moreTables: Array<{ title: string; table: MirrorTable }>;
+  /** The active tab is one shown whole and its copy has arrived: it is drawn instead of fields and tables. */
+  frame: ClientScreenFrame | null;
 }
 
 function mirrorTable(table: ClientScreenTable, ui: ClientScreenUi | null, options: { editable: boolean; paged: boolean }): MirrorTable {
@@ -119,5 +121,7 @@ export function buildMirrorView(snapshot: ClientScreenSnapshot, ui: ClientScreen
     table,
     tableTitle,
     moreTables,
+    // A copy of another tab is never drawn under this one.
+    frame: snapshot.frame && snapshot.frame.tab === activeTab ? snapshot.frame : null,
   };
 }

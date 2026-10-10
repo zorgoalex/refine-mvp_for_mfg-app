@@ -31,6 +31,8 @@ export const CLIENT_SCREEN_CODES = [
   'requirements.film_name', 'requirements.film_area', 'requirements.film_details', 'requirements.film_meters', 'requirements.film_sheets',
   'requirements.film_cut_jobs', 'requirements.film_stock', 'requirements.film_coverage',
   'requirements.sheet_name', 'requirements.sheet_area', 'requirements.sheet_details', 'requirements.sheet_stock', 'requirements.sheet_coverage',
+  // Tabs shown whole, exactly as the manager sees them: one tick per tab, no field ticks.
+  'tab.cut', 'tab.workshops', 'tab.additional',
 ] as const;
 
 export type ClientScreenCode = typeof CLIENT_SCREEN_CODES[number];
@@ -67,6 +69,8 @@ export interface ClientScreenGroup {
   /** null for the summary: it is always on screen and has no tab checkbox. */
   tabCode: ClientScreenCode | null;
   fields: ClientScreenField[];
+  /** The tab has no field ticks: the customer sees all of it, exactly as the manager does. */
+  whole?: true;
 }
 
 export const CLIENT_SCREEN_GROUPS: readonly ClientScreenGroup[] = [
@@ -230,6 +234,9 @@ export const CLIENT_SCREEN_GROUPS: readonly ClientScreenGroup[] = [
       { code: 'requirements.sheet_coverage', label: 'Листовой материал: покрытие' },
     ],
   },
+  { key: 'cut', label: 'Раскрой', tabCode: 'tab.cut', fields: [], whole: true },
+  { key: 'workshops', label: 'Цеха', tabCode: 'tab.workshops', fields: [], whole: true },
+  { key: 'additional', label: 'Дополнительно', tabCode: 'tab.additional', fields: [], whole: true },
 ];
 
 const ORDER = new Map<string, number>(CLIENT_SCREEN_CODES.map((code, index) => [code, index]));

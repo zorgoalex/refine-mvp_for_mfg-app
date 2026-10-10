@@ -35,6 +35,15 @@ describe('live check follows the ticks in force', () => {
   it('what is not exercised is reported, never silently skipped', () => {
     for (const reported of ["skipped('the materials tab');", "skipped('the HDF tab');", "skipped('the HDF tab (needs the basic and finance tabs to return to)');",
       "skipped('live edit of a cell (the height column)');", "skipped('tab switches between «Финансы» and «Основная информация»');",
-      "skipped('the detail list of the view page');", "skipped('the finance panel of the view page');"]) expect(script, reported).toContain(reported);
+      "skipped('the detail list of the view page');", "skipped('the finance panel of the view page');", 'skipped(`the ${tab.key} tab shown whole`);',
+    ]) expect(script, reported).toContain(reported);
+  });
+
+  it('what the customer window asked the network for is judged for every run, from the first request', () => {
+    const noted = script.indexOf("context.on('request', (request) => asked.push(");
+    expect(noted).toBeGreaterThan(0);
+    // Noted before any page exists, so nothing the customer window does can be missed.
+    expect(noted).toBeLessThan(script.indexOf('await context.newPage()'));
+    expect(script).toContain("assert.deepEqual(customerWindowProblems(), [], 'the customer window asked the network only for its own page');");
   });
 });

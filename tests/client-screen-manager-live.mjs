@@ -1,9 +1,10 @@
 import { chromium, expect } from '@playwright/test';
 import assert from 'node:assert/strict';
 import {
-  createSettingsChange, expectedMaterialColumns, isForbiddenDataRequest, isStageRelayTarget, isStageSettingsRequest, settingsRestorePlan,
-  stageTargetProblem, STAGE_SITE,
+  createSettingsChange, customerWindowBlockedProblem, customerWindowRequestProblem, expectedMaterialColumns, frameDifferences, frameText,
+  isForbiddenDataRequest, isStageRelayTarget, isStageSettingsRequest, settingsRestorePlan, stageTargetProblem, STAGE_SITE,
 } from './helpers/clientScreenLiveGuards.mjs';
+import { FRAME_CONTROL_SELECTOR, readCopy, readManagerTab } from './helpers/clientScreenFrameLive.mjs';
 import { printableError } from './helpers/redactSecrets.mjs';
 import { vercelBypassCookies } from './helpers/vercelBypass.mjs';
 
@@ -108,6 +109,35 @@ const browser = await chromium.launch({ headless: true, handleSIGINT: false, han
 browserToClose = browser;
 try {
   const context = await browser.newContext({ viewport: { width: 1500, height: 900 } });
+  // Everything any window asks the network for and everything the browser refuses to load is noted
+  // from the very start; what the customer window did is judged at the end (see customerWindowProblems).
+  const asked = [];
+  const refused = [];
+  const pageOf = (source) => {
+    try {
+      return source.frame().page();
+    } catch {
+      return null;
+    }
+  };
+  context.on('request', (request) => asked.push({ page: pageOf(request), url: request.url(), type: request.resourceType() }));
+  context.on('console', (message) => {
+    if (/Content Security Policy|Refused to/i.test(message.text())) refused.push({ page: message.page(), text: message.text() });
+  });
+  const isCustomerWindow = (target) => {
+    try {
+      return Boolean(target) && new URL(target.url()).pathname.endsWith('/client-screen.html');
+    } catch {
+      return false;
+    }
+  };
+  const customerWindowProblems = () => {
+    const origin = new URL(base).origin;
+    return [...new Set([
+      ...asked.filter((entry) => isCustomerWindow(entry.page)).map((entry) => customerWindowRequestProblem(entry.url, entry.type, origin)),
+      ...refused.filter((entry) => isCustomerWindow(entry.page)).map((entry) => customerWindowBlockedProblem(entry.text, origin)),
+    ].filter(Boolean))];
+  };
   const cookies = await vercelBypassCookies(base, bypass);
   if (cookies.length) await context.addCookies(cookies);
   // A preview deployment has the customer screen flag off; this run switches it on for its own browser only.
@@ -317,6 +347,11 @@ try {
   const has = (code) => codes.includes(code);
   const skipped = (what) => results.push(`skipped (not ticked in the settings in force): ${what}`);
   const selectedTab = () => popup.getByRole('tab', { selected: true });
+  const WHOLE_TABS = [
+    { code: 'tab.cut', key: 'cut', name: /^Раскрой$/ },
+    { code: 'tab.workshops', key: 'workshops', name: /^(Цеха|Производство)$/ },
+    { code: 'tab.additional', key: 'additional', name: /^(Дополнительно|Бирки)$/ },
+  ];
   const managerTab = (name) => page.getByRole('tab', { name }).first();
   if (!has('tab.details')) skipped('the detail list and everything on it');
   else if (await managerTab(/Детали заказа|Состав/).count()) {
@@ -447,15 +482,120 @@ try {
       await managerTab(/Основная информация|Обзор/).click();
       await expect(selectedTab()).toHaveText(/Основная информация|Обзор/, { timeout: 20000 });
     }
-    const unmirrored = managerTab(/Дополнительно|Бирки|Цеха|Раскрой/);
-    if (tabSwitches && await unmirrored.count() && await unmirrored.isEnabled()) {
+    // A tab shown whole whose tick is off is like a tab that is not mirrored at all.
+    const offTab = WHOLE_TABS.find((tab) => !has(tab.code));
+    const unmirrored = offTab ? managerTab(offTab.name) : null;
+    if (tabSwitches && unmirrored && await unmirrored.count() && await unmirrored.isEnabled()) {
       await unmirrored.click();
       await page.waitForTimeout(1500);
       await expect(selectedTab()).toHaveText(/Основная информация|Обзор/);
-      results.push('tab that is not mirrored → the customer keeps the last mirrored tab');
+      assert.equal(await popup.locator('iframe.client-screen__frame-box').count(), 0, 'a tab whose tick is off is not copied');
+      results.push(`tab whose tick is off (${offTab.key}) → the customer keeps the last tab shown, nothing of it is copied`);
     }
   } else {
     results.push('this layout has no tab bar (sections on one page): tab mirroring not exercised');
+  }
+
+  // Tabs shown whole (cut, workshops, additional): the customer sees an inert copy of the manager's tab.
+  const openSection = async (name) => {
+    const tab = page.getByRole('tab', { name }).first();
+    if (await tab.count()) {
+      if (!(await tab.isEnabled())) return false;
+      await tab.click();
+      return true;
+    }
+    const anchor = page.locator('.wb-form-anchors__item').filter({ hasText: name }).first();
+    if (!(await anchor.count()) || !(await anchor.isEnabled())) return false;
+    await anchor.click();
+    return true;
+  };
+  const copyEquals = async (key, where, scope, what) => {
+    let manager = null;
+    let copy = null;
+    let problems = ['not compared yet'];
+    await expect.poll(async () => {
+      manager = await page.evaluate(readManagerTab, [key, FRAME_CONTROL_SELECTOR]);
+      copy = await where.evaluate(readCopy, [scope, FRAME_CONTROL_SELECTOR]);
+      if (!manager || !copy) {
+        problems = [`${manager ? 'the copy' : 'the tab of the manager'} is not on screen`];
+        return problems;
+      }
+      problems = [];
+      if (frameText(manager.text) !== frameText(copy.text)) problems.push(`texts differ (${frameText(manager.text).length} and ${frameText(copy.text).length} characters)`);
+      if (manager.images !== copy.images) problems.push(`pictures: ${manager.images} on the tab, ${copy.images} in the copy`);
+      if (copy.brokenImages || copy.emptyImages) problems.push(`pictures not drawn: ${copy.brokenImages} broken, ${copy.emptyImages} empty`);
+      if (manager.width !== copy.width) problems.push(`width ${manager.width} → ${copy.width}`);
+      if (manager.viewport.join('x') !== copy.viewport.join('x')) problems.push(`window ${manager.viewport.join('x')} → ${copy.viewport.join('x')}`);
+      problems.push(...frameDifferences(manager.controls, copy.controls));
+      return problems;
+    }, { timeout: 45000, message: `${what}: the copy equals the manager's tab` }).toEqual([]);
+    assert.equal(copy.sandbox, 'allow-same-origin', `${what}: the box runs no scripts`);
+    assert.equal(copy.policy, `default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data: ${new URL(base).origin}/assets/`, `${what}: the content policy of the box`);
+    assert.equal(copy.policyFirst, true, `${what}: the policy is the first thing in the box`);
+    assert.equal(copy.scripts, 0, `${what}: nothing that runs, embeds or submits is in the copy`);
+    assert.equal(copy.handlers, 0, `${what}: no event handler is in the copy`);
+    assert.deepEqual(copy.addressed, [], `${what}: nothing in the copy has an address`);
+    return { manager, copy };
+  };
+  for (const tab of WHOLE_TABS) {
+    if (!has(tab.code)) {
+      skipped(`the ${tab.key} tab shown whole`);
+      continue;
+    }
+    if (!(await openSection(tab.name))) {
+      results.push(`this layout or this order has no enabled ${tab.key} tab: nothing to copy`);
+      continue;
+    }
+    await expect(selectedTab()).toHaveText(tab.name, { timeout: 30000 });
+    const first = await copyEquals(tab.key, popup, '.client-screen', `${tab.key} tab`);
+    const notes = [`${first.copy.controls.length} control node(s) at the same place`, `${first.copy.images} picture(s) inline`];
+    // The other side of the layout breakpoint: a narrower manager window.
+    await page.setViewportSize({ width: 1200, height: 900 });
+    await copyEquals(tab.key, popup, '.client-screen', `${tab.key} tab in a 1200 px window`);
+    await page.setViewportSize({ width: 1500, height: 900 });
+    await copyEquals(tab.key, popup, '.client-screen', `${tab.key} tab back in a 1500 px window`);
+    // Scrolling: what is pinned inside the tab is pinned at the same place in the copy.
+    await page.mouse.move(750, 600);
+    await page.mouse.wheel(0, 260);
+    const scrolled = await copyEquals(tab.key, popup, '.client-screen', `${tab.key} tab after scrolling`);
+    notes.push(`after scrolling the box is at ${scrolled.copy.scrollTop} px`);
+    await page.mouse.wheel(0, -2000);
+    // The miniature in the manager's header draws the same copy.
+    await page.getByRole('button', { name: 'Что видит клиент' }).hover();
+    await copyEquals(tab.key, page, '.client-screen-preview', `${tab.key} tab in the miniature`);
+    await page.mouse.move(5, 400);
+    const timings = scrolled.manager.timings;
+    if (timings.length) notes.push(`taking a copy: ${Math.max(...timings)} ms at most over ${timings.length} time(s)`);
+    results.push(`${tab.key} tab shown whole and equal to the manager's tab: ${notes.join('; ')}`);
+
+    if (tab.key === 'cut' || !has('tab.cut')) {
+      // The manager leaves the order screen with the order still presented: the copy stays whole,
+      // also for a customer window opened anew and for the miniature.
+      const away = page.getByRole('link', { name: 'Заказы', exact: true }).first();
+      if (await away.count()) {
+        await away.click();
+        await page.waitForURL((url) => !url.pathname.includes('/orders/edit/'), { timeout: 30000 });
+        await popup.reload({ waitUntil: 'domcontentloaded' });
+        const kept = async (where, scope) => {
+          let copy = null;
+          await expect.poll(async () => {
+            copy = await where.evaluate(readCopy, [scope, FRAME_CONTROL_SELECTOR]);
+            return Boolean(copy && frameText(copy.text) === frameText(first.manager.text) && copy.brokenImages === 0 && copy.images === first.manager.images);
+          }, { timeout: 45000, message: `${tab.key} tab: the kept copy is whole` }).toBe(true);
+        };
+        await kept(popup, '.client-screen');
+        await page.getByRole('button', { name: 'Что видит клиент' }).hover();
+        await kept(page, '.client-screen-preview');
+        await page.mouse.move(5, 400);
+        results.push(`${tab.key} tab: the copy with its pictures survives leaving the order screen, a reload of the customer window and the miniature`);
+        await page.goBack();
+        await expect(page.getByText('Клиент видит этот заказ')).toBeVisible({ timeout: 120000 });
+      } else {
+        results.push('no in-app link away from the order in this layout: the kept copy is not exercised');
+      }
+    }
+    if (!(await openSection(/Основная информация|Обзор/))) results.push('no way back to the first tab in this layout');
+    else if (has('tab.basic')) await expect(selectedTab()).toHaveText(/Основная информация|Обзор/, { timeout: 20000 });
   }
 
   await page.getByRole('button', { name: 'Скрыть от клиента' }).click();
@@ -534,6 +674,8 @@ try {
     results.push(`rollback: switched off in the settings during a presentation → the customer lost the order in ${Math.round((Date.now() - startedAt) / 1000)} s`);
   }
 
+  assert.deepEqual(customerWindowProblems(), [], 'the customer window asked the network only for its own page');
+  results.push(`customer windows asked the network for ${asked.filter((entry) => isCustomerWindow(entry.page)).length} thing(s), all of them their own page, build files and runtime config`);
   assert.deepEqual([...new Set(errors)], [], 'no page errors');
   console.log(JSON.stringify({ live: 'passed', base: new URL(base).host, results }, null, 1));
 } catch (error) {

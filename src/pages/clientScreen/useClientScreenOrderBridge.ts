@@ -5,11 +5,12 @@ import { useTabStore } from '../../stores/tabStore';
 import { isOrderDetailPlaceholder } from '../../utils/orderDetailRows';
 import type { ClientScreenIdFor } from './buildClientScreenSnapshot';
 import { getClientScreenPresenter } from './clientScreenInstance';
+import { clientScreenFrameNodeKey, createClientScreenFrameSource, type ClientScreenFrameSource } from './clientScreenFrameSource';
 import { clientScreenUnmountAction } from './clientScreenOrderKeys';
 import type { OrderMaterialsMirror } from './orderMaterialsMirror';
 import { readOrderTabMirror, subscribeOrderTabMirror } from './orderTabMirror';
 import type { ClientScreenOrderProvider } from './clientScreenPresenter';
-import { CLIENT_SCREEN_TAB_KEYS, type ClientScreenTabKey, type ClientScreenUi } from './clientScreenSnapshotSchema';
+import { CLIENT_SCREEN_TAB_KEYS, isClientScreenFrameTab, type ClientScreenTabKey, type ClientScreenUi } from './clientScreenSnapshotSchema';
 import {
   buildOrderEditSource, DETAIL_COLUMN_FIELDS, detailRowKey, orderEditEditingValues, type OrderEditSourceInput,
 } from './orderEditSnapshotSource';
@@ -31,6 +32,8 @@ export interface ClientScreenOrderBridgeInput {
   activeTab: string;
   /** The compact "operational" layout names and orders its tabs differently. */
   operational: boolean;
+  /** The form has the cut tab (the manager may see cut jobs). */
+  cutTab: boolean;
   references: OrderFormDataReferences | null | undefined;
   sheetMaterialName: (id: number | null | undefined) => string | undefined;
   /** Phones of the order's client, when they are loaded. */
@@ -50,16 +53,22 @@ const TAB_LABELS: Record<ClientScreenTabKey, [string, string]> = {
   dates: ['Даты', 'Логистика'],
   finance: ['Финансы', 'Финансы'],
   services: ['Услуги/товары', 'Услуги/товары'],
+  cut: ['Раскрой', 'Раскрой'],
+  workshops: ['Цеха', 'Производство'],
+  additional: ['Дополнительно', 'Бирки'],
 };
 const TAB_ORDER: Record<'default' | 'operational', ClientScreenTabKey[]> = {
-  default: ['basic', 'details', 'hdf', 'dates', 'finance', 'services', 'requirements'],
+  default: ['basic', 'details', 'hdf', 'dates', 'finance', 'cut', 'services', 'workshops', 'requirements', 'additional'],
   // The operational layout of the form has no HDF tab (a test keeps both lists equal to the form's own).
-  operational: ['basic', 'details', 'requirements', 'finance', 'dates', 'services'],
+  operational: ['basic', 'details', 'requirements', 'cut', 'workshops', 'finance', 'dates', 'additional', 'services'],
 };
 
 /** Tabs of the form the customer screen can mirror, with the labels and order the manager sees. */
-export function orderFormMirrorTabs(operational: boolean): Array<{ key: ClientScreenTabKey; label: string }> {
-  return TAB_ORDER[operational ? 'operational' : 'default'].map((key) => ({ key, label: TAB_LABELS[key][operational ? 1 : 0] }));
+export function orderFormMirrorTabs(operational: boolean, cutTab = true): Array<{ key: ClientScreenTabKey; label: string }> {
+  return TAB_ORDER[operational ? 'operational' : 'default']
+    // The form has the cut tab only for a manager who may see cut jobs.
+    .filter((key) => key !== 'cut' || cutTab)
+    .map((key) => ({ key, label: TAB_LABELS[key][operational ? 1 : 0] }));
 }
 
 const fromList = (options: ReadonlyArray<{ value?: unknown; label?: unknown }> | undefined) => (id: number | null | undefined) => {
@@ -229,6 +238,7 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
   const latest = useRef(input);
   latest.current = input;
   const scrollRatio = useClientScreenScroll(input.orderKey, input.active);
+  const frameSource = useRef<ClientScreenFrameSource | null>(null);
 
   const provider = useMemo<ClientScreenOrderProvider>(() => ({
     getSource() {
@@ -247,7 +257,9 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
         hdfDetails: state.hdfDetails,
         tableCellsOf: mirror?.getTableCells ?? null,
         requirements: readOrderTabMirror<OrderMaterialsMirror>(store, 'requirements'),
-        tabs: orderFormMirrorTabs(current.operational),
+        // The copy of a tab shown whole: the live one, or the last one taken during this presentation.
+        frame: frameSource.current?.get() ?? null,
+        tabs: orderFormMirrorTabs(current.operational, current.cutTab),
         names: orderFormNames(current.references, current.sheetMaterialName, current.filmNameById),
         // The manager's own columns, sorting and grouping, once the detail table has been on screen.
         detailColumnOrder: mirror?.columnKeys ?? DEFAULT_DETAIL_COLUMNS,
@@ -267,7 +279,7 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
         // The manager's own tab; on a tab that is not mirrored the presenter keeps the customer's last one.
         tab: mirroredTab(current.activeTab),
         ...mirroredEditing(mirror, store.getState().details, names, idFor),
-        scroll: { ratio: scrollRatio() },
+        scroll: { ratio: scrollRatio(), ...(frameSource.current?.get() ? { frameTop: frameSource.current.scrollTop() } : {}) },
         page: mirroredPage(mirror, store.getState().details),
       };
     },
@@ -334,6 +346,55 @@ export function useClientScreenOrderBridge(input: ClientScreenOrderBridgeInput):
 
   useEffect(() => {
     getClientScreenPresenter()?.notifyUi(orderKey);
+  }, [orderKey, input.activeTab, input.active]);
+
+  // Tabs shown whole (cut, workshops, additional): while this order is presented, the manager is on
+  // such a tab and its tick is on, the area of the tab is copied; the last copy is kept until the
+  // presentation ends. The source outlives this effect's cleanup on purpose: the presenter reads the
+  // last copy when the form goes away with its order still presented.
+  useEffect(() => {
+    const presenter = getClientScreenPresenter();
+    if (!presenter || typeof window === 'undefined' || typeof MutationObserver === 'undefined') return undefined;
+    const store = getOrderDraftStore(orderKey);
+    const presented = () => presenter.getView().presentedOrderKey === orderKey;
+    const source = createClientScreenFrameSource({
+      node: (tab) => readOrderTabMirror<HTMLElement>(store, clientScreenFrameNodeKey(tab)),
+      allowed: (tab) => presented() && presenter.isCodeVisible(`tab.${tab}`),
+      changed: () => presenter.notifyChanged(orderKey),
+      scrolled: () => presenter.notifyUi(orderKey),
+    });
+    frameSource.current = source;
+    const sync = () => {
+      try {
+        const current = latest.current;
+        source.sync(current.active && isClientScreenFrameTab(current.activeTab) ? current.activeTab : null, presented());
+      } catch {
+        // a tab that cannot be copied is simply not shown
+      }
+    };
+    sync();
+    const unsubscribeTabs = subscribeOrderTabMirror(store, sync);
+    const unsubscribeView = presenter.subscribe(sync);
+    // The settings are re-read on their own schedule: a tick put on or taken off is noticed here.
+    const timer = window.setInterval(sync, 1000);
+    return () => {
+      unsubscribeTabs();
+      unsubscribeView();
+      window.clearInterval(timer);
+      source.stop();
+    };
+  }, [orderKey]);
+
+  useEffect(() => {
+    const current = latest.current;
+    try {
+      frameSource.current?.sync(
+        current.active && isClientScreenFrameTab(current.activeTab) ? current.activeTab : null,
+        getClientScreenPresenter()?.getView().presentedOrderKey === orderKey,
+      );
+    } catch {
+      // as above
+    }
   }, [orderKey, input.activeTab, input.active]);
 
   return { provider };

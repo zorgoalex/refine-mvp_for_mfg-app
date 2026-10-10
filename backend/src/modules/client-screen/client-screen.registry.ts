@@ -33,6 +33,8 @@ export const CLIENT_SCREEN_CODES = [
   'requirements.film_name', 'requirements.film_area', 'requirements.film_details', 'requirements.film_meters', 'requirements.film_sheets',
   'requirements.film_cut_jobs', 'requirements.film_stock', 'requirements.film_coverage',
   'requirements.sheet_name', 'requirements.sheet_area', 'requirements.sheet_details', 'requirements.sheet_stock', 'requirements.sheet_coverage',
+  // Tabs shown whole, exactly as the manager sees them: one tick per tab, no field ticks.
+  'tab.cut', 'tab.workshops', 'tab.additional',
 ] as const;
 
 export type ClientScreenCode = typeof CLIENT_SCREEN_CODES[number];
