@@ -49,6 +49,44 @@ function build(doc: Document, node: ClientScreenFrameNode): Node {
   return element;
 }
 
+/**
+ * Brings what is drawn to the new tree by changing only what differs: an element that stays keeps
+ * its node (a picture is not decoded again, an inner area keeps its scroll), everything else is
+ * built anew. The copy changes a few times a second while the manager works; redrawing all of it
+ * every time would leave the customer looking at a blinking page.
+ */
+function update(doc: Document, parent: Element, drawn: readonly ClientScreenFrameNode[], next: readonly ClientScreenFrameNode[]): void {
+  const nodes = Array.from(parent.childNodes);
+  for (let index = 0; index < next.length; index += 1) {
+    const node = next[index];
+    const before = drawn[index];
+    const current = nodes[index] as ChildNode | undefined;
+    if (current && before !== undefined && typeof node === 'string' && typeof before === 'string') {
+      if (node !== before) current.nodeValue = node;
+      continue;
+    }
+    if (current && before !== undefined && typeof node !== 'string' && typeof before !== 'string' && node.t === before.t && node.s === before.s) {
+      const element = current as Element;
+      const attributes = node.a ?? {};
+      for (const name of Object.keys(before.a ?? {})) if (!(name in attributes)) element.removeAttribute(name);
+      for (const [name, value] of Object.entries(attributes)) {
+        if (before.a?.[name] === value) continue;
+        try {
+          element.setAttribute(name, value);
+        } catch {
+          // a name the browser refuses is left out
+        }
+      }
+      update(doc, element, before.c ?? [], node.c ?? []);
+      continue;
+    }
+    const built = build(doc, node);
+    if (current) parent.replaceChild(built, current);
+    else parent.appendChild(built);
+  }
+  for (let index = nodes.length - 1; index >= next.length; index -= 1) nodes[index].remove();
+}
+
 function setRoot(element: HTMLElement, cls: string, data: Record<string, string>, style: string): void {
   for (const name of Array.from(element.attributes).map((attribute) => attribute.name)) element.removeAttribute(name);
   if (cls) element.setAttribute('class', cls);
@@ -56,21 +94,42 @@ function setRoot(element: HTMLElement, cls: string, data: Record<string, string>
   if (style) element.setAttribute('style', style);
 }
 
-function fill(doc: Document, frame: Frame, drawnStyles: { current: readonly string[] | null }): void {
+interface Drawn {
+  styles: readonly string[] | null;
+  /** The frame on screen and the node of its tab, to change only what differs next time. */
+  frame: Frame | null;
+  tab: HTMLElement | null;
+}
+
+/** Every message brings its own strings: the styles are the same when their text is. */
+const sameStyles = (a: readonly string[] | null, b: readonly string[]): boolean => a !== null && a.length === b.length && a.every((text, index) => text === b[index]);
+const sameSurroundings = (a: Frame, b: Frame): boolean => a.tab === b.tab && JSON.stringify([a.shells, a.root]) === JSON.stringify([b.shells, b.root]);
+
+function fill(doc: Document, frame: Frame, drawn: Drawn): void {
+  const place = `left:${frame.left}px;top:${frame.top}px;width:${frame.width}px`;
+  const roomStyle = `position:absolute;left:0;top:0;width:1px;height:${frame.top + frame.height + frame.viewport.h}px;visibility:hidden`;
+  if (drawn.frame?.tree && frame.tree && drawn.tab?.isConnected && sameStyles(drawn.styles, frame.styles) && sameSurroundings(drawn.frame, frame)) {
+    drawn.tab.setAttribute('style', place);
+    doc.body.lastElementChild?.setAttribute('style', roomStyle);
+    update(doc, drawn.tab, [drawn.frame.tree], [frame.tree]);
+    drawn.frame = frame;
+    applyScroll(drawn.tab);
+    return;
+  }
   setRoot(doc.documentElement, frame.root.htmlCls, frame.root.htmlData, frame.root.htmlStyle);
   setRoot(doc.body, frame.root.bodyCls, frame.root.bodyData, frame.root.bodyStyle);
-  if (drawnStyles.current !== frame.styles) {
+  if (!sameStyles(drawn.styles, frame.styles)) {
     for (const old of Array.from(doc.head.querySelectorAll('style'))) old.remove();
     for (const text of [...frame.styles, OWN_STYLE]) {
       const style = doc.createElement('style');
       style.textContent = text;
       doc.head.appendChild(style);
     }
-    drawnStyles.current = frame.styles;
+    drawn.styles = frame.styles;
   }
   const tab = doc.createElement('div');
   tab.setAttribute('data-cs-tab', '');
-  tab.setAttribute('style', `left:${frame.left}px;top:${frame.top}px;width:${frame.width}px`);
+  tab.setAttribute('style', place);
   if (frame.tree) tab.appendChild(build(doc, frame.tree));
   let top: HTMLElement = tab;
   for (const shell of [...frame.shells].reverse()) {
@@ -84,19 +143,26 @@ function fill(doc: Document, frame: Frame, drawnStyles: { current: readonly stri
   }
   // Room below the tab, so that the box can be scrolled as far as the manager's area is.
   const room = doc.createElement('div');
-  room.setAttribute('style', `position:absolute;left:0;top:0;width:1px;height:${frame.top + frame.height + frame.viewport.h}px;visibility:hidden`);
+  room.setAttribute('style', roomStyle);
   doc.body.replaceChildren(top, room);
-  for (const element of Array.from(doc.body.querySelectorAll(`[${SCROLL_ATTRIBUTE}]`))) {
+  drawn.frame = frame;
+  drawn.tab = tab;
+  applyScroll(tab);
+}
+
+/** Inner areas of the tab are scrolled as far as the manager's. */
+function applyScroll(tab: HTMLElement): void {
+  for (const element of Array.from(tab.querySelectorAll(`[${SCROLL_ATTRIBUTE}]`))) {
     const [scrollTop, scrollLeft] = (element.getAttribute(SCROLL_ATTRIBUTE) ?? '').split(',').map(Number);
-    if (Number.isFinite(scrollTop)) element.scrollTop = scrollTop;
-    if (Number.isFinite(scrollLeft)) element.scrollLeft = scrollLeft;
+    if (Number.isFinite(scrollTop) && element.scrollTop !== scrollTop) element.scrollTop = scrollTop;
+    if (Number.isFinite(scrollLeft) && element.scrollLeft !== scrollLeft) element.scrollLeft = scrollLeft;
   }
 }
 
 export const ClientScreenFrame: React.FC<{ frame: Frame; frameTop: number }> = ({ frame, frameTop }) => {
   const outerRef = useRef<HTMLDivElement | null>(null);
   const boxRef = useRef<HTMLIFrameElement | null>(null);
-  const drawnStyles = useRef<readonly string[] | null>(null);
+  const drawn = useRef<Drawn>({ styles: null, frame: null, tab: null });
   const [ready, setReady] = useState(0);
   const [available, setAvailable] = useState(0);
   const page = useMemo(() => clientScreenFrameDocument(typeof window === 'undefined' ? '' : window.location.origin), []);
@@ -125,7 +191,7 @@ export const ClientScreenFrame: React.FC<{ frame: Frame; frameTop: number }> = (
   useEffect(() => {
     const doc = boxRef.current?.contentDocument;
     if (!ready || !doc?.body || frame.tree === null) return;
-    fill(doc, frame, drawnStyles);
+    fill(doc, frame, drawn.current);
   }, [frame, ready]);
 
   const shown = clientScreenFrameWindow(frame, frameTop, available);
@@ -148,7 +214,7 @@ export const ClientScreenFrame: React.FC<{ frame: Frame; frameTop: number }> = (
         srcDoc={page}
         tabIndex={-1}
         onLoad={() => {
-          drawnStyles.current = null;
+          drawn.current = { styles: null, frame: null, tab: null };
           setReady((value) => value + 1);
         }}
         style={{ width: frame.viewport.w, height: frame.viewport.h, transform: `translate(${shown.shiftX}px, ${shown.shiftY}px) scale(${shown.scale})` }}

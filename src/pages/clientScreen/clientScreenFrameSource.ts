@@ -19,10 +19,15 @@ const IMAGE_CACHE_LIMIT = 200;
 
 /**
  * Redraws a picture the page already shows into an inline image, at the size it has on screen.
- * `null` while it is not loaded or when the browser refuses to read it.
+ * `null` while it is not loaded or when the browser refuses to read it. Redrawing a large picture
+ * takes time, so one copy of the tab redraws at most one picture it has not seen yet; the rest are
+ * empty boxes in that copy and come with the next ones (`begin` starts a copy, `pending` tells
+ * whether pictures are still owed).
  */
-export function createFrameImageEncoder(doc: Document, ratio: number): { encode: FrameImageEncoder; clear(): void } {
+export function createFrameImageEncoder(doc: Document, ratio: number): { encode: FrameImageEncoder; begin(): void; pending(): boolean; clear(): void } {
   const cache = new Map<string, string>();
+  let fresh = 0;
+  let owed = false;
   const encode: FrameImageEncoder = (source) => {
     const element = source as unknown as HTMLImageElement | HTMLCanvasElement;
     const isCanvas = element.tagName.toLowerCase() === 'canvas';
@@ -39,6 +44,14 @@ export function createFrameImageEncoder(doc: Document, ratio: number): { encode:
     const key = isCanvas ? null : `${image.currentSrc || image.src}|${width}x${height}`;
     const known = key === null ? undefined : cache.get(key);
     if (known !== undefined) return known;
+    // (A canvas is drawn anew every time and is never put off: there is nothing to wait for.)
+    if (key !== null) {
+      if (fresh >= 1) {
+        owed = true;
+        return null;
+      }
+      fresh += 1;
+    }
     const canvas = doc.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
@@ -53,7 +66,15 @@ export function createFrameImageEncoder(doc: Document, ratio: number): { encode:
     }
     return data;
   };
-  return { encode, clear: () => cache.clear() };
+  return {
+    encode,
+    begin() {
+      fresh = 0;
+      owed = false;
+    },
+    pending: () => owed,
+    clear: () => cache.clear(),
+  };
 }
 
 export interface FrameSourceDeps {
@@ -109,6 +130,8 @@ export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window
   };
   let timer = 0;
   let lastAt = 0;
+  /** A copy that took long is taken less often, so the manager's own work is never held up by it. */
+  let pause = FRAME_CAPTURE_MS;
   let styles: { signature: string; blocks: string[] | null } | null = null;
 
   const set = (next: ClientScreenFrame | null, key: string) => {
@@ -147,6 +170,7 @@ export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window
     }
     const area = scroller?.getBoundingClientRect() ?? null;
     const blocks = pageStyles();
+    images.begin();
     const tree = blocks ? captureClientScreenFrame(watched.node as unknown as FrameSourceElement, images.encode).tree : null;
     const surroundings = captureFrameSurroundings(watched.node, doc.documentElement, doc.body);
     const candidate = {
@@ -167,6 +191,10 @@ export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window
     if (!parsed.success) return;
     const { styles: _styles, ...rest } = parsed.data;
     set(parsed.data, `${styles?.signature ?? ''}|${JSON.stringify(rest)}`);
+    const spent = (win.performance?.now?.() ?? 0) - startedAt;
+    // Pictures still owed come with the next copy, at the usual pace.
+    pause = images.pending() ? FRAME_CAPTURE_MS : Math.min(4000, Math.max(FRAME_CAPTURE_MS, Math.round(spent * 8)));
+    if (images.pending()) schedule();
     // How long one copy takes is visible in the browser's own timings (User Timing).
     try {
       win.performance?.measure?.(CLIENT_SCREEN_FRAME_MEASURE, { start: startedAt, end: win.performance.now() });
@@ -177,7 +205,7 @@ export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window
 
   const schedule = () => {
     if (timer) return;
-    timer = win.setTimeout(capture, Math.max(0, FRAME_CAPTURE_MS - (Date.now() - lastAt)));
+    timer = win.setTimeout(capture, Math.max(0, pause - (Date.now() - lastAt)));
   };
 
   const unwatch = () => {

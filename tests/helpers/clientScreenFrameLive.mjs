@@ -90,6 +90,8 @@ export function readCopy([scope, selector]) {
   };
   return {
     place,
+    // The node of the tab stays the same node while the copy is only brought up to date.
+    sameNode: (node.__seen = (node.__seen ?? 0) + 1),
     seen: seenAt(doc, node, origin),
     sandbox: box.getAttribute('sandbox'),
     policy: doc.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content') ?? null,

@@ -581,6 +581,11 @@ try {
         const opened = await copyEquals(tab.key, popup, '.client-screen', 'cut tab with a job opened');
         notes.push(`with a job opened: ${opened.copy.controls.length} control node(s), ${opened.copy.images} picture(s) inline`);
         await shot('job');
+        // The copy is brought up to date in place: the same node is still there a moment later, with its pictures drawn.
+        await page.waitForTimeout(2500);
+        const later = await copyEquals(tab.key, popup, '.client-screen', 'cut tab with a job opened, a moment later');
+        assert.ok(later.copy.sameNode > opened.copy.sameNode, 'the copy is updated in place, not redrawn as a whole');
+        await shot('job-later');
       } else {
         notes.push(`no job to open on the tab (buttons: ${(await page.locator('[data-client-screen-frame="cut"] button').allInnerTexts()).slice(0, 12).join(' | ').replace(/\d/g, '#')})`);
       }
@@ -621,7 +626,15 @@ try {
           while (state !== 'whole' && Date.now() < deadline) {
             await page.waitForTimeout(400);
             const copy = await where.evaluate(readCopy, [scope, FRAME_CONTROL_SELECTOR]);
-            if (!copy) state = 'no copy on screen';
+            if (!copy) {
+              state = `no copy on screen: ${JSON.stringify(await where.evaluate((selector) => ({
+                tab: document.querySelector(`${selector} .client-screen__tab--active`)?.textContent ?? null,
+                boxes: document.querySelectorAll(`${selector} iframe`).length,
+                filled: document.querySelector(`${selector} iframe`)?.contentDocument?.querySelectorAll('[data-cs-tab]').length ?? null,
+                splash: Boolean(document.querySelector('.client-screen__splash')),
+                note: document.querySelector(`${selector} .client-screen__empty`)?.textContent ?? null,
+              }), scope))}`;
+            }
             else if (frameText(copy.text) !== frameText(last.manager.text)) state = `text differs (${frameText(copy.text).length} and ${frameText(last.manager.text).length} characters)`;
             else if (copy.brokenImages || copy.images !== last.manager.images) state = `pictures: ${copy.images} in the copy (${copy.brokenImages} broken), ${last.manager.images} on the tab`;
             else state = 'whole';
