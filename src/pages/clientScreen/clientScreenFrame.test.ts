@@ -395,7 +395,7 @@ describe('whole-tab copy: the source with a page under it', () => {
   });
 
   /** The few members of a page the source touches: one tab with one picture in it. */
-  function page() {
+  function page(innerHeight = 900) {
     const state = { presented: true, no: 1, tick: 'on' as FrameTick, changed: 0, redrawn: 0, listeners: new Set<() => void>() };
     const html = 'http://www.w3.org/1999/xhtml';
     const element = (tagName: string, attributes: Record<string, string>, extra: Record<string, unknown> = {}) => ({
@@ -417,7 +417,7 @@ describe('whole-tab copy: the source with a page under it', () => {
     const canvas = { width: 0, height: 0, getContext: () => ({ drawImage() {} }), toDataURL: () => { state.redrawn += 1; return PIXEL; } };
     const win = {
       document: { documentElement: root, body, styleSheets: [{ cssRules: [{ cssText: '.cut-page { color: red; }' }] }], createElement: () => canvas },
-      devicePixelRatio: 1, innerWidth: 1500, innerHeight: 900, scrollX: 0, scrollY: 0,
+      devicePixelRatio: 1, innerWidth: 1500, innerHeight, scrollX: 0, scrollY: 0,
       getComputedStyle: () => ({ overflowY: 'visible' }),
       setTimeout: (run: () => void, ms: number) => setTimeout(run, ms), clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
       addEventListener() {}, removeEventListener() {},
@@ -437,11 +437,26 @@ describe('whole-tab copy: the source with a page under it', () => {
     }, win as never);
     return { state, source, tell: () => state.listeners.forEach((listener) => listener()) };
   }
-  const withPage = () => {
+  const withPage = (innerHeight?: number) => {
     vi.useFakeTimers();
     vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} });
-    return page();
+    return page(innerHeight);
   };
+
+  it('a first copy that cannot go over the wire leaves nothing behind: its pictures are not kept, with or without the form', () => {
+    // A window lower than the wire format allows: the picture is redrawn, the copy is refused.
+    const { state, source, tell } = withPage(199);
+    source.sync('cut');
+    vi.advanceTimersByTime(FRAME_CAPTURE_MS + 50);
+    expect(state.redrawn).toBe(1);
+    expect(source.get()).toBeNull();
+    expect(source.heldPictures()).toBe(0);
+    source.stop();
+    state.presented = false;
+    tell();
+    expect(source.heldPictures()).toBe(0);
+    expect(state.changed).toBe(0);
+  });
 
   it('takes a copy of the tab with its picture inside, and redraws a picture it has seen only once', () => {
     const { state, source } = withPage();

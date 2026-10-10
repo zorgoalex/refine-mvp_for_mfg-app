@@ -172,6 +172,19 @@ export function createClientScreenFrameSource(deps: FrameSourceDeps, win: Window
 
   const capture = () => {
     timer = 0;
+    try {
+      read();
+    } finally {
+      // Whatever way the reading ended (too small a window, a copy that cannot go over the wire, the
+      // presentation just over): with no copy kept, nothing prepared for one is kept either.
+      if (keeper.get() === null) {
+        images.clear();
+        styles = null;
+      }
+    }
+  };
+
+  const read = () => {
     if (!watched || !watched.node.isConnected || deps.allowed(watched.tab) !== 'on') return;
     const box = watched.node.getBoundingClientRect();
     // A hidden tab (another screen of the app is on top) has no size: the last copy stays.
