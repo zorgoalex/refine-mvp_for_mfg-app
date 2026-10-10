@@ -665,18 +665,26 @@ try {
         await expect(page.locator('[role="dialog"][aria-label="Экран клиента"]')).toHaveCount(0, { timeout: 10000 });
       }
     }
-    if (!(await openSection(/Основная информация|Обзор/))) results.push('no way back to the first tab in this layout');
-    else if (has('tab.basic')) await expect(selectedTab()).toHaveText(/Основная информация|Обзор/, { timeout: 20000 });
+    // Back to the first tab where the layout has tabs; a one-page form is simply scrolled back below.
+    if (await openSection(/Основная информация|Обзор/) && has('tab.basic')) await expect(selectedTab()).toHaveText(/Основная информация|Обзор/, { timeout: 20000 });
   }
+  // The page as it was before the tabs were visited (a scrolled one-page form shows a second, compact header).
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+  await page.mouse.move(750, 500);
+  await page.mouse.wheel(0, -30000);
+  const hideButtons = page.getByRole('button', { name: 'Скрыть от клиента' });
+  await expect.poll(() => hideButtons.count(), { timeout: 10000 }).toBeGreaterThan(0);
+  const headerState = await page.evaluate(() => `page at ${Math.round(window.scrollY)} px`);
+  if (await hideButtons.count() > 1) results.push(`the one-page form keeps its compact header on (${headerState}): the first «Скрыть от клиента» is used`);
 
-  await page.getByRole('button', { name: 'Скрыть от клиента' }).click();
+  await hideButtons.first().click();
   await expect(popup.getByText('Здесь появится ваш заказ')).toBeVisible({ timeout: 20000 });
-  await expect(page.getByRole('button', { name: 'Показать клиенту' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Показать клиенту' }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Что видит клиент' })).toHaveCount(0, { timeout: 10000 });
   await expect(page.getByRole('button', { name: 'Отключить экран клиента' })).toHaveCount(0);
   results.push('«Скрыть от клиента» → splash; the header eye and the emergency button are gone');
 
-  await page.getByRole('button', { name: 'Показать клиенту' }).click();
+  await page.getByRole('button', { name: 'Показать клиенту' }).first().click();
   await expect(popup.getByRole('heading', { level: 1 })).toHaveText(/Заказ |Ваш заказ/, { timeout: 30000 });
 
   // Emergency switch-off from ANOTHER app tab, which presents nothing itself.
