@@ -22,12 +22,13 @@ export const COMPENSATE_SOURCE = 'onec_consumption_compensate';
 
 const DOC_KIND_LABEL: Record<string, string> = {
   sales_shipment: 'Реализация', supplier_return: 'Возврат поставщику', inventory_writeoff: 'Списание', inventory_transfer: 'Перемещение',
+  purchase_receipt: 'Поступление',
 };
 
 /** Комментарий документа-дельты: что из 1С его породило (журнал склада). */
 export function onecDeltaComment(view: ConsumptionDocumentView | null, reason: 'projection' | 'compensate'): string {
-  if (reason === 'compensate') return '1С: откат расхода склада (компенсация)';
-  if (view === null) return '1С: документ больше не участвует в расходе';
+  if (reason === 'compensate') return '1С: откат учёта склада (компенсация)';
+  if (view === null) return '1С: документ больше не участвует в учёте склада';
   const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(view.docDate);
   return `1С: ${DOC_KIND_LABEL[view.docKind] ?? view.docKind} № ${view.number} от ${date ? `${date[3]}.${date[2]}.${date[1]}` : view.docDate}`;
 }

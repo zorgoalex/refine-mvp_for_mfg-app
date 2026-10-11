@@ -19,11 +19,11 @@ export const ONEC_ISSUE_LABEL: Record<string, string> = {
 
 /** Что сделать пользователю по причине (подсказка в таблице). */
 export const ONEC_ISSUE_HINT: Record<string, string> = {
-  FILM_UNLINKED: 'Свяжите плёнку с позицией 1С в каталоге плёнок — расход применится при следующем пересчёте.',
+  FILM_UNLINKED: 'Свяжите плёнку с позицией 1С в каталоге плёнок — строка применится при следующем пересчёте.',
   UNIT_PACKAGE: 'В документе 1С количество в упаковках — исправьте единицу в 1С.',
   UNIT_MISMATCH: 'В документе 1С единица не пог. м — исправьте единицу в 1С.',
   NO_BASELINE: 'Проведите инвентаризацию склада с моментом подсчёта.',
-  BEFORE_CUTOFF: 'Документ 1С раньше момента подсчёта инвентаризации — его расход уже в её количестве.',
+  BEFORE_CUTOFF: 'Документ 1С раньше момента подсчёта инвентаризации — он уже учтён в её количестве.',
   AMBIGUOUS_SOURCE: 'Склад 1С найден в нескольких базах — расход по складу заморожен до устранения.',
   LINE_CONFLICT: 'Строка документа 1С загружена с конфликтом — см. загрузку 1С.',
   MISSING_IN_SOURCE: 'Документ больше не приходит из 1С — применённое оставлено как есть.',
@@ -34,6 +34,7 @@ export const onecIssueLabel = (code: string): string => ONEC_ISSUE_LABEL[code] ?
 
 const DOC_KIND_LABEL: Record<string, string> = {
   sales_shipment: 'Реализация', supplier_return: 'Возврат поставщику', inventory_writeoff: 'Списание', inventory_transfer: 'Перемещение',
+  purchase_receipt: 'Поступление',
 };
 
 const ruDate = (value: string): string => {

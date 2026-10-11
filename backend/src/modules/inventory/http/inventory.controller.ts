@@ -336,7 +336,7 @@ export class InventoryController {
   @ApiOperation({ operationId: 'compensateInventoryOnecConsumption', summary: 'Return the 1C consumption of a warehouse to zero and clear its start moment (rollback)' })
   @ApiResponse({ status: 200, description: 'Compensation result: documents written and remaining applied amount; a replay returns the stored result' })
   @ApiResponse({ status: 404, description: 'Warehouse not found' })
-  @ApiResponse({ status: 409, description: 'ONEC_COMPENSATION_SUPERSEDED: an interrupted rollback, consumption enabled again since' })
+  @ApiResponse({ status: 409, description: 'ONEC_COMPENSATION_SUPERSEDED: an interrupted rollback, consumption enabled again since; ONEC_COMPENSATION_CONFIRM_REQUIRED: the rollback would also remove 1C receipts and the request does not acknowledge it' })
   @ApiResponse({ status: 422, description: 'IDEMPOTENCY_KEY_REUSED' })
   @Post('inventory/warehouses/:warehouseId/onec-consumption/compensate')
   @HttpCode(200)
@@ -344,10 +344,13 @@ export class InventoryController {
     @Req() request: RequestWithCurrentUser,
     @Headers('idempotency-key') key: string | undefined,
     @Param('warehouseId') warehouseId: string,
+    @Body() body?: unknown,
   ) {
     const parsedId = parseId(warehouseId, 'warehouseId');
     if (parsedId > 32767) throw new ApiError(404, 'WAREHOUSE_NOT_FOUND', 'Склад не найден');
-    return this.projection.compensate(this.ctx(request, key), parsedId);
+    // Клиент подтверждает, что знает: откат снимает и поступления 1С (старый клиент этого поля не шлёт).
+    const includesReceipts = typeof body === 'object' && body !== null && (body as { includesReceipts?: unknown }).includesReceipts === true;
+    return this.projection.compensate(this.ctx(request, key), parsedId, { includesReceipts });
   }
 
   @ApiOperation({ operationId: 'getOrderSheetStock', summary: 'Stock of the sheet materials used by an order, from 1C balances (no reservation)' })
