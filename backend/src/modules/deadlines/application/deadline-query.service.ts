@@ -1,4 +1,7 @@
 import { ApiError } from '../../../common/errors/api-error';
+import type { DatabaseClient } from '../../../database/database.types';
+import type { CurrentUser } from '../../../permissions/current-user';
+import { assertOrderReadable, isOrderReadable } from '../../../permissions/policies/order-read-visibility';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import type { PermissionName } from '../../../permissions/permissions';
 import { calculateDeadlineTiming } from '../domain/deadline-calculator';
@@ -29,6 +32,8 @@ import {
 export interface DeadlineQueryServicePorts {
   repository: DeadlineRepositoryPort;
   permissions?: PermissionsService;
+  /** For order read visibility of per-order reads (access groups 0A.4). */
+  database?: DatabaseClient;
 }
 
 export class DeadlineQueryService {
@@ -60,17 +65,23 @@ export class DeadlineQueryService {
     if (!deadline) {
       throw new DeadlineNotFoundError(command.deadlineId);
     }
+    // A deadline of an order outside the user's read visibility does not exist for him.
+    if (deadline.orderId !== null && deadline.orderId !== undefined && !(await this.orderReadable(command, deadline.orderId))) {
+      throw new DeadlineNotFoundError(command.deadlineId);
+    }
 
     return deadline;
   }
 
   async listOrderDeadlines(command: ListOrderDeadlinesCommand) {
     this.requirePermission(command, 'deadlines.view');
+    await this.assertOrderReadable(command, command.orderId);
     return { data: await this.ports.repository.listOrderDeadlines(command.orderId) };
   }
 
   async listOrderDeadlineEvents(command: ListOrderDeadlineEventsCommand) {
     this.requirePermission(command, 'deadlines.audit.view');
+    await this.assertOrderReadable(command, command.orderId);
     return { data: await this.ports.repository.listOrderDeadlineEvents(command.orderId) };
   }
 
@@ -79,9 +90,18 @@ export class DeadlineQueryService {
     now: string = new Date().toISOString(),
   ): Promise<OrderDeadlineSummaryDto> {
     this.requirePermission(command, 'deadlines.view');
+    await this.assertOrderReadable(command, command.orderId);
     const deadlines = await this.ports.repository.listOrderDeadlines(command.orderId);
 
     return buildOrderDeadlineSummary(command.orderId, deadlines, now);
+  }
+
+  private async orderReadable(command: { currentUser: CurrentUser }, orderId: number | string): Promise<boolean> {
+    return this.ports.database ? isOrderReadable(this.ports.database, command.currentUser, orderId) : true;
+  }
+
+  private async assertOrderReadable(command: { currentUser: CurrentUser }, orderId: number): Promise<void> {
+    if (this.ports.database) await assertOrderReadable(this.ports.database, command.currentUser, orderId);
   }
 
   async listPolicies(command: ListDeadlinePoliciesCommand) {

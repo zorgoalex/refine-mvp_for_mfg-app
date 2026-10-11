@@ -42,7 +42,7 @@ export class GroupOrderCreatedMonthCountsReportService {
   ): Promise<GroupOrderCreatedMonthCountsReportResponseDto> {
     this.requirePermissions(command.currentUser, REQUIRED_REPORT_PERMISSIONS, command.requestId);
 
-    return this.ports.reports.listOrderCreatedMonthCounts(command.query);
+    return this.ports.reports.listOrderCreatedMonthCounts({ ...command.query, viewer: command.currentUser });
   }
 
   private requirePermissions(

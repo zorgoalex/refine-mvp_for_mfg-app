@@ -102,8 +102,9 @@ export interface CreateProjectResult extends ProjectDto {
 }
 
 export interface ProjectsRepositoryPort {
-  list(query: ListProjectsQuery): Promise<ProjectDto[]>;
-  getById(projectId: number): Promise<ProjectCard>;
+  /** `viewer`: order counts, sums and the card's order list cover only orders he may read (access groups 0A.4). */
+  list(query: ListProjectsQuery, viewer?: CurrentUser): Promise<ProjectDto[]>;
+  getById(projectId: number, viewer?: CurrentUser): Promise<ProjectCard>;
   create(command: CreateProjectCommand): Promise<CreateProjectResult>;
   update(command: UpdateProjectCommand): Promise<ProjectDto>;
   moveOrder(command: MoveOrderCommand): Promise<MoveOrderResult>;

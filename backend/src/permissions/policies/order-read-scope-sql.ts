@@ -83,3 +83,38 @@ function requireActorIndex(actorIndex: number | null): number {
   if (actorIndex === null) throw new Error('Actor SQL parameter is required');
   return actorIndex;
 }
+
+/**
+ * Which orders a user may READ (access groups 0A.4; user decision 2026-10-11): `own` restricts reads to orders the
+ * user created or manages; `assigned` does NOT restrict reads yet (decision: only the manager's `own`), `all` never
+ * does. Scope sets come from the user's effective authorization (token / snapshot), not the static matrix.
+ * Writes, exports and the reads that already applied `assigned` keep their own rules.
+ */
+export function orderReadVisibilityIsRestricted(currentUser: CurrentUser): boolean {
+  const set = toScopeSet(policyScopeSetsForUser(currentUser).orders.view);
+  return !set.includes('all') && !set.includes('assigned');
+}
+
+/**
+ * SQL predicate of order read visibility on `alias` (`TRUE` when unrestricted, `FALSE` without any grant). Adds the
+ * actor parameter to `params` only when it is needed.
+ */
+export function appendOrderReadVisibilitySql(params: unknown[], currentUser: CurrentUser, orderAlias = 'o'): string {
+  if (!orderReadVisibilityIsRestricted(currentUser)) return 'TRUE';
+  const set = toScopeSet(policyScopeSetsForUser(currentUser).orders.view);
+  if (!set.includes('own')) return 'FALSE';
+  const actorIndex = params.push(normalizeActorUserId(currentUser.id));
+  return `(${orderAlias}.created_by = $${actorIndex} OR ${orderAlias}.manager_id = $${actorIndex})`;
+}
+
+/** In-memory twin of appendOrderReadVisibilitySql for an order already loaded. */
+export function canReadOrder(
+  currentUser: CurrentUser,
+  order: { createdByUserId?: string | number | null; managerUserId?: string | number | null },
+): boolean {
+  if (!orderReadVisibilityIsRestricted(currentUser)) return true;
+  const set = toScopeSet(policyScopeSetsForUser(currentUser).orders.view);
+  if (!set.includes('own')) return false;
+  const actor = String(normalizeActorUserId(currentUser.id));
+  return [order.createdByUserId, order.managerUserId].some((id) => id !== null && id !== undefined && String(id) === actor);
+}

@@ -92,6 +92,7 @@ import { PgMdfBoardHistoryRepository } from './adapters/pg-mdf-board-history-rep
         return new CncTelegramService({
           packets: repository,
           deniedAudit: repository,
+          ...(database.isConfigured ? { database } : {}),
           backgroundIngestEnabled: config.get('CNC_TELEGRAM_BACKGROUND_INGEST_ENABLED', { infer: true }),
           manualSvgDestinationChatIds: (
             config.get('CNC_TELEGRAM_ALLOWED_CHAT_IDS', { infer: true }) ?? ''

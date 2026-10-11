@@ -1,4 +1,5 @@
 import type { QueryResultRow } from 'pg';
+import { appendOrderReadVisibilitySql } from '../../../permissions/policies/order-read-scope-sql';
 import { readOrderCatalogLines } from './pg-order-catalog-lines';
 import { mapProductionSummary, type ProductionSummaryRow } from '../../../shared/production-status/production-summary';
 import type { DatabaseClient } from '../../../database/database.types';
@@ -738,9 +739,14 @@ export class PgOrderReadRepository
     const headerMetadataJoin = includeDeleted
       ? [headerMaterialJoin, deletedHeaderJoin].filter((fragment) => fragment.length > 0).join('\n      ')
       : headerMaterialJoin;
+    const headerParams: unknown[] = [command.orderId];
+    // Read visibility (access groups 0A.4): an order outside the user's «own» scope is not found (404), so the card,
+    // history, audit and every reader built on this method stay within it.
+    const visibility = appendOrderReadVisibilitySql(headerParams, command.currentUser, 'o');
+    const visibilityClause = visibility === 'TRUE' ? '' : ` AND ${visibility}`;
     const headerWhere = includeDeleted
-      ? `WHERE o.order_id = $1 AND o.order_kind = 'production_order'`
-      : `WHERE o.order_id = $1 AND o.delete_flag = false AND o.order_kind = 'production_order'`;
+      ? `WHERE o.order_id = $1 AND o.order_kind = 'production_order'${visibilityClause}`
+      : `WHERE o.order_id = $1 AND o.delete_flag = false AND o.order_kind = 'production_order'${visibilityClause}`;
     const headerResult = await this.database.query<OrderHeaderRow>(
       `
       SELECT
@@ -797,7 +803,7 @@ export class PgOrderReadRepository
       ${headerSheetJoin}
       ${headerWhere}
       `,
-      [command.orderId],
+      headerParams,
     );
     const header = headerResult.rows[0];
 
@@ -1396,6 +1402,10 @@ export class PgOrderReadRepository
     if (command.query.onlyMyOrders) {
       clauses.push(`o.manager_id = $${params.push(Number(command.currentUser.id))}`);
     }
+
+    // Read visibility (access groups 0A.4): «own» users see only orders they created or manage — list, search, counts.
+    const visibility = appendOrderReadVisibilitySql(params, command.currentUser, 'o');
+    if (visibility !== 'TRUE') clauses.push(visibility);
 
     if (command.query.groupMode === 'none') {
       clauses.push(`

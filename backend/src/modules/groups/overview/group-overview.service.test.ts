@@ -48,11 +48,13 @@ describe('GroupOverviewService', () => {
     const service = new GroupOverviewService({ overviews });
     const query = overviewQuery();
 
+    const currentUser = user(['groups.view', 'orders.view']);
     await expect(
-      service.getOverview({ currentUser: user(['groups.view', 'orders.view']), groupId: groupId(), query }),
+      service.getOverview({ currentUser, groupId: groupId(), query }),
     ).resolves.toEqual(overviewResponse(query));
     expect(overviews.calls).toEqual([{
       groupId: groupId(),
+      viewer: currentUser,
       query,
       visibleEntityTypes: ['order'],
       canViewParticipants: false,

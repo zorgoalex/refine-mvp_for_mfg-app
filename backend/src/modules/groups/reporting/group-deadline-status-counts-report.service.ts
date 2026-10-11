@@ -37,7 +37,7 @@ export class GroupDeadlineStatusCountsReportService {
   ): Promise<GroupDeadlineStatusCountsReportResponseDto> {
     this.requirePermissions(command.currentUser, REQUIRED_REPORT_PERMISSIONS);
 
-    return this.ports.reports.listDeadlineStatusCounts(command.query);
+    return this.ports.reports.listDeadlineStatusCounts({ ...command.query, viewer: command.currentUser });
   }
 
   private requirePermissions(currentUser: CurrentUser, requiredPermissions: readonly PermissionName[]): void {

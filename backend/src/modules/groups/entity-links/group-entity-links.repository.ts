@@ -1,3 +1,4 @@
+import { appendReferencedOrderVisibilitySql } from '../../../permissions/policies/order-read-visibility';
 import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
@@ -96,7 +97,7 @@ export class PgGroupEntityLinksRepository implements GroupEntityLinksRepositoryP
       : (command.visibleEntityTypes ?? []);
     const links = entityTypes.length === 0
       ? []
-      : await loadLinks(this.database, command.groupId, entityTypes, command.includeClosed ?? false);
+      : await loadLinks(this.database, command.groupId, entityTypes, command.includeClosed ?? false, command.currentUser);
     const hydratedLinks = await hydrateLinkRows(this.database, links);
 
     return {
@@ -270,7 +271,13 @@ async function loadLinks(
   groupId: string,
   entityTypes: GroupEntityTypeCode[],
   includeClosed: boolean,
+  viewer?: CurrentUser,
 ): Promise<LinkRow[]> {
+  const params: unknown[] = [groupId, entityTypes];
+  // Read visibility (access groups 0A.4): links to orders the reader may not see are not listed.
+  const visibility = viewer
+    ? appendReferencedOrderVisibilitySql(params, viewer, `(CASE WHEN pel.entity_id_text ~ '^[0-9]{1,18}$' THEN pel.entity_id_text::bigint END)`, false)
+    : 'TRUE';
   const result = await database.query<LinkRow>(
     `
     SELECT
@@ -286,9 +293,10 @@ async function loadLinks(
     WHERE pel.group_id = $1::uuid
       AND pel.entity_type_code = ANY($2::text[])
       ${includeClosed ? '' : 'AND pel.valid_to IS NULL'}
+      ${visibility === 'TRUE' ? '' : `AND (pel.entity_type_code <> 'order' OR ${visibility})`}
     ORDER BY pel.entity_type_code ASC, pel.relation_type ASC, pel.entity_id_text ASC, pel.valid_from DESC, pel.id ASC
     `,
-    [groupId, entityTypes],
+    params,
   );
   return result.rows;
 }
