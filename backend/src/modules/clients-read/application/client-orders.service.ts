@@ -2,34 +2,35 @@ import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import type { ClientOrdersPage } from '../adapters/pg-client-orders-repository';
-import { clientOrdersScope } from './client-list-facts.service';
-import type { ClientOrdersScope } from './client-list-facts.types';
+import { clientOrderReadScope } from './client-list-facts.service';
+import type { ClientOrderReadScope } from './client-list-facts.types';
 import type { ClientOrdersResponseDto } from './client-orders.types';
 
 export interface ClientOrdersReadPort {
   clientExists(clientId: number): Promise<boolean>;
-  list(clientId: number, scope: Exclude<ClientOrdersScope, { kind: 'none' }>, page: number, pageSize: number): Promise<ClientOrdersPage>;
+  list(clientId: number, scope: Exclude<ClientOrderReadScope, { kind: 'none' }>, page: number, pageSize: number): Promise<ClientOrdersPage>;
 }
 
 const money = (value: number) => Math.round(value * 100) / 100;
 
 /**
  * «Документы ERP» of the client card: the orders of one client the user may see, with totals over all pages.
- * Needs `clients.view` and `orders.view`; the rows follow the user's order visibility (all, or only his own —
- * the same rule as the order facts of the clients list); money needs `orders.view_financials`. Rights are
+ * Needs `clients.view` and `orders.view`; the rows follow the shared order read visibility (all, or only his own —
+ * the same rule as the orders list, the order card and the order facts of the clients list); money needs
+ * `orders.view_financials`. Rights are
  * checked here by literal membership, so a refusal is audited.
  */
 export class ClientOrdersService {
   constructor(private readonly ports: { read: ClientOrdersReadPort; auditClient: DatabaseClient }) {}
 
   async list(user: CurrentUser, clientId: number, page: number, pageSize: number, requestId: string): Promise<ClientOrdersResponseDto> {
-    const scope = clientOrdersScope(user);
+    const scope = clientOrderReadScope(user);
     const missing = (['clients.view', 'orders.view'] as const).filter((permission) => !user.permissions.includes(permission));
     if (missing.length > 0 || scope.kind === 'none') {
-      // Both rights present but the order visibility is neither «all» nor «own»: the scope is what forbids it.
-      const orderScope = rolePolicyForUser(user).orders.view;
+      // Both rights present but the order read visibility grants nothing: the scope is what forbids it.
+      const orderScope = policyScopeSetsForUser(user).orders.view.join(',') || 'none';
       await auditService.recordDenied(this.ports.auditClient, {
         event: 'clients.orders_denied', entityType: 'client', entityId: clientId, relatedClientId: clientId,
         actorUserId: user.id, actorUsername: user.username, actorRole: user.role, requestId,

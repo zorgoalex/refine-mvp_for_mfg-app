@@ -1,3 +1,5 @@
+import type { CurrentUser } from '../../../permissions/current-user';
+
 /** Facts shown next to a client in the operational «Клиенты» list. */
 export interface ClientListFactsDto {
   clientId: number;
@@ -15,8 +17,18 @@ export interface ClientListFactsResponseDto {
   data: ClientListFactsDto[];
 }
 
-/** Which orders are counted: all of them or only the user's own (creator or manager). */
+/**
+ * Strict scope of the 1C documents of a client (`clientOrdersScope`): all, only the user's own (creator or manager),
+ * or nothing for any other scope. Not the rule of the ERP order reads below.
+ */
 export type ClientOrdersScope = { kind: 'all' } | { kind: 'own'; userId: number } | { kind: 'none' };
+
+/**
+ * Which ERP orders of a client are read: none, or the ones the viewer may read — all of them or only the viewer's
+ * own (creator or manager). The SQL of the rule is the shared order read visibility, built from `viewer` by the
+ * repositories.
+ */
+export type ClientOrderReadScope = { kind: 'all'; viewer: CurrentUser } | { kind: 'own'; viewer: CurrentUser } | { kind: 'none' };
 
 /** At most this many clients per request (one page of the list). */
 export const CLIENT_LIST_FACTS_MAX_IDS = 100;

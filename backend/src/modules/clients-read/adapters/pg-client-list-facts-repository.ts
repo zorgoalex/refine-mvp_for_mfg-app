@@ -1,5 +1,6 @@
 import type { DatabaseClient } from '../../../database/database.types';
-import type { ClientListFactsDto, ClientOrdersScope } from '../application/client-list-facts.types';
+import { appendOrderReadVisibilitySql } from '../../../permissions/policies/order-read-scope-sql';
+import type { ClientListFactsDto, ClientOrderReadScope } from '../application/client-list-facts.types';
 
 /**
  * Only real orders: CRM requests and drafts live in the same table but are not orders — the order
@@ -21,15 +22,11 @@ interface FactsRow {
 export class PgClientListFactsRepository {
   constructor(private readonly database: DatabaseClient) {}
 
-  async facts(clientIds: readonly number[], scope: ClientOrdersScope): Promise<ClientListFactsDto[]> {
+  async facts(clientIds: readonly number[], scope: ClientOrderReadScope): Promise<ClientListFactsDto[]> {
     if (clientIds.length === 0) return [];
     const params: unknown[] = [clientIds];
-    // Orders are limited to what the user may see: the same rule as the orders list («own» = creator or manager).
-    let visible = 'TRUE';
-    if (scope.kind === 'own') {
-      params.push(scope.userId);
-      visible = `(o.created_by = $2 OR o.manager_id = $2)`;
-    }
+    // Orders are limited to what the user may read: the shared rule of the orders list («own» = creator or manager).
+    const visible = scope.kind === 'none' ? 'FALSE' : appendOrderReadVisibilitySql(params, scope.viewer);
     const ordersJoin = scope.kind === 'none'
       ? ''
       : `LEFT JOIN LATERAL (

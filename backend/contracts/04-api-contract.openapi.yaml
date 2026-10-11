@@ -19432,9 +19432,11 @@ paths:
         - {bearerAuth: []}
       x-permission: clients.view
       description: >-
-        Requires clients.view and orders.view. Rows, the count and the sums all follow the order visibility of the user:
-        every real order of the client for the scope «all», only the user's own (creator or manager) for «own»;
-        any other scope is refused. Money of the rows and `summary` are present only with orders.view_financials.
+        Requires clients.view and orders.view. Rows, the count and the sums all follow the shared order read visibility
+        of the user (the rule of the orders list and the order card): only the user's own orders (creator or manager)
+        when the visibility is restricted to «own», every real order of the client when it is not restricted
+        («all», or a set with «assigned»); a visibility that grants nothing is refused. Money of the rows and
+        `summary` are present only with orders.view_financials.
       parameters:
         - {name: clientId, in: path, required: true, schema: {type: integer, minimum: 1}}
         - {name: page, in: query, required: false, schema: {type: integer, minimum: 1, default: 1}}

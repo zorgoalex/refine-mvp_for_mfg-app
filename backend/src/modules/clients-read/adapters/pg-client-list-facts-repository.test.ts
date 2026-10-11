@@ -1,18 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { CurrentUser } from '../../../permissions/current-user';
 import { PgClientListFactsRepository } from './pg-client-list-facts-repository';
+
+const viewer = (role: string, id = '42') => ({ id, username: 'u', role, permissions: ['clients.view', 'orders.view'] } as unknown as CurrentUser);
 
 const row = { client_id: '5', primary_phone: '87001112233', phones_count: '2', orders_count: '3', last_order_id: '90', last_order_name: '2995', last_order_date: '2026-10-01' };
 
 describe('client list facts read model', () => {
   it('asks nothing for an empty page', async () => {
     const query = vi.fn();
-    await expect(new PgClientListFactsRepository({ query } as never).facts([], { kind: 'all' })).resolves.toEqual([]);
+    await expect(new PgClientListFactsRepository({ query } as never).facts([], { kind: 'all', viewer: viewer('top_manager') })).resolves.toEqual([]);
     expect(query).not.toHaveBeenCalled();
   });
 
   it('counts all orders for the scope «all»', async () => {
     const query = vi.fn(async () => ({ rows: [row] }));
-    await expect(new PgClientListFactsRepository({ query } as never).facts([5], { kind: 'all' })).resolves.toEqual([
+    await expect(new PgClientListFactsRepository({ query } as never).facts([5], { kind: 'all', viewer: viewer('top_manager') })).resolves.toEqual([
       { clientId: 5, primaryPhone: '87001112233', phonesCount: 2, orders: { count: 3, last: { orderId: 90, orderName: '2995', orderDate: '2026-10-01' } } },
     ]);
     const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
@@ -26,7 +29,7 @@ describe('client list facts read model', () => {
 
   it('counts only the user\'s own orders for the scope «own»', async () => {
     const query = vi.fn(async () => ({ rows: [{ ...row, orders_count: '0', last_order_id: null, last_order_name: null, last_order_date: null }] }));
-    await expect(new PgClientListFactsRepository({ query } as never).facts([5], { kind: 'own', userId: 42 })).resolves.toEqual([
+    await expect(new PgClientListFactsRepository({ query } as never).facts([5], { kind: 'own', viewer: viewer('manager') })).resolves.toEqual([
       { clientId: 5, primaryPhone: '87001112233', phonesCount: 2, orders: { count: 0, last: null } },
     ]);
     const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];

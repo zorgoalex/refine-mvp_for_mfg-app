@@ -105,19 +105,24 @@ describe.skipIf(!databaseUrl)('orders of a client for the client card (PostgreSQ
     }
   });
 
-  it('refuses without clients.view or orders.view (audited), and for a scope that is neither «all» nor «own»', async () => {
+  it('refuses without clients.view or orders.view (audited), and for a visibility that grants nothing', async () => {
     expect(await code(service.list(user(12, 'manager', ['orders.view']), 1, 1, 20, 'req-no-clients'))).toBe('PERMISSION_DENIED');
     expect(await code(service.list(user(12, 'manager', ['clients.view']), 1, 1, 20, 'req-no-orders'))).toBe('PERMISSION_DENIED');
-    const assigned: CurrentUser = { ...user(14, 'manager'), policyScopes: { ...ROLE_POLICIES.manager, orders: { ...ROLE_POLICIES.manager.orders, view: 'assigned' } } };
-    expect(await code(service.list(assigned, 1, 1, 20, 'req-assigned'))).toBe('PERMISSION_DENIED');
+    const withView = (view: 'assigned' | 'none'): CurrentUser =>
+      ({ ...user(14, 'manager'), policyScopes: { ...ROLE_POLICIES.manager, orders: { ...ROLE_POLICIES.manager.orders, view } } });
+    expect(await code(service.list(withView('none'), 1, 1, 20, 'req-nogrant'))).toBe('PERMISSION_DENIED');
+    // «assigned» does not restrict order reads (the shared rule of the orders list and the order card): the same orders here.
+    const assigned = await service.list(withView('assigned'), 1, 1, 20, 'req-assigned');
+    expect(assigned.scope).toBe('all');
+    expect(assigned.pagination.total).toBe(29);
     // Each refusal is found in the audit by the client, with the exact reason: a missing right or the forbidden scope.
     const denied = (await pool.query(`SELECT request_id, related_client_id, status_code, metadata_json->'missingPermissions' missing,
         metadata_json->>'orderScope' order_scope FROM "${schema}".audit_log
       WHERE event = 'clients.orders_denied' AND related_client_id = 1 ORDER BY request_id`)).rows;
     expect(denied).toEqual([
-      { request_id: 'req-assigned', related_client_id: '1', status_code: 'scope_not_allowed', missing: [], order_scope: 'assigned' },
       { request_id: 'req-no-clients', related_client_id: '1', status_code: 'missing_permission', missing: ['clients.view'], order_scope: 'own' },
       { request_id: 'req-no-orders', related_client_id: '1', status_code: 'missing_permission', missing: ['orders.view'], order_scope: 'own' },
+      { request_id: 'req-nogrant', related_client_id: '1', status_code: 'scope_not_allowed', missing: [], order_scope: 'none' },
     ]);
     expect(await code(service.list(user(11, 'admin'), 999, 1, 20, 'req-missing'))).toBe('CLIENT_NOT_FOUND');
   });

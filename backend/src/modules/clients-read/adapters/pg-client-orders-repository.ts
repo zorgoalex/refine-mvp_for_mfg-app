@@ -1,5 +1,6 @@
 import type { DatabaseClient } from '../../../database/database.types';
-import type { ClientOrdersScope } from '../application/client-list-facts.types';
+import { appendOrderReadVisibilitySql } from '../../../permissions/policies/order-read-scope-sql';
+import type { ClientOrderReadScope } from '../application/client-list-facts.types';
 
 /** Only real orders (see the facts repository): CRM requests and drafts are not orders. */
 const ORDER_ROWS = `o.order_kind = 'production_order'`;
@@ -25,9 +26,9 @@ export interface ClientOrdersPage {
 
 /**
  * Orders of one client for the client card, newest first. The visibility of the user is part of the query
- * itself — rows, the count and the sums all use the same predicate, so a user limited to his own orders
- * («own» = creator or manager, as in the facts of the clients list) never gets another manager's order or its
- * money, whatever the request says. Read-only.
+ * itself — rows, the count and the sums all use the same predicate (the shared order read visibility of the
+ * orders list and the order card), so a user limited to his own orders («own» = creator or manager) never gets
+ * another manager's order or its money, whatever the request says. Read-only.
  */
 export class PgClientOrdersRepository {
   constructor(private readonly database: DatabaseClient) {}
@@ -36,9 +37,9 @@ export class PgClientOrdersRepository {
     return (await this.database.query('SELECT 1 FROM clients WHERE client_id = $1', [clientId])).rows.length > 0;
   }
 
-  async list(clientId: number, scope: Exclude<ClientOrdersScope, { kind: 'none' }>, page: number, pageSize: number): Promise<ClientOrdersPage> {
+  async list(clientId: number, scope: Exclude<ClientOrderReadScope, { kind: 'none' }>, page: number, pageSize: number): Promise<ClientOrdersPage> {
     const params: unknown[] = [clientId];
-    const visible = scope.kind === 'own' ? `(o.created_by = $${params.push(scope.userId)} OR o.manager_id = $${params.length})` : 'TRUE';
+    const visible = appendOrderReadVisibilitySql(params, scope.viewer);
     const where = `o.client_id = $1 AND o.delete_flag = false AND ${ORDER_ROWS} AND ${visible}`;
     const totals = (await this.database.query<{ total: string | number; final_amount: string | number; paid_amount: string | number }>(
       `SELECT count(*) AS total, COALESCE(sum(o.final_amount), 0) AS final_amount, COALESCE(sum(o.paid_amount), 0) AS paid_amount
