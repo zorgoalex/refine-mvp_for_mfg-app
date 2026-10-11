@@ -12,6 +12,9 @@ import { ContactsCard } from "../../components/contacts/ContactsCard";
 import { CLIENT_CONTACTS } from "../../components/contacts/partyContactsSources";
 import { ClientCounterpartyCard } from "./ClientCounterpartyCard";
 import { ClientOrdersTab } from "./ClientOrdersTab";
+import { ClientOnecDocumentsTab } from "./ClientOnecDocumentsTab";
+import { canSeeClientOnecDocuments } from "./clientOnecDocumentsModel";
+import { can } from "../../utils/permissions";
 
 const { Title, Text } = Typography;
 
@@ -163,8 +166,10 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
         items={[
           { key: 'main', label: 'Основное', children: main },
           { key: 'erp-documents', label: 'Документы ERP', children: <ClientOrdersTab clientId={clientId} /> },
-          // Вкладка «Документы 1С» (сессия 1С) добавляется здесь: условие показа и компонент — в её файле
-          // (canSeeClientOnecDocuments() ? { key: 'onec-documents', label: 'Документы 1С', children: <ClientOnecDocuments clientId={clientId} /> } : null).
+          // «Документы 1С»: условие показа и компонент — в файлах вкладки (clientOnecDocumentsModel, ClientOnecDocumentsTab).
+          ...(canSeeClientOnecDocuments(can)
+            ? [{ key: 'onec-documents', label: 'Документы 1С', children: <ClientOnecDocumentsTab clientId={clientId} /> }]
+            : []),
         ]}
       />
     </Show>

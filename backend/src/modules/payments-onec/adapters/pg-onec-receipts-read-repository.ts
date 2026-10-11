@@ -1,8 +1,9 @@
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient } from '../../../database/database.types';
+import { seriesRuleOrderSql } from '../domain/onec-order-link-sql';
 import {
-  ERP_CURRENCY, INCOMING_KINDS, ORDER_LINK_WINDOW_DAYS, paymentToken, RECEIPT_KINDS, REFUND_KINDS, STATE_GROUP_KEYS,
+  ERP_CURRENCY, INCOMING_KINDS, paymentToken, RECEIPT_KINDS, REFUND_KINDS, STATE_GROUP_KEYS,
   STATE_GROUPS, stateToken, type PaymentScope, type ReceiptState, type StateGroup,
 } from '../domain/onec-receipts';
 import type {
@@ -97,16 +98,8 @@ eo AS (
     LEFT JOIN order_onec_order_links lk
       ON lk.source_id = ro.source_id AND lk.onec_order_ref_key = ro.order_ref AND lk.removed_at IS NULL
     LEFT JOIN LATERAL (
-      -- Правило серии: «<серия>-<номер заказа ERP>». Поиск идёт по уникальному индексу действующих производственных
-      -- заказов (uq_orders_name_production_active) — предикат ниже обязан совпадать с предикатом индекса; он же
-      -- гарантирует, что кандидат один. Заказы-исключения из уникальности (старые дубли) правилом не подбираются.
-      SELECT o.order_id
-        FROM orders o
-       WHERE $2::text IS NOT NULL AND lk.link_id IS NULL AND od.onec_document_id IS NOT NULL
-         AND od.number ~ ('^' || $2::text || '-[0-9]+$')
-         AND normalize_order_name(o.order_name::text) = normalize_order_name(substring(od.number from '([0-9]+)$'))
-         AND o.delete_flag = false AND o.order_kind = 'production_order' AND o.legacy_duplicate_name_exempt = false
-         AND abs(o.order_date - od.doc_date) <= ${ORDER_LINK_WINDOW_DAYS}
+      -- Правило серии «<серия>-<номер заказа ERP>» — общее с другими чтениями документов 1С (domain/onec-order-link-sql).
+      ${seriesRuleOrderSql('$2')}
     ) byrule ON true
 ),
 st AS (

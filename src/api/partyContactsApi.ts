@@ -98,6 +98,46 @@ export interface ClientConfirmResult {
   holderClientName: string | null;
 }
 
+export type ClientOnecDocumentGroup = 'orders' | 'shipments' | 'receipts' | 'refunds';
+export type ClientOnecDocumentState = 'posted' | 'not_posted' | 'deleted' | 'missing';
+
+/** One 1C document of the counterparty of a client. Money only for a user who may see order financials. */
+export interface ClientOnecDocument {
+  id: string;
+  group: ClientOnecDocumentGroup;
+  kind: string;
+  number: string | null;
+  date: string | null;
+  state: ClientOnecDocumentState;
+  orderStateName: string | null;
+  responsibleName: string | null;
+  /** ERP orders the document leads to, within the order visibility of the user. */
+  erpOrders: Array<{ orderId: number; orderName: string }>;
+  amount?: string | null;
+  currency?: string | null;
+}
+
+/** Money of the posted 1C documents the user may see, per currency. */
+export interface ClientOnecDocumentsSummary {
+  currency: string | null;
+  ordered: string;
+  shipped: string;
+  received: string;
+  refunded: string;
+  balance: string;
+}
+
+export interface ClientOnecDocumentsResponse {
+  linked: boolean;
+  counterparty: { refKey1c: string; name: string | null } | null;
+  data: ClientOnecDocument[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  scope: 'all' | 'own';
+  groups: Record<ClientOnecDocumentGroup, number>;
+  /** Absent without `orders.view_financials`. */
+  summary?: ClientOnecDocumentsSummary[];
+}
+
 /** Pairs of one confirmation request (the backend limit). */
 export const CLIENT_CONFIRM_MAX = 100;
 
@@ -126,6 +166,10 @@ export const partyContactsApi = {
   /** Link, relink or unlink (refKey1c null); `expectedRefKey1c` is the key this page showed. */
   setClientCounterparty: (clientId: number, body: { refKey1c: string | null; expectedRefKey1c: string | null }) =>
     httpClient.put<ClientLink>(apiRoutes.partyContacts.clientCounterparty(clientId), body),
+  /** «Документы 1С» of the client card: which documents and whether money is shown is decided by the backend. */
+  clientOnecDocuments: (clientId: number, params: { group?: ClientOnecDocumentGroup; page: number; pageSize: number }) =>
+    httpClient.get<ClientOnecDocumentsResponse>(
+      `${apiRoutes.partyContacts.clientOnecDocuments(clientId)}?page=${params.page}&pageSize=${params.pageSize}${params.group ? `&group=${params.group}` : ''}`),
   clientCounterpartyMatches: () => httpClient.get<ClientCounterpartyMatches>(apiRoutes.partyContacts.clientCounterpartyMatches),
   /** At most CLIENT_CONFIRM_MAX pairs; a pair that is no longer possible is reported and skipped. */
   confirmClientCounterparties: (pairs: Array<{ clientId: number; refKey1c: string }>) =>

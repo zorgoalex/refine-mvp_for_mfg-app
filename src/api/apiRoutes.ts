@@ -445,6 +445,7 @@ export const apiRoutes = {
     supplierFromCounterparty: backendApiPath('/suppliers/from-counterparty'),
     clientCounterparty: (clientId: number) => backendApiPath(`/clients/${clientId}/counterparty`),
     clientCounterpartyCandidates: (clientId: number) => backendApiPath(`/clients/${clientId}/counterparty-candidates`),
+    clientOnecDocuments: (clientId: number) => backendApiPath(`/clients/${clientId}/onec-documents`),
     clientCounterpartyMatches: backendApiPath('/client-counterparty-matches'),
     clientCounterpartyMatchesConfirm: backendApiPath('/client-counterparty-matches/confirm'),
   },

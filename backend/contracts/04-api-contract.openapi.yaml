@@ -1190,6 +1190,32 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '409': {description: 'SUPPLIER_NAME_TAKEN (details.supplierId)'}
         '422': {description: 'SUPPLIER_COUNTERPARTY_UNKNOWN or VALIDATION_ERROR'}
+  /api/v1/clients/{clientId}/onec-documents:
+    get:
+      tags: [Party contacts]
+      operationId: listClientOnecDocuments
+      summary: '1C documents of the counterparty of a client within the order visibility of the user, with totals (client card, tab «Документы 1С»; read-only)'
+      description: >-
+        Customer orders, shipments, money receipts and refunds of the 1C counterparty the client is linked to; purchase documents are never included.
+        Requires clients.view, clients.onec_documents.view and orders.view (checked by the service; a refusal is audited as clients.onec_documents_denied).
+        Rows, counts and sums follow the order visibility of the user: every document for the scope «all»; for «own» only a document that refers
+        to at least one 1C customer order and every order it refers to resolves (manual link, otherwise the number series rule) to an ERP order
+        of the user's own (creator or manager), and no live line of it is left without an order — so refunds, documents that involve another manager's order and payments with a line of unknown belonging are not shown; any other scope is refused.
+        Amounts of rows and `summary` are present only with orders.view_financials. `summary` counts posted documents only, per currency;
+        balance = shipped − received + refunded. These totals are 1C data and are never added to the ERP orders totals.
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.view, clients.onec_documents.view, orders.view]
+      parameters:
+        - {name: clientId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: group, in: query, required: false, schema: {type: string, enum: [orders, shipments, receipts, refunds]}}
+        - {name: page, in: query, required: false, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: pageSize, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200': {description: "{linked, counterparty{refKey1c, name}|null, data[{id, group, kind, number, date, state: posted|not_posted|deleted|missing, orderStateName, responsibleName, erpOrders[{orderId, orderName}], amount?, currency?}], pagination{page, pageSize, total, totalPages}, scope: all|own, groups{orders, shipments, receipts, refunds}, summary?[{currency, ordered, shipped, received, refunded, balance}]}"}
+        '400': {description: 'VALIDATION_FAILED'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {description: 'Permission denied (audited as clients.onec_documents_denied)'}
+        '404': {description: 'CLIENT_NOT_FOUND'}
   /api/v1/clients/{id}/counterparty:
     get:
       tags: [Party contacts]
