@@ -60,6 +60,7 @@ export function deadlineOrderIdSql(alias = 'd'): string {
 }
 
 /**
+ * (Deadline ids are compared case-insensitively: links accept upper/mixed-case UUIDs and store them as sent.)
  * Group entity links that point at order data — `order` and `deadline_instance` (through the deadline's order,
  * including its workshop) — are kept only within the reader's order read visibility; other types are untouched
  * (access groups 0A.4, review R2). `TRUE` for unrestricted readers.
@@ -71,6 +72,6 @@ export function appendLinkedEntityVisibilitySql(params: unknown[], currentUser: 
   const deadlineVisible = appendReferencedOrderVisibilitySql(params, currentUser, deadlineOrderIdSql('lnk_d'), true);
   return `(CASE ${typeSql}
       WHEN 'order' THEN ${orderVisible}
-      WHEN 'deadline_instance' THEN EXISTS (SELECT 1 FROM deadline_instances lnk_d WHERE lnk_d.deadline_id::text = ${idSql} AND ${deadlineVisible})
+      WHEN 'deadline_instance' THEN EXISTS (SELECT 1 FROM deadline_instances lnk_d WHERE lnk_d.deadline_id::text = lower(btrim(${idSql})) AND ${deadlineVisible})
       ELSE TRUE END)`;
 }

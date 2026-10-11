@@ -73,9 +73,10 @@ describe.skipIf(!databaseUrl)('order read visibility on real data (rolled-back f
     f.dFree = await deadline(null, null, `${tag}-free`);
     f.group = (await one(`INSERT INTO group_groups (code, name) VALUES ($1, $2) RETURNING id`, [tag, tag])).id;
     await tx.query(`INSERT INTO group_order_groups (order_id, group_id) VALUES ($1, $3), ($2, $3)`, [f.own, f.foreign, f.group]);
+    // Deadline links in upper case, as clients may send them (links accept any case and store the text as sent).
     await tx.query(`INSERT INTO group_entity_links (group_id, entity_type_code, entity_id_text) VALUES
       ($1, 'order', $2), ($1, 'order', $3), ($1, 'deadline_instance', $4), ($1, 'deadline_instance', $5)`,
-    [f.group, String(f.own), String(f.foreign), String(f.dOwn), String(f.dForeignWorkshop)]);
+    [f.group, String(f.own), String(f.foreign), String(f.dOwn).toUpperCase(), String(f.dForeignWorkshop).toUpperCase()]);
   });
 
   afterAll(async () => {
@@ -137,7 +138,7 @@ describe.skipIf(!databaseUrl)('order read visibility on real data (rolled-back f
     const links = new PgGroupEntityLinksRepository(tx);
     const shown = async (user: CurrentUser) => (await links.list({ currentUser: user, groupId: f.group,
       visibleEntityTypes: ['order', 'deadline_instance'] } as never)).links.map((l: { entityType: string; entityId: string }) => `${l.entityType}:${l.entityId}`).sort();
-    expect(await shown(manager)).toEqual([`deadline_instance:${f.dOwn}`, `order:${f.own}`].sort());
+    expect(await shown(manager)).toEqual([`deadline_instance:${String(f.dOwn).toUpperCase()}`, `order:${f.own}`].sort());
     expect(await shown(topManager)).toHaveLength(4);
 
     const overview = new PgGroupOverviewRepository(tx);
