@@ -10,20 +10,15 @@ export const REFERENCE_LAST_KEY = 'erp.references.last';
 /** Пункт «Справочники» бокового меню просит показать панель, даже если её свернули. */
 export const REFERENCE_RAIL_OPEN_EVENT = 'erp:references-rail-open';
 
-type RailKind = 'wide' | 'regular';
-type RailChoices = Record<RailKind, boolean | null>;
-const storageKey = (kind: RailKind) => (kind === 'wide' ? `${RAIL_HIDDEN_KEY}.wide` : RAIL_HIDDEN_KEY);
-
-/** Явный выбор пользователя в этом браузере; `null` — не выбирал. */
-const readChoice = (kind: RailKind): boolean | null => {
+/** Явный выбор пользователя в этом браузере для обычных справочников; `null` — не выбирал. */
+const readChoice = (): boolean | null => {
   try {
-    const stored = window.localStorage.getItem(storageKey(kind));
+    const stored = window.localStorage.getItem(RAIL_HIDDEN_KEY);
     return stored === '1' ? true : stored === '0' ? false : null;
   } catch {
     return null;
   }
 };
-const readChoices = (): RailChoices => ({ wide: readChoice('wide'), regular: readChoice('regular') });
 
 /**
  * «NewLine»: левая панель «все справочники» на экранах-списках справочников — переход между ними
@@ -33,7 +28,9 @@ export const WorkbenchReferenceRail: React.FC = () => {
   const { sider } = useEvolutionNavigation();
   const { pathname } = useLocation();
   const [query, setQuery] = React.useState('');
-  const [choices, setChoices] = React.useState(readChoices);
+  const [choice, setChoice] = React.useState(readChoice);
+  // широкий справочник: панель открыта вручную — до перехода на другой экран
+  const [openedHere, setOpenedHere] = React.useState(false);
 
   const groups = React.useMemo(() => buildReferenceRail(sider.categorizedResources), [sider.categorizedResources]);
   const current = React.useMemo(() => findReferenceByPath(groups, pathname), [groups, pathname]);
@@ -48,6 +45,7 @@ export const WorkbenchReferenceRail: React.FC = () => {
   }, []);
   const currentName = current?.name;
   React.useEffect(() => {
+    setOpenedHere(false);
     if (!currentName) {
       setForcedOpen(false);
       return;
@@ -61,17 +59,21 @@ export const WorkbenchReferenceRail: React.FC = () => {
 
   if (!current) return null;
 
-  const kind: RailKind = isWideReference(current.name) ? 'wide' : 'regular';
-  const hidden = !forcedOpen && isReferenceRailHidden(choices[kind], current.name, window.innerWidth);
+  const wide = isWideReference(current.name);
+  const hidden = isReferenceRailHidden({ resourceName: current.name, choice, openedHere, forcedOpen });
   const toggleHidden = () => {
     const next = !hidden;
+    if (wide) {
+      setOpenedHere(!next);
+      return;
+    }
     try {
-      window.localStorage.setItem(storageKey(kind), next ? '1' : '0');
+      window.localStorage.setItem(RAIL_HIDDEN_KEY, next ? '1' : '0');
     } catch {
       // панель просто не запомнит выбор
     }
     setForcedOpen(false);
-    setChoices((value) => ({ ...value, [kind]: next }));
+    setChoice(next);
   };
 
   if (hidden) {

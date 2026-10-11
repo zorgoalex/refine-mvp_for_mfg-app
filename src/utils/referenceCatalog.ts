@@ -76,22 +76,29 @@ export const REFERENCE_DESCRIPTIONS: Record<string, string> = {
   suppliers: 'Поставщики для заявок на закуп.',
 };
 
-/** Справочники с широкими таблицами: на нешироком экране панель для них по умолчанию свёрнута. */
+/** Справочники с широкими таблицами: при их открытии панель всегда сворачивается сама. */
 const WIDE_REFERENCES: ReadonlySet<string> = new Set(['films', 'inventory-warehouses', 'sheet_material_types', 'catalog_items']);
-export const REFERENCE_RAIL_ROOMY_WIDTH = 1600;
 
-/**
- * Свёрнута ли панель: явный выбор пользователя главнее; без него панель свёрнута только
- * у широких справочников на экране уже `REFERENCE_RAIL_ROOMY_WIDTH`.
- */
-export function isReferenceRailHidden(choice: boolean | null, resourceName: string, viewportWidth: number): boolean {
-  if (choice !== null) return choice;
-  return isWideReference(resourceName) && viewportWidth < REFERENCE_RAIL_ROOMY_WIDTH;
-}
-
-/** Выбор «свернуть/показать» запоминается отдельно для широких и обычных справочников. */
 export function isWideReference(resourceName: string): boolean {
   return WIDE_REFERENCES.has(resourceName);
+}
+
+/**
+ * Свёрнута ли панель. Широкий справочник: свёрнута, пока её не открыли вручную на этом экране.
+ * Обычный: по сохранённому выбору пользователя, но пункт бокового меню показывает её в любом случае.
+ */
+export function isReferenceRailHidden(args: {
+  resourceName: string;
+  /** сохранённый выбор для обычных справочников; `null` — не выбирал */
+  choice: boolean | null;
+  /** панель открыта вручную на этом широком справочнике */
+  openedHere: boolean;
+  /** переход из пункта «Справочники» бокового меню */
+  forcedOpen: boolean;
+}): boolean {
+  if (isWideReference(args.resourceName)) return !args.openedHere;
+  if (args.forcedOpen) return false;
+  return args.choice ?? false;
 }
 
 /** Группа, в которую справочник входит на панели; `null` — экран не из перечня справочников. */

@@ -68,12 +68,17 @@ describe('reference catalog of the NewLine rail', () => {
     expect(referenceGroupLabel(undefined)).toBeNull();
   });
 
-  it('folds the rail by default only for wide references on a narrow screen; an explicit choice wins', () => {
-    expect(isReferenceRailHidden(null, 'films', 1440)).toBe(true);
-    expect(isReferenceRailHidden(null, 'films', 1920)).toBe(false);
-    expect(isReferenceRailHidden(null, 'milling_types', 1440)).toBe(false);
-    expect(isReferenceRailHidden(false, 'films', 1440)).toBe(false);
-    expect(isReferenceRailHidden(true, 'milling_types', 1920)).toBe(true);
+  it('always folds the rail on a wide reference until it is opened by hand there', () => {
+    const base = { choice: false, openedHere: false, forcedOpen: true };
+    expect(isReferenceRailHidden({ ...base, resourceName: 'films' })).toBe(true);
+    expect(isReferenceRailHidden({ ...base, resourceName: 'films', openedHere: true })).toBe(false);
+  });
+
+  it('follows the saved choice on a regular reference, but the sidebar entry shows the rail anyway', () => {
+    const base = { resourceName: 'milling_types', openedHere: false, forcedOpen: false };
+    expect(isReferenceRailHidden({ ...base, choice: null })).toBe(false);
+    expect(isReferenceRailHidden({ ...base, choice: true })).toBe(true);
+    expect(isReferenceRailHidden({ ...base, choice: true, forcedOpen: true })).toBe(false);
   });
 
   it('replaces references in the sidebar with one entry but keeps suppliers there', () => {

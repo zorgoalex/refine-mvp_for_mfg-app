@@ -365,3 +365,8 @@
 :root[data-ui-variant="workbench"] .production-stages__stage--pending {
   color: var(--wb-ink-3) !important;
 }
+
+/* свёрнутая группа с текущим экраном: подпись выделена, чтобы место в меню не терялось */
+:root[data-ui-variant="workbench"] .evolution-sider__group-toggle.evolution-sider__group-toggle--current {
+  color: var(--evo-primary);
+}

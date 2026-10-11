@@ -350,16 +350,16 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
                   });
                 }
 
-                // a folded group still shows while it holds the current page, so the selection is never hidden
+                // a folded group that holds the current page keeps its label highlighted, so the place is not lost
                 const holdsSelection = hubSelected || resources.some((item) => item.name === sider.selectedKey);
-                const folded = isWorkbench && !collapsed && foldedGroups.includes(category) && !holdsSelection;
+                const folded = isWorkbench && !collapsed && foldedGroups.includes(category);
 
                 return (
                   <div className="evolution-sider__group" key={category}>
                     {!collapsed && isWorkbench ? (
                       <button
                         type="button"
-                        className="evolution-sider__group-label evolution-sider__group-toggle"
+                        className={`evolution-sider__group-label evolution-sider__group-toggle${folded && holdsSelection ? ' evolution-sider__group-toggle--current' : ''}`}
                         aria-expanded={!folded}
                         onClick={() => toggleGroup(category)}
                       >
