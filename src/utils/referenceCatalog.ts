@@ -157,3 +157,27 @@ export function filterReferenceRail(groups: readonly ReferenceRailGroup[], query
     .map((group) => ({ ...group, items: group.items.filter((item) => item.label.toLocaleLowerCase('ru').includes(needle)) }))
     .filter((group) => group.items.length > 0);
 }
+
+/** Ключ единственного пункта «Справочники» в боковом меню NewLine. */
+export const REFERENCE_HUB_KEY = '__references';
+/** Справочники, которые остаются и в боковом меню (ими пользуются как рабочим экраном). */
+const KEPT_IN_SIDEBAR: ReadonlySet<string> = new Set(['suppliers']);
+
+/** Экраны, которые в боковом меню NewLine заменяет один пункт «Справочники». */
+export function referenceNamesBehindHub(groups: readonly ReferenceRailGroup[]): Set<string> {
+  const names = new Set<string>();
+  groups.forEach((group) => group.items.forEach((item) => {
+    if (!KEPT_IN_SIDEBAR.has(item.name)) names.add(item.name);
+  }));
+  return names;
+}
+
+/**
+ * Куда ведёт пункт «Справочники»: последний открытый справочник, а если он с широкой таблицей
+ * (панель у него свёрнута) или недоступен — первый обычный; `null` — справочников у пользователя нет.
+ */
+export function resolveReferenceLanding(groups: readonly ReferenceRailGroup[], lastVisited: string | null): ReferenceRailItem | null {
+  const items = groups.flatMap((group) => group.items);
+  const regular = items.filter((item) => !isWideReference(item.name));
+  return regular.find((item) => item.name === lastVisited) ?? regular[0] ?? items[0] ?? null;
+}

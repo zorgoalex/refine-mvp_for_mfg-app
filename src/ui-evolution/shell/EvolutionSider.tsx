@@ -4,6 +4,7 @@ import { Button, Layout, Menu, Typography } from 'antd';
 import {
   AppstoreOutlined,
   AuditOutlined,
+  BookOutlined,
   CalendarOutlined,
   CreditCardOutlined,
   DownOutlined,
@@ -27,6 +28,14 @@ import type { UserIdentity } from '../../types/auth';
 import { APP_VERSION } from '../../version';
 import { useUiVariant } from '../../ui-variant/UiVariantProvider';
 import { getEvolutionCategoryLabels } from '../../utils/navigationMenuConfig';
+import {
+  REFERENCE_HUB_KEY,
+  REFERENCE_MENU_CATEGORY,
+  buildReferenceRail,
+  referenceNamesBehindHub,
+  resolveReferenceLanding,
+} from '../../utils/referenceCatalog';
+import { REFERENCE_LAST_KEY, REFERENCE_RAIL_OPEN_EVENT } from './WorkbenchReferenceRail';
 import {
   EVOLUTION_CATEGORY_ORDER,
   useEvolutionNavigation,
@@ -67,6 +76,24 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
     });
   };
   const categoryLabels = getEvolutionCategoryLabels(variant);
+  // «NewLine»: справочники в меню — один пункт; их список открывается панелью на самом экране.
+  const referenceGroups = React.useMemo(
+    () => (isWorkbench ? buildReferenceRail(sider.categorizedResources) : []),
+    [isWorkbench, sider.categorizedResources],
+  );
+  const referencesBehindHub = React.useMemo(() => referenceNamesBehindHub(referenceGroups), [referenceGroups]);
+  const openReferences = () => {
+    let last: string | null = null;
+    try {
+      last = window.localStorage.getItem(REFERENCE_LAST_KEY);
+    } catch {
+      last = null;
+    }
+    const target = resolveReferenceLanding(referenceGroups, last);
+    if (!target) return;
+    sider.handleNavigate(target.route);
+    window.dispatchEvent(new Event(REFERENCE_RAIL_OPEN_EVENT));
+  };
   const resourceItems = Object.values(sider.categorizedResources).flat();
   const activeCategory = Object.entries(sider.categorizedResources)
     .find(([, items]) => items.some((item) => item.name === sider.selectedKey))?.[0];
@@ -298,8 +325,10 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
               ) : null}
 
               {sider.categoryOrder.map((category) => {
-                const resources = sider.categorizedResources[category] ?? [];
-                if (resources.length === 0) return null;
+                const resources = (sider.categorizedResources[category] ?? [])
+                  .filter((item) => !referencesBehindHub.has(item.name));
+                const holdsHub = category === REFERENCE_MENU_CATEGORY && referencesBehindHub.size > 0;
+                if (resources.length === 0 && !holdsHub) return null;
                 const categoryLabel = categoryLabels[
                   category as keyof typeof categoryLabels
                 ] ?? category;
@@ -310,9 +339,19 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
                   title: item.label,
                   onClick: () => sider.handleNavigate(item.route),
                 }));
+                const hubSelected = holdsHub && referencesBehindHub.has(sider.selectedKey);
+                if (holdsHub) {
+                  items.unshift({
+                    key: REFERENCE_HUB_KEY,
+                    icon: <BookOutlined />,
+                    label: 'Справочники',
+                    title: 'Справочники',
+                    onClick: openReferences,
+                  });
+                }
 
                 // a folded group still shows while it holds the current page, so the selection is never hidden
-                const holdsSelection = resources.some((item) => item.name === sider.selectedKey);
+                const holdsSelection = hubSelected || resources.some((item) => item.name === sider.selectedKey);
                 const folded = isWorkbench && !collapsed && foldedGroups.includes(category) && !holdsSelection;
 
                 return (
@@ -338,7 +377,7 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
                       inlineCollapsed={collapsed}
                       items={items}
                       mode="inline"
-                      selectedKeys={resources.some((item) => item.name === sider.selectedKey) ? [sider.selectedKey] : []}
+                      selectedKeys={hubSelected ? [REFERENCE_HUB_KEY] : resources.some((item) => item.name === sider.selectedKey) ? [sider.selectedKey] : []}
                       theme="dark"
                     />
                     )}

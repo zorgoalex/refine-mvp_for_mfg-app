@@ -23,7 +23,7 @@ describe('workbench navigation config', () => {
     const labels = getEvolutionCategoryLabels('workbench');
     expect(Object.keys(labels).sort()).toEqual([...EVOLUTION_CATEGORY_ORDER].sort());
     expect(labels['Настройки']).toBe('Настройка');
-    expect(labels['Данные']).toBe('Справочники');
+    expect(labels['Данные']).toBe('Данные');
     for (const variant of ['evolution', 'line', 'air', 'neutral'] as const) {
       expect(getEvolutionCategoryLabels(variant)).toBe(EVOLUTION_CATEGORY_LABELS);
     }

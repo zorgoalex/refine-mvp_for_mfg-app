@@ -5,6 +5,10 @@ import { buildReferenceRail, filterReferenceRail, findReferenceByPath, isReferen
 import { useEvolutionNavigation } from './useEvolutionNavigation';
 
 const RAIL_HIDDEN_KEY = 'erp.references.railHidden';
+/** Последний открытый справочник: к нему возвращает пункт «Справочники» бокового меню. */
+export const REFERENCE_LAST_KEY = 'erp.references.last';
+/** Пункт «Справочники» бокового меню просит показать панель, даже если её свернули. */
+export const REFERENCE_RAIL_OPEN_EVENT = 'erp:references-rail-open';
 
 type RailKind = 'wide' | 'regular';
 type RailChoices = Record<RailKind, boolean | null>;
@@ -35,10 +39,30 @@ export const WorkbenchReferenceRail: React.FC = () => {
   const current = React.useMemo(() => findReferenceByPath(groups, pathname), [groups, pathname]);
   const shown = React.useMemo(() => filterReferenceRail(groups, query), [groups, query]);
 
+  // переход из бокового меню показывает панель на этот раз, сохранённый выбор не меняется
+  const [forcedOpen, setForcedOpen] = React.useState(false);
+  React.useEffect(() => {
+    const open = () => setForcedOpen(true);
+    window.addEventListener(REFERENCE_RAIL_OPEN_EVENT, open);
+    return () => window.removeEventListener(REFERENCE_RAIL_OPEN_EVENT, open);
+  }, []);
+  const currentName = current?.name;
+  React.useEffect(() => {
+    if (!currentName) {
+      setForcedOpen(false);
+      return;
+    }
+    try {
+      window.localStorage.setItem(REFERENCE_LAST_KEY, currentName);
+    } catch {
+      // без хранилища пункт меню просто откроет первый справочник
+    }
+  }, [currentName]);
+
   if (!current) return null;
 
   const kind: RailKind = isWideReference(current.name) ? 'wide' : 'regular';
-  const hidden = isReferenceRailHidden(choices[kind], current.name, window.innerWidth);
+  const hidden = !forcedOpen && isReferenceRailHidden(choices[kind], current.name, window.innerWidth);
   const toggleHidden = () => {
     const next = !hidden;
     try {
@@ -46,6 +70,7 @@ export const WorkbenchReferenceRail: React.FC = () => {
     } catch {
       // панель просто не запомнит выбор
     }
+    setForcedOpen(false);
     setChoices((value) => ({ ...value, [kind]: next }));
   };
 

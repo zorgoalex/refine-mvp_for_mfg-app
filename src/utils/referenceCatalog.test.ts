@@ -7,6 +7,8 @@ import {
   filterReferenceRail,
   findReferenceByPath,
   isReferenceRailHidden,
+  referenceNamesBehindHub,
+  resolveReferenceLanding,
   referenceGroupLabel,
 } from './referenceCatalog';
 import { RESOURCE_LABELS } from './tabLabels';
@@ -72,5 +74,23 @@ describe('reference catalog of the NewLine rail', () => {
     expect(isReferenceRailHidden(null, 'milling_types', 1440)).toBe(false);
     expect(isReferenceRailHidden(false, 'films', 1440)).toBe(false);
     expect(isReferenceRailHidden(true, 'milling_types', 1920)).toBe(true);
+  });
+
+  it('replaces references in the sidebar with one entry but keeps suppliers there', () => {
+    const groups = buildReferenceRail({
+      CRM: [item('suppliers', '/suppliers')],
+      Производство: [item('workshops', '/workshops'), item('cut-jobs', '/cut')],
+      Данные: [item('films', '/films'), item('orders-trash', '/orders/trash')],
+    });
+    expect([...referenceNamesBehindHub(groups)].sort()).toEqual(['films', 'workshops']);
+  });
+
+  it('lands on the last opened regular reference, otherwise on the first regular one', () => {
+    const groups = buildReferenceRail({ Данные: [item('films', '/films'), item('materials', '/materials'), item('units', '/units')] });
+    expect(resolveReferenceLanding(groups, 'units')?.name).toBe('units');
+    expect(resolveReferenceLanding(groups, 'films')?.name).toBe('materials');
+    expect(resolveReferenceLanding(groups, 'gone')?.name).toBe('materials');
+    expect(resolveReferenceLanding(buildReferenceRail({ Данные: [item('films', '/films')] }), null)?.name).toBe('films');
+    expect(resolveReferenceLanding([], null)).toBeNull();
   });
 });
