@@ -207,6 +207,28 @@ describe('CncTelegramService', () => {
     });
   });
 
+  it('order cutting sequences follow order read visibility: foreign order 404 before the repository (0A.4)', async () => {
+    const listOrderCuttingSequences = vi.fn().mockResolvedValue({ orderId: 2700, sequences: [] });
+    const packets = { listOrderCuttingSequences } as never;
+    // The visibility query answers «visible» only for order 2700.
+    const database = { query: vi.fn(async (_text: string, params: unknown[]) => (Number(params[0]) === 2700
+      ? { rows: [{ '?column?': 1 }], rowCount: 1 } : { rows: [], rowCount: 0 })) };
+    const service = new CncTelegramService({ packets, database: database as never });
+    const manager = { ...user(['orders.view']), role: 'manager', roleId: 10 } as never;
+
+    await expect(service.listOrderCuttingSequences({ currentUser: manager, orderId: 2701 }))
+      .rejects.toMatchObject({ statusCode: 404, code: 'ORDER_NOT_FOUND' });
+    expect(listOrderCuttingSequences).not.toHaveBeenCalled();
+    await expect(service.listOrderCuttingSequences({ currentUser: manager, orderId: 2700 })).resolves.toMatchObject({ orderId: 2700 });
+
+    // all (top manager) and assigned (worker) readers: no visibility query, behaviour as before.
+    database.query.mockClear();
+    for (const role of ['top_manager', 'worker'] as const) {
+      await service.listOrderCuttingSequences({ currentUser: { ...user(['orders.view']), role, roleId: 0 } as never, orderId: 2701 });
+    }
+    expect(database.query).not.toHaveBeenCalled();
+  });
+
   it('requires cut.view for Telegram source media', () => {
     const service = new CncTelegramService({
       packets: {

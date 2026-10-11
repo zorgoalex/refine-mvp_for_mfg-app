@@ -1,5 +1,5 @@
 import type { CurrentUser } from '../../../permissions/current-user';
-import { appendReferencedOrderVisibilitySql } from '../../../permissions/policies/order-read-visibility';
+import { appendLinkedEntityVisibilitySql } from '../../../permissions/policies/order-read-visibility';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient } from '../../../database/database.types';
@@ -282,7 +282,7 @@ export class PgGroupOverviewRepository implements GroupOverviewRepositoryPort {
     const params: unknown[] = [groupId, visibleEntityTypes];
     // Order links are counted only for orders the reader may see (access groups 0A.4).
     const visibility = viewer
-      ? appendReferencedOrderVisibilitySql(params, viewer, `(CASE WHEN entity_id_text ~ '^[0-9]{1,18}$' THEN entity_id_text::bigint END)`, false)
+      ? appendLinkedEntityVisibilitySql(params, viewer, 'entity_type_code', 'entity_id_text')
       : 'TRUE';
     const result = await this.database.query<LinkedEntityCountRow>(
       `
@@ -291,7 +291,7 @@ export class PgGroupOverviewRepository implements GroupOverviewRepositoryPort {
       WHERE group_id = $1::uuid
         AND valid_to IS NULL
         AND entity_type_code = ANY($2::text[])
-        ${visibility === 'TRUE' ? '' : `AND (entity_type_code <> 'order' OR ${visibility})`}
+        ${visibility === 'TRUE' ? '' : `AND ${visibility}`}
       GROUP BY entity_type_code
       ORDER BY entity_type_code ASC
       `,

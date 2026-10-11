@@ -1,4 +1,4 @@
-import { appendReferencedOrderVisibilitySql } from '../../../permissions/policies/order-read-visibility';
+import { appendLinkedEntityVisibilitySql } from '../../../permissions/policies/order-read-visibility';
 import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
@@ -276,7 +276,7 @@ async function loadLinks(
   const params: unknown[] = [groupId, entityTypes];
   // Read visibility (access groups 0A.4): links to orders the reader may not see are not listed.
   const visibility = viewer
-    ? appendReferencedOrderVisibilitySql(params, viewer, `(CASE WHEN pel.entity_id_text ~ '^[0-9]{1,18}$' THEN pel.entity_id_text::bigint END)`, false)
+    ? appendLinkedEntityVisibilitySql(params, viewer, 'pel.entity_type_code', 'pel.entity_id_text')
     : 'TRUE';
   const result = await database.query<LinkRow>(
     `
@@ -293,7 +293,7 @@ async function loadLinks(
     WHERE pel.group_id = $1::uuid
       AND pel.entity_type_code = ANY($2::text[])
       ${includeClosed ? '' : 'AND pel.valid_to IS NULL'}
-      ${visibility === 'TRUE' ? '' : `AND (pel.entity_type_code <> 'order' OR ${visibility})`}
+      ${visibility === 'TRUE' ? '' : `AND ${visibility}`}
     ORDER BY pel.entity_type_code ASC, pel.relation_type ASC, pel.entity_id_text ASC, pel.valid_from DESC, pel.id ASC
     `,
     params,

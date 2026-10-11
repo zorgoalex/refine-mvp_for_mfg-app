@@ -58,3 +58,19 @@ export async function readableOrderIds(
 export function deadlineOrderIdSql(alias = 'd'): string {
   return `COALESCE(${alias}.order_id, (SELECT dl_ow.order_id FROM order_workshops dl_ow WHERE dl_ow.order_workshop_id = ${alias}.order_workshop_id))`;
 }
+
+/**
+ * Group entity links that point at order data — `order` and `deadline_instance` (through the deadline's order,
+ * including its workshop) — are kept only within the reader's order read visibility; other types are untouched
+ * (access groups 0A.4, review R2). `TRUE` for unrestricted readers.
+ */
+export function appendLinkedEntityVisibilitySql(params: unknown[], currentUser: CurrentUser, typeSql: string, idSql: string): string {
+  if (!orderReadVisibilityIsRestricted(currentUser)) return 'TRUE';
+  const orderId = `(CASE WHEN ${idSql} ~ '^[0-9]{1,18}$' THEN ${idSql}::bigint END)`;
+  const orderVisible = appendReferencedOrderVisibilitySql(params, currentUser, orderId, false);
+  const deadlineVisible = appendReferencedOrderVisibilitySql(params, currentUser, deadlineOrderIdSql('lnk_d'), true);
+  return `(CASE ${typeSql}
+      WHEN 'order' THEN ${orderVisible}
+      WHEN 'deadline_instance' THEN EXISTS (SELECT 1 FROM deadline_instances lnk_d WHERE lnk_d.deadline_id::text = ${idSql} AND ${deadlineVisible})
+      ELSE TRUE END)`;
+}
