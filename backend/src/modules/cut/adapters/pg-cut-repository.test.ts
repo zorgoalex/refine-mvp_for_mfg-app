@@ -1615,6 +1615,21 @@ describe('PgCutRepository', () => {
     expect(result.noSheetSpecCount).toBe(1);
   });
 
+  it('listEligibleDetails offers only details of orders the reader may read (access groups 0A.4)', async () => {
+    const db = createDatabase({ readyStatusIds: [1], eligibleRows: [] });
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+    await repo.listEligibleDetails({ currentUser: currentUser({ role: 'manager', roleId: 10 } as Partial<CurrentUser>), criteria: { orderIds: [9] }, requestId: 'r' });
+    const managerQuery = db.queries.find((q) => /FROM order_details od/.test(q.text) && /JOIN orders ord/.test(q.text));
+    expect(managerQuery?.text).toMatch(/\(ord\.created_by = \$\d+ OR ord\.manager_id = \$\d+\)/);
+    expect(managerQuery?.params).toContain(7);
+
+    const operatorDb = createDatabase({ readyStatusIds: [1], eligibleRows: [] });
+    await new PgCutRepository(operatorDb.service, fakeFreecut(happyResponse))
+      .listEligibleDetails({ currentUser: currentUser(), criteria: { orderIds: [9] }, requestId: 'r' });
+    const operatorQuery = operatorDb.queries.find((q) => /FROM order_details od/.test(q.text) && /JOIN orders ord/.test(q.text));
+    expect(operatorQuery?.text).not.toMatch(/ord\.created_by =/);
+  });
+
   it('listEligibleDetails defaults to ready statuses unless preview asks for all statuses', async () => {
     const db = createDatabase({
       readyStatusIds: [1],

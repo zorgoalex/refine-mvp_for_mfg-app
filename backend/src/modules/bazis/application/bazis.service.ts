@@ -114,15 +114,15 @@ export class BazisService {
   ): Promise<BazisProjectListItemDto[]> {
     await this.requirePermission(currentUser, 'bazis.view', 'list_projects');
     const projects = await this.ports.repository.listProjects(filter);
-    const readable = await this.readable(currentUser, projects.flatMap((project) => project.linkedOrders.map((order) => order.orderId)));
-    return readable ? projects.map((project) => ({ ...project, linkedOrders: project.linkedOrders.filter((order) => readable.has(order.orderId)) })) : projects;
+    const readable = await this.readable(currentUser, projects.flatMap(projectOrderIds));
+    return readable ? projects.map((project) => withReadableOrders(project, readable)) : projects;
   }
 
   async getProject(currentUser: CurrentUser, id: number): Promise<BazisProjectCardDto> {
     await this.requirePermission(currentUser, 'bazis.view', 'get_project');
     const project = await this.ports.repository.getProject(id);
-    const readable = await this.readable(currentUser, project.linkedOrders.map((order) => order.orderId));
-    return readable ? { ...project, linkedOrders: project.linkedOrders.filter((order) => readable.has(order.orderId)) } : project;
+    const readable = await this.readable(currentUser, projectOrderIds(project));
+    return readable ? withReadableOrders(project, readable) : project;
   }
 
   async renameProject(
@@ -226,7 +226,7 @@ export class BazisService {
   }
 
   private async filterTreeNodes(currentUser: CurrentUser, nodes: BazisTreeNodeDto[]): Promise<BazisTreeNodeDto[]> {
-    const readable = await this.readable(currentUser, nodes.flatMap((node) => node.orders.map((order) => order.orderId)));
+    const readable = await this.readable(currentUser, nodes.flatMap((node) => [...node.orders.map((order) => order.orderId), ...node.orderIds]));
     if (!readable) return nodes;
     return nodes.map((node) => {
       const orders = node.orders.filter((order) => readable.has(order.orderId));
@@ -381,4 +381,18 @@ async function gzipFile(filePath: string): Promise<Buffer> {
     }),
   );
   return Buffer.concat(chunks);
+}
+
+/** Every order id a Bazis project carries (both the references and the id list). */
+function projectOrderIds(project: BazisProjectListItemDto): number[] {
+  return [...project.linkedOrders.map((order) => order.orderId), ...project.linkedOrderIds];
+}
+
+/** Both order fields filtered by one set of readable ids (access groups 0A.4, review R1). */
+function withReadableOrders<T extends BazisProjectListItemDto>(project: T, readable: Set<number>): T {
+  return {
+    ...project,
+    linkedOrders: project.linkedOrders.filter((order) => readable.has(order.orderId)),
+    linkedOrderIds: project.linkedOrderIds.filter((id) => readable.has(id)),
+  };
 }

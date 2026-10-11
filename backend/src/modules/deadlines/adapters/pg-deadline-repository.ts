@@ -1,5 +1,5 @@
 import { ApiError } from '../../../common/errors/api-error';
-import { appendReferencedOrderVisibilitySql } from '../../../permissions/policies/order-read-visibility';
+import { appendReferencedOrderVisibilitySql, deadlineOrderIdSql } from '../../../permissions/policies/order-read-visibility';
 import { computeDiff } from '../../../common/audit/audit-diff';
 import type { DatabaseClient } from '../../../database/database.types';
 import type {
@@ -223,7 +223,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
     const baseFilter = buildDeadlineFilter(command.query);
     // Read visibility (access groups 0A.4): deadlines of orders outside the user's «own» scope are not listed.
     const params = [...baseFilter.params];
-    const visibility = appendReferencedOrderVisibilitySql(params, command.currentUser, 'd.order_id');
+    const visibility = appendReferencedOrderVisibilitySql(params, command.currentUser, deadlineOrderIdSql('d'));
     const filter = visibility === 'TRUE'
       ? baseFilter
       : { params, whereSql: baseFilter.whereSql.trim() ? `${baseFilter.whereSql} AND ${visibility}` : `WHERE ${visibility}` };
