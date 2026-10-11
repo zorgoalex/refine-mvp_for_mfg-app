@@ -3308,6 +3308,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       groupLabelOf={clientScreenGroupLabelOf}
       columnKeys={visibleDetailColumns.map((column) => String(column.key ?? ''))}
       payments={clientScreenPayments}
+      catalogLines={backendOrder?.catalogLines}
       hdfDetails={hdfDetails}
       cutJobByDetailId={cutJobByDetailId}
       hdfTextOf={clientScreenHdfTextOf}

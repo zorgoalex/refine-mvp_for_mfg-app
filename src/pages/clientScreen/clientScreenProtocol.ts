@@ -13,10 +13,11 @@ import { clientScreenSnapshotSchema, clientScreenUiSchema } from './clientScreen
  * customer window of an older build would drop what it does not know and keep showing stale data.
  * So the version is part of the channel name and of the lock names: a manager window sees only a
  * customer window of its own version and opens one when there is none. Any change of the wire data
+ * — or of what the customer window draws from the same data (v8: services above the detail list) —
  * needs a new version here, and the previous one added to CLIENT_SCREEN_RETIRED_VIEWERS (a test pins
  * the registry to the version).
  */
-export const CLIENT_SCREEN_PROTOCOL_VERSION = 7 as const;
+export const CLIENT_SCREEN_PROTOCOL_VERSION = 8 as const;
 export const CLIENT_SCREEN_CHANNEL = `erp-client-screen-v${CLIENT_SCREEN_PROTOCOL_VERSION}`;
 /**
  * Customer windows of earlier builds: the channel each listens on and the message that makes it
@@ -30,6 +31,7 @@ export const CLIENT_SCREEN_RETIRED_VIEWERS: ReadonlyArray<{ channel: string; shu
   { channel: 'erp-client-screen-v4', shutdown: { v: 4, t: 'shutdown' } },
   { channel: 'erp-client-screen-v5', shutdown: { v: 5, t: 'shutdown' } },
   { channel: 'erp-client-screen-v6', shutdown: { v: 6, t: 'shutdown' } },
+  { channel: 'erp-client-screen-v7', shutdown: { v: 7, t: 'shutdown' } },
 ];
 
 const v = z.literal(CLIENT_SCREEN_PROTOCOL_VERSION);

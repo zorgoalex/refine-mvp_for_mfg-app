@@ -50,7 +50,7 @@ describe('client screen protocol', () => {
   it('drops anything with an unknown key, a wrong version, a wrong type or a foreign shape', () => {
     const state = all[5];
     for (const bad of [
-      null, 'state', 42, {}, { ...state, v: 1 }, { ...state, v: 6 }, { ...state, v: 8 }, { ...state, t: 'takeover' }, { ...state, extra: 1 },
+      null, 'state', 42, {}, { ...state, v: 1 }, { ...state, v: 7 }, { ...state, v: 9 }, { ...state, t: 'takeover' }, { ...state, extra: 1 },
       { ...state, snapshot: { ...snapshot, header: { order_id: 7 } } },
       { ...state, snapshot: { ...snapshot, summary: [{ code: 'orders.secret', label: 'x', value: 'y' }] } },
       { ...state, snapshot: { ...snapshot, details: { ...snapshot.details!, rows: [{ id: 'rowaaaaaa', cells: ['only one'] }] } } },
@@ -101,10 +101,11 @@ describe('workstation record', () => {
 
 describe('wire version', () => {
   it('names of the channel and of the locks carry the version, so windows of different builds never meet', () => {
-    expect(CLIENT_SCREEN_PROTOCOL_VERSION).toBe(7);
-    expect(CLIENT_SCREEN_CHANNEL).toBe('erp-client-screen-v7');
-    expect(CLIENT_SCREEN_VIEWER_LOCK).toBe('erp-client-screen-viewer-v7');
-    expect(clientScreenOwnerLock(7)).toBe('erp-client-screen-owner-v7-7');
+    expect(CLIENT_SCREEN_PROTOCOL_VERSION).toBe(8);
+    expect(CLIENT_SCREEN_CHANNEL).toBe('erp-client-screen-v8');
+    expect(CLIENT_SCREEN_VIEWER_LOCK).toBe('erp-client-screen-viewer-v8');
+    expect(clientScreenOwnerLock(7)).toBe('erp-client-screen-owner-v8-7');
+    expect('erp-client-screen-owner-v7-7'.startsWith(CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX)).toBe(true);
     expect('erp-client-screen-owner-v6-7'.startsWith(CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX)).toBe(true);
     expect('erp-client-screen-owner-v5-7'.startsWith(CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX)).toBe(true);
     expect('erp-client-screen-owner-v4-7'.startsWith(CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX)).toBe(true);
@@ -116,7 +117,7 @@ describe('wire version', () => {
     expect('erp-client-screen-owner-7'.startsWith(CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX)).toBe(true);
     expect(CLIENT_SCREEN_VIEWER_LOCK.startsWith(CLIENT_SCREEN_ANY_OWNER_LOCK_PREFIX)).toBe(false);
     const retired = CLIENT_SCREEN_RETIRED_VIEWERS.map((item) => item.channel);
-    expect(retired).toEqual(['erp-client-screen', 'erp-client-screen-v2', 'erp-client-screen-v3', 'erp-client-screen-v4', 'erp-client-screen-v5', 'erp-client-screen-v6']);
+    expect(retired).toEqual(['erp-client-screen', 'erp-client-screen-v2', 'erp-client-screen-v3', 'erp-client-screen-v4', 'erp-client-screen-v5', 'erp-client-screen-v6', 'erp-client-screen-v7']);
     expect(retired).not.toContain(CLIENT_SCREEN_CHANNEL);
   });
 
@@ -124,7 +125,8 @@ describe('wire version', () => {
     expect(parseClientScreenMessage({ v: 1, t: 'shutdown' })).toBeNull();
     expect(parseClientScreenMessage({ v: 1, t: 'hello', viewerId: 'aaaaaaaaaaaaaaaa' })).toBeNull();
     expect(parseClientScreenMessage({ v: 2, t: 'shutdown' })).toBeNull();
-    expect(CLIENT_SCREEN_RETIRED_VIEWERS.map((item) => item.shutdown)).toEqual([{ v: 1, t: 'shutdown' }, { v: 2, t: 'shutdown' }, { v: 3, t: 'shutdown' }, { v: 4, t: 'shutdown' }, { v: 5, t: 'shutdown' }, { v: 6, t: 'shutdown' }]);
+    expect(CLIENT_SCREEN_RETIRED_VIEWERS.map((item) => item.shutdown)).toEqual([{ v: 1, t: 'shutdown' }, { v: 2, t: 'shutdown' }, { v: 3, t: 'shutdown' }, { v: 4, t: 'shutdown' }, { v: 5, t: 'shutdown' }, { v: 6, t: 'shutdown' }, { v: 7, t: 'shutdown' }]);
+    expect(parseClientScreenMessage({ v: 7, t: 'shutdown' })).toBeNull();
     expect(parseClientScreenMessage({ v: 6, t: 'shutdown' })).toBeNull();
     expect(parseClientScreenMessage({ v: 5, t: 'shutdown' })).toBeNull();
     expect(parseClientScreenMessage({ v: 4, t: 'shutdown' })).toBeNull();
@@ -137,7 +139,7 @@ describe('wire version', () => {
   // previous channel to CLIENT_SCREEN_RETIRED_VIEWERS, then update the pair below.
   it('the registry of codes is pinned to the wire version', () => {
     expect({ version: CLIENT_SCREEN_PROTOCOL_VERSION, codes: CLIENT_SCREEN_CODES.join(' ') }).toEqual({
-      version: 7,
+      version: 8,
       codes: 'summary.number summary.order_name summary.client summary.client_phone summary.client_phones summary.deadline summary.positions '
         + 'summary.parts summary.area summary.material summary.milling_type summary.edge_type summary.film '
         + 'summary.final summary.discount summary.surcharge summary.paid summary.debt '

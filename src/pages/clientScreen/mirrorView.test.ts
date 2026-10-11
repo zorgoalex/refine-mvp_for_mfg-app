@@ -32,6 +32,23 @@ describe('buildMirrorView', () => {
     expect(buildMirrorView(snapshot, ui()).tabs.map((tab) => tab.active)).toEqual([false, true, false]);
   });
 
+  it('services that came without a tab of their own stand above the detail list', () => {
+    const services = { columns: [{ code: 'services.name' as const, label: 'Наименование', align: 'left' as const }], rows: [{ id: 'srvaaaaaa', cells: ['Доставка'] }] };
+    const view = buildMirrorView({ ...snapshot, services }, ui());
+    expect(view.tablesBefore.map((item) => [item.title, item.table.rows.map((row) => row.cells[0].text)])).toEqual([['Услуги/товары', ['Доставка']]]);
+    expect(view.table?.rows).toHaveLength(3);
+    // On another tab, and when the manager's screen has the tab, nothing is added to the detail list.
+    expect(buildMirrorView({ ...snapshot, services }, ui({ tab: 'finance' })).tablesBefore).toEqual([]);
+    const withTab = { ...snapshot, services, tabs: [...snapshot.tabs, { key: 'services' as const, label: 'Услуги/товары' }] };
+    expect(buildMirrorView(withTab, ui()).tablesBefore).toEqual([]);
+    expect(buildMirrorView(withTab, ui({ tab: 'services' })).table?.rows).toHaveLength(1);
+    expect(buildMirrorView(snapshot, ui()).tablesBefore).toEqual([]);
+    // The page of the detail list is the manager's page of that list, not of the table above it.
+    const paged = buildMirrorView({ ...snapshot, services }, ui({ page: { current: 2, size: 2 } }));
+    expect(paged.table?.rows.map((row) => row.id)).toEqual(['rowcccccc']);
+    expect(paged.tablesBefore[0].table.rows).toHaveLength(1);
+  });
+
   it('marks the field the manager is on', () => {
     const view = buildMirrorView(snapshot, ui({ tab: 'basic', focus: { code: 'basic.order_date' } }));
     expect(view.fields.map((field) => field.focused)).toEqual([false, true]);

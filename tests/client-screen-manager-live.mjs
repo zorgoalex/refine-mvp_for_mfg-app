@@ -17,7 +17,8 @@ import { vercelBypassCookies } from './helpers/vercelBypass.mjs';
 // Env: BASE_URL (a built deployment), ORDER_ID (an existing test order), CODEX_PLAYWRIGHT_USERNAME /
 // CODEX_PLAYWRIGHT_PASSWORD, optional VERCEL_AUTOMATION_BYPASS_SECRET, optional LAYOUT=legacy,
 // optional SELF_INTERRUPT=1 | during, optional ROLLBACK=1,
-// optional EXTRA_CODES=code,code (read-only mode only).
+// optional EXTRA_CODES=code,code (read-only mode only); EXPECT_SERVICES=1 — the order must have
+// «Услуги/товары» positions (the view page step then cannot pass without them).
 // Secrets are never printed.
 const base = (process.env.BASE_URL ?? '').replace(/\/$/, '');
 assert.match(base, /^https:\/\//, 'BASE_URL must be an https URL');
@@ -714,15 +715,63 @@ try {
   viewPopup.on('pageerror', (e) => errors.push(`customer (view): ${e.message.split('\n')[0]}`));
   await expect(viewPopup.getByRole('heading', { level: 1 })).toHaveText(/Заказ |Ваш заказ/, { timeout: 60000 });
   await expect(page.getByText('Клиент видит этот заказ')).toBeVisible({ timeout: 30000 });
+  // The page's «Услуги/товары» card stands above its detail table, and the customer has that table
+  // above the detail list; the detail list is the last table of the tab.
+  const viewDetails = viewPopup.locator('.client-screen__table').last();
   if (has('tab.details')) {
     await expect(viewPopup.getByRole('tab', { selected: true })).toHaveText(/Детали заказа/, { timeout: 20000 });
-    await expect(viewPopup.locator('tbody tr[data-row-id]').first()).toBeVisible({ timeout: 20000 });
+    await expect(viewDetails.locator('tbody tr[data-row-id]').first()).toBeVisible({ timeout: 20000 });
   } else skipped('the detail list of the view page');
-  if (!codes.includes('details.cost')) assert.equal(await viewPopup.getByRole('columnheader', { name: 'Сумма', exact: true }).count(), 0, 'view: hidden cost column is absent');
-  if (!codes.includes('details.note')) assert.equal(await viewPopup.getByRole('columnheader', { name: 'Примечание', exact: true }).count(), 0, 'view: hidden note column is absent');
-  const viewHeaders = await viewPopup.getByRole('columnheader').allInnerTexts();
+  if (!codes.includes('details.cost')) assert.equal(await viewDetails.getByRole('columnheader', { name: 'Сумма', exact: true }).count(), 0, 'view: hidden cost column is absent');
+  if (!codes.includes('details.note')) assert.equal(await viewDetails.getByRole('columnheader', { name: 'Примечание', exact: true }).count(), 0, 'view: hidden note column is absent');
+  const viewHeaders = await viewDetails.getByRole('columnheader').allInnerTexts();
   if (has('tab.details') && has('details.quantity')) assert.ok(viewHeaders.includes('Кол-во'), `view: ticked quantity column is present (columns: ${viewHeaders.join(' | ')})`);
-  results.push(`view page presented: ${await viewPopup.locator('tbody tr[data-row-id]').count()} detail rows, hidden columns absent`);
+  results.push(`view page presented: ${await viewDetails.locator('tbody tr[data-row-id]').count()} detail rows, hidden columns absent`);
+  if (has('tab.details')) {
+    const card = page.locator('.ant-card').filter({ has: page.locator('.ant-card-head-title', { hasText: 'Услуги/товары' }) });
+    const cardRows = card.locator('.ant-table-tbody > tr.ant-table-row');
+    // Columns of the manager's table: №, position (name over the article), kind, unit, quantity and,
+    // only with the right to see money, price and sum; the note is the last one.
+    const managerHeaders = await card.count() ? (await card.locator('.ant-table-thead th').allInnerTexts()).map((text) => text.trim()) : [];
+    const managerMoney = managerHeaders.includes('Цена, ₸') && managerHeaders.includes('Сумма, ₸');
+    const managerLines = await card.count() ? await cardRows.evaluateAll((rows, money) => rows.map((row) => {
+      const cells = [...row.querySelectorAll('td')].map((cell) => cell);
+      const text = (index) => cells[index]?.textContent?.trim() ?? '';
+      return {
+        name: cells[1]?.querySelector('div')?.textContent?.trim() ?? '', quantity: `${text(4)} ${text(3)}`.trim(),
+        price: money ? text(5) : null, sum: money ? text(6) : null,
+      };
+    }), managerMoney) : [];
+    if (process.env.EXPECT_SERVICES === '1') assert.ok(managerLines.length > 0, 'view: the order under test has service positions (EXPECT_SERVICES=1)');
+    const subtitles = viewPopup.locator('.client-screen__subtitle');
+    if (!managerLines.length || !has('tab.services')) {
+      assert.equal(await subtitles.filter({ hasText: 'Услуги/товары' }).count(), 0, 'view: no services table without the card or without its tick');
+      assert.equal(await viewPopup.locator('.client-screen__table').count(), 1, 'view: the detail list is the only table');
+      results.push(`view page: no «Услуги/товары» table at the customer (${managerLines.length ? 'its tick is off' : 'the order has no such positions'})`);
+    } else {
+      await expect(subtitles).toHaveText(['Услуги/товары'], { timeout: 20000 });
+      const customerServices = viewPopup.locator('.client-screen__table').first();
+      await expect(viewPopup.locator('.client-screen__table')).toHaveCount(2);
+      // Exactly the ticked columns; the money ones only when the manager's own table has them.
+      const expectedColumns = [['services.name', 'Наименование', 'name'], ['services.quantity', 'Количество', 'quantity'], ['services.price', 'Цена', 'price'], ['services.sum', 'Сумма', 'sum']]
+        .filter(([code, , field]) => has(code) && (managerMoney || (field !== 'price' && field !== 'sum')));
+      const customerHeaders = (await customerServices.getByRole('columnheader').allInnerTexts()).map((text) => text.trim());
+      assert.deepEqual(customerHeaders, expectedColumns.map(([, label]) => label), 'view: the service columns are exactly the ticked ones the manager has');
+      const customerLines = await customerServices.locator('tbody tr[data-row-id]').evaluateAll((rows) => rows.map((row) => [...row.querySelectorAll('td')].map((cell) => cell.textContent?.trim() ?? '')));
+      const plain = (value) => String(value ?? '').replace(/\s/g, ' ');
+      assert.deepEqual(
+        customerLines.map((cells) => cells.map(plain)),
+        managerLines.map((line) => expectedColumns.map(([, , field]) => plain(line[field]))),
+        'view: every service cell is the manager\'s',
+      );
+      const above = await viewPopup.evaluate(() => {
+        const tables = [...document.querySelectorAll('.client-screen__table')];
+        return tables[0].getBoundingClientRect().top < tables[1].getBoundingClientRect().top;
+      });
+      assert.ok(above, 'view: the services table stands above the detail list');
+      results.push(`view page: «Услуги/товары» above the detail list, ${customerLines.length} rows equal to the manager's card (${customerHeaders.join(' | ')}${managerMoney ? '' : '; the manager sees no prices'})`);
+    }
+  }
   const financePanel = page.locator('.order-show-info-tabs [role="tab"]').filter({ hasText: 'Финансы' });
   if (!(has('tab.finance') && has('tab.details'))) skipped('the finance panel of the view page');
   else if (await financePanel.count()) {

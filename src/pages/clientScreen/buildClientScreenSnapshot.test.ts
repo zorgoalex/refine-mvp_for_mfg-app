@@ -151,6 +151,28 @@ describe('buildClientScreenSnapshot', () => {
     expect(byNumber.summary).toEqual([{ code: 'summary.order_name', label: 'Название заказа', value: S('summary.order_name') }]);
   });
 
+  it('services of a screen without such a tab go with the detail list, under the same ticks', () => {
+    const tabs = [{ key: 'details' as const, label: 'Детали заказа' }, { key: 'finance' as const, label: 'Финансы' }];
+    const viewPage = source({ tabs, servicesWithDetails: true });
+    const all = buildClientScreenSnapshot(viewPage, CLIENT_SCREEN_CODES, ids());
+    expect(all.tabs.map((tab) => tab.key)).toEqual(['details', 'finance']);
+    expect(all.services?.columns.map((column) => column.code)).toEqual(['services.name', 'services.quantity', 'services.price', 'services.sum']);
+    expect(all.services?.rows.map((row) => row.cells[0])).toEqual([S('services.name', '#1'), S('services.name', '#2')]);
+
+    const without = (...codes: string[]) => CLIENT_SCREEN_CODES.filter((code) => !codes.includes(code));
+    // The tick of the table, the tick of a column, the tick of the list the table stands above.
+    expect(JSON.stringify(buildClientScreenSnapshot(viewPage, without('tab.services'), ids()))).not.toContain('<<services.');
+    const noSum = buildClientScreenSnapshot(viewPage, without('services.sum', 'services.price'), ids());
+    expect(noSum.services?.columns.map((column) => column.code)).toEqual(['services.name', 'services.quantity']);
+    expect(JSON.stringify(noSum)).not.toMatch(/<<services\.(sum|price)/);
+    expect(JSON.stringify(buildClientScreenSnapshot(viewPage, without('tab.details'), ids()))).not.toContain('<<services.');
+    // The manager's card is absent for an order without such positions: so is the customer's table.
+    expect(buildClientScreenSnapshot(source({ tabs, servicesWithDetails: true, services: [] }), CLIENT_SCREEN_CODES, ids()).services).toBeUndefined();
+    // A screen that does not say so sends nothing without a tab of its own.
+    expect(buildClientScreenSnapshot(source({ tabs }), CLIENT_SCREEN_CODES, ids()).services).toBeUndefined();
+    expect(clientScreenSnapshotSchema.safeParse(all).success).toBe(true);
+  });
+
   it('a column the manager has for no row at all is not sent, not even as dashes', () => {
     const noMoney = source({ services: [1, 2].map((n) => ({ key: `SERVICEKEY-${n}`, values: { name: `S${n}`, quantity: '1', price: undefined, sum: undefined } })) });
     const snapshot = buildClientScreenSnapshot(noMoney, CLIENT_SCREEN_CODES, ids());

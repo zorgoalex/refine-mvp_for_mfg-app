@@ -54,6 +54,35 @@ describe('buildOrderShowSource', () => {
     expect(source.finance.debt).toMatch(/^75\s000,00 /);
   });
 
+  it('gives the «Услуги/товары» card of the page to the detail tab; prices only with the right to see money', () => {
+    const catalogLines = [
+      { id: 12, catalogItemId: 3, catalogVersion: 1, name: 'Доставка', sku: 'SKU-СЕКРЕТ', kind: 'service', unitId: 1, unitName: 'шт', refKey1c: 'КЛЮЧ-1С-СЕКРЕТ',
+        quantity: '2', unitPrice: '1500.5', notes: 'ПРИМЕЧАНИЕ-СЕКРЕТ', catalogActive: true },
+    ] as never;
+    const source = buildOrderShowSource(input({ catalogLines }));
+    expect(source.servicesWithDetails).toBe(true);
+    expect(source.tabs.map((tab) => tab.key)).toEqual(['details', 'finance']);
+    expect(source.services).toHaveLength(1);
+    expect(source.services[0]).toMatchObject({ key: 'id:12', values: { name: 'Доставка', quantity: '2 шт' } });
+    expect(source.services[0].values.price).toMatch(/^1\s500,50$/);
+    expect(source.services[0].values.sum).toMatch(/^3\s001,00$/);
+    const snapshot = buildClientScreenSnapshot(source, ALL, createClientScreenIdMap(() => 'idaaaaaa'));
+    expect(snapshot.services?.rows[0].cells.slice(0, 2)).toEqual(['Доставка', '2 шт']);
+    expect(snapshot.services?.rows[0].cells[3]).toMatch(/^3\s001,00$/);
+    expect(JSON.stringify(snapshot)).not.toMatch(/SKU-СЕКРЕТ|КЛЮЧ-1С-СЕКРЕТ|ПРИМЕЧАНИЕ-СЕКРЕТ/);
+    expect(clientScreenSnapshotSchema.safeParse(snapshot).success).toBe(true);
+
+    const noMoney = buildOrderShowSource(input({ catalogLines, canViewFinancials: false }));
+    expect(noMoney.services[0].values).toEqual({ name: 'Доставка', quantity: '2 шт', price: undefined, sum: undefined });
+    const hidden = buildClientScreenSnapshot(noMoney, ALL, createClientScreenIdMap(() => 'idaaaaaa'));
+    expect(hidden.services?.columns.map((column) => column.code)).toEqual(['services.name', 'services.quantity']);
+    expect(JSON.stringify(hidden)).not.toMatch(/1\s500,50|3\s001,00/);
+
+    // An order without such positions (and a page that has not loaded them) has no card.
+    expect(buildClientScreenSnapshot(buildOrderShowSource(input()), ALL, createClientScreenIdMap(() => 'idaaaaaa')).services).toBeUndefined();
+    expect(buildClientScreenSnapshot(buildOrderShowSource(input({ catalogLines: null })), ALL, createClientScreenIdMap(() => 'idaaaaaa')).services).toBeUndefined();
+  });
+
   it('the client name falls back to the record; the title is the order name only when that is ticked', () => {
     const source = buildOrderShowSource(input({ clientName: null }));
     expect(source.summary.client).toBe('Клиент из записи');

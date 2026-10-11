@@ -25,11 +25,16 @@ export interface MirrorView {
   table: MirrorTable | null;
   /** The finance tab has both fields and the payments table. */
   tableTitle: string | null;
+  /** Tables drawn above the main one, each under its title (the services card of the order view page). */
+  tablesBefore: Array<{ title: string; table: MirrorTable }>;
   /** Further tables of the tab, each under its title (the «Материалы» tab has two tables). */
   moreTables: Array<{ title: string; table: MirrorTable }>;
   /** The active tab is one shown whole and its copy has arrived: it is drawn instead of fields and tables. */
   frame: ClientScreenFrame | null;
 }
+
+/** The title of the manager's own card. */
+export const CLIENT_SCREEN_SERVICES_TITLE = 'Услуги/товары';
 
 function mirrorTable(table: ClientScreenTable, ui: ClientScreenUi | null, options: { editable: boolean; paged: boolean }): MirrorTable {
   const focus = ui?.focus ?? null;
@@ -86,6 +91,7 @@ export function buildMirrorView(snapshot: ClientScreenSnapshot, ui: ClientScreen
   let fields: MirrorField[] = [];
   let table: MirrorTable | null = null;
   let tableTitle: string | null = null;
+  const tablesBefore: Array<{ title: string; table: MirrorTable }> = [];
   const moreTables: Array<{ title: string; table: MirrorTable }> = [];
   if (activeTab === 'basic') fields = withFocus(snapshot.basic);
   else if (activeTab === 'dates') fields = withFocus(snapshot.dates);
@@ -98,7 +104,13 @@ export function buildMirrorView(snapshot: ClientScreenSnapshot, ui: ClientScreen
       table = mirrorTable(snapshot.finance.payments, ui, { editable: false, paged: false });
       tableTitle = 'Оплаты';
     }
-  } else if (activeTab === 'details' && snapshot.details) table = mirrorTable(snapshot.details, ui, { editable: true, paged: true });
+  } else if (activeTab === 'details' && snapshot.details) {
+    table = mirrorTable(snapshot.details, ui, { editable: true, paged: true });
+    // Services that came without a tab of their own are the card above the detail list.
+    if (snapshot.services && !keys.includes('services')) {
+      tablesBefore.push({ title: CLIENT_SCREEN_SERVICES_TITLE, table: mirrorTable(snapshot.services, ui, { editable: false, paged: false }) });
+    }
+  }
   else if (activeTab === 'services' && snapshot.services) table = mirrorTable(snapshot.services, ui, { editable: false, paged: false });
   else if (activeTab === 'requirements') {
     const plain = { editable: false, paged: false };
@@ -120,6 +132,7 @@ export function buildMirrorView(snapshot: ClientScreenSnapshot, ui: ClientScreen
     fields,
     table,
     tableTitle,
+    tablesBefore,
     moreTables,
     // A copy of another tab is never drawn under this one.
     frame: snapshot.frame && snapshot.frame.tab === activeTab ? snapshot.frame : null,

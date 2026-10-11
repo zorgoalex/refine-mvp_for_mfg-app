@@ -422,17 +422,22 @@ export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenO
         films: input.requirements.films, sheets: input.requirements.sheets,
       } }
       : {}),
-    services: input.catalogLines.map((line) => ({
-      key: line.id ? `id:${line.id}` : String(line.clientKey ?? ''),
-      values: {
-        name: line.name,
-        quantity: line.unitName ? `${line.quantity} ${line.unitName}` : line.quantity,
-        // Without the right to see prices the manager's table has no price columns: nothing to send.
-        price: input.canViewServiceMoney ? serviceMoney(line.unitPrice) : undefined,
-        sum: input.canViewServiceMoney ? serviceMoney(orderCatalogLineAmount(line.quantity, line.unitPrice)) : undefined,
-      },
-    })),
+    services: clientScreenServiceRows(input.catalogLines, input.canViewServiceMoney),
   };
+}
+
+/** Rows of the «Услуги/товары» table, the same on the edit form and on the view page. */
+export function clientScreenServiceRows(lines: readonly OrderCatalogLine[], canViewMoney: boolean): ClientScreenOrderSource['services'] {
+  return lines.map((line) => ({
+    key: line.id ? `id:${line.id}` : String(line.clientKey ?? ''),
+    values: {
+      name: line.name,
+      quantity: line.unitName ? `${line.quantity} ${line.unitName}` : line.quantity,
+      // Without the right to see prices the manager's table has no price columns: nothing to send.
+      price: canViewMoney ? serviceMoney(line.unitPrice) : undefined,
+      sum: canViewMoney ? serviceMoney(orderCatalogLineAmount(line.quantity, line.unitPrice)) : undefined,
+    },
+  }));
 }
 
 /** The manager's table order; rows it does not name go after, by number (the table's own default). */

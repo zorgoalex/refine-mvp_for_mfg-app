@@ -39,6 +39,11 @@ export interface ClientScreenOrderSource {
     grouping?: { field: DetailField | null; groups: ReadonlyArray<{ key: string; title: string; rowKeys: ReadonlyArray<string> }> } | null;
   };
   services: ReadonlyArray<ClientScreenRowSource<'name' | 'quantity' | 'price' | 'sum'>>;
+  /**
+   * The screen has no «Услуги/товары» tab and shows that table above the detail list (the order view
+   * page). The customer then gets it on the detail tab, under the same ticks.
+   */
+  servicesWithDetails?: boolean;
   /** The «Материалы» tab as that tab reports it; absent while the tab is not on the manager's screen. */
   requirements?: {
     /** Columns the manager's own tables have; a column outside these lists is never sent, ticked or not. */
@@ -183,7 +188,10 @@ export function buildClientScreenSnapshot(source: ClientScreenOrderSource, visib
     snapshot.details = table;
   }
 
-  if (tabOn('services')) {
+  // A table above the detail list goes only with that list and, like the manager's card, only when
+  // the order has such positions.
+  const servicesAboveDetails = source.servicesWithDetails === true && visible.has('tab.services') && tabOn('details') && source.services.length > 0;
+  if (tabOn('services') || servicesAboveDetails) {
     const order = (['name', 'quantity', 'price', 'sum'] as const)
       .filter((field) => isClientScreenCodeVisible(`services.${field}`, visible) && available(source.services, field));
     snapshot.services = {

@@ -1,4 +1,5 @@
 import type { OrderDetail, OrderHdfDetail } from '../../types/orders';
+import type { OrderCatalogLine } from '../../utils/orderCatalogLines';
 import { resolveHeaderMaterialName } from '../../utils/materialDisplayName';
 import { formatNumber } from '../../utils/numberFormat';
 import { calculateOrderTotalArea } from '../../utils/orderArea';
@@ -7,14 +8,16 @@ import type { ClientScreenTabKey } from './clientScreenSnapshotSchema';
 import { formatCutJobGroupLabel } from '../orders/detailGrouping';
 import { orderDetailMirrorRows } from './orderDetailTableMirror';
 import {
-  clientScreenDate, clientScreenExtraMoney, clientScreenHeaderFromDetails, clientScreenHeaderPeople, clientScreenMoney, GROUPING_FIELDS, orderDetailDisplayValues,
+  clientScreenDate, clientScreenExtraMoney, clientScreenHeaderFromDetails, clientScreenHeaderPeople, clientScreenMoney, clientScreenServiceRows, GROUPING_FIELDS,
+  orderDetailDisplayValues,
   type ClientScreenClientContacts,
 } from './orderEditSnapshotSource';
 
 /**
  * Turns what the order VIEW page has loaded into the same display source the edit form gives: names
  * instead of ids, the page's own formats. Pure. The view page shows the detail table all the time
- * and the finance panel on demand, so the customer gets those two tabs.
+ * and the finance panel on demand, so the customer gets those two tabs. Its «Услуги/товары» card
+ * stands above the detail table, and that is where the customer sees it.
  */
 type Names = ReadonlyMap<number, string>;
 
@@ -34,6 +37,8 @@ export interface OrderShowSourceInput {
   /** Keys of the visible detail table columns, left to right (the view page's column keys). */
   columnKeys: readonly string[];
   payments: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  /** Rows of the page's «Услуги/товары» card; the page draws the card only when there are any. */
+  catalogLines?: readonly OrderCatalogLine[] | null;
   /** The text of the page's HDF cell for a detail (calculated size or its state). */
   hdfTextOf?: (detail: Readonly<Record<string, unknown>>) => string | null;
   /** The last ready cut jobs the page shows per detail id (plain and bath); the maps are the authority. */
@@ -236,6 +241,8 @@ export function buildOrderShowSource(input: OrderShowSourceInput): ClientScreenO
         }
         : null,
     },
-    services: [],
+    // Prices are in the page's table only with the right to see money.
+    services: clientScreenServiceRows(input.catalogLines ?? [], input.canViewFinancials),
+    servicesWithDetails: true,
   };
 }
