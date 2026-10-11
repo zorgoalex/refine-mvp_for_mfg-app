@@ -728,7 +728,8 @@ try {
   if (has('tab.details') && has('details.quantity')) assert.ok(viewHeaders.includes('Кол-во'), `view: ticked quantity column is present (columns: ${viewHeaders.join(' | ')})`);
   results.push(`view page presented: ${await viewDetails.locator('tbody tr[data-row-id]').count()} detail rows, hidden columns absent`);
   if (has('tab.details')) {
-    const card = page.locator('.ant-card').filter({ has: page.locator('.ant-card-head-title', { hasText: 'Услуги/товары' }) });
+    // The card itself, not a card around it: its own head carries the title.
+    const card = page.locator('.ant-card:has(> .ant-card-head .ant-card-head-title:text-is("Услуги/товары"))');
     const cardRows = card.locator('.ant-table-tbody > tr.ant-table-row');
     // Columns of the manager's table: №, position (name over the article), kind, unit, quantity and,
     // only with the right to see money, price and sum; the note is the last one.
@@ -759,11 +760,9 @@ try {
       assert.deepEqual(customerHeaders, expectedColumns.map(([, label]) => label), 'view: the service columns are exactly the ticked ones the manager has');
       const customerLines = await customerServices.locator('tbody tr[data-row-id]').evaluateAll((rows) => rows.map((row) => [...row.querySelectorAll('td')].map((cell) => cell.textContent?.trim() ?? '')));
       const plain = (value) => String(value ?? '').replace(/\s/g, ' ');
-      assert.deepEqual(
-        customerLines.map((cells) => cells.map(plain)),
-        managerLines.map((line) => expectedColumns.map(([, , field]) => plain(line[field]))),
-        'view: every service cell is the manager\'s',
-      );
+      const customerCells = customerLines.map((cells) => cells.map(plain));
+      const managerCells = managerLines.map((line) => expectedColumns.map(([, , field]) => plain(line[field])));
+      assert.deepEqual(customerCells, managerCells, `view: every service cell is the manager's (customer ${JSON.stringify(customerCells)}, manager ${JSON.stringify(managerCells)})`);
       const above = await viewPopup.evaluate(() => {
         const tables = [...document.querySelectorAll('.client-screen__table')];
         return tables[0].getBoundingClientRect().top < tables[1].getBoundingClientRect().top;
