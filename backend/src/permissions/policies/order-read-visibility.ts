@@ -50,3 +50,11 @@ export async function readableOrderIds(
   );
   return new Set(result.rows.map((row) => Number(row.order_id)));
 }
+
+/**
+ * The order a deadline belongs to: its own `order_id`, or the order of its workshop (`order_workshop_id`) — a
+ * workshop deadline of another manager's order is that order's data too (access groups 0A.4, review R1).
+ */
+export function deadlineOrderIdSql(alias = 'd'): string {
+  return `COALESCE(${alias}.order_id, (SELECT dl_ow.order_id FROM order_workshops dl_ow WHERE dl_ow.order_workshop_id = ${alias}.order_workshop_id))`;
+}

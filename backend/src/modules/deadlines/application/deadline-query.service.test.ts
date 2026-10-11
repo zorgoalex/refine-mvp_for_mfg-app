@@ -9,6 +9,23 @@ import { DeadlineQueryService, buildOrderDeadlineSummary } from './deadline-quer
 import type { DeadlineRepositoryPort } from './deadline.types';
 
 describe('DeadlineQueryService', () => {
+  it('hides deadlines and previews of orders outside the reader\'s «own» scope (access groups 0A.4)', async () => {
+    const queries: string[] = [];
+    // Nothing is visible to this manager: every visibility query returns no row.
+    const database = { query: async (text: string) => { queries.push(text); return { rows: [], rowCount: 0 }; } } as never;
+    const service = new DeadlineQueryService({
+      repository: createRepository({ getDeadlineById: async () => ({ deadlineId: 'd1', orderId: null, orderWorkshopId: 3 }) as never }),
+      database,
+    });
+    // A workshop deadline (order_id NULL) of a foreign order: the order is resolved through the workshop.
+    await expect(service.getById({ currentUser: currentUser(), deadlineId: 'd1' } as never)).rejects.toMatchObject({ statusCode: 404 });
+    expect(queries[0]).toContain('COALESCE(d.order_id, (SELECT dl_ow.order_id FROM order_workshops dl_ow');
+    await expect(service.previewOrderActionRules({ currentUser: currentUser(), orderId: 9, dto: {} } as never))
+      .rejects.toMatchObject({ statusCode: 404, code: 'ORDER_NOT_FOUND' });
+    await expect(service.listOrderDeadlines({ currentUser: currentUser(), orderId: 9 } as never))
+      .rejects.toMatchObject({ statusCode: 404, code: 'ORDER_NOT_FOUND' });
+  });
+
   it('requires deadlines.view for list reads', async () => {
     const service = new DeadlineQueryService({
       repository: createRepository(),

@@ -18,6 +18,7 @@ describe.skipIf(!databaseUrl)('order read visibility on real data (read-only)', 
   let pool: Pool;
   let manager: CurrentUser;
   let topManager: CurrentUser;
+  let worker: CurrentUser | undefined;
   let ownOrderId: number;
   let foreignOrderId: number;
 
@@ -44,9 +45,11 @@ describe.skipIf(!databaseUrl)('order read visibility on real data (read-only)', 
       WHERE u.is_active AND NOT u.is_service_account
       ORDER BY u.user_id LIMIT 1`);
     const top = await one(`SELECT u.user_id FROM users u JOIN roles r USING (role_id) WHERE r.role_code = 'top_manager' AND u.is_active ORDER BY u.user_id LIMIT 1`);
-    const users = await loadEvaluationUsersWith(pool, [pick.user_id, top.user_id]);
+    const workerRow = await one(`SELECT u.user_id FROM users u JOIN roles r USING (role_id) WHERE r.role_code = 'worker' AND u.is_active ORDER BY u.user_id LIMIT 1`);
+    const users = await loadEvaluationUsersWith(pool, [pick.user_id, top.user_id, ...(workerRow ? [workerRow.user_id] : [])]);
     manager = users.get(String(pick.user_id))!;
     topManager = users.get(String(top.user_id))!;
+    worker = workerRow ? users.get(String(workerRow.user_id)) : undefined;
     ownOrderId = Number(pick.own_order);
     foreignOrderId = Number(pick.foreign_order);
   });
@@ -62,6 +65,8 @@ describe.skipIf(!databaseUrl)('order read visibility on real data (read-only)', 
     expect((await repo.listOrders({ currentUser: manager, query })).pagination.total).toBe(own);
     expect((await repo.listOrders({ currentUser: topManager, query })).pagination.total).toBe(all);
     expect(own).toBeLessThan(all);
+    // assigned (worker) reads stay unrestricted (user decision 2026-10-11).
+    if (worker) expect((await repo.listOrders({ currentUser: worker, query })).pagination.total).toBe(all);
   });
 
   it('card (and everything built on it: history, audit, CAD, Bazis): foreign order is not found', async () => {
@@ -71,16 +76,21 @@ describe.skipIf(!databaseUrl)('order read visibility on real data (read-only)', 
     expect(await repo.getOrderById({ currentUser: topManager, orderId: foreignOrderId })).not.toBeNull();
   });
 
-  it('deadlines list: no deadline of a foreign order', async () => {
+  it('deadlines list: no deadline of a foreign order, directly or through its workshop', async () => {
     const repo = new PgDeadlineRepository(pool);
     const result = await repo.listDeadlines({ currentUser: manager, query: { page: 1, pageSize: 500, sortBy: 'deadlineAt', sortOrder: 'asc' } } as never);
-    const orderIds = [...new Set(result.data.map((d) => d.orderId).filter((id): id is number => id !== null && id !== undefined))];
-    if (orderIds.length > 0) {
-      const foreign = await one(`SELECT count(*) AS n FROM orders WHERE order_id = ANY($1::bigint[]) AND created_by IS DISTINCT FROM $2 AND manager_id IS DISTINCT FROM $2`, [orderIds, manager.id]);
-      expect(Number(foreign.n)).toBe(0);
-    }
-    const allTotal = (await repo.listDeadlines({ currentUser: topManager, query: { page: 1, pageSize: 1, sortBy: 'deadlineAt', sortOrder: 'asc' } } as never)).total;
-    expect(result.total).toBeLessThanOrEqual(allTotal);
+    const ids = result.data.map((d) => d.deadlineId);
+    const foreign = await one(`SELECT count(*) AS n FROM deadline_instances d
+      JOIN orders o ON o.order_id = COALESCE(d.order_id, (SELECT ow.order_id FROM order_workshops ow WHERE ow.order_workshop_id = d.order_workshop_id))
+      WHERE d.deadline_id::text = ANY($1::text[]) AND o.created_by IS DISTINCT FROM $2 AND o.manager_id IS DISTINCT FROM $2`, [ids, manager.id]);
+    expect(Number(foreign.n)).toBe(0);
+    // Expected total = deadlines without any order + deadlines of own orders (both resolutions).
+    const expected = await one(`SELECT count(*) AS n FROM deadline_instances d
+      LEFT JOIN orders o ON o.order_id = COALESCE(d.order_id, (SELECT ow.order_id FROM order_workshops ow WHERE ow.order_workshop_id = d.order_workshop_id))
+      WHERE o.order_id IS NULL OR o.created_by = $1 OR o.manager_id = $1`, [manager.id]);
+    expect(result.total).toBe(Number(expected.n));
+    const everyone = (await repo.listDeadlines({ currentUser: topManager, query: { page: 1, pageSize: 1, sortBy: 'deadlineAt', sortOrder: 'asc' } } as never)).total;
+    expect(everyone).toBe(Number((await one('SELECT count(*) AS n FROM deadline_instances')).n));
   });
 
   it('project card and totals: only own orders', async () => {
@@ -92,20 +102,30 @@ describe.skipIf(!databaseUrl)('order read visibility on real data (read-only)', 
     expect(shown).not.toContain(foreignOrderId);
     const full = await repo.getById(Number(project.project_id), topManager);
     expect(full.orders.map((o: { orderId: number }) => o.orderId)).toContain(foreignOrderId);
+    // Totals of the restricted card are sums over his visible (non-deleted production) orders only.
+    const own = await one(`SELECT count(*) AS n, COALESCE(SUM(final_amount), 0) AS s FROM orders WHERE project_id = $1
+      AND delete_flag = false AND order_kind = 'production_order' AND (created_by = $2 OR manager_id = $2)`, [project.project_id, manager.id]);
+    expect(Number(card.ordersCount ?? 0)).toBe(Number(own.n));
+    expect(Number(card.totalFinalAmount ?? 0)).toBe(Number(own.s));
   });
 
   it('group order report: only own orders', async () => {
-    const group = await one(`SELECT group_id FROM group_order_groups WHERE valid_to IS NULL GROUP BY group_id ORDER BY count(*) DESC LIMIT 1`);
-    if (!group) return;
+    const group = await one(`SELECT g.group_id FROM group_order_groups g JOIN orders o ON o.order_id = g.order_id
+      WHERE g.valid_to IS NULL AND o.delete_flag = false AND o.order_kind = 'production_order'
+      GROUP BY g.group_id
+      HAVING bool_or(o.created_by = $1 OR o.manager_id = $1) AND bool_or(o.created_by IS DISTINCT FROM $1 AND o.manager_id IS DISTINCT FROM $1)
+      LIMIT 1`, [manager.id]);
+    if (!group) return; // no mixed group in this data set
     const repo = new PgGroupOrderReportRepository(pool);
     const filter = { mode: 'any', groupIds: [group.group_id], temporal: { mode: 'current' } } as const;
     const mine = await repo.listOrderIds({ page: 1, pageSize: 1000, filter, viewer: manager } as never);
     const ids = mine.data.map((row) => row.orderId);
-    if (ids.length > 0) {
+    expect(ids.length).toBeGreaterThan(0);
+    {
       const foreign = await one(`SELECT count(*) AS n FROM orders WHERE order_id = ANY($1::bigint[]) AND created_by IS DISTINCT FROM $2 AND manager_id IS DISTINCT FROM $2`, [ids, manager.id]);
       expect(Number(foreign.n)).toBe(0);
     }
     const everyone = await repo.listOrderIds({ page: 1, pageSize: 1, filter, viewer: topManager } as never);
-    expect(mine.pagination.total).toBeLessThanOrEqual(everyone.pagination.total);
+    expect(mine.pagination.total).toBeLessThan(everyone.pagination.total);
   });
 });
