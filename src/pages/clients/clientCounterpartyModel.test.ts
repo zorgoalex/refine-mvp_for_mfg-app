@@ -4,7 +4,7 @@ import { ApiError } from '../../api/apiError';
 import type { ClientCounterparty } from '../../api/partyContactsApi';
 import {
   chunks, clientLinkErrorMessage, clientsCount, confirmHeadline, confirmSummary, counterpartyDetails, counterpartyOptions, defaultSelection,
-  canChooseCounterparty, isCounterpartyApiMissing, matchReasons, pairsToVerify, runConfirmation, takenBy, verifyPairs,
+  canChooseCounterparty, isCounterpartyApiMissing, matchReasons, matchesLoadProblem, pairsToVerify, runConfirmation, takenBy, verifyPairs,
 } from './clientCounterpartyModel';
 
 const item = (patch: Partial<ClientCounterparty> = {}): ClientCounterparty => ({
@@ -49,6 +49,20 @@ describe('client ↔ 1C counterparty model', () => {
     expect(isCounterpartyApiMissing(apiError(404, 'HTTP_ERROR'))).toBe(true);
     expect(isCounterpartyApiMissing(apiError(404, 'CLIENT_NOT_FOUND'))).toBe(false);
     expect(isCounterpartyApiMissing(apiError(500, 'INTERNAL_ERROR'))).toBe(false);
+  });
+
+  it('bulk window with the new rights on a backend without the API: unavailable, not an error to retry', () => {
+    expect(matchesLoadProblem(apiError(404, 'HTTP_ERROR'))).toEqual({
+      unavailable: true, text: 'Массовое сопоставление с 1С появится после обновления сервера. Сейчас оно недоступно.',
+    });
+    expect(matchesLoadProblem(apiError(404, 'NOT_FOUND')).unavailable).toBe(true);
+    const failed = matchesLoadProblem(apiError(500, 'INTERNAL_ERROR'));
+    expect(failed.unavailable).toBe(false);
+    expect(failed.text).toContain('Список совпадений не загружен');
+    expect(matchesLoadProblem(new Error('сеть')).text).toContain('сеть');
+    const modal = read('./ClientCounterpartyBulkModal.tsx');
+    expect(modal).toContain('setError(matchesLoadProblem(failure))');
+    expect(modal).toContain("type={error.unavailable ? 'info' : 'error'}");
   });
 
   it('the client forms no longer carry the 1C key: it is changed only by the card command', () => {

@@ -6,7 +6,7 @@ import {
   type ClientCounterpartyAmbiguity, type ClientCounterpartyMatch, type ClientCounterpartyMatches, type ClientMatchStrength,
 } from '../../api/partyContactsApi';
 import {
-  STRENGTH_COLORS, STRENGTH_LABELS, UNKNOWN_STATE_LABELS, clientsCount, confirmHeadline, confirmSummary, counterpartyDetails, defaultSelection, matchReasons, pairsToVerify,
+  STRENGTH_COLORS, STRENGTH_LABELS, UNKNOWN_STATE_LABELS, clientsCount, confirmHeadline, confirmSummary, counterpartyDetails, defaultSelection, matchReasons, matchesLoadProblem, pairsToVerify,
   runConfirmation, verifyPairs,
   type ConfirmSummary,
 } from './clientCounterpartyModel';
@@ -27,7 +27,7 @@ type View = ClientMatchStrength | 'ambiguous';
 export const ClientCounterpartyBulkModal: React.FC<Props> = ({ open, onClose, onChanged }) => {
   const [data, setData] = useState<ClientCounterpartyMatches | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ unavailable: boolean; text: string } | null>(null);
   const [view, setView] = useState<View>('both');
   const [selected, setSelected] = useState<number[]>([]);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -54,7 +54,7 @@ export const ClientCounterpartyBulkModal: React.FC<Props> = ({ open, onClose, on
       return true;
     } catch (failure) {
       if (epoch !== loadRef.current) return false;
-      setError(`Список совпадений не загружен: ${failure instanceof Error ? failure.message : 'ошибка запроса'}. Закройте окно и откройте его снова.`);
+      setError(matchesLoadProblem(failure));
       return false;
     } finally {
       if (epoch === loadRef.current) setLoading(false);
@@ -134,7 +134,7 @@ export const ClientCounterpartyBulkModal: React.FC<Props> = ({ open, onClose, on
       ]}
     >
       <Space direction="vertical" style={{ width: '100%' }} size={12}>
-        {error ? <Alert type="error" showIcon message={error} /> : null}
+        {error ? <Alert type={error.unavailable ? 'info' : 'error'} showIcon message={error.text} /> : null}
         {data && !data.available ? <Alert type="warning" showIcon message="Контрагенты 1С ещё не загружены — сопоставлять не с чем." /> : null}
         {summary ? (
           <Typography.Text>
