@@ -31,8 +31,8 @@ describe('whole-tab copy: reading the manager\'s tab', () => {
       el('H3', {}, [text('Задания')]),
       el('A', { href: '/orders/5', class: 'link' }, [text('Заказ 5')]),
       el('SCRIPT', {}, [text('alert(1)')]),
-      el('STYLE', {}, [text('.a{background:url(/api/x)}')]),
-      el('IFRAME', { src: '/api/x' }),
+      el('STYLE', {}, [text('.a{background:url(/api/v1/x)}')]),
+      el('IFRAME', { src: '/api/v1/x' }),
       el('DIV', { style: 'background: url(/api/v1/files/1)' }, [text('фон')]),
       svg('svg', { viewBox: '0 0 10 10' }, [svg('rect', { width: '5', onload: 'x()' }), svg('foreignObject', {}, [el('DIV', {}, [text('внутри')])]), svg('use', { href: '/sprite.svg#a' })]),
       { nodeType: 8, nodeValue: 'comment' },
@@ -54,7 +54,7 @@ describe('whole-tab copy: reading the manager\'s tab', () => {
 
   it('carries a picture inside the copy: no address of the manager\'s page survives', () => {
     const root = el('DIV', {}, [
-      el('IMG', { src: 'blob:https://app-test.mebelkz.app/1b2c', alt: 'Лист 1', class: 'app-image-outline', srcset: '/api/x 2x', onerror: 'x()' }),
+      el('IMG', { src: 'blob:https://app-test.mebelkz.app/1b2c', alt: 'Лист 1', class: 'app-image-outline', srcset: '/api/v1/x 2x', onerror: 'x()' }),
       el('IMG', { src: '/api/v1/files/7', alt: 'ещё не загружена' }),
       el('CANVAS', { width: '10', height: '10', class: 'label' }),
     ]);
@@ -122,7 +122,7 @@ describe('whole-tab copy: what the tab\'s styles need from outside it', () => {
   it('takes the chain of ancestors with classes, data attributes and inline variables, and the theme of the page', () => {
     const html = node('HTML', 'theme-light', { 'data-ui-variant': 'workbench', style: '--app-surface: #fff', lang: 'ru' });
     const body = node('BODY', 'app', { 'data-theme': 'light' }, html);
-    const layout = node('MAIN', 'evo-layout', { style: 'margin-left: 224px; background: url(/api/x)', id: 'main' }, body);
+    const layout = node('MAIN', 'evo-layout', { style: 'margin-left: 224px; background: url(/api/v1/x)', id: 'main' }, body);
     const form = node('FORM', 'order-form', { style: '--wb-order-sticky-top: 132px', 'data-order': '5', onsubmit: 'x()' }, layout);
     const pane = node('DIV', 'ant-tabs-tabpane', { role: 'tabpanel' }, form);
     const tab = node('DIV', '', { 'data-client-screen-frame': 'cut' }, pane);

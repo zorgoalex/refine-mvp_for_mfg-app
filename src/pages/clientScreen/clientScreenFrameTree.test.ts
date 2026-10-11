@@ -80,12 +80,12 @@ describe('frame tree: attributes', () => {
       'background: url(https://evil.example/a.png)', 'background: url("//evil.example/a")', 'width: expression(alert(1))',
       'background: url(javascript:alert(1))', '@import "x.css"', 'behavior: url(x.htc)', 'background: url(/api/v1/orders/1)',
       'background: url("/assets/a.png")', 'background: url(blob:https://app-test.mebelkz.app/1)', 'background: url(data:image/svg+xml,x)',
-      'background: image-set("/api/x" 1x)', 'background: u\\72l(/api/x)', 'background: URL( "/api/x" )',
+      'background: image-set("/api/v1/x" 1x)', 'background: u\\72l(/api/v1/x)', 'background: URL( "/api/v1/x" )',
     ]) {
       expect(clientScreenFrameAttribute('div', false, 'style', value), value).toBeNull();
     }
     expect(clientScreenFrameAttribute('div', false, 'style', 'background: url(data:image/png;base64,AA==)')).not.toBeNull();
-    expect(clientScreenFrameAttribute('div', false, 'style', 'a: url(data:image/png;base64,AA==); b: url(/api/x)')).toBeNull();
+    expect(clientScreenFrameAttribute('div', false, 'style', 'a: url(data:image/png;base64,AA==); b: url(/api/v1/x)')).toBeNull();
     expect(clientScreenFrameAttribute('rect', true, 'fill', 'url(#grad)')).toBe('url(#grad)');
     expect(clientScreenFrameAttribute('rect', true, 'fill', 'url(https://evil.example/x.svg#a)')).toBeNull();
   });
