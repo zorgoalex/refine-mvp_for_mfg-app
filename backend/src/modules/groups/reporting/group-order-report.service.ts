@@ -28,7 +28,7 @@ export class GroupOrderReportService {
   async listOrderIds(command: ListGroupOrderReportCommand): Promise<GroupOrderReportResponseDto> {
     this.requirePermissions(command.currentUser, REQUIRED_REPORT_PERMISSIONS);
 
-    return this.ports.reports.listOrderIds(command.query);
+    return this.ports.reports.listOrderIds({ ...command.query, viewer: command.currentUser });
   }
 
   private requirePermissions(currentUser: CurrentUser, requiredPermissions: readonly PermissionName[]): void {

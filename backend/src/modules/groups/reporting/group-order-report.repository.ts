@@ -23,6 +23,7 @@ export class PgGroupOrderReportRepository implements GroupOrderReportRepositoryP
     const params: unknown[] = [];
     const predicate = appendGroupReportPredicate({
       params,
+      viewer: query.viewer,
       orderIdExpression: 'o.order_id',
       filter: query.filter,
     });

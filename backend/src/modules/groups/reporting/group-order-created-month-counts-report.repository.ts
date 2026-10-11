@@ -29,6 +29,7 @@ export class PgGroupOrderCreatedMonthCountsReportRepository
     const params: unknown[] = [];
     const predicate = appendGroupReportPredicate({
       params,
+      viewer: query.viewer,
       orderIdExpression: 'o.order_id',
       filter: query.predicateFilter,
     });

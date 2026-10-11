@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { appendOrderReadVisibilitySql } from '../../../permissions/policies/order-read-scope-sql';
 import { mapProductionSummary, type ProductionSummaryRow } from '../../../shared/production-status/production-summary';
 import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
@@ -222,6 +223,9 @@ export class OrderDetailTransferService {
     const clientId = toNumber(sourceRow.client_id);
     const search = command.search?.trim() ?? '';
     const queryLimit = Math.min(Math.max(command.limit * 5, command.limit), 100);
+    const targetParams: unknown[] = [command.sourceOrderId, search, clientId, queryLimit];
+    // Read visibility in SQL before LIMIT (access groups 0A.4): the page is not cut short by the in-memory checks.
+    const visibility = appendOrderReadVisibilitySql(targetParams, command.currentUser, 'o');
     const rows = await this.ports.database.query<TargetSearchRow>(
       `
       SELECT o.order_id, o.order_name, o.client_id, c.client_name, o.order_date,
@@ -236,7 +240,8 @@ export class OrderDetailTransferService {
       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
       LEFT JOIN production_statuses ps ON ps.production_status_id = o.production_status_id
       WHERE o.delete_flag = false
-        AND o.order_id <> $1
+        AND o.order_id <> $1${visibility === 'TRUE' ? '' : `
+        AND ${visibility}`}
         AND o.order_date >= (CURRENT_DATE - INTERVAL '1 month')
         AND (
           $2::text = ''
@@ -253,7 +258,7 @@ export class OrderDetailTransferService {
         o.order_id DESC
       LIMIT $4
       `,
-      [command.sourceOrderId, search, clientId, queryLimit],
+      targetParams,
     );
 
     const data = rows.rows

@@ -1,3 +1,4 @@
+import { appendOrderReadVisibilitySql, orderReadVisibilityIsRestricted } from '../../../permissions/policies/order-read-scope-sql';
 import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
@@ -87,7 +88,9 @@ type CommandResponse = MoveOrderResult | MergeResult | CreateProjectResult;
 export class PgProjectsRepository implements ProjectsRepositoryPort {
   constructor(private readonly database: DatabaseService) {}
 
-  async list(query: ListProjectsQuery): Promise<ProjectDto[]> {
+  async list(query: ListProjectsQuery, viewer?: CurrentUser): Promise<ProjectDto[]> {
+    const params: unknown[] = [query.search ?? null, query.clientId ?? null, query.includeArchived ?? false];
+    const totals = projectTotalsSql(params, viewer);
     const result = await this.database.query<ProjectRow>(
       `
       SELECT
@@ -98,22 +101,22 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
         client_name,
         notes,
         version,
-        orders_count,
-        total_final_amount,
-        total_paid_amount
-      FROM projects_view
+        ${totals}
+      FROM projects_view pv
       WHERE ($1::text IS NULL OR code ILIKE '%' || $1 || '%' OR name ILIKE '%' || $1 || '%' OR client_name ILIKE '%' || $1 || '%')
         AND ($2::bigint IS NULL OR client_id = $2)
         AND ($3::boolean = true OR delete_flag = false)
       ORDER BY delete_flag ASC, code ASC, project_id ASC
       `,
-      [query.search ?? null, query.clientId ?? null, query.includeArchived ?? false],
+      params,
     );
 
     return result.rows.map(mapProjectRow);
   }
 
-  async getById(projectId: number): Promise<ProjectCard> {
+  async getById(projectId: number, viewer?: CurrentUser): Promise<ProjectCard> {
+    const projectParams: unknown[] = [projectId];
+    const totals = projectTotalsSql(projectParams, viewer);
     const project = await this.database.query<ProjectRow>(
       `
       SELECT
@@ -124,19 +127,20 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
         client_name,
         notes,
         version,
-        orders_count,
-        total_final_amount,
-        total_paid_amount
-      FROM projects_view
+        ${totals}
+      FROM projects_view pv
       WHERE project_id = $1
       `,
-      [projectId],
+      projectParams,
     );
     const row = project.rows[0];
     if (!row) {
       throw new ProjectNotFoundError(projectId);
     }
 
+    const orderParams: unknown[] = [projectId];
+    // Read visibility (access groups 0A.4): only orders the reader may see are listed.
+    const orderVisibility = viewer ? appendOrderReadVisibilitySql(orderParams, viewer, 'o') : 'TRUE';
     // Not orders_view: it filters delete_flag=false and does not expose the
     // column, while the project card must also list archived (deleted) orders
     // that stay parented to the project.
@@ -153,10 +157,10 @@ export class PgProjectsRepository implements ProjectsRepositoryPort {
       FROM orders o
       JOIN projects p ON p.project_id = o.project_id
       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
-      WHERE o.project_id = $1 AND o.order_kind = 'production_order'
+      WHERE o.project_id = $1 AND o.order_kind = 'production_order' AND ${orderVisibility}
       ORDER BY o.order_id ASC
       `,
-      [projectId],
+      orderParams,
     );
 
     return {
@@ -1120,4 +1124,20 @@ function parseStoredResponse(value: CommandResponse | string): CommandResponse {
     return JSON.parse(value) as CommandResponse;
   }
   return value;
+}
+
+/**
+ * Project order totals: the view's columns, or — for a reader whose order reads are restricted — the same sums over
+ * the orders he may read (access groups 0A.4), so counts and amounts of other people's orders are not disclosed.
+ */
+function projectTotalsSql(params: unknown[], viewer?: CurrentUser): string {
+  if (!viewer || !orderReadVisibilityIsRestricted(viewer)) {
+    return 'orders_count, total_final_amount, total_paid_amount';
+  }
+  const visibility = appendOrderReadVisibilitySql(params, viewer, 'vo');
+  const visible = `FROM orders vo WHERE vo.project_id = pv.project_id AND vo.delete_flag = false
+          AND vo.order_kind = 'production_order' AND ${visibility}`;
+  return `(SELECT COUNT(*) ${visible}) AS orders_count,
+        (SELECT COALESCE(SUM(vo.final_amount), 0) ${visible}) AS total_final_amount,
+        (SELECT COALESCE(SUM(vo.paid_amount), 0) ${visible}) AS total_paid_amount`;
 }

@@ -1,3 +1,5 @@
+import { appendReferencedOrderVisibilitySql } from '../../../permissions/policies/order-read-visibility';
+import type { CurrentUser } from '../../../permissions/current-user';
 export type GroupReportFilterMode = 'any' | 'all' | 'primary' | 'none';
 
 export type GroupReportTemporalFilter =
@@ -10,6 +12,8 @@ export interface GroupReportFilter {
   mode: GroupReportFilterMode;
   groupIds?: readonly string[];
   temporal: GroupReportTemporalFilter;
+  /** Internal predicate filters only (never echoed in a response): the reader, for order read visibility. */
+  viewer?: CurrentUser;
 }
 
 export interface AppendGroupReportPredicateInput {
@@ -17,9 +21,19 @@ export interface AppendGroupReportPredicateInput {
   orderIdExpression: string;
   filter: GroupReportFilter;
   tableAlias?: string;
+  /** The reader: orders outside his read visibility are not counted or listed (access groups 0A.4). */
+  viewer?: CurrentUser;
 }
 
 export function appendGroupReportPredicate(input: AppendGroupReportPredicateInput): string {
+  const predicate = appendGroupReportGroupPredicate(input);
+  const viewer = input.viewer ?? input.filter.viewer;
+  if (!viewer) return predicate;
+  const visibility = appendReferencedOrderVisibilitySql(input.params, viewer, input.orderIdExpression, false);
+  return visibility === 'TRUE' ? predicate : `(${predicate}) AND ${visibility}`;
+}
+
+function appendGroupReportGroupPredicate(input: AppendGroupReportPredicateInput): string {
   const alias = input.tableAlias ?? 'pop_filter';
   assertSafeSqlIdentifier(alias, 'tableAlias');
   assertSafeSqlExpression(input.orderIdExpression, 'orderIdExpression');

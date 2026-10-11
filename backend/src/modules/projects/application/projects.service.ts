@@ -25,12 +25,12 @@ export class ProjectsService {
 
   async list(command: { currentUser: CurrentUser; query: ListProjectsQuery }) {
     this.require(command.currentUser, 'projects.view');
-    return this.ports.projects.list(command.query);
+    return this.ports.projects.list(command.query, command.currentUser);
   }
 
   async getById(command: { currentUser: CurrentUser; projectId: number }) {
     this.require(command.currentUser, 'projects.view');
-    return this.ports.projects.getById(command.projectId);
+    return this.ports.projects.getById(command.projectId, command.currentUser);
   }
 
   async create(command: CreateProjectCommand) {

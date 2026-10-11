@@ -1,3 +1,4 @@
+import { appendOrderReadVisibilitySql } from '../../../permissions/policies/order-read-scope-sql';
 import {
   buildFrozenSheetRenderModel,
   FROZEN_SHEET_RENDER_V1,
@@ -3239,6 +3240,10 @@ export class PgCutRepository implements CutRepositoryPort {
       conditions.push('false');
     }
 
+    // Only details of orders the user may read can be added to a cut (access groups 0A.4). The cut jobs, results and
+    // labels themselves stay shared production tooling (user decision 2026-10-11).
+    const visibility = appendOrderReadVisibilitySql(params, query.currentUser, 'ord');
+    if (visibility !== 'TRUE') conditions.push(visibility);
     const result = await this.database.query<EligibleRow>(
       `
       SELECT od.detail_id, od.order_id, ord.order_name, od.quantity, od.material_id,

@@ -219,11 +219,12 @@ export class Bitrix24ReverseAdminController {
   @ApiOperation({ summary: 'List Bitrix24 payment snapshots for a mapped ERP order' })
   @Get('mapped-orders/:orderId/payments')
   @RequirePermissions('orders.view_financials')
-  getMappedOrderPayments(
+  async getMappedOrderPayments(
     @Req() request: RequestWithCurrentUser,
     @Param('orderId') orderId: string,
   ) {
     const actor = requireUser(request);
+    await this.repository.assertOrderReadable(parseId(orderId, 'orderId'), actor);
     return this.repository.getMappedOrderPayments(
       parseId(orderId, 'orderId'),
       bitrix24RequestScope(actor),
@@ -242,6 +243,7 @@ export class Bitrix24ReverseAdminController {
     const actor = requireUser(request);
     const orderId = parseId(orderIdValue, 'orderId');
     const scope = bitrix24RequestScope(actor);
+    await this.repository.assertOrderReadable(orderId, actor);
     const current = await this.repository.getMappedOrderPayments(orderId, scope);
     if (current.linked !== true || typeof current.bitrixDealId !== 'string') {
       return current;
