@@ -74,6 +74,20 @@ export function isCounterpartyApiMissing(error: unknown): boolean {
   return error instanceof ApiError && error.status === 404 && error.code !== 'CLIENT_NOT_FOUND';
 }
 
+/**
+ * Why the bulk window has no rows. The rights can arrive before the backend that serves the window (the
+ * permissions migration is applied first, and a rollback keeps it): then it is not an error to retry.
+ */
+export function matchesLoadProblem(failure: unknown): { unavailable: boolean; text: string } {
+  if (isCounterpartyApiMissing(failure)) {
+    return { unavailable: true, text: 'Массовое сопоставление с 1С появится после обновления сервера. Сейчас оно недоступно.' };
+  }
+  return {
+    unavailable: false,
+    text: `Список совпадений не загружен: ${failure instanceof Error ? failure.message : 'ошибка запроса'}. Закройте окно и откройте его снова.`,
+  };
+}
+
 // ── Bulk confirmation ────────────────────────────────────────────────────────
 
 export const STRENGTH_LABELS: Record<ClientMatchStrength, string> = {
