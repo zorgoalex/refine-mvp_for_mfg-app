@@ -15,6 +15,8 @@ const GROUP = '120363338054016575@g.us';
 const OTHER_GROUP = '120363429893275855@g.us';
 const admin: CurrentUser = { id: '11', username: 'broadcast-admin', role: 'admin', roleId: 1, permissions: [] };
 const other: CurrentUser = { id: '12', username: 'broadcast-other', role: 'admin', roleId: 1, permissions: [] };
+const sender: CurrentUser = { id: '13', username: 'calendar-sender', role: 'top_manager', roleId: 3, permissions: [] };
+const settingsOnly: CurrentUser = { id: '14', username: 'whatsapp-settings-only', role: 'admin', roleId: 4, permissions: [] };
 const hour = 60 * 60_000;
 const at = (date: string, clock: string) => new Date(`${date}T${clock}+05:00`);
 // 2026-10-05 is a Monday, 2026-10-06 a Tuesday.
@@ -67,15 +69,22 @@ describe.skipIf(!databaseUrl)('BroadcastRepository PostgreSQL (isolated schema)'
       CREATE TABLE role_permissions(role_id int, permission_name text, is_enabled boolean NOT NULL DEFAULT true, PRIMARY KEY(role_id, permission_name));
       INSERT INTO roles VALUES (1, true), (2, true);
       INSERT INTO users VALUES (11, 'broadcast-admin', 1, true), (12, 'broadcast-other', 2, true);
-      INSERT INTO permissions_catalog(permission_name) VALUES ('whatsapp.manage'),('calendar.view'),('orders.view'),('orders.view_financials');
-      INSERT INTO role_permissions(role_id, permission_name) SELECT r, p FROM (VALUES (1),(2)) roles(r), permissions_catalog pc(p);`);
+      INSERT INTO permissions_catalog(permission_name) VALUES ('whatsapp.manage'),('whatsapp.calendar_send'),('calendar.view'),('orders.view'),('orders.view_financials');
+      INSERT INTO role_permissions(role_id, permission_name) SELECT r, p FROM (VALUES (1),(2)) roles(r), permissions_catalog pc(p);
+      -- Role 3 may only send from the calendar (no whatsapp.manage); role 4 manages WhatsApp but may not send from the calendar.
+      INSERT INTO roles VALUES (3, true), (4, true);
+      INSERT INTO users VALUES (13, 'calendar-sender', 3, true), (14, 'whatsapp-settings-only', 4, true);
+      INSERT INTO role_permissions(role_id, permission_name) SELECT 3, p FROM permissions_catalog pc(p) WHERE p <> 'whatsapp.manage';
+      INSERT INTO role_permissions(role_id, permission_name) SELECT 4, p FROM permissions_catalog pc(p) WHERE p <> 'whatsapp.calendar_send';`);
     for (const file of ['183_whatsapp_daily_digest.sql', '184_whatsapp_daily_digest_schedule.sql', '209_whatsapp_broadcasts.sql', '224_whatsapp_calendar_send.sql']) {
       await q(await readFile(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     // The author's rights are read through the authorization snapshot objects of migration 248 (views and function).
     await q(`CREATE TABLE IF NOT EXISTS permissions_state(id boolean PRIMARY KEY DEFAULT true, version int NOT NULL DEFAULT 1);
       INSERT INTO permissions_state VALUES (true, 1) ON CONFLICT DO NOTHING;
-      CREATE TABLE IF NOT EXISTS role_policy_scopes(role_id int, scope_key text, scope_value text, PRIMARY KEY(role_id, scope_key))`);
+      CREATE TABLE IF NOT EXISTS role_policy_scopes(role_id int, scope_key text, scope_value text, PRIMARY KEY(role_id, scope_key));
+      INSERT INTO role_policy_scopes VALUES (1, 'orders.view', 'all'), (2, 'orders.view', 'all'), (3, 'orders.view', 'all'), (4, 'orders.view', 'all')
+        ON CONFLICT DO NOTHING`);
     await installAuthorizationSnapshot((sql) => q(sql), schema,
       await readFile(new URL('../../../../db/migrations/248_authorization_snapshot.sql', import.meta.url), 'utf8'));
     database = {
@@ -474,10 +483,10 @@ describe.skipIf(!databaseUrl)('BroadcastRepository PostgreSQL (isolated schema)'
       return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
     };
     const calendarId = () => repository.calendarBroadcastId();
-    const calendarRun = async (targetDate: string, orderIds = [5, 6], key = randomUUID()) => {
+    const calendarRun = async (targetDate: string, orderIds = [5, 6], key = randomUUID(), actor: CurrentUser = admin) => {
       const state = await repository.getCalendarSend();
       return repository.createManualRun({ broadcastId: state.settings.broadcastId, settingsVersion: state.settings.version, idempotencyKey: key,
-        fingerprint: commandFingerprint({ kind: 'calendar', date: targetDate, key }), actor: admin, requestId: `req-cal-${key}`,
+        fingerprint: commandFingerprint({ kind: 'calendar', date: targetDate, key }), actor, requestId: `req-cal-${key}`,
         businessDate: today(), targetDate, snapshot: snapshotFor(targetDate, orderIds), images: orderIds.length ? [image(1, orderIds)] : [],
         imageExpiresAt: FAR_FUTURE, source: 'calendar' });
     };
@@ -614,6 +623,117 @@ describe.skipIf(!databaseUrl)('BroadcastRepository PostgreSQL (isolated schema)'
       await setLastDelivery(16);
       const retry = await repository.createRetry(run.runId, retryInput);
       expect((await q('SELECT source FROM whatsapp_broadcast_runs WHERE run_id = $1', [retry.runId])).rows[0].source).toBe('calendar');
+    });
+
+    it('needs the calendar send permission, not whatsapp.manage: a sender without the settings right is delivered', async () => {
+      const run = await calendarRun(today(), [5, 6], randomUUID(), sender);
+      expect((await q('SELECT required_permissions, snapshot_author_user_id::text author, initiated_by_user_id::text initiator FROM whatsapp_broadcast_runs WHERE run_id = $1', [run.runId])).rows[0])
+        .toEqual({ required_permissions: ['whatsapp.calendar_send', 'calendar.view', 'orders.view', 'orders.view_financials'], author: '13', initiator: '13' });
+      await finish(run.runId);
+      expect((await q('SELECT state FROM whatsapp_broadcast_runs WHERE run_id = $1', [run.runId])).rows[0].state).toBe('sent');
+      // An ordinary broadcast run still carries the settings bundle.
+      const user = await create({ enabled: false });
+      const manual = await repository.createManualRun({ broadcastId: user.id, settingsVersion: user.version, idempotencyKey: randomUUID(), fingerprint: 'e'.repeat(64),
+        actor: admin, requestId: 'r', businessDate: today(), targetDate: today(), snapshot: snapshotFor(today(), [1]), images: [image(1, [1])], imageExpiresAt: FAR_FUTURE });
+      expect((await q<{ required_permissions: string[] }>('SELECT required_permissions FROM whatsapp_broadcast_runs WHERE run_id = $1', [manual.runId])).rows[0].required_permissions)
+        .toEqual(['whatsapp.manage', 'calendar.view', 'orders.view', 'orders.view_financials']);
+    });
+
+    it('cancels a queued calendar send when the permission is revoked before delivery', async () => {
+      const run = await calendarRun(today(), [5, 6], randomUUID(), sender);
+      await q(`UPDATE role_permissions SET is_enabled = false WHERE role_id = 3 AND permission_name = 'whatsapp.calendar_send'`);
+      try {
+        expect(await repository.createSendIntent(run.runId, 1, true)).toBeNull();
+        expect((await q('SELECT state, reason FROM whatsapp_broadcast_runs WHERE run_id = $1', [run.runId])).rows[0])
+          .toEqual({ state: 'failed', reason: 'BROADCAST_AUTHOR_PERMISSION_REVOKED' });
+        expect((await q<{ error_code: string }>('SELECT DISTINCT error_code FROM whatsapp_broadcast_messages WHERE run_id = $1', [run.runId])).rows.map((row) => row.error_code))
+          .toEqual(['PERMISSION_REVOKED']);
+      } finally {
+        await q(`UPDATE role_permissions SET is_enabled = true WHERE role_id = 3 AND permission_name = 'whatsapp.calendar_send'`);
+      }
+    });
+
+    it('cancels a queued calendar send when the sender no longer sees all orders, and audits the scope refusal of the command', async () => {
+      const run = await calendarRun(today(), [5, 6], randomUUID(), sender);
+      await q(`UPDATE role_policy_scopes SET scope_value = 'own' WHERE role_id = 3 AND scope_key = 'orders.view'`);
+      try {
+        expect(await repository.createSendIntent(run.runId, 1, true)).toBeNull();
+        expect((await q('SELECT state, reason FROM whatsapp_broadcast_runs WHERE run_id = $1', [run.runId])).rows[0])
+          .toEqual({ state: 'failed', reason: 'BROADCAST_AUTHOR_PERMISSION_REVOKED' });
+      } finally {
+        await q(`UPDATE role_policy_scopes SET scope_value = 'all' WHERE role_id = 3 AND scope_key = 'orders.view'`);
+      }
+      // An ordinary broadcast run is not bound to the order scope (its content is the admin's settings).
+      await q(`UPDATE role_policy_scopes SET scope_value = 'own' WHERE role_id = 1 AND scope_key = 'orders.view'`);
+      try {
+        const user = await create({ enabled: false });
+        const manual = await repository.createManualRun({ broadcastId: user.id, settingsVersion: user.version, idempotencyKey: randomUUID(), fingerprint: 'f'.repeat(64),
+          actor: admin, requestId: 'r', businessDate: today(), targetDate: today(), snapshot: snapshotFor(today(), [1]), images: [image(1, [1])], imageExpiresAt: FAR_FUTURE });
+        expect(await repository.createSendIntent(manual.runId, 1, true)).not.toBeNull();
+      } finally {
+        await q(`UPDATE role_policy_scopes SET scope_value = 'all' WHERE role_id = 1 AND scope_key = 'orders.view'`);
+      }
+      await repository.recordCalendarScopeDenied(sender, 'req-cal-scope', 'run', ['own']);
+      expect((await q(`SELECT user_id::text, status_code, metadata_json->>'action' action, metadata_json->'orderScope' scope FROM audit_log
+        WHERE event = 'whatsapp.broadcast.calendar_send_denied' AND request_id = 'req-cal-scope'`)).rows)
+        .toEqual([{ user_id: '13', status_code: 'scope_not_allowed', action: 'run', scope: ['own'] }]);
+    });
+
+    it('rollback of the calendar send permission: the runbook SQL leaves no queued calendar send for the previous worker', async () => {
+      // An earlier calendar send that was delivered in full.
+      const delivered = (await calendarRun(today(), [7], randomUUID(), sender)).runId;
+      await finish(delivered);
+      await setLastDelivery(16);
+      // Queue → the sender's scope is narrowed → the backend is rolled back: the previous worker checks no scope.
+      const run = await calendarRun(today(), [5, 6], randomUUID(), sender);
+      await q(`UPDATE role_policy_scopes SET scope_value = 'own' WHERE role_id = 3 AND scope_key = 'orders.view'`);
+      try {
+        expect(await repository.listDeliverableRuns()).toContain(run.runId);
+        const runbook = await readFile(new URL('../../../../docs/whatsapp-broadcasts.md', import.meta.url), 'utf8');
+        const section = runbook.slice(runbook.indexOf('### Право `whatsapp.calendar_send` (миграция 251)'), runbook.indexOf('### Выкладка миграции 224'));
+        const sql = /```sql\n([\s\S]*?)```/.exec(section)?.[1];
+        expect(sql).toContain("r.source = 'calendar'");
+        await q(sql!);
+        expect(await repository.listDeliverableRuns()).not.toContain(run.runId);
+        expect((await q('SELECT state, reason FROM whatsapp_broadcast_runs WHERE run_id = $1', [run.runId])).rows[0]).toEqual({ state: 'cancelled', reason: 'CALENDAR_ROLLBACK' });
+        expect((await q<{ n: number }>(`SELECT count(*)::int n FROM whatsapp_broadcast_messages WHERE run_id = $1 AND state = 'pending'`, [run.runId])).rows[0].n).toBe(0);
+        // The system broadcast stays: the previous backend keeps serving the calendar send of WhatsApp admins.
+        await expect(repository.getCalendarSend()).resolves.toMatchObject({ activeRun: false });
+        // Neither the cancelled send nor a delivered earlier one can be brought back by a retry (mode «all», risk confirmed).
+        const messages = async () => (await q<{ n: number }>(`SELECT count(*)::int n FROM whatsapp_broadcast_messages m
+          JOIN whatsapp_broadcast_runs r ON r.run_id = m.run_id WHERE r.source = 'calendar'`)).rows[0].n;
+        const before = await messages();
+        await setLastDelivery(16);
+        const retryAll = (runId: string) => repository.createRetry(runId, { mode: 'all' as const, idempotencyKey: randomUUID(), duplicateRiskConfirmed: true,
+          actor: admin, requestId: `req-rollback-retry-${randomUUID()}`, fingerprintFor: (id: number) => commandFingerprint({ kind: 'retry', id, key: randomUUID() }) });
+        await expect(retryAll(run.runId)).rejects.toMatchObject({ code: 'BROADCAST_RUN_SUPERSEDED' });
+        expect(delivered).not.toBe(run.runId);
+        await expect(retryAll(delivered)).rejects.toMatchObject({ code: 'BROADCAST_RUN_SUPERSEDED' });
+        expect(await messages()).toBe(before);
+        expect(await repository.listDeliverableRuns()).toEqual([]);
+      } finally {
+        await q(`UPDATE role_policy_scopes SET scope_value = 'all' WHERE role_id = 3 AND scope_key = 'orders.view'`);
+      }
+    });
+
+    it('does not deliver a calendar send of a user who has whatsapp.manage but not the calendar send permission', async () => {
+      // The HTTP gate refuses such a user before the repository; the delivery check is the second line.
+      const run = await calendarRun(today(), [5, 6], randomUUID(), settingsOnly);
+      expect(await repository.createSendIntent(run.runId, 1, true)).toBeNull();
+      expect((await q('SELECT state, reason FROM whatsapp_broadcast_runs WHERE run_id = $1', [run.runId])).rows[0])
+        .toEqual({ state: 'failed', reason: 'BROADCAST_AUTHOR_PERMISSION_REVOKED' });
+    });
+
+    it('a retry of a sender\'s calendar run by a WhatsApp admin is delivered: both hold the calendar bundle', async () => {
+      const run = await calendarRun(today(), [5, 6], randomUUID(), sender);
+      const grant = await repository.createSendIntent(run.runId, 1, true);
+      await repository.settleMessage(run.runId, 1, grant!.token, { state: 'failed', errorCode: 'WAHA_PROVIDER_ERROR' });
+      await setLastDelivery(16);
+      const retry = await repository.createRetry(run.runId, { mode: 'remaining' as const, idempotencyKey: randomUUID(), duplicateRiskConfirmed: false, actor: admin,
+        requestId: 'req-cal-retry-admin', fingerprintFor: (id: number) => commandFingerprint({ kind: 'retry', id }) });
+      expect((await q('SELECT snapshot_author_user_id::text author, initiated_by_user_id::text initiator FROM whatsapp_broadcast_runs WHERE run_id = $1', [retry.runId])).rows[0])
+        .toEqual({ author: '13', initiator: '11' });
+      expect(await repository.createSendIntent(retry.runId, 1, true)).not.toBeNull();
     });
 
     it('serves the calendar queue head before older broadcast queues', async () => {

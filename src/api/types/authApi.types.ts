@@ -44,6 +44,7 @@ export type PermissionName =
   | 'clients.analytics.view'
   | 'clients.onec_data.view'
   | 'clients.onec_documents.view'
+  | 'whatsapp.calendar_send'
   | 'vlm.use'
   | 'vlm.configure'
   | 'settings.view'

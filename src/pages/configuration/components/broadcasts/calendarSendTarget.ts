@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { broadcastsApi } from '../../../../api/broadcastsApi';
+import { hasCalendarSendSettingsPermissions } from './calendarSendSupport';
 import { loadWhatsAppGroups } from '../whatsappGroupsCache';
 import { findGroupById, groupDisplayName } from '../whatsappGroupsView';
 
@@ -17,7 +18,20 @@ export function calendarSendTooltip(target: CalendarSendTarget): string {
   return CALENDAR_SEND_LABEL;
 }
 
-export async function loadCalendarSendTarget(): Promise<CalendarSendTarget> {
+/** The settings of the calendar send (and the group list that names the chat) belong to the WhatsApp admin. */
+export function canReadCalendarSendSettings(): boolean {
+  return hasCalendarSendSettingsPermissions();
+}
+
+/**
+ * A user who may only send (no whatsapp.manage) learns whether a group is chosen, not which one: the backend
+ * gives that read neither the group id nor the caption.
+ */
+export async function loadCalendarSendTarget(withSettings = canReadCalendarSendSettings()): Promise<CalendarSendTarget> {
+  if (!withSettings) {
+    const { configured } = await broadcastsApi.calendarSendAvailability();
+    return configured ? { kind: 'group', name: null } : { kind: 'none' };
+  }
   const { settings } = await broadcastsApi.calendarSendSettings();
   const id = settings.groupChatId?.trim();
   if (!id) return { kind: 'none' };

@@ -39,7 +39,8 @@ export const BroadcastsPanel: React.FC<BroadcastsPanelProps> = ({ initial }) => 
   const [historyToken, setHistoryToken] = useState(0);
   const [confirmPause, setConfirmPause] = useState(false);
   const [controlBusy, setControlBusy] = useState(false);
-  const { support: calendarSendSupport } = useCalendarSendSupport();
+  // The settings form follows the settings right, not the right to send from the calendar.
+  const { support: calendarSendSupport } = useCalendarSendSupport('settings');
   const mountedRef = useRef(false);
   const catalogRequestedRef = useRef(false);
   const selectRequestRef = useRef(0);

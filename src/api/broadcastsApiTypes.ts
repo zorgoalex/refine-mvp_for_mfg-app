@@ -230,6 +230,14 @@ export interface CalendarSendEnvelope {
   runtime: BroadcastRuntime;
 }
 
+/** What the calendar button reads with the calendar send permission: no settings content. */
+export interface CalendarSendAvailability {
+  configured: boolean;
+  minIntervalMinutes: number;
+  nextAllowedAt: string | null;
+  activeRun: boolean;
+}
+
 export interface CalendarSendUpdateInput {
   version: number;
   groupChatId: string | null;

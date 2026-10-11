@@ -205,6 +205,10 @@ export const PERMISSIONS = [
   'bitrix24.requests.view_assigned',
   /** Batch linking of entities to a group (was the role list admin/top_manager). */
   'groups.batch_link',
+
+  // «Отправить в чат» from the calendar day header (user decision 2026-10-11: top manager and above). Appended.
+  /** Queue the order cards of a calendar day for the configured chat; the settings stay behind whatsapp.manage. */
+  'whatsapp.calendar_send',
 ] as const;
 
 export type PermissionName = (typeof PERMISSIONS)[number];
@@ -268,6 +272,7 @@ export const ROLE_PERMISSIONS = {
     'clients.analytics.view',
     'clients.onec_data.view',
     'clients.onec_documents.view',
+    'whatsapp.calendar_send',
 
     'bitrix24.requests.view',
     'bitrix24.requests.view_all',

@@ -425,6 +425,7 @@ export const apiRoutes = {
       replanToday: (id: number) => backendApiPath(`/whatsapp/broadcasts/${id}/schedule/today/replan`),
       calendarSend: backendApiPath('/whatsapp/calendar-send'),
       calendarSendRuns: backendApiPath('/whatsapp/calendar-send/runs'),
+      calendarSendAvailability: backendApiPath('/whatsapp/calendar-send/availability'),
       runById: (runId: string) =>
         backendApiPath(`/whatsapp/broadcast-runs/${encodeURIComponent(runId)}`),
       messageImage: (runId: string, seq: number) =>

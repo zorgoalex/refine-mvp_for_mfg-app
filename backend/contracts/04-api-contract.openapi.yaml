@@ -895,14 +895,27 @@ paths:
         '409': {description: 'BROADCAST_VERSION_CONFLICT'}
         '422': {description: Invalid request}
         '503': {description: 'BROADCAST_CALENDAR_UNAVAILABLE'}
+  /api/v1/whatsapp/calendar-send/availability:
+    get:
+      tags: [WhatsApp]
+      operationId: getWhatsAppCalendarSendAvailability
+      summary: 'Whether «Отправить в чат» can be used from the calendar now (no settings content)'
+      description: 'For the calendar button of a user with the calendar send permission: whether a destination group is chosen, the frequency threshold and its state. Carries neither the group id nor the caption; the settings themselves need whatsapp.manage. Besides the permissions the order visibility scope «all» is required (403 PERMISSION_DENIED otherwise).'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.calendar_send, calendar.view, orders.view, orders.view_financials]
+      responses:
+        '200': {description: Calendar send availability, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppCalendarSendAvailability'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '503': {description: 'BROADCAST_CALENDAR_UNAVAILABLE'}
   /api/v1/whatsapp/calendar-send/runs:
     post:
       tags: [WhatsApp]
       operationId: createWhatsAppCalendarSendRun
       summary: 'Queue the order cards of one calendar day for the configured chat (idempotent)'
-      description: 'Sends right away (no send window, no confirmation): all production orders planned for that day, like a broadcast. The same idempotencyKey with the same payload returns the original run. At most one calendar send is active, and calendar deliveries start at most once per the configured interval (409 BROADCAST_CALENDAR_COOLDOWN with details.nextAllowedAt). A day without orders creates an empty run and does not use the threshold.'
+      description: 'Sends right away (no send window, no confirmation): all production orders planned for that day, like a broadcast. The same idempotencyKey with the same payload returns the original run. At most one calendar send is active, and calendar deliveries start at most once per the configured interval (409 BROADCAST_CALENDAR_COOLDOWN with details.nextAllowedAt). A day without orders creates an empty run and does not use the threshold. Besides the permissions the caller needs the order visibility scope «all» (the send takes every order of the day): 403 PERMISSION_DENIED otherwise; the scope of the run author and initiator is checked again before each delivery.'
       security: [{bearerAuth: []}]
-      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      x-permissions: [whatsapp.calendar_send, calendar.view, orders.view, orders.view_financials]
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppCalendarSendRunRequest'}}}
@@ -21955,6 +21968,7 @@ components:
         - clients.onec_data.view
         - clients.onec_documents.view
         - groups.batch_link
+        - whatsapp.calendar_send
         - bitrix24.requests.view_all
         - bitrix24.requests.view_assigned
         - groups.view_history
@@ -29929,6 +29943,15 @@ components:
           properties:
             id: {type: string}
             username: {type: string, nullable: true}
+    WhatsAppCalendarSendAvailability:
+      type: object
+      additionalProperties: false
+      required: [configured, minIntervalMinutes, nextAllowedAt, activeRun]
+      properties:
+        configured: {type: boolean, description: A destination group is chosen in the settings}
+        minIntervalMinutes: {type: integer, minimum: 1, maximum: 1440}
+        nextAllowedAt: {type: string, format: date-time, nullable: true}
+        activeRun: {type: boolean}
     WhatsAppCalendarSendEnvelope:
       type: object
       required: [settings, nextAllowedAt, activeRun, runtime]
