@@ -6,8 +6,9 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { OnecDocumentsReaderPort } from '../../onec-sync/application/onec-documents-reader.types';
 
 export {
-  CONSUMPTION_DOC_KINDS,
+  CONSUMPTION_DOC_KINDS, STOCK_RECEIPT_DOC_KINDS,
   type ConsumptionCandidatesFilter, type ConsumptionDocKind, type ConsumptionDocumentView, type ConsumptionLineView,
+  type StockProjectionDocKind,
 } from '../../onec-sync/application/onec-documents-reader.types';
 
 export const ONEC_CONSUMPTION_READER = Symbol('ONEC_CONSUMPTION_READER');

@@ -524,6 +524,19 @@ describe.skipIf(!url)('1C documents loader — real PostgreSQL', { timeout: 1200
       expect(view).toMatchObject({ docKind: 'inventory_transfer', revision: 1, docAt: '2026-03-11T09:03:28Z', warehouseRefKey: WH, destinationWarehouseRefKey: WH2,
         posted: true, deletedInOnec: false, missingInSource: false });
       expect(view.lines).toEqual([expect.objectContaining({ lineNo: 1, warehouseRefKey: WH, quantity: '3.000', unitCode: 'sheet', isStockItem: true, unitIsPackage: false })]);
+      // Приход: порт отдаёт поступление только по явному запросу вида; по умолчанию — прежние виды расхода.
+      const receiptId = Number((await watcher.query<{ onec_document_id: string }>(
+        `INSERT INTO onec_documents (source_id, doc_kind, onec_ref_key, number, doc_date, doc_at, posted, applied_revision, currency, warehouse_ref_key)
+         VALUES ($1, 'purchase_receipt', gen_random_uuid(), 'ПТ-порт', '2026-06-03', '2026-06-03T05:00:00Z', true, 1, 'KZT', $2) RETURNING onec_document_id`,
+        [source, WH2])).rows[0].onec_document_id);
+      const ids = async (kinds?: readonly ('purchase_receipt' | 'sales_shipment')[]) =>
+        (await reader().consumptionCandidates({ sourceIds: [source], warehouseRefKeys: [WH2], kinds })).map((c) => c.documentId);
+      expect(await ids()).not.toContain(receiptId);
+      expect(await ids(['purchase_receipt'])).toEqual([receiptId]);
+      expect(await database.transaction((client) => reader().lockDocumentForProjection(receiptId, client))).toBeNull();
+      expect(await database.transaction((client) => reader().lockDocumentForProjection(receiptId, client, ['purchase_receipt'])))
+        .toMatchObject({ documentId: receiptId, docKind: 'purchase_receipt', warehouseRefKey: WH2 });
+      await watcher.query('DELETE FROM onec_documents WHERE onec_document_id = $1', [receiptId]);
     });
 
     it('a kind change removes the old-kind document with audit and event; the read port then sees it as gone', async () => {

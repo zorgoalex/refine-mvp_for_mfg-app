@@ -53,7 +53,7 @@ export const OnecIssuesTab: React.FC<{
     { title: 'Обновлено', dataIndex: 'updatedAt', key: 'updatedAt', render: (value: string) => formatMoment(value) },
   ];
   return <Card>
-    <Alert style={{ marginBottom: 12 }} type="info" showIcon message="Строки плёнки из документов 1С (реализация, возврат поставщику, списание, перемещение), которые не попали в остатки склада. Прочие материалы (МДФ, фрезеровка) здесь не показываются. Исправленные строки применяются при следующем пересчёте (сам — каждый час и после загрузки документов 1С)." />
+    <Alert style={{ marginBottom: 12 }} type="info" showIcon message="Строки плёнки из документов 1С (реализация, возврат поставщику, списание, перемещение, поступление), которые не попали в остатки склада. Прочие материалы (МДФ, фрезеровка) здесь не показываются. Исправленные строки применяются при следующем пересчёте (сам — каждый час и после загрузки документов 1С)." />
     <Space wrap style={{ marginBottom: 12 }}>
       <Select placeholder="Склад" style={{ minWidth: 220 }} value={warehouseId} options={warehouseOptions} onChange={onWarehouseChange} status={warehouseId === undefined ? 'warning' : undefined} />
       <Select allowClear placeholder="Причина" style={{ minWidth: 280 }} value={code} onChange={setCode}

@@ -136,6 +136,10 @@ export interface OnecCompensationResult { documents: number; remaining: number }
 export const supersededCompensation = (): ApiError => new ApiError(409, 'ONEC_COMPENSATION_SUPERSEDED',
   'Расход из 1С по складу снова включён после начала отката — обновите список и запустите откат заново');
 
+/** Откат склада снимает и поступления 1С, а клиент этого не подтвердил (старая вкладка) — ничего не изменено. */
+export const receiptsConfirmationRequired = (): ApiError => new ApiError(409, 'ONEC_COMPENSATION_CONFIRM_REQUIRED',
+  'Откат отменит и поступления из 1С — остаток может уменьшиться. Обновите страницу (Ctrl+Shift+R) и повторите откат.');
+
 async function assertOnecBaseline(tx: TransactionClient, warehouseId: number): Promise<void> {
   const gaps = await onecBaselineGaps(tx, warehouseId);
   if (gaps.length > 0) {
@@ -385,7 +389,9 @@ export class PgWarehouseRepository {
    * «в работе» (прерванная компенсация) — продолжение, если дата начала всё ещё пуста (иначе расход снова включили —
    * прежний ключ не откатывает новые применения); новый ключ — очистка даты начала с аудитом в той же транзакции.
    */
-  async beginOnecCompensation(ctx: CommandContext, warehouseId: number): Promise<{ replay: OnecCompensationResult | null }> {
+  async beginOnecCompensation(
+    ctx: CommandContext, warehouseId: number, guard: { receiptsAcknowledged: boolean; receiptsEnabled: boolean } = { receiptsAcknowledged: false, receiptsEnabled: false },
+  ): Promise<{ replay: OnecCompensationResult | null }> {
     return this.database.transaction(async (tx) => {
       let resumed = false;
       try {
@@ -403,6 +409,14 @@ export class PgWarehouseRepository {
       if (locked.rows.length === 0) throw notFound();
       const before = await readWarehouse(tx, warehouseId);
       if (!before) throw notFound();
+      // Откат снимает и приход: без подтверждения клиента — отказ до любых изменений (транзакция откатывается целиком,
+      // включая ключ идемпотентности). Склад заблокирован FOR UPDATE: проход проекции берёт его FOR KEY SHARE и ждёт,
+      // поэтому применённое с плюсом после этой проверки появиться не может (после commit дата начала уже пуста).
+      if (!guard.receiptsAcknowledged) {
+        const positive = guard.receiptsEnabled || (await tx.query(
+          'SELECT 1 FROM inventory_onec_applied WHERE warehouse_id = $1 AND quantity > 0 LIMIT 1', [warehouseId])).rows.length > 0;
+        if (positive) throw receiptsConfirmationRequired();
+      }
       if (resumed) {
         if (before.onecConsumptionSince !== null) throw supersededCompensation();
         return { replay: null };
