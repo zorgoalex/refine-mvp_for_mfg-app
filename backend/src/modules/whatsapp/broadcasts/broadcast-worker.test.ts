@@ -193,6 +193,27 @@ describe('BroadcastService manual send', () => {
     expect(repository.findCommand).toHaveBeenCalledWith(9, '0f8fad5b-d9cb-469f-a165-70867728950e', expect.any(String));
   });
 
+  it('calendar send: a user who does not see all orders is refused and audited before any read, replay or render', async () => {
+    const repository = { recordCalendarScopeDenied: vi.fn().mockResolvedValue(undefined), calendarBroadcastId: vi.fn(), findCommand: vi.fn(),
+      getCalendarSend: vi.fn() };
+    const worker = { storeReady: true, runtime: () => ({ relayAvailable: true }), readSnapshot: vi.fn(), withRenderLease: vi.fn() };
+    const service = new BroadcastService(repository as never, worker as never, {} as never, {} as never);
+    const own = { id: '13', username: 'tm', role: 'top_manager' as const, roleId: 3, permissions: [],
+      policyScopeSets: { orders: { view: ['own', 'assigned'] } } as never };
+    await expect(service.createCalendarRun({ date: '2026-09-15', idempotencyKey: '0f8fad5b-d9cb-469f-a165-70867728950e' }, own, 'req-own'))
+      .rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED', details: { requiredScope: { 'orders.view': 'all' } } });
+    await expect(service.calendarSendAvailability(own, 'req-own-2')).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+    expect(repository.recordCalendarScopeDenied.mock.calls).toEqual([[own, 'req-own', 'run', ['own', 'assigned']], [own, 'req-own-2', 'availability', ['own', 'assigned']]]);
+    for (const untouched of [repository.calendarBroadcastId, repository.findCommand, repository.getCalendarSend, worker.readSnapshot, worker.withRenderLease]) {
+      expect(untouched).not.toHaveBeenCalled();
+    }
+    // The static top manager (order visibility «all») reads the availability without settings content.
+    repository.getCalendarSend.mockResolvedValue({ settings: { groupChatId: '120363000000000001@g.us', captionTemplate: 'secret', minIntervalMinutes: 15 },
+      nextAllowedAt: null, activeRun: false });
+    await expect(service.calendarSendAvailability({ id: '14', username: 'tm2', role: 'top_manager', roleId: 3, permissions: [] }, 'req-all'))
+      .resolves.toEqual({ configured: true, minIntervalMinutes: 15, nextAllowedAt: null, activeRun: false });
+  });
+
   it('replays a committed command without rendering', async () => {
     const repository = { findCommand: vi.fn().mockResolvedValue({ runId: 'run-9' }), getRunDetail: vi.fn().mockResolvedValue({ run: { id: 'run-9' }, messages: [] }) };
     const worker = { withRenderLease: vi.fn(), storeReady: true, runtime: () => ({ relayAvailable: true }) };

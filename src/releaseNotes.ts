@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-11", title: "Календарь: «Отправить в чат» доступно топ-менеджеру",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Отправка заказов дня в чат WhatsApp из шапки дня календаря теперь открывается отдельным правом «WhatsApp: отправка из календаря». По умолчанию оно есть у топ-менеджера, админа и суперадмина; настройки отправки и рассылок по-прежнему доступны только с правом управления WhatsApp.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-12", title: "NewLine: сворачивание групп меню и списка справочников",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: [

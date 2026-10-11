@@ -208,6 +208,10 @@ export const PERMISSIONS = [
   'clients.onec_data.view',
   /** «Документы 1С» of the matched counterparty in the client card (amounts also need orders.view_financials). */
   'clients.onec_documents.view',
+
+  // «Отправить в чат» from the calendar day header (user decision 2026-10-11: top manager and above). Appended.
+  /** Queue the order cards of a calendar day for the configured chat; the settings stay behind whatsapp.manage. */
+  'whatsapp.calendar_send',
 ] as const;
 
 export type PermissionName = (typeof PERMISSIONS)[number];
@@ -273,6 +277,7 @@ export const ROLE_PERMISSIONS = {
     'clients.analytics.view',
     'clients.onec_data.view',
     'clients.onec_documents.view',
+    'whatsapp.calendar_send',
 
     'bitrix24.requests.view',
     'bitrix24.requests.view_all',

@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import { DailyDigestRepository } from '../daily-digest.repository';
 import { CAPTION_VARIABLES, renderCaption } from './broadcast-caption';
 import { BroadcastFileStore } from './broadcast-file-store';
@@ -10,7 +11,7 @@ import { BroadcastRepository, commandFingerprint } from './broadcast.repository'
 import {
   BROADCAST_MAX_ACTIVE,
   type BroadcastEnvelope, type BroadcastInput, type BroadcastPreview, type BroadcastRunDetail, type BroadcastUpdateInput,
-  type CalendarSendEnvelope, type CalendarSendUpdateInput,
+  type CalendarSendAvailability, type CalendarSendEnvelope, type CalendarSendUpdateInput,
 } from './broadcast.types';
 
 @Injectable()
@@ -88,12 +89,34 @@ export class BroadcastService {
     return { ...(await this.repository.getCalendarSend()), runtime: this.worker.runtime() };
   }
 
+  /** For the calendar button: availability only, readable with the calendar send permission. */
+  async calendarSendAvailability(actor: CurrentUser, requestId: string): Promise<CalendarSendAvailability> {
+    await this.assertCalendarOrderScope(actor, requestId, 'availability');
+    const { settings, nextAllowedAt, activeRun } = await this.repository.getCalendarSend();
+    return { configured: Boolean(settings.groupChatId), minIntervalMinutes: settings.minIntervalMinutes, nextAllowedAt, activeRun };
+  }
+
   async updateCalendarSend(input: CalendarSendUpdateInput, actor: CurrentUser, requestId: string): Promise<CalendarSendEnvelope> {
     return { ...(await this.repository.updateCalendarSend(input, actor, requestId)), runtime: this.worker.runtime() };
   }
 
+  /**
+   * The calendar send takes all production orders of the day, whoever manages them: it is allowed only to a
+   * user whose order visibility is «all». A user limited to own or assigned orders is refused (and audited),
+   * and the same scope is checked again for the run author and initiator right before each delivery.
+   */
+  private async assertCalendarOrderScope(actor: CurrentUser, requestId: string, action: 'availability' | 'run'): Promise<void> {
+    const scopes = policyScopeSetsForUser(actor).orders.view;
+    if (scopes.includes('all')) return;
+    await this.repository.recordCalendarScopeDenied(actor, requestId, action, [...scopes]);
+    throw new ApiError(403, 'PERMISSION_DENIED', 'Отправка из календаря доступна только тем, кто видит все заказы',
+      { requiredScope: { 'orders.view': 'all' } });
+  }
+
   /** Queues the cards of one calendar day for the configured chat right away (no window, no confirmation). */
   async createCalendarRun(input: { date: string; idempotencyKey: string }, actor: CurrentUser, requestId: string): Promise<BroadcastRunDetail> {
+    // Before any read, render or replay: the command sends every production order of the day.
+    await this.assertCalendarOrderScope(actor, requestId, 'run');
     const broadcastId = await this.repository.calendarBroadcastId();
     const fingerprint = commandFingerprint({ kind: 'calendar', broadcastId, date: input.date, actorId: actor.id });
     try {

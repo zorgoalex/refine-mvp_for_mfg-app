@@ -314,6 +314,12 @@ describe('permissions foundation', () => {
     }
   });
 
+  it('keeps the calendar send permission in the OpenAPI PermissionName enum, for top manager and above only', () => {
+    expect(readPermissionNameEnum(readOpenApiContract())).toContain('whatsapp.calendar_send');
+    for (const role of ['superadmin', 'admin', 'top_manager'] as const) expect(can(role, 'whatsapp.calendar_send')).toBe(true);
+    for (const role of ['manager', 'operator', 'worker', 'packer', 'viewer', 'onec_operator'] as const) expect(can(role, 'whatsapp.calendar_send')).toBe(false);
+  });
+
   it('keeps label permissions in the static OpenAPI PermissionName enum', () => {
     const contract = readOpenApiContract();
     const contractPermissions = readPermissionNameEnum(contract);
