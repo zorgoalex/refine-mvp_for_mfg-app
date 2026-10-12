@@ -19,20 +19,21 @@ describe('migration 249: role-name checks become permissions (access groups 0A.3
     expect(lock).toBeLessThan(sql.indexOf('INSERT INTO public.permissions_catalog'));
   });
 
-  it('grants each new permission to exactly the roles of the static matrix', () => {
+  it('grants each new permission to exactly the roles of the static matrix (superadmin batch linking — migration 252)', () => {
     const grants = [...sql.matchAll(/\('([a-z0-9_.]+)', '([a-z_]+)'\)/g)].map(([, permission, role]) => `${permission}:${role}`).sort();
     const expected = (Object.keys(ROLE_PERMISSIONS) as UserRole[])
       .flatMap((role) => NEW_PERMISSIONS.filter((p) => (ROLE_PERMISSIONS[role] as readonly PermissionName[]).includes(p)).map((p) => `${p}:${role}`))
+      .filter((grant) => grant !== 'groups.batch_link:superadmin')
       .sort();
     expect(grants).toEqual(expected);
   });
 
-  it('keeps the former behaviour: all for superadmin/admin/top_manager, assigned for manager/operator, batch for admin/top_manager', () => {
+  it('keeps the former behaviour: all for superadmin/admin/top_manager, assigned for manager/operator; batch also for superadmin (252)', () => {
     const has = (role: UserRole, permission: PermissionName) => (ROLE_PERMISSIONS[role] as readonly PermissionName[]).includes(permission);
     expect((['superadmin', 'admin', 'top_manager'] as const).every((role) => has(role, 'bitrix24.requests.view_all'))).toBe(true);
     expect((['manager', 'operator', 'worker', 'packer', 'viewer', 'onec_operator'] as const).some((role) => has(role, 'bitrix24.requests.view_all'))).toBe(false);
     expect((['manager', 'operator'] as const).every((role) => has(role, 'bitrix24.requests.view_assigned'))).toBe(true);
     expect((['worker', 'packer', 'viewer', 'onec_operator'] as const).some((role) => has(role, 'bitrix24.requests.view_assigned'))).toBe(false);
-    expect((Object.keys(ROLE_PERMISSIONS) as UserRole[]).filter((role) => has(role, 'groups.batch_link')).sort()).toEqual(['admin', 'top_manager']);
+    expect((Object.keys(ROLE_PERMISSIONS) as UserRole[]).filter((role) => has(role, 'groups.batch_link')).sort()).toEqual(['admin', 'superadmin', 'top_manager']);
   });
 });

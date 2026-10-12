@@ -236,8 +236,8 @@ const adminServicePermissions = ALL_PERMISSIONS.filter(
 );
 
 export const ROLE_PERMISSIONS = {
-  // Batch linking was never allowed to superadmin (role list admin/top_manager): kept as is in 0A.3.
-  superadmin: ALL_PERMISSIONS.filter((permission) => permission !== 'groups.batch_link'),
+  // Every permission, batch linking included (user decision 2026-10-12, migration 252; 0A.3 had kept it off).
+  superadmin: ALL_PERMISSIONS,
 
   // Service application administrator: manages users, settings, references,
   // support operations, and integrations, but does not own superadmin-only

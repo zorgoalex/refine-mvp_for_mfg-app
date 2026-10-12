@@ -2616,6 +2616,9 @@ probe_file() {
       "SELECT EXISTS (SELECT 1 FROM permissions_catalog WHERE permission_name = 'whatsapp.calendar_send' AND is_active);" \
       "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'top_manager' AND rp.permission_name = 'whatsapp.calendar_send');" \
       "SELECT NOT EXISTS (SELECT 1 FROM whatsapp_broadcasts WHERE purpose = 'calendar' AND NOT (required_permissions @> ARRAY['whatsapp.calendar_send']));" ;;
+    # 252: superadmin gets groups.batch_link (user decision 2026-10-12).
+    252_superadmin_group_batch_link*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'superadmin' AND rp.permission_name = 'groups.batch_link' AND rp.is_enabled);" ;;
     249_role_checks_to_permissions*) probe_all \
       "SELECT (SELECT count(*) FROM permissions_catalog WHERE permission_name IN ('bitrix24.requests.view_all','bitrix24.requests.view_assigned','groups.batch_link') AND is_active) = 3;" \
       "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'top_manager' AND rp.permission_name = 'groups.batch_link');" ;;
@@ -3134,7 +3137,7 @@ verify_applied_effect() {
     205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|244_client_onec_permissions*|251_whatsapp_calendar_send_permission*|240_payment_onec_matches*|241_client_screen_settings*|245_onec_operator_role*|246_clients_analytics_view_real_orders*|247_onec_agent_expected_silence*|248_authorization_snapshot*|249_role_checks_to_permissions*|250_onec_stock_snapshots*)
+    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|244_client_onec_permissions*|251_whatsapp_calendar_send_permission*|240_payment_onec_matches*|241_client_screen_settings*|245_onec_operator_role*|246_clients_analytics_view_real_orders*|247_onec_agent_expected_silence*|248_authorization_snapshot*|249_role_checks_to_permissions*|250_onec_stock_snapshots*|252_superadmin_group_batch_link*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)
