@@ -1,3 +1,5 @@
+import type { CurrentUser } from '../../../permissions/current-user';
+import { appendLinkedEntityVisibilitySql } from '../../../permissions/policies/order-read-visibility';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient } from '../../../database/database.types';
@@ -15,6 +17,8 @@ const GROUP_ORDER_RELATION_TYPES = ['main', 'secondary', 'reporting', 'billing',
 
 interface GroupOverviewInput {
   groupId: string;
+  /** The reader: order counts cover only orders he may read (access groups 0A.4). */
+  viewer?: CurrentUser;
   query: GroupOverviewQuery;
   visibleEntityTypes?: GroupEntityTypeCode[];
   canViewParticipants?: boolean;
@@ -79,6 +83,7 @@ export class PgGroupOverviewRepository implements GroupOverviewRepositoryPort {
       mode: 'any',
       groupIds: [input.groupId],
       temporal: input.query.temporal,
+      viewer: input.viewer,
     } as const satisfies GroupReportFilter;
 
     const [totalCount, statusCounts, relationCounts, createdMonthCounts, linkedEntityCounts, participantSummary] = await Promise.all([
@@ -86,7 +91,7 @@ export class PgGroupOverviewRepository implements GroupOverviewRepositoryPort {
       this.getStatusCounts(predicateFilter),
       this.getRelationCounts(predicateFilter, input.groupId),
       this.getCreatedMonthCounts(predicateFilter, input.query),
-      this.getLinkedEntityCounts(input.groupId, input.visibleEntityTypes ?? []),
+      this.getLinkedEntityCounts(input.groupId, input.visibleEntityTypes ?? [], input.viewer),
       input.canViewParticipants ? this.getParticipantSummary(input.groupId) : Promise.resolve([]),
     ]);
 
@@ -271,8 +276,14 @@ export class PgGroupOverviewRepository implements GroupOverviewRepositoryPort {
   private async getLinkedEntityCounts(
     groupId: string,
     visibleEntityTypes: GroupEntityTypeCode[],
+    viewer?: CurrentUser,
   ): Promise<GroupOverviewResponseDto['linkedEntityCounts']> {
     if (visibleEntityTypes.length === 0) return [];
+    const params: unknown[] = [groupId, visibleEntityTypes];
+    // Order links are counted only for orders the reader may see (access groups 0A.4).
+    const visibility = viewer
+      ? appendLinkedEntityVisibilitySql(params, viewer, 'entity_type_code', 'entity_id_text')
+      : 'TRUE';
     const result = await this.database.query<LinkedEntityCountRow>(
       `
       SELECT entity_type_code, COUNT(*)::int AS current_count
@@ -280,10 +291,11 @@ export class PgGroupOverviewRepository implements GroupOverviewRepositoryPort {
       WHERE group_id = $1::uuid
         AND valid_to IS NULL
         AND entity_type_code = ANY($2::text[])
+        ${visibility === 'TRUE' ? '' : `AND ${visibility}`}
       GROUP BY entity_type_code
       ORDER BY entity_type_code ASC
       `,
-      [groupId, visibleEntityTypes],
+      params,
     );
     return result.rows.map((row) => ({
       entityType: row.entity_type_code,

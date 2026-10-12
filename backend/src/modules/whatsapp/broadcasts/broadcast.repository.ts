@@ -12,7 +12,7 @@ import {
   addDays, automaticDeliveryDeadline, businessDate, clockMinutes, fixationWindowState, isoWeekday, minutesToClock, zonedMinute,
 } from './broadcast-time';
 import {
-  BROADCAST_BASE_PERMISSIONS, BROADCAST_MAX_ACTIVE,
+  BROADCAST_BASE_PERMISSIONS, BROADCAST_MAX_ACTIVE, CALENDAR_SEND_PERMISSIONS,
   type Broadcast, type BroadcastControl, type BroadcastInput, type BroadcastMessage, type BroadcastRun, type BroadcastRunDetail,
   type BroadcastRunState, type BroadcastSchedule, type BroadcastStoredImage, type BroadcastSummary, type BroadcastUpdateInput,
   type CalendarSendSettings, type CalendarSendState, type CalendarSendUpdateInput,
@@ -399,7 +399,8 @@ export class BroadcastRepository {
         VALUES ($1, $2, $3::date, $4::date, 'manual', $1, $5, $6, $7, $7, $8::text[], $9, $10, $11, $12, $13, $14::jsonb, $15, $16, $17,
           $18, $19, $20, $21, $22)`,
       [runId, input.broadcastId, input.businessDate, input.targetDate, commandId, broadcast.version, input.actor.id,
-        broadcast.required_permissions, broadcast.group_chat_id, broadcast.catch_up_policy, empty ? null : input.imageExpiresAt,
+        // A calendar run is the actor's own send: it needs the calendar bundle, not the settings one of the row.
+        source === 'calendar' ? [...CALENDAR_SEND_PERMISSIONS] : broadcast.required_permissions, broadcast.group_chat_id, broadcast.catch_up_policy, empty ? null : input.imageExpiresAt,
         broadcast.partial_policy, broadcast.cards_per_message, JSON.stringify(input.snapshot), input.snapshot.rendererVersion,
         input.snapshot.orders.length, input.snapshot.totalArea, empty ? 'empty' : 'queued', empty ? 'NO_ORDERS' : null,
         input.requestId, empty ? null : input.imageExpiresAt, source]);
@@ -578,8 +579,11 @@ export class BroadcastRepository {
       }
       const automatic = run.kind === 'auto' || run.auto_origin;
       if (automatic && (!runtimeEnabled || !broadcast.enabled || broadcast.archived_at)) return null;
-      const authorOk = await this.userHasPermissions(tx, run.snapshot_author_user_id, run.required_permissions);
-      const initiatorOk = run.initiated_by_user_id === null || await this.userHasPermissions(tx, run.initiated_by_user_id, run.required_permissions);
+      // A calendar run carries every order of the day: its author and initiator must still see all orders.
+      const allOrders = run.source === 'calendar';
+      const authorOk = await this.userHasPermissions(tx, run.snapshot_author_user_id, run.required_permissions, allOrders);
+      const initiatorOk = run.initiated_by_user_id === null
+        || await this.userHasPermissions(tx, run.initiated_by_user_id, run.required_permissions, allOrders);
       if (!authorOk || !initiatorOk) {
         await tx.query(`UPDATE whatsapp_broadcast_messages SET state = 'cancelled', error_code = 'PERMISSION_REVOKED', updated_at = now()
           WHERE run_id = $1 AND state = 'pending'`, [runId]);
@@ -893,16 +897,29 @@ export class BroadcastRepository {
     return { retryCount: Number(row?.retry_count ?? 0), hasActive: Boolean(row?.has_active) };
   }
 
-  private async userHasPermissions(tx: TransactionClient, userId: string | number | null, permissions: string[]): Promise<boolean> {
+  /** Refusal of the calendar send to a user who does not see all orders (the HTTP gate passed: the permissions are there). */
+  async recordCalendarScopeDenied(actor: CurrentUser, requestId: string, action: 'availability' | 'run', orderScopes: string[]): Promise<void> {
+    await auditService.recordDenied(this.database, {
+      event: 'whatsapp.broadcast.calendar_send_denied', entityType: 'whatsapp_calendar_send', entityId: action,
+      actorUserId: actor.id, actorUsername: actor.username, actorRole: actor.role, requestId, source: 'erp_whatsapp_broadcast',
+      reason: 'scope_not_allowed', requiredPermissions: [...CALENDAR_SEND_PERMISSIONS],
+      metadata: { correlationId: requestId, action, orderScope: orderScopes, requiredScope: 'all' },
+    });
+  }
+
+  /** `allOrders`: the user's effective «orders.view» scope must include «all» as well. */
+  private async userHasPermissions(tx: TransactionClient, userId: string | number | null, permissions: string[], allOrders = false): Promise<boolean> {
     if (userId === null || userId === undefined) return false;
     const row = (await tx.query<{ allowed: boolean }>(`
       SELECT EXISTS (
         SELECT 1 FROM users u JOIN roles ro ON ro.role_id = u.role_id
         WHERE u.user_id = $1 AND u.is_active AND ro.is_active
           AND NOT EXISTS (SELECT 1 FROM unnest($2::text[]) need(permission_name)
-            WHERE NOT EXISTS (SELECT 1 FROM role_permissions rp JOIN permissions_catalog pc ON pc.permission_name = rp.permission_name
-              WHERE rp.role_id = u.role_id AND rp.permission_name = need.permission_name AND rp.is_enabled AND pc.is_active))
-      ) AS allowed`, [userId, permissions])).rows[0];
+            WHERE NOT EXISTS (SELECT 1 FROM user_effective_permissions uep
+              WHERE uep.user_id = u.user_id AND uep.permission_name = need.permission_name))
+          AND ($3::boolean = false OR EXISTS (SELECT 1 FROM user_effective_scopes ues
+            WHERE ues.user_id = u.user_id AND ues.scope_key = 'orders.view' AND ues.scope_value = 'all'))
+      ) AS allowed`, [userId, permissions, allOrders])).rows[0];
     return Boolean(row?.allowed);
   }
 

@@ -1,7 +1,7 @@
 import type { DatabaseClient } from '../../../database/database.types';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import type { MdfJobDatabase } from '../application/mdf-job-runner';
 import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
 
@@ -40,11 +40,15 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
     if (!state) throw new ApiError(503,'MDF_STATE_UNAVAILABLE','Состояние МДФ-доски недоступно');
     if (state.mode!=='active' && state.mode!=='read_only') return { schemaVersion: 1 as const, ...state,
       cards: [],positions: [],members: [],pendingJobs: [],trackedJobs: [],issues: ['MDF_PUBLICATION_NOT_ACTIVE'] };
-    const scope = rolePolicyForUser(user).orders.view;
-    const allowed = scope==='all' ? 'TRUE' : scope==='own' ? '(o.created_by=$1::bigint OR o.manager_id=$1::bigint)'
-      : scope==='assigned' ? `EXISTS(SELECT 1 FROM order_workshops w JOIN users u
+    // Scope set of the token (access groups stage 0A): own ∪ assigned = OR of both; one value = same SQL as before.
+    const scope = policyScopeSetsForUser(user).orders.view;
+    const parts = scope.includes('all') ? ['TRUE'] : [
+      ...(scope.includes('own') ? ['(o.created_by=$1::bigint OR o.manager_id=$1::bigint)'] : []),
+      ...(scope.includes('assigned') ? [`EXISTS(SELECT 1 FROM order_workshops w JOIN users u
         ON u.employee_id=w.responsible_employee_id WHERE w.order_id=o.order_id AND NOT w.delete_flag
-        AND u.is_active AND u.user_id=$1::bigint)` : 'FALSE';
+        AND u.is_active AND u.user_id=$1::bigint)`] : []),
+    ];
+    const allowed = parts.length === 0 ? 'FALSE' : parts.length === 1 ? parts[0] : `(${parts.join(' OR ')})`;
     const owners = `SELECT o.order_id FROM orders o WHERE $1::bigint IS NOT NULL
       AND NOT o.delete_flag AND o.order_kind='production_order' AND ${allowed}`;
     const cardRows = (await tx.query<PublishedCard & { headVersion: string; headEpoch: string; headReceived: string; headAccepted: string|null }>(`WITH allowed AS (${owners})
@@ -61,7 +65,7 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
         AND ($6::boolean OR EXISTS(SELECT 1 FROM mdf_published_source_members m
           WHERE m.source_kind=p.source_kind AND m.source_id=p.source_id))
       ORDER BY p.source_created_at DESC,p.source_kind,p.source_id LIMIT 1001`,
-    [user.id,state.dateFrom,state.dateTo,query.focus?.kind ?? null,query.focus?.id ?? null,scope==='all'])).rows;
+    [user.id,state.dateFrom,state.dateTo,query.focus?.kind ?? null,query.focus?.id ?? null,scope.includes('all')])).rows;
     checkLimit(cardRows,1000);
     const cards: PublishedCard[] = cardRows.map(({ headVersion,headEpoch,headReceived,headAccepted,...card }) => ({ ...card,
       commandToken: headReceived === card.receivedRevision && headAccepted === headReceived && card.issues.length === 0
@@ -71,8 +75,8 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
       JOIN unnest($1::text[],$2::text[]) s(kind,id) ON m.source_kind=s.kind AND m.source_id=s.id
       ORDER BY m.source_kind,m.source_id,m.order_id,m.detail_id LIMIT 10001`,[cards.map(c => c.kind),cards.map(c => c.id)])).rows;
     checkLimit(members,10000);
-    const pendingJobs = await loadPending(tx,owners,user.id,state,query,scope==='all');
-    const trackedJobs = await loadTracked(tx,owners,user.id,query.jobIds ?? [],scope==='all');
+    const pendingJobs = await loadPending(tx,owners,user.id,state,query,scope.includes('all'));
+    const trackedJobs = await loadTracked(tx,owners,user.id,query.jobIds ?? [],scope.includes('all'));
     const selectedOwners = [...new Set([...members.map(m => m.orderId),...(query.orderIds ?? []),
       ...pendingJobs.flatMap(j => j.orderIds)])];
     const positions = (await tx.query<PublishedPosition>(`WITH allowed AS (${owners})

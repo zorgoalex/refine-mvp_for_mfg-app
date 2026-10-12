@@ -2,7 +2,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
-import type { PermissionName, UserRole } from '../../../permissions/permissions';
+import type { PermissionName } from '../../../permissions/permissions';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import type { GroupEntityLinksRepositoryPort } from '../entity-links/group-entity-links.repository';
 import { GROUP_ENTITY_REGISTRY } from '../entity-links/group-entity-registry';
@@ -34,7 +34,6 @@ export interface GroupBatchLinkServicePorts {
   database: DatabaseService;
 }
 
-const ALLOWED_BATCH_LINK_ROLES = new Set<UserRole>(['admin', 'top_manager']);
 
 export class GroupBatchLinkService {
   private readonly permissions: GroupBatchLinkPermissionsPort;
@@ -137,17 +136,18 @@ export class GroupBatchLinkService {
 
   private async authorize(command: DryRunGroupBatchLinkCommand): Promise<void> {
     this.requirePermission(command.currentUser, 'groups.manage_links'); // plain static → deferred (service-helper or decorate+guard)
-    if (!ALLOWED_BATCH_LINK_ROLES.has(command.currentUser.role)) {
+    // Formerly the role list admin/top_manager; now the permission granted to exactly those roles (0A.3). The denial
+    // keeps its own audit event; allowedRoles is no longer meaningful, the required permission is recorded instead.
+    if (!this.permissions.canUser(command.currentUser, 'groups.batch_link')) {
       try {
         await auditService.recordDenied(this.ports.database, buildBatchLinkRoleDeniedEvent({
           currentUser: command.currentUser,
           requestId: command.requestId ?? 'groups-command', // reuse existing groups fallback (group.repository.ts:758)
           groupId: command.groupId ?? null,
-          allowedRoles: [...ALLOWED_BATCH_LINK_ROLES],
         }));
       } catch { /* best-effort */ }
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
-        allowedRoles: [...ALLOWED_BATCH_LINK_ROLES],
+        requiredPermissions: ['groups.batch_link'],
       });
     }
 

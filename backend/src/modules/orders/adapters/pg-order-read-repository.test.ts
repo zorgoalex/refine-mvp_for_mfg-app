@@ -1,3 +1,5 @@
+import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
+import { scopeSetsFromPolicy } from '../../../permissions/policies/scope-sets';
 import { describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
@@ -114,6 +116,24 @@ describe('PgOrderReadRepository', () => {
       10,
       10,
     ]);
+  });
+
+  it('restricts list, search counts and the card to own orders for a manager with the «own» read scope (0A.4)', async () => {
+    const database = createDatabase();
+    const repository = new PgOrderReadRepository(database.service);
+    await repository.listOrders({
+      currentUser: ownScopedManager('42'),
+      query: { page: 1, pageSize: 10, sortBy: 'updatedAt', sortOrder: 'desc', search: 'client' },
+    });
+    for (const query of database.queries.filter((q) => q.text.includes('FROM orders o'))) {
+      expect(query.text).toMatch(/\(o\.created_by = \$\d+ OR o\.manager_id = \$\d+\)/);
+      expect(query.params).toContain(42);
+    }
+    const card = createDatabase();
+    await new PgOrderReadRepository(card.service).getOrderById({ currentUser: ownScopedManager('42'), orderId: 5 });
+    const header = card.queries[0];
+    expect(header.text).toContain("o.order_kind = 'production_order' AND (o.created_by = $2 OR o.manager_id = $2)");
+    expect(header.params).toEqual([5, 42]);
   });
 
   it('keeps the default list SQL free of trash-only select and join fragments', async () => {
@@ -1064,14 +1084,25 @@ function orderRow() {
   };
 }
 
+/**
+ * Manager permissions with unrestricted order reads: these tests check SQL shape, not read visibility (that has its
+ * own tests below with `ownScopedManager`).
+ */
 function currentUser(id: string): CurrentUser {
+  const sets = scopeSetsFromPolicy(ROLE_POLICIES.manager);
   return {
     id,
     username: 'manager',
     role: 'manager',
     roleId: 10,
     permissions: getPermissionsForRole('manager'),
+    policyScopeSets: { ...sets, orders: { ...sets.orders, view: ['all'] } },
   };
+}
+
+/** A manager with the real «own» read scope (access groups 0A.4). */
+function ownScopedManager(id: string): CurrentUser {
+  return { id, username: 'manager', role: 'manager', roleId: 10, permissions: getPermissionsForRole('manager') };
 }
 
 function mergeBaseDefaultListSql(): string {

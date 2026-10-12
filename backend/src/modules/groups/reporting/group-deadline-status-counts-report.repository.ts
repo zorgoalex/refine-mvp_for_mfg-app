@@ -1,3 +1,4 @@
+import { appendReferencedOrderVisibilitySql, deadlineOrderIdSql } from '../../../permissions/policies/order-read-visibility';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient } from '../../../database/database.types';
@@ -25,6 +26,10 @@ export function buildGroupDeadlineStatusCountsSql(query: GroupDeadlineStatusCoun
   const filter = query.predicateFilter;
   const groupIds = filter.mode === 'none' ? [] : filter.groupIds;
   const params: unknown[] = [groupIds, filter.mode];
+  // Read visibility (access groups 0A.4): deadlines of orders the reader may not see are not counted.
+  const visibility = query.viewer
+    ? appendReferencedOrderVisibilitySql(params, query.viewer, deadlineOrderIdSql('d'))
+    : 'TRUE';
 
   return {
     params,
@@ -98,6 +103,7 @@ WHERE
     ) = cardinality($1::uuid[])
     ELSE false
   END
+  AND ${visibility}
 GROUP BY d.status
 ORDER BY d.status ASC
 `,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { staticRawAuthorizationSnapshot } from '../../../permissions/testing/static-authorization-snapshot';
 import type { DatabaseService } from '../../../database/database.service';
 import { PgUserIdentityRepository, type IdentityActor } from './pg-user-identity-repository';
 
@@ -704,6 +705,60 @@ describe('PgUserIdentityRepository administrator controls', () => {
   });
 });
 
+describe('PgUserIdentityRepository invitation authority (access groups 0A.4)', () => {
+  it('revokes and refuses an invitation whose creator lost authority over the target', async () => {
+    const database = createTransactionalDatabase([
+      {
+        rows: [{
+          target_user_id: '42',
+          created_by_user_id: '7',
+          expires_at: '2099-07-26T20:00:00.000Z',
+          consumed_at: null,
+          revoked_at: null,
+          is_active: true,
+          actor_username: 'admin',
+          actor_role_id: 1,
+        }],
+      },
+    ], { creatorRoleId: 100 });
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+
+    await expect(repository.consumeInvitationAndLinkWithAudit({
+      invitationId: '02bed022-f183-487b-8e2f-4603665a2add',
+      provider: 'workos',
+      providerUserId: 'sub-late',
+      emailAtLink: 'late@example.com',
+      emailVerified: true,
+    })).resolves.toEqual({ status: 'invitation_invalid' });
+    // Locked first, then decided on the fresh creator: no identity is linked, the invitation is revoked and audited.
+    expect(database.authQueries[0].text).toContain('FROM permissions_state WHERE id = true FOR SHARE');
+    expect(database.queries.some((q) => q.text.includes('INSERT INTO user_identities'))).toBe(false);
+    expect(database.queries.some((q) => q.text.includes('SET revoked_at = now() WHERE invitation_id'))).toBe(true);
+    const audit = database.queries.find((q) => q.text.includes('INSERT INTO audit_log') && q.params.includes('auth.identity.invitation_revoked'));
+    expect(audit?.params).toContain('workos');
+    expect(JSON.stringify(audit?.params)).toContain('authorization_changed');
+    expect(JSON.stringify(audit?.params)).toContain('missing_permission');
+  });
+
+  it('decides an invitation inside its transaction on fresh authorization', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ is_active: true }] },
+    ], { creatorRoleId: 100 });
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+
+    await expect(repository.createLinkInvitationWithAudit({
+      invitationId: '02bed022-f183-487b-8e2f-4603665a2add',
+      tokenHash: 'hash',
+      expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+      targetUserId: '42',
+      actor: { userId: '7', username: 'admin', roleId: 1 },
+      actorSessionId: 'session-1',
+    })).resolves.toEqual({ status: 'access_denied', reason: 'missing_permission' });
+    expect(database.queries.some((q) => q.text.includes('INSERT INTO workos_link_invitations'))).toBe(false);
+  });
+});
+
 describe('PgUserIdentityRepository.isSessionActive', () => {
   it('requires an active, unexpired auth_sessions row', async () => {
     const database = createTransactionalDatabase([{ rows: [{ '?column?': 1 }] }]);
@@ -729,11 +784,27 @@ interface RecordedQuery {
   params: unknown[];
 }
 
-function createTransactionalDatabase(results: Array<{ rows: unknown[] }>) {
+function authorizationAnswer(text: string, params: unknown[], options: { creatorRoleId: number }) {
+  if (text.includes('FROM permissions_state')) return { rows: [{ version: 1 }] };
+  const snapshot = (id: unknown) => staticRawAuthorizationSnapshot({ userId: String(id), roleId: String(id) === '7' ? options.creatorRoleId : 100 });
+  if (text.includes('unnest($1::bigint[])')) return { rows: (params[0] as string[]).map((id) => ({ snapshot: snapshot(id) })) };
+  if (text.includes('user_authorization_snapshot')) return { rows: [{ snapshot: snapshot(params[0]) }] };
+  return null;
+}
+
+function createTransactionalDatabase(results: Array<{ rows: unknown[] }>, options = { creatorRoleId: 1 }) {
   const queries: RecordedQuery[] = [];
+  const authQueries: RecordedQuery[] = [];
   let resultIndex = 0;
 
   const query = async (text: string, params: unknown[] = []) => {
+    // Authorization reads of access groups 0A (lock, fresh snapshots) answer out of band: the invitation creator
+    // (user 7) is an admin, every other user a viewer — inside the creator's authority.
+    const authorization = authorizationAnswer(text, params, options);
+    if (authorization) {
+      authQueries.push({ text, params });
+      return authorization;
+    }
     queries.push({ text, params });
     const result = results[resultIndex] ?? { rows: [] };
     if (resultIndex < results.length) {
@@ -749,5 +820,5 @@ function createTransactionalDatabase(results: Array<{ rows: unknown[] }>) {
     },
   } as unknown as DatabaseService;
 
-  return { service, queries };
+  return { service, queries, authQueries };
 }

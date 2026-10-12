@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PgGroupNotificationRecipientRepository } from './group-notification-recipient.repository';
+import { fakeSnapshotRows } from '../../../permissions/testing/static-authorization-snapshot';
 
 describe('PgGroupNotificationRecipientRepository', () => {
   it('returns only current user participants for a group', async () => {
@@ -100,6 +101,10 @@ function fakeDatabase({
     queries: [] as Array<{ text: string; params: readonly unknown[] }>,
     async query<T>(text: string, params: readonly unknown[] = []) {
       this.queries.push({ text, params });
+      if (text.includes('user_authorization_snapshot')) {
+        const known = [...users, ...orderRows] as Array<{ user_id: string; role_id: number }>;
+        return { rows: fakeSnapshotRows(params, (id) => known.find((row) => String(row.user_id) === id)?.role_id) as T[] };
+      }
       if (text.includes('FROM public.group_participants')) return { rows: participants as T[] };
       if (text.includes('CROSS JOIN public.orders')) return { rows: orderRows as T[] };
       if (text.includes('FROM public.users u')) return { rows: users as T[] };

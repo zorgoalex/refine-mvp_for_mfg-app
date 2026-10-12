@@ -2631,6 +2631,25 @@ probe_file() {
       "SELECT (SELECT count(*) FROM permissions_catalog WHERE permission_name IN ('clients.onec_data.view','clients.onec_documents.view') AND is_active) = 2;" \
       "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'manager' AND rp.permission_name = 'clients.onec_data.view');" ;;
     # 247: expected daily silence of a 1C agent (column + format check).
+    # 248: access groups M1 — one-statement authorization snapshot, Hasura views, scope pairs, switch, user version.
+    248_authorization_snapshot*) probe_all \
+      "SELECT to_regprocedure('public.user_authorization_snapshot(bigint)') IS NOT NULL;" \
+      "SELECT to_regclass('public.user_effective_permissions') IS NOT NULL AND to_regclass('public.user_effective_scopes') IS NOT NULL;" \
+      "SELECT (SELECT count(*) FROM policy_scope_allowed_values) = 24;" \
+      "$(q_col permissions_state access_groups_enabled)" \
+      "$(q_col users row_version)" ;;
+    # 249: access groups 0A.3 — Bitrix24 request scope and group batch linking as permissions (catalog + role grants).
+    249_role_checks_to_permissions*) probe_all \
+      "SELECT (SELECT count(*) FROM permissions_catalog WHERE permission_name IN ('bitrix24.requests.view_all','bitrix24.requests.view_assigned','groups.batch_link') AND is_active) = 3;" \
+      "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'top_manager' AND rp.permission_name = 'groups.batch_link');" ;;
+    # 251: «Отправить в чат» from the calendar behind its own permission (top manager and above).
+    251_whatsapp_calendar_send_permission*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM permissions_catalog WHERE permission_name = 'whatsapp.calendar_send' AND is_active);" \
+      "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'top_manager' AND rp.permission_name = 'whatsapp.calendar_send');" \
+      "SELECT NOT EXISTS (SELECT 1 FROM whatsapp_broadcasts WHERE purpose = 'calendar' AND NOT (required_permissions @> ARRAY['whatsapp.calendar_send']));" ;;
+    # 252: superadmin gets groups.batch_link (user decision 2026-10-12).
+    252_superadmin_group_batch_link*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'superadmin' AND rp.permission_name = 'groups.batch_link' AND rp.is_enabled);" ;;
     247_onec_agent_expected_silence*) probe_all \
       "$(q_col onec_agents expected_silence_utc)" \
       "$(q_con_on onec_agents chk_onec_agents_expected_silence_utc)" ;;
@@ -2822,7 +2841,7 @@ verify_applied_effect() {
     193_onec_agent_foundation*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|245_onec_operator_role*|247_onec_agent_expected_silence*|244_client_onec_permissions*)
+    231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|245_onec_operator_role*|247_onec_agent_expected_silence*|244_client_onec_permissions*|248_authorization_snapshot*|249_role_checks_to_permissions*|251_whatsapp_calendar_send_permission*|252_superadmin_group_batch_link*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

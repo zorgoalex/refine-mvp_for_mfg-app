@@ -1,4 +1,4 @@
-import type { AuthorizationPolicyScopes } from '../../types/auth';
+import type { AuthorizationPolicyScopeSets, AuthorizationPolicyScopes } from '../../types/auth';
 
 export type UserRole =
   | 'superadmin'
@@ -44,6 +44,7 @@ export type PermissionName =
   | 'clients.analytics.view'
   | 'clients.onec_data.view'
   | 'clients.onec_documents.view'
+  | 'whatsapp.calendar_send'
   | 'vlm.use'
   | 'vlm.configure'
   | 'settings.view'
@@ -82,6 +83,8 @@ export interface BackendUserIdentity {
   permissions: PermissionName[];
   permissionsVersion: number;
   policyScopes: AuthorizationPolicyScopes;
+  /** Absent from older backends: readers fall back to `policyScopes`. */
+  policyScopeSets?: AuthorizationPolicyScopeSets;
 }
 
 export interface LoginRequest {

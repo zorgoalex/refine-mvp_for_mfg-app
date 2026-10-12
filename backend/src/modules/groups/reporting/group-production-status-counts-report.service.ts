@@ -33,7 +33,7 @@ export class GroupProductionStatusCountsReportService {
   ): Promise<GroupProductionStatusCountsReportResponseDto> {
     this.requirePermissions(command.currentUser, REQUIRED_REPORT_PERMISSIONS);
 
-    return this.ports.reports.listProductionStatusCounts(command.query);
+    return this.ports.reports.listProductionStatusCounts({ ...command.query, viewer: command.currentUser });
   }
 
   private requirePermissions(currentUser: CurrentUser, requiredPermissions: readonly PermissionName[]): void {

@@ -1,4 +1,5 @@
 import { Injectable, Optional } from '@nestjs/common';
+import { lockAuthorizationState } from './authorization-command-guard';
 import type { QueryResultRow } from 'pg';
 import { computeDiff } from '../common/audit/audit-diff';
 import { ApiError } from '../common/errors/api-error';
@@ -17,6 +18,12 @@ import {
   type UserRole,
 } from './permissions';
 import { ROLE_POLICIES, type RolePolicy, type Scope } from './policies/role-policies';
+import { scopeSetsFromPolicy } from './policies/scope-sets';
+import {
+  parseAuthorizationSnapshot,
+  type RawAuthorizationSnapshot,
+  type UserAuthorizationSnapshot,
+} from './user-authorization-snapshot';
 
 export const ROLE_POLICY_SCOPE_KEYS = [
   'orders.view',
@@ -105,6 +112,8 @@ export interface RoleAuthorizationSnapshot {
   scopes: RolePolicy;
   version: number;
 }
+
+export type { UserAuthorizationSnapshot } from './user-authorization-snapshot';
 
 export interface RoleMatrixRoleDto {
   roleId: number;
@@ -238,6 +247,36 @@ export class PermissionsService {
     }
   }
 
+  /**
+   * Effective authorization of a user (base role; access groups when enabled — migration 249). One SQL
+   * statement; takes no locks. Pass the caller's transaction client to read under the caller's locks.
+   * Returns null for an unknown user. Without a database: the static matrix of the given fallback role.
+   */
+  async loadUserAuthorization(
+    userId: string | number,
+    client?: DatabaseClient,
+  ): Promise<UserAuthorizationSnapshot | null> {
+    if (!this.database?.isConfigured) return null;
+    try {
+      if (!client) await this.seedDefaults();
+      const target = client ?? this.database;
+      const result = await target.query<{ snapshot: RawAuthorizationSnapshot | null }>(
+        'SELECT public.user_authorization_snapshot($1::bigint) AS snapshot',
+        [String(userId)],
+      );
+      const raw = result.rows[0]?.snapshot;
+      return raw ? parseAuthorizationSnapshot(raw) : null;
+    } catch (error) {
+      throw mapPermissionsRuntimeError(error);
+    }
+  }
+
+  /** Static fallback snapshot pieces (no database configured), for callers that keep their old path. */
+  staticAuthorizationForRole(role: UserRole): Pick<UserAuthorizationSnapshot, 'permissions' | 'scopes' | 'scopeSets' | 'version'> {
+    const scopes = cloneRolePolicy(ROLE_POLICIES[role]);
+    return { permissions: getPermissionsForRole(role), scopes, scopeSets: scopeSetsFromPolicy(scopes), version: 0 };
+  }
+
   async getAuthorizationVersion(client?: DatabaseClient): Promise<number> {
     if (!this.database?.isConfigured) {
       return 0;
@@ -271,6 +310,10 @@ export class PermissionsService {
   ): Promise<RolesMatrixDto> {
     this.requireMatrixMutationAccess(currentUser);
     return this.requireDatabase().transaction(async (tx) => {
+      // Global lock order of authorization commands (access groups plan §5.1): permissions_state first, then the
+      // seed under it. Seeding first would hold catalog rows while waiting for permissions_state — a cycle with a
+      // command that holds permissions_state and waits for a session whose holder seeds (R2).
+      await lockAuthorizationState(tx, 'update');
       await this.seedDefaults(tx);
       const before = await this.readMatrix(tx, { lockState: true });
       this.assertExpectedVersion(request.version, before.version);
@@ -299,6 +342,10 @@ export class PermissionsService {
   ): Promise<RolesMatrixDto> {
     this.requireMatrixMutationAccess(currentUser);
     return this.requireDatabase().transaction(async (tx) => {
+      // Global lock order of authorization commands (access groups plan §5.1): permissions_state first, then the
+      // seed under it. Seeding first would hold catalog rows while waiting for permissions_state — a cycle with a
+      // command that holds permissions_state and waits for a session whose holder seeds (R2).
+      await lockAuthorizationState(tx, 'update');
       await this.seedDefaults(tx);
       const before = await this.readMatrix(tx, { lockState: true });
       const role = before.roles.find((row) => row.roleId === roleId);
@@ -472,8 +519,23 @@ export class PermissionsService {
     }
   }
 
+  /**
+   * Static defaults into the matrix tables. Atomic and in the authorization lock order (access groups plan §5.1):
+   * permissions_state is locked first, then catalog and grants, and the version moves in the same transaction
+   * when new grants appear — a failure in between rolls everything back, so grants never land without the bump.
+   * With a client the caller's transaction is used (the roles matrix already holds the lock).
+   */
   async seedDefaults(client?: DatabaseClient): Promise<void> {
-    const target = client ?? this.requireDatabase();
+    if (client) {
+      await this.seedRows(client);
+      return;
+    }
+    await this.requireDatabase().transaction((tx) => this.seedRows(tx));
+  }
+
+  private async seedRows(target: DatabaseClient): Promise<void> {
+    await target.query('INSERT INTO permissions_state (id, version) VALUES (true, 1) ON CONFLICT (id) DO NOTHING');
+    await target.query('SELECT version FROM permissions_state WHERE id = true FOR UPDATE');
     const catalogRows = PERMISSIONS.map((permission, index) => ({
       permission,
       domain: permissionDomain(permission),
@@ -481,7 +543,10 @@ export class PermissionsService {
         'message_signals.view': 'Входящие сигналы: просмотр', 'message_signals.resolve': 'Входящие сигналы: разбор',
         'message_signals.technical': 'Входящие сигналы: диагностика', 'message_signals.manage_config': 'Обработка сообщений: настройка',
         'cad.technology': 'CAD: технологические настройки', 'cad.approve': 'CAD: одобрение исключений',
-        'clients.onec_data.view': 'Клиенты: данные контрагента 1С', 'clients.onec_documents.view': 'Клиенты: документы 1С' } as Partial<Record<PermissionName, string>>)[permission] ?? permission,
+        'clients.onec_data.view': 'Клиенты: данные контрагента 1С', 'clients.onec_documents.view': 'Клиенты: документы 1С',
+        'bitrix24.requests.view_all': 'Заявки Bitrix24: все', 'bitrix24.requests.view_assigned': 'Заявки Bitrix24: назначенные',
+        'groups.batch_link': 'Группы: пакетная привязка',
+        'whatsapp.calendar_send': 'WhatsApp: отправка из календаря' } as Partial<Record<PermissionName, string>>)[permission] ?? permission,
       description: null as string | null,
       sortOrder: index + 1,
       isDangerous: DANGEROUS_PERMISSIONS.has(permission),
@@ -535,15 +600,19 @@ export class PermissionsService {
         rolePermissionValues.push(`($${base + 1}, $${base + 2}, $${base + 3})`);
       }
     }
+    // Grants a role did not have before (a new permission of a newer backend): counted to invalidate tokens below.
+    let grantsAdded = 0;
     if (rolePermissionValues.length > 0) {
-      await target.query(
+      const inserted = await target.query<{ is_enabled: boolean } & QueryResultRow>(
         `
         INSERT INTO role_permissions (role_id, permission_name, is_enabled)
         VALUES ${rolePermissionValues.join(', ')}
         ON CONFLICT (role_id, permission_name) DO NOTHING
+        RETURNING is_enabled
         `,
         rolePermissionParams,
       );
+      grantsAdded += (inserted?.rows ?? []).filter((row) => row.is_enabled === true).length;
     }
 
     const scopeParams: unknown[] = [];
@@ -559,23 +628,23 @@ export class PermissionsService {
       }
     }
     if (scopeValues.length > 0) {
-      await target.query(
+      const insertedScopes = await target.query<{ scope_value: string } & QueryResultRow>(
         `
         INSERT INTO role_policy_scopes (role_id, scope_key, scope_value)
         VALUES ${scopeValues.join(', ')}
         ON CONFLICT (role_id, scope_key) DO NOTHING
+        RETURNING scope_value
         `,
         scopeParams,
       );
+      grantsAdded += (insertedScopes?.rows ?? []).filter((row) => row.scope_value !== 'none').length;
     }
 
-    await target.query(
-      `
-      INSERT INTO permissions_state (id, version)
-      VALUES (true, 1)
-      ON CONFLICT (id) DO NOTHING
-      `,
-    );
+    // New grants change effective authorization: tokens issued before them must refresh (access groups 0A.3 R1).
+    // Whether the backend or the migration that grants them came first, the version moves exactly when rows appear.
+    if (grantsAdded > 0) {
+      await target.query('UPDATE permissions_state SET version = version + 1, updated_at = now() WHERE id = true');
+    }
   }
 
   private requireDatabase(): DatabaseService {

@@ -18,6 +18,8 @@ export interface UserDto {
   isActive: boolean;
   createdAt: string;
   updatedAt?: string | null;
+  /** users.row_version: every command over the user increments it; send it back as expectedVersion. */
+  rowVersion: number;
 }
 
 export interface UserListResponseDto {
@@ -56,4 +58,6 @@ export interface ChangePasswordRequestDto {
 export interface ChangePasswordResponseDto {
   success: true;
   revokedSessions: number;
+  /** users.row_version after the change (absent in responses of an older backend). */
+  rowVersion?: number;
 }

@@ -9,6 +9,12 @@ export type BroadcastMessageState =
 
 /** Permissions a broadcast's content requires in stage A (the digest bundle). */
 export const BROADCAST_BASE_PERMISSIONS = ['whatsapp.manage', 'calendar.view', 'orders.view', 'orders.view_financials'] as const;
+/**
+ * «Отправить в чат» from the calendar: its own permission instead of whatsapp.manage, so a role may send the
+ * day without access to the broadcast settings. Checked on the command, stored on the run and checked again
+ * (run author and initiator) right before each delivery.
+ */
+export const CALENDAR_SEND_PERMISSIONS = ['whatsapp.calendar_send', 'calendar.view', 'orders.view', 'orders.view_financials'] as const;
 /** Upper bound of simultaneously enabled broadcasts (plan §6.2). */
 export const BROADCAST_MAX_ACTIVE = 20;
 export const BROADCAST_MAX_ORDER_OFFSET_DAYS = 14;
@@ -177,6 +183,15 @@ export interface CalendarSendState {
   /** Earliest start of the next calendar delivery, or null when it is allowed now. */
   nextAllowedAt: string | null;
   /** A calendar send is still queued or being delivered. */
+  activeRun: boolean;
+}
+
+/** What the calendar button needs and nothing of the settings: no group id, no caption, no author. */
+export interface CalendarSendAvailability {
+  /** A destination group is chosen in the settings. */
+  configured: boolean;
+  minIntervalMinutes: number;
+  nextAllowedAt: string | null;
   activeRun: boolean;
 }
 

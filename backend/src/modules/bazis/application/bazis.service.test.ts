@@ -53,6 +53,28 @@ describe('BazisService', () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
+  it('drops references to orders the reader may not read from both order fields (access groups 0A.4)', async () => {
+    const project = (ids: number[]) => ({
+      bazisProjectId: 1, linkedOrderIds: ids, linkedOrders: ids.map((orderId) => ({ orderId, orderName: `#${orderId}` })),
+    });
+    const repository = createRepository({
+      listProjects: async () => [project([5, 6]), project([6])] as never,
+      getProject: async () => project([5, 6]) as never,
+    });
+    // Only order 5 is the manager's own.
+    const auditDatabase = { query: async () => ({ rows: [{ order_id: 5 }], rowCount: 1 }) } as never;
+    const service = new BazisService({ repository, auditDatabase });
+    const [mixed, foreignOnly] = await service.listProjects(viewerUser(), {});
+    expect(mixed).toMatchObject({ linkedOrderIds: [5], linkedOrders: [{ orderId: 5 }] });
+    expect(foreignOnly).toMatchObject({ linkedOrderIds: [], linkedOrders: [] });
+    expect(await service.getProject(viewerUser(), 1)).toMatchObject({ linkedOrderIds: [5], linkedOrders: [{ orderId: 5 }] });
+
+    // An unrestricted reader sees both, without a visibility query.
+    const unrestricted = new BazisService({ repository, auditDatabase: { query: async () => { throw new Error('no query'); } } as never });
+    const top = { ...viewerUser(), role: 'top_manager', roleId: 15 } as CurrentUser;
+    expect((await unrestricted.listProjects(top, {}))[0]).toMatchObject({ linkedOrderIds: [5, 6] });
+  });
+
   it('rejects importXml without bazis.manage and does not call the repository', async () => {
     const repository = createRepository();
     const service = new BazisService({ repository });

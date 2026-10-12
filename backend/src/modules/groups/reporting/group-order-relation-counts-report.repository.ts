@@ -31,6 +31,7 @@ export class PgGroupOrderRelationCountsReportRepository implements GroupOrderRel
     const params: unknown[] = [];
     const predicate = appendGroupReportPredicate({
       params,
+      viewer: query.viewer,
       orderIdExpression: 'o.order_id',
       filter: query.predicateFilter,
     });

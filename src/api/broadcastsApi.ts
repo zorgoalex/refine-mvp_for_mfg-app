@@ -2,6 +2,7 @@ import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import type {
   BroadcastCatalog,
+  CalendarSendAvailability,
   CalendarSendEnvelope,
   CalendarSendRunInput,
   CalendarSendUpdateInput,
@@ -47,6 +48,7 @@ export const broadcastsApi = {
   calendarSendSettings: () => httpClient.get<CalendarSendEnvelope>(routes.calendarSend),
   updateCalendarSendSettings: (body: CalendarSendUpdateInput) =>
     httpClient.put<CalendarSendEnvelope>(routes.calendarSend, body),
+  calendarSendAvailability: () => httpClient.get<CalendarSendAvailability>(routes.calendarSendAvailability),
   calendarSend: (body: CalendarSendRunInput) =>
     httpClient.post<BroadcastRunDetail>(routes.calendarSendRuns, body),
   retry: (runId: string, body: BroadcastRetryInput) =>

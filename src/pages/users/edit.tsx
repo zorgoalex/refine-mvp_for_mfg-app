@@ -14,7 +14,9 @@ import {
   Select,
 } from "antd";
 import { authStorage } from "../../utils/auth";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { createActionKeyStore } from "../../api/actionIdempotency";
+import { advanceOwnVersion, formRowVersion } from "./userFormVersion";
 import { usersApi } from "../../api/usersApi";
 import { legacyApiRoutes } from "../../api/legacyApiRoutes";
 import { featureFlags } from "../../config/featureFlags";
@@ -53,6 +55,13 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
 
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordForm] = Form.useForm();
+  // One Idempotency-Key per action, repeated while the same request is retried (lost response, network error).
+  const saveKeys = useRef(createActionKeyStore()).current;
+  const passwordKeys = useRef(createActionKeyStore()).current;
+  // Row version advanced by this form's own confirmed commands (see userFormVersion): the next command compares with
+  // it without reloading the form, which would drop unsaved fields.
+  const [ownRowVersion, setOwnRowVersion] = useState<number | undefined>(undefined);
+  const currentVersion = () => formRowVersion(queryResult?.data?.data?.row_version, ownRowVersion);
 
   const userId = queryResult?.data?.data?.user_id ?? queryResult?.data?.data?.id;
   // «Оператор интеграции 1С» назначается только при создании: у такой учётки роль не меняется, другим не предлагается.
@@ -63,10 +72,16 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
     setPasswordLoading(true);
     try {
       if (featureFlags.useBackendUsers) {
-        await usersApi.changePassword(Number(userId), {
+        const expectedVersion = currentVersion();
+        const request = {
           newPassword: values.new_password,
           revokeExistingSessions: true,
-        });
+          ...(typeof expectedVersion === 'number' ? { expectedVersion } : {}),
+        };
+        const key = passwordKeys.keyFor(request);
+        const response = await usersApi.changePassword(Number(userId), request, key);
+        passwordKeys.succeeded(key);
+        setOwnRowVersion((own) => advanceOwnVersion(own, expectedVersion, response.rowVersion));
 
         message.success('Пароль успешно изменён');
         passwordForm.resetFields();
@@ -112,7 +127,12 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
   // Кастомный onFinish для преобразования role → role_id
   const handleFinish = (values: any) => {
     if (featureFlags.useBackendUsers) {
-      usersApi.update(Number(userId), mapBackendUpdateUserRequest(values)).then(() => {
+      const expectedVersion = currentVersion();
+      const request = mapBackendUpdateUserRequest(values, expectedVersion);
+      const key = saveKeys.keyFor(request);
+      usersApi.update(Number(userId), request, key).then((response) => {
+        saveKeys.succeeded(key);
+        setOwnRowVersion((own) => advanceOwnVersion(own, expectedVersion, response.user.rowVersion));
         message.success('Данные пользователя обновлены');
       }).catch((error) => {
         console.error('Update user error:', error);

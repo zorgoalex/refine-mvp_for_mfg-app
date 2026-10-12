@@ -36,6 +36,7 @@ export class GroupOverviewService {
 
     return this.ports.overviews.getOverview({
       groupId: command.groupId,
+      viewer: command.currentUser,
       query: command.query,
       visibleEntityTypes: Object.entries(GROUP_ENTITY_REGISTRY)
         .filter(([, entry]) => this.permissions.canUser(command.currentUser, entry.requiredPermission, command.requestId))

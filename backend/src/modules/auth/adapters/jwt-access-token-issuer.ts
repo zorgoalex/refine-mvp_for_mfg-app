@@ -4,6 +4,7 @@ import type { BackendEnv } from '../../../config/env.validation';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName, UserRole } from '../../../permissions/permissions';
 import type { RolePolicy } from '../../../permissions/policies/role-policies';
+import type { RolePolicyScopeSets } from '../../../permissions/policies/scope-sets';
 import type { AccessTokenIssuerPort, IssuedAccessToken } from '../auth.types';
 
 export interface AccessTokenPayload {
@@ -15,6 +16,8 @@ export interface AccessTokenPayload {
   roleId: number;
   permissions: PermissionName[];
   policyScopes?: RolePolicy;
+  /** Scopes as sets (access groups); tokens of older backends lack it — readers fall back to policyScopes. */
+  policyScopeSets?: RolePolicyScopeSets;
   permissionsVersion?: number;
   sessionId?: string;
   tokenType: 'access';
@@ -56,6 +59,7 @@ export class JwtAccessTokenIssuer implements AccessTokenIssuerPort {
       roleId: user.roleId,
       permissions: [...user.permissions],
       policyScopes: user.policyScopes,
+      ...(user.policyScopeSets ? { policyScopeSets: user.policyScopeSets } : {}),
       permissionsVersion: user.permissionsVersion,
       sessionId: user.sessionId,
       tokenType: 'access',
@@ -101,6 +105,7 @@ export class JwtAccessTokenIssuer implements AccessTokenIssuerPort {
           roleId: payload.roleId,
           permissions: payload.permissions,
           policyScopes: payload.policyScopes,
+          ...(payload.policyScopeSets ? { policyScopeSets: payload.policyScopeSets } : {}),
           permissionsVersion: payload.permissionsVersion,
           sessionId: payload.sessionId,
         },

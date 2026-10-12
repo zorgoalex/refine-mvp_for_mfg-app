@@ -1,4 +1,7 @@
 import { ApiError } from '../../../common/errors/api-error';
+import type { DatabaseClient } from '../../../database/database.types';
+import type { CurrentUser } from '../../../permissions/current-user';
+import { appendReferencedOrderVisibilitySql, assertOrderReadable, deadlineOrderIdSql } from '../../../permissions/policies/order-read-visibility';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import type { PermissionName } from '../../../permissions/permissions';
 import { calculateDeadlineTiming } from '../domain/deadline-calculator';
@@ -29,6 +32,8 @@ import {
 export interface DeadlineQueryServicePorts {
   repository: DeadlineRepositoryPort;
   permissions?: PermissionsService;
+  /** For order read visibility of per-order reads (access groups 0A.4). */
+  database?: DatabaseClient;
 }
 
 export class DeadlineQueryService {
@@ -60,17 +65,23 @@ export class DeadlineQueryService {
     if (!deadline) {
       throw new DeadlineNotFoundError(command.deadlineId);
     }
+    // A deadline of an order (directly or through its workshop) outside the user's read visibility does not exist for him.
+    if (!(await this.deadlineReadable(command, command.deadlineId))) {
+      throw new DeadlineNotFoundError(command.deadlineId);
+    }
 
     return deadline;
   }
 
   async listOrderDeadlines(command: ListOrderDeadlinesCommand) {
     this.requirePermission(command, 'deadlines.view');
+    await this.assertOrderReadable(command, command.orderId);
     return { data: await this.ports.repository.listOrderDeadlines(command.orderId) };
   }
 
   async listOrderDeadlineEvents(command: ListOrderDeadlineEventsCommand) {
     this.requirePermission(command, 'deadlines.audit.view');
+    await this.assertOrderReadable(command, command.orderId);
     return { data: await this.ports.repository.listOrderDeadlineEvents(command.orderId) };
   }
 
@@ -79,9 +90,24 @@ export class DeadlineQueryService {
     now: string = new Date().toISOString(),
   ): Promise<OrderDeadlineSummaryDto> {
     this.requirePermission(command, 'deadlines.view');
+    await this.assertOrderReadable(command, command.orderId);
     const deadlines = await this.ports.repository.listOrderDeadlines(command.orderId);
 
     return buildOrderDeadlineSummary(command.orderId, deadlines, now);
+  }
+
+  private async deadlineReadable(command: { currentUser: CurrentUser }, deadlineId: string): Promise<boolean> {
+    if (!this.ports.database) return true;
+    const params: unknown[] = [deadlineId];
+    const visibility = appendReferencedOrderVisibilitySql(params, command.currentUser, deadlineOrderIdSql('d'));
+    if (visibility === 'TRUE') return true;
+    const result = await this.ports.database.query(
+      `SELECT 1 FROM deadline_instances d WHERE d.deadline_id = $1 AND ${visibility}`, params);
+    return (result.rowCount ?? result.rows.length) > 0;
+  }
+
+  private async assertOrderReadable(command: { currentUser: CurrentUser }, orderId: number): Promise<void> {
+    if (this.ports.database) await assertOrderReadable(this.ports.database, command.currentUser, orderId);
   }
 
   async listPolicies(command: ListDeadlinePoliciesCommand) {
@@ -96,6 +122,7 @@ export class DeadlineQueryService {
 
   async listOrderEffectiveRules(command: ListOrderEffectiveDeadlineRulesCommand) {
     this.requireAnyPermission(command, ['deadlines.actions.manage', 'deadlines.manage_order_overrides']);
+    await this.assertOrderReadable(command, command.orderId);
 
     const [policies, actionRules, overrides] = await Promise.all([
       this.ports.repository.listPolicies(),
@@ -133,6 +160,8 @@ export class DeadlineQueryService {
 
   async previewOrderActionRules(command: PreviewOrderDeadlineActionRulesCommand) {
     this.requirePermission(command, 'deadlines.view');
+    // A read of the order's deadline state despite POST: a foreign order is not found (access groups 0A.4, R1).
+    await this.assertOrderReadable(command, command.orderId);
 
     const [deadline, overrides, orderContext] = await Promise.all([
       command.dto.deadlineId

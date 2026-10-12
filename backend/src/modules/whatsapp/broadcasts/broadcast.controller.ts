@@ -10,10 +10,12 @@ import {
   parseBroadcastUpdate, parseBroadcastVersion, parseCalendarSendRun, parseCalendarSendUpdate, parseDeliverySeq, parseRunId,
 } from './broadcast.dto';
 import { BroadcastService } from './broadcast.service';
-import { BROADCAST_BASE_PERMISSIONS } from './broadcast.types';
+import { BROADCAST_BASE_PERMISSIONS, CALENDAR_SEND_PERMISSIONS } from './broadcast.types';
 
 // Stage A content needs exactly the digest bundle (plan §4.3); every read and command checks it.
 const GATES = BROADCAST_BASE_PERMISSIONS;
+// The calendar command and the read its button needs; the calendar send settings stay behind GATES.
+const CALENDAR_GATES = CALENDAR_SEND_PERMISSIONS;
 
 @ApiTags('WhatsApp')
 @ApiBearerAuth('bearerAuth')
@@ -61,8 +63,14 @@ export class BroadcastController {
     return this.service.updateCalendarSend(parseCalendarSendUpdate(body), user(request), requestId(request));
   }
 
+  @ApiOperation({ summary: 'Whether «Отправить в чат» can be used from the calendar now (no settings content)' })
+  @Get('calendar-send/availability') @RequirePermissions(CALENDAR_GATES)
+  calendarSendAvailability(@Req() request: RequestWithCurrentUser) {
+    return this.service.calendarSendAvailability(user(request), requestId(request));
+  }
+
   @ApiOperation({ summary: 'Queue the order cards of one calendar day for the configured chat (idempotent)' })
-  @Post('calendar-send/runs') @HttpCode(202) @RequirePermissions(GATES)
+  @Post('calendar-send/runs') @HttpCode(202) @RequirePermissions(CALENDAR_GATES)
   createCalendarRun(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
     return this.service.createCalendarRun(parseCalendarSendRun(body), user(request), requestId(request));
   }

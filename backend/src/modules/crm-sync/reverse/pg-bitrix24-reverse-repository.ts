@@ -1,3 +1,4 @@
+import { assertOrderReadable } from '../../../permissions/policies/order-read-visibility';
 import { createHash, randomUUID } from 'node:crypto';
 import { resolveFilmReferencesForWrite } from '../../orders/adapters/pg-film-reference-resolver';
 import { safeBitrixError } from '../../audit/application/bitrix-audit-sanitization';
@@ -139,6 +140,11 @@ export class PgBitrix24ReverseRepository {
     private readonly portalDomain = 'mebelkz.bitrix24.kz',
     private readonly stageObserver?: import('../stages/stage-repository').StageRepository,
   ) {}
+
+  /** 404 for an order outside the reader's order read visibility (access groups 0A.4). */
+  assertOrderReadable(orderId: number, reader: CurrentUser): Promise<void> {
+    return assertOrderReadable(this.db, reader, orderId);
+  }
 
   async assertReverseSyncReady(actorUserId: number): Promise<void> {
     const result = await this.db.query(

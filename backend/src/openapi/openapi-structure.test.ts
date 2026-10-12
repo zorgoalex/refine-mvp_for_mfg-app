@@ -73,7 +73,6 @@ describe('OpenAPI document structure', () => {
       ['/api/v1/whatsapp/broadcast-runs/{runId}/retry', 'post'],
       ['/api/v1/whatsapp/calendar-send', 'get'],
       ['/api/v1/whatsapp/calendar-send', 'put'],
-      ['/api/v1/whatsapp/calendar-send/runs', 'post'],
     ] as const;
 
     for (const [path, method] of broadcastPaths) {
@@ -90,7 +89,15 @@ describe('OpenAPI document structure', () => {
     expect(contract.paths['/api/v1/whatsapp/broadcast-runs/{runId}/messages/{seq}/image'].get.responses).toHaveProperty('410');
     expect(contract.paths['/api/v1/whatsapp/broadcast-runs/{runId}/retry'].post.requestBody.content['application/json'].schema.$ref).toBe('#/components/schemas/WhatsAppBroadcastRetryRequest');
     expect(contract.paths['/api/v1/whatsapp/broadcasts/legacy-digest-runs'].get.responses['200'].content['application/json'].schema.$ref).toBe('#/components/schemas/WhatsAppDailyDigestRunList');
-    // «Отправить в чат» from the calendar: closed request schemas and the frequency threshold.
+    // «Отправить в чат» from the calendar: its own permission for the command and the button read; the settings keep whatsapp.manage.
+    const calendarPermissions = ['whatsapp.calendar_send', 'calendar.view', 'orders.view', 'orders.view_financials'];
+    for (const [path, method] of [['/api/v1/whatsapp/calendar-send/runs', 'post'], ['/api/v1/whatsapp/calendar-send/availability', 'get']] as const) {
+      expect(contract.paths[path][method].security).toEqual([{ bearerAuth: [] }]);
+      expect(contract.paths[path][method]['x-permissions']).toEqual(calendarPermissions);
+    }
+    expect(Object.keys(contract.components.schemas.WhatsAppCalendarSendAvailability.properties).sort())
+      .toEqual(['activeRun', 'configured', 'minIntervalMinutes', 'nextAllowedAt']);
+    // Closed request schemas and the frequency threshold.
     const calendar = contract.paths['/api/v1/whatsapp/calendar-send/runs'].post;
     expect(calendar.responses).toHaveProperty('202');
     expect(calendar.responses['409'].description).toContain('BROADCAST_CALENDAR_COOLDOWN');

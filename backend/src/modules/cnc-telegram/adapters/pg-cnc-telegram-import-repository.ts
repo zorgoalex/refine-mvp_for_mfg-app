@@ -6,7 +6,7 @@ import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { getPermissionsForRole, mapRoleIdToRole, type UserRole } from '../../../permissions/permissions';
+import { mapRoleIdToRole, type UserRole } from '../../../permissions/permissions';
 import { assertCurrentWorkerSessionInTransaction } from './cnc-telegram-worker-session-fencing';
 import type { CncTelegramWorkerSessionLeaseContext } from '../application/cnc-telegram-worker-session.types';
 import type { CncTelegramImportRepositoryPort } from '../application/cnc-telegram-import.types';
@@ -27,6 +27,7 @@ import type {
 import type { CncTelegramManualSvgUploadDto, CncTelegramManualSvgUploadResponseDto, CncTelegramStructuredIngestDto } from '../dto/cnc-telegram.dto';
 import type { ManualSvgUploadCommand } from '../application/cnc-telegram.types';
 import { ensureSvgCutJobDisplayNumberAvailable } from './pg-cnc-telegram-repository';
+import { parseAuthorizationSnapshot, type RawAuthorizationSnapshot } from '../../../permissions/user-authorization-snapshot';
 
 type Row = QueryResultRow;
 
@@ -550,7 +551,13 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
     const result = await tx.query<Row>('SELECT u.user_id,u.username,u.role_id,r.role_code FROM users u JOIN roles r ON r.role_id=u.role_id WHERE u.user_id=$1', [userId]);
     const row = requiredRow(result.rows[0], 'requester actor');
     const role = mapRoleIdToRole(number(row, 'role_id')) ?? safeRole(text(row, 'role_code'));
-    return { id: text(row, 'user_id'), username: text(row, 'username'), role, roleId: number(row, 'role_id'), permissions: getPermissionsForRole(role) };
+    // Effective grants from the same snapshot as the token (not the static role matrix), read in this tx.
+    const result2 = await tx.query<{ snapshot: RawAuthorizationSnapshot | null }>(
+      'SELECT public.user_authorization_snapshot($1::bigint) AS snapshot', [userId]);
+    const snapshot = result2.rows[0]?.snapshot ? parseAuthorizationSnapshot(result2.rows[0].snapshot) : null;
+    return { id: text(row, 'user_id'), username: text(row, 'username'), role, roleId: number(row, 'role_id'),
+      permissions: snapshot?.permissions ?? [],
+      ...(snapshot ? { policyScopes: snapshot.scopes, policyScopeSets: snapshot.scopeSets, permissionsVersion: snapshot.version } : {}) };
   }
 
   private async refreshMatches(tx: TransactionClient, candidate: Row): Promise<Row> {

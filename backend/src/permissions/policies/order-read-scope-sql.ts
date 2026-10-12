@@ -1,5 +1,20 @@
 import type { CurrentUser } from '../current-user';
-import { ROLE_POLICIES, type Scope } from './role-policies';
+import type { Scope } from './role-policies';
+import { policyScopeSetsForUser } from './scope';
+import { normalizeScopeSet, type ScopeGrant } from './scope-sets';
+
+/** One scope value (legacy callers) or a scope set (access groups): both give the same SQL for one value. */
+export type ScopeInput = Scope | readonly ScopeGrant[];
+
+function toScopeSet(scope: ScopeInput): ScopeGrant[] {
+  return normalizeScopeSet(typeof scope === 'string' ? [scope] : scope);
+}
+
+/** True when the predicate needs the actor parameter (own and/or assigned granted, without all). */
+export function scopeNeedsActor(scope: ScopeInput): boolean {
+  const set = toScopeSet(scope);
+  return !set.includes('all') && (set.includes('own') || set.includes('assigned'));
+}
 
 export interface OrderReadScopeSql {
   predicate: string;
@@ -13,8 +28,9 @@ export function appendOrderReadScopeSql(
   currentUser: CurrentUser,
   orderAlias = 'o',
 ): OrderReadScopeSql {
-  const scope = ROLE_POLICIES[currentUser.role].orders.view;
-  const actorIndex = scope === 'own' || scope === 'assigned'
+  // The user's effective scope set (token), not the static role matrix (access groups stage 0A).
+  const scope = policyScopeSetsForUser(currentUser).orders.view;
+  const actorIndex = scopeNeedsActor(scope)
     ? params.push(normalizeActorUserId(currentUser.id))
     : null;
   const assignedSql = actorIndex === null ? 'FALSE' : orderAssignmentExistsSql(orderAlias, actorIndex);
@@ -26,23 +42,22 @@ export function appendOrderReadScopeSql(
 }
 
 export function buildOrderReadScopePredicate(
-  scope: Scope,
+  scope: ScopeInput,
   actorIndex: number | null,
   assignedSql: string,
   orderAlias = 'o',
 ): string {
-  switch (scope) {
-    case 'all':
-      return 'TRUE';
-    case 'own': {
-      const requiredActorIndex = requireActorIndex(actorIndex);
-      return `(${orderAlias}.created_by = $${requiredActorIndex} OR ${orderAlias}.manager_id = $${requiredActorIndex})`;
-    }
-    case 'assigned':
-      return assignedSql;
-    case 'none':
-      return 'FALSE';
+  const set = toScopeSet(scope);
+  if (set.includes('all')) return 'TRUE';
+  const parts: string[] = [];
+  if (set.includes('own')) {
+    const requiredActorIndex = requireActorIndex(actorIndex);
+    parts.push(`(${orderAlias}.created_by = $${requiredActorIndex} OR ${orderAlias}.manager_id = $${requiredActorIndex})`);
   }
+  if (set.includes('assigned')) parts.push(assignedSql);
+  if (parts.length === 0) return 'FALSE';
+  // own ∪ assigned (from different sources) = OR of both predicates; one value = the same SQL as before.
+  return parts.length === 1 ? parts[0] : `(${parts.join(' OR ')})`;
 }
 
 export function orderAssignmentExistsSql(orderAlias: string, actorIndex: number): string {
@@ -67,4 +82,39 @@ export function normalizeActorUserId(value: string): number {
 function requireActorIndex(actorIndex: number | null): number {
   if (actorIndex === null) throw new Error('Actor SQL parameter is required');
   return actorIndex;
+}
+
+/**
+ * Which orders a user may READ (access groups 0A.4; user decision 2026-10-11): `own` restricts reads to orders the
+ * user created or manages; `assigned` does NOT restrict reads yet (decision: only the manager's `own`), `all` never
+ * does. Scope sets come from the user's effective authorization (token / snapshot), not the static matrix.
+ * Writes, exports and the reads that already applied `assigned` keep their own rules.
+ */
+export function orderReadVisibilityIsRestricted(currentUser: CurrentUser): boolean {
+  const set = toScopeSet(policyScopeSetsForUser(currentUser).orders.view);
+  return !set.includes('all') && !set.includes('assigned');
+}
+
+/**
+ * SQL predicate of order read visibility on `alias` (`TRUE` when unrestricted, `FALSE` without any grant). Adds the
+ * actor parameter to `params` only when it is needed.
+ */
+export function appendOrderReadVisibilitySql(params: unknown[], currentUser: CurrentUser, orderAlias = 'o'): string {
+  if (!orderReadVisibilityIsRestricted(currentUser)) return 'TRUE';
+  const set = toScopeSet(policyScopeSetsForUser(currentUser).orders.view);
+  if (!set.includes('own')) return 'FALSE';
+  const actorIndex = params.push(normalizeActorUserId(currentUser.id));
+  return `(${orderAlias}.created_by = $${actorIndex} OR ${orderAlias}.manager_id = $${actorIndex})`;
+}
+
+/** In-memory twin of appendOrderReadVisibilitySql for an order already loaded. */
+export function canReadOrder(
+  currentUser: CurrentUser,
+  order: { createdByUserId?: string | number | null; managerUserId?: string | number | null },
+): boolean {
+  if (!orderReadVisibilityIsRestricted(currentUser)) return true;
+  const set = toScopeSet(policyScopeSetsForUser(currentUser).orders.view);
+  if (!set.includes('own')) return false;
+  const actor = String(normalizeActorUserId(currentUser.id));
+  return [order.createdByUserId, order.managerUserId].some((id) => id !== null && id !== undefined && String(id) === actor);
 }

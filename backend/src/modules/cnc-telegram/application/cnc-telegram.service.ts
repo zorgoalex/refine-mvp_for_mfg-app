@@ -1,3 +1,5 @@
+import type { DatabaseClient } from '../../../database/database.types';
+import { assertOrderReadable } from '../../../permissions/policies/order-read-visibility';
 import { ApiError } from '../../../common/errors/api-error';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import type {
@@ -28,6 +30,8 @@ export interface CncTelegramServicePorts {
   permissions?: PermissionsService;
   backgroundIngestEnabled?: boolean;
   manualSvgDestinationChatIds?: readonly string[];
+  /** For order read visibility of per-order reads (access groups 0A.4). */
+  database?: DatabaseClient;
 }
 
 export class CncTelegramService {
@@ -73,6 +77,9 @@ export class CncTelegramService {
         requiredPermissions: ['orders.view'],
       });
     }
+    // An order outside the reader's «own» scope is not found (access groups 0A.4); the CNC boards themselves are
+    // production tooling and stay as they are (user decision 2026-10-11: cutting stays shared).
+    if (this.ports.database) await assertOrderReadable(this.ports.database, command.currentUser, command.orderId);
     return this.ports.packets.listOrderCuttingSequences(command);
   }
 

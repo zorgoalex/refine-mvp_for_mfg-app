@@ -1,3 +1,4 @@
+import type { CurrentUser } from '../../../permissions/current-user';
 import { ApiError } from '../../../common/errors/api-error';
 import type { GroupReportFilter, GroupReportFilterMode } from './group-report-predicates';
 
@@ -33,6 +34,8 @@ type GroupOrderRelationCountsReportResponseFilter =
     };
 
 export interface GroupOrderRelationCountsReportQuery {
+  /** The reader, for order read visibility (access groups 0A.4); never part of the response. */
+  viewer?: CurrentUser;
   predicateFilter: GroupOrderRelationCountsReportPredicateFilter;
   responseFilter: GroupOrderRelationCountsReportResponseFilter;
 }

@@ -5,7 +5,9 @@ import { DatabaseService } from '../../../database/database.service';
 import { mapRoleIdToRole } from '../../../permissions/permissions';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { PermissionsService } from '../../../permissions/permissions.service';
-import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { accountEscalationViolations } from '../../../permissions/account-escalation';
+import { currentUserFromAuthorization } from '../../../permissions/current-user-from-authorization';
+import { policyScopeSetsForUser, rolePolicyForUser } from '../../../permissions/policies/scope';
 import { UserAccessPolicy } from '../../../permissions/policies/user-access.policy';
 import {
   InvalidCredentialsError,
@@ -485,6 +487,27 @@ export class WorkosAuthService {
       actor: this.toActor(command),
       actorSessionId: sessionId,
     });
+    if (outcome.status === 'access_denied') {
+      // Decided inside the invitation transaction (fresh authorization): recorded like the pre-check denial.
+      try {
+        await this.ports.deniedAudit.recordDenied(this.ports.database, {
+          event: 'auth.identity.invitation_create_denied',
+          entityType: 'user',
+          entityId: command.targetUserId,
+          actorUserId: command.currentUser.id,
+          actorUsername: command.currentUser.username,
+          actorRole: command.currentUser.role,
+          relatedUserId: Number(command.targetUserId),
+          requiredPermissions: [MANAGE_SSO_PERMISSION],
+          requestId: command.requestId ?? '',
+          source: 'workos',
+          reason: outcome.reason,
+          metadata: { mode: 'admin' },
+        });
+      } catch {
+        // best-effort: sink failure must not change the denial outcome
+      }
+    }
     const invitation = this.mapInvitationCreateOutcome(outcome);
     const invitationUrl = new URL('/auth/workos/invite', this.ports.frontendOrigin);
     invitationUrl.hash = new URLSearchParams({ token }).toString();
@@ -693,7 +716,18 @@ export class WorkosAuthService {
       ? await this.ports.database.query<{ role_id: number | string }>('SELECT role_id FROM users WHERE user_id = $1', [targetId])
       : { rows: [] };
     const targetRole = target.rows[0] ? mapRoleIdToRole(Number(target.rows[0].role_id)) : null;
-    return SSO_USER_POLICY.canManageSso(command.currentUser, targetRole);
+    const roleDenial = SSO_USER_POLICY.canManageSso(command.currentUser, targetRole);
+    if (roleDenial || !target.rows[0] || String(targetId) === String(command.currentUser.id)) return roleDenial;
+    // No escalation through another person's SSO identities (access groups 0A.4): the target may not have
+    // permissions or scopes the administrator lacks. External WorkOS effects cannot run in one DB transaction,
+    // so the check precedes the action (as the role boundary above does).
+    const [actor, subject] = await Promise.all([
+      this.ports.permissions.loadUserAuthorization(command.currentUser.id),
+      this.ports.permissions.loadUserAuthorization(targetId),
+    ]);
+    if (!actor || !subject) return 'role_hierarchy_denied';
+    const violations = accountEscalationViolations(actor, subject);
+    return violations.missingPermissions.length > 0 || violations.scopeKeys.length > 0 ? 'privilege_escalation_denied' : null;
   }
 
   private async requireManageSso(
@@ -805,6 +839,11 @@ export class WorkosAuthService {
         throw new UserInactiveError();
       case 'session_inactive':
         throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
+      case 'access_denied':
+        throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+          requiredPermissions: [MANAGE_SSO_PERMISSION],
+          reason: outcome.reason,
+        });
     }
   }
 
@@ -894,18 +933,10 @@ export class WorkosAuthService {
       );
     }
 
-    const authorization = await this.ports.permissions.loadRoleAuthorization(user.roleId);
-
-    return {
-      id: user.id,
-      username: user.username,
-      role,
-      roleId: user.roleId,
-      permissions: authorization.permissions,
-      policyScopes: authorization.scopes,
-      permissionsVersion: authorization.version,
-      sessionId,
-    };
+    // One-statement snapshot: role, grants, scopes and version together (access groups stage 0A).
+    const snapshot = await this.ports.permissions.loadUserAuthorization(user.id);
+    if (snapshot && !snapshot.role) throw new UnknownRoleError(snapshot.roleId);
+    return currentUserFromAuthorization(snapshot, { sessionId });
   }
 
   private toAuthResponse(user: CurrentUser, issued: { accessToken: string; expiresAt: Date }): AuthResponse {
@@ -920,6 +951,7 @@ export class WorkosAuthService {
         permissions: user.permissions,
         permissionsVersion: user.permissionsVersion ?? 0,
         policyScopes: rolePolicyForUser(user),
+        policyScopeSets: policyScopeSetsForUser(user),
       },
     };
   }

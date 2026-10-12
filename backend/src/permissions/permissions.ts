@@ -198,6 +198,17 @@ export const PERMISSIONS = [
   'clients.onec_data.view',
   /** «Документы 1С» of the matched counterparty in the client card (amounts also need orders.view_financials). */
   'clients.onec_documents.view',
+  // Access groups 0A.3: former role-name checks as permissions (appended: catalog order of the rest unchanged).
+  /** Bitrix24 requests: every request is visible (was superadmin/admin/top_manager). */
+  'bitrix24.requests.view_all',
+  /** Bitrix24 requests: only those assigned to the user (was manager/operator). */
+  'bitrix24.requests.view_assigned',
+  /** Batch linking of entities to a group (was the role list admin/top_manager). */
+  'groups.batch_link',
+
+  // «Отправить в чат» from the calendar day header (user decision 2026-10-11: top manager and above). Appended.
+  /** Queue the order cards of a calendar day for the configured chat; the settings stay behind whatsapp.manage. */
+  'whatsapp.calendar_send',
 ] as const;
 
 export type PermissionName = (typeof PERMISSIONS)[number];
@@ -222,6 +233,7 @@ const adminServicePermissions = ALL_PERMISSIONS.filter(
 );
 
 export const ROLE_PERMISSIONS = {
+  // Every permission, batch linking included (user decision 2026-10-12, migration 252; 0A.3 had kept it off).
   superadmin: ALL_PERMISSIONS,
 
   // Service application administrator: manages users, settings, references,
@@ -260,8 +272,10 @@ export const ROLE_PERMISSIONS = {
     'clients.analytics.view',
     'clients.onec_data.view',
     'clients.onec_documents.view',
+    'whatsapp.calendar_send',
 
     'bitrix24.requests.view',
+    'bitrix24.requests.view_all',
     'bitrix24.requests.update',
     'bitrix24.requests.convert',
     'bitrix24.payments.materialize',
@@ -324,6 +338,7 @@ export const ROLE_PERMISSIONS = {
 
     'groups.view',
     'groups.manage_links',
+    'groups.batch_link',
     'groups.view_history',
     'groups.members.view',
     'groups.participants.view',
@@ -361,6 +376,7 @@ export const ROLE_PERMISSIONS = {
     'clients.onec_documents.view',
 
     'bitrix24.requests.view',
+    'bitrix24.requests.view_assigned',
     'bitrix24.requests.update',
     'bitrix24.requests.convert',
     'bitrix24.payments.materialize',
@@ -429,6 +445,7 @@ export const ROLE_PERMISSIONS = {
     'clients.update',
 
     'bitrix24.requests.view',
+    'bitrix24.requests.view_assigned',
     'bitrix24.requests.update',
 
     'suppliers.view',

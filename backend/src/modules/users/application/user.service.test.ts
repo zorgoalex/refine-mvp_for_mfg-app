@@ -155,6 +155,87 @@ describe('UserService', () => {
     }
   });
 
+  it('hands the repository a recheck of the same policy and audits a denial decided in the transaction', async () => {
+    const recordDenied = vi.spyOn(auditService, 'recordDenied').mockResolvedValue(undefined as never);
+    try {
+      const target = userDto({ id: 10, role: 'viewer' });
+      let recheck: ((actor: CurrentUser, target: { id: string; role: CurrentUser['role'] } | null) => string | null) | undefined;
+      const service = new UserService({
+        users: createRepository({
+          async getUserById() { return target; },
+          async updateUser(command) {
+            recheck = command.recheck as typeof recheck;
+            // Under the lock the target turned out to rank above the actor: the repository refuses with the reason.
+            throw new ApiError(403, 'PERMISSION_DENIED', 'denied', { reason: 'role_hierarchy_denied' });
+          },
+        }),
+        database: stubDb,
+      });
+      await expect(service.update({ currentUser: currentUser('admin', 'admin-1'), userId: 10, requestId: 'req_lock', dto: { role: 'worker' } }))
+        .rejects.toMatchObject({ statusCode: 403 });
+      // The recheck is the update policy: an admin still may, a viewer may not.
+      expect(recheck!(currentUser('admin', 'admin-1'), { id: '10', role: 'viewer' })).toBeNull();
+      expect(recheck!(currentUser('viewer', 'admin-1'), { id: '10', role: 'viewer' })).toBe('missing_permission');
+      expect(recordDenied).toHaveBeenCalledTimes(1);
+      expect(recordDenied.mock.calls[0][1]).toMatchObject({ requestId: 'req_lock', reason: 'role_hierarchy_denied' });
+      expect(recheck!(currentUser('admin', 'admin-1'), { id: '10', role: 'superadmin' })).toBe('role_hierarchy_denied');
+    } finally {
+      recordDenied.mockRestore();
+    }
+  });
+
+  it('answers a completed repeat before the current policy: no target read, no denial audit (R2 #3)', async () => {
+    const recordDenied = vi.spyOn(auditService, 'recordDenied').mockResolvedValue(undefined as never);
+    try {
+      const stored = userDto({ id: 1, role: 'admin' });
+      const calls: string[] = [];
+      const service = new UserService({
+        users: createRepository({
+          async findCompletedReplay(name, command) {
+            calls.push(`replay:${name}:${command.idempotencyKey}`);
+            return command.idempotencyKey === 'k-done-0001' ? stored as never : null;
+          },
+          async getUserById() { calls.push('get'); return userDto({ id: 1, role: 'admin' }); },
+        }),
+        database: stubDb,
+      });
+      // The former superadmin demoted himself to admin; the response was lost. Today's policy would deny
+      // (an admin may not manage an equal role), but the repeat returns what the command already did.
+      await expect(service.update({
+        currentUser: currentUser('admin', '1'), userId: 1, idempotencyKey: 'k-done-0001', dto: { role: 'admin' },
+      })).resolves.toEqual(stored);
+      expect(calls).toEqual(['replay:users.update:k-done-0001']);
+      expect(recordDenied).not.toHaveBeenCalled();
+    } finally {
+      recordDenied.mockRestore();
+    }
+  });
+
+  it('with a key the decision is the transaction\'s: no pre-check that could race with a repeat (R3 #2)', async () => {
+    const recordDenied = vi.spyOn(auditService, 'recordDenied').mockResolvedValue(undefined as never);
+    try {
+      const stored = userDto({ id: 10, role: 'viewer', isActive: false });
+      const seen: string[] = [];
+      const service = new UserService({
+        users: createRepository({
+          // Not yet visible to the lookup (the first attempt was still committing)…
+          async findCompletedReplay() { return null; },
+          async getUserById() { seen.push('get'); return userDto({ id: 10, role: 'admin' }); },
+          // …the repository's serialized claim finds it completed and answers with the stored response.
+          async deactivateUser(command) { seen.push(`deactivate:${command.expectedTargetRole ?? '-'}:${typeof command.recheck}`); return stored; },
+        }),
+        database: stubDb,
+      });
+      // Today the target is an admin (promoted after K committed): a pre-check would deny an admin actor.
+      await expect(service.deactivate({ currentUser: currentUser('admin', 'admin-1'), userId: 10, idempotencyKey: 'k-race-0001' }))
+        .resolves.toEqual(stored);
+      expect(seen).toEqual(['deactivate:-:function']);
+      expect(recordDenied).not.toHaveBeenCalled();
+    } finally {
+      recordDenied.mockRestore();
+    }
+  });
+
   it('blocks self-deactivation through user policy', async () => {
     const service = new UserService({
       users: createRepository({
@@ -277,6 +358,9 @@ describe('UserService', () => {
 
 function createRepository(overrides: Partial<UserRepositoryPort> = {}): UserRepositoryPort {
   return {
+    async findCompletedReplay() {
+      return null;
+    },
     async listUsers() {
       throw new Error('listUsers should not be called');
     },
@@ -320,6 +404,7 @@ function userDto(overrides: Partial<UserDto> = {}): UserDto {
     permissions: getPermissionsForRole('manager'),
     isActive: true,
     createdAt: '2026-04-30T00:00:00.000Z',
+    rowVersion: 1,
     ...overrides,
   };
 }

@@ -1,8 +1,7 @@
 import type { QueryResultRow } from 'pg';
 import type { DatabaseClient } from '../../database/database.types';
-import type { CurrentUser } from '../current-user';
-import { ROLE_ID_TO_ROLE, ROLE_PERMISSIONS, type KnownRoleId, type UserRole } from '../permissions';
 import { OrderAccessPolicy } from '../policies/order-access.policy';
+import { loadEvaluationUsersWith } from '../user-authorization-snapshot';
 
 interface OrderVisibilityUserRow extends QueryResultRow {
   user_id: string | number;
@@ -14,20 +13,6 @@ interface OrderVisibilityUserRow extends QueryResultRow {
 }
 
 const orderAccessPolicy = new OrderAccessPolicy();
-
-/** Maps a (user_id, username, role_id) row to a CurrentUser, or null for unknown roles. */
-export function mapUserRow(row: { user_id: string | number; username: string | null; role_id: string | number }): CurrentUser | null {
-  const roleId = Number(row.role_id);
-  const role = ROLE_ID_TO_ROLE[roleId as KnownRoleId] as UserRole | undefined;
-  if (!role) return null;
-  return {
-    id: String(row.user_id),
-    username: row.username ?? String(row.user_id),
-    role,
-    roleId,
-    permissions: ROLE_PERMISSIONS[role],
-  };
-}
 
 /** Returns the subset of userIds (as string) that can base-view the given order. Reuses OrderAccessPolicy.canView. */
 export async function filterUserIdsByOrderVisibility(
@@ -45,9 +30,11 @@ export async function filterUserIdsByOrderVisibility(
     `,
     [userIds, orderId],
   );
+  // Effective authorization (same snapshot as the token), not the static role matrix.
+  const users = await loadEvaluationUsersWith(client, rows.rows.map((row) => row.user_id));
   const allowed = new Set<string>();
   for (const row of rows.rows) {
-    const currentUser = mapUserRow(row);
+    const currentUser = users.get(String(row.user_id)) ?? null;
     if (currentUser && orderAccessPolicy.canView(currentUser, {
       orderId: row.order_id,
       createdByUserId: nullableString(row.created_by),

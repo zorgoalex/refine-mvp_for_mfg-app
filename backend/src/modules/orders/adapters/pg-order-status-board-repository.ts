@@ -5,7 +5,8 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { Scope } from '../../../permissions/policies/role-policies';
-import { allowsScope, rolePolicyForUser } from '../../../permissions/policies/scope';
+import { buildOrderReadScopePredicate, scopeNeedsActor, type ScopeInput } from '../../../permissions/policies/order-read-scope-sql';
+import { allowsScopeSet, policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import type {
   GetOrderStatusBoardCommand,
   OrderStatusBoardQuery,
@@ -97,8 +98,9 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
       command.query.board === 'order'
         ? 'o.order_status_id::text'
         : `COALESCE(o.production_status_id::text, '${UNASSIGNED_COLUMN}')`;
-    const policy = rolePolicyForUser(command.currentUser);
-    if (command.query.board === 'production' && policy.productionTasks.view === 'none') {
+    // Scope sets of the token (access groups stage 0A); one value behaves exactly as before.
+    const policy = policyScopeSetsForUser(command.currentUser);
+    if (command.query.board === 'production' && policy.productionTasks.view.length === 0) {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра доски производства', {
         requiredPermissions: ['productionTasks.view'],
       });
@@ -108,9 +110,9 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
       : policy.orders.view;
     const needsAssignment =
       command.query.onlyMyOrders ||
-      readScope === 'assigned' ||
-      policy.productionTasks.update === 'assigned';
-    const needsActor = needsAssignment || readScope === 'own';
+      readScope.includes('assigned') ||
+      policy.productionTasks.update.includes('assigned');
+    const needsActor = needsAssignment || readScope.includes('own');
     const actorIndex = needsActor
       ? params.push(normalizeActorUserId(command.currentUser.id))
       : null;
@@ -373,28 +375,18 @@ function appendUserFilters(
 
 /** Shared by compact MDF owner summaries; same read boundary as production headers. */
 export function productionBoardReadScopeSql(user: CurrentUser, params: unknown[]): string {
-  const scope = rolePolicyForUser(user).productionTasks.view;
-  const actor = scope === 'own' || scope === 'assigned' ? params.push(normalizeActorUserId(user.id)) : null;
+  const scope = policyScopeSetsForUser(user).productionTasks.view;
+  const actor = scopeNeedsActor(scope) ? params.push(normalizeActorUserId(user.id)) : null;
   return buildReadScopePredicate(scope, actor, actor === null ? 'FALSE' : assignmentExistsSql(actor));
 }
 
 function buildReadScopePredicate(
-  scope: Scope,
+  scope: ScopeInput,
   actorIndex: number | null,
   assignedSql: string,
 ): string {
-  switch (scope) {
-    case 'all':
-      return 'TRUE';
-    case 'own': {
-      const requiredActorIndex = requireActorIndex(actorIndex);
-      return `(o.created_by = $${requiredActorIndex} OR o.manager_id = $${requiredActorIndex})`;
-    }
-    case 'assigned':
-      return assignedSql;
-    case 'none':
-      return 'FALSE';
-  }
+  // Same SQL as the shared order read scope builder (alias o); a scope set is an OR of its grants.
+  return buildOrderReadScopePredicate(scope, actorIndex, assignedSql, 'o');
 }
 
 function requireActorIndex(actorIndex: number | null): number {
@@ -676,7 +668,7 @@ function mapBoardCard(row: BoardRow, currentUser: CurrentUser): OrderStatusBoard
   const createdBy = nullableString(row.created_by);
   const managerUserId = nullableString(row.manager_id);
   const assigned = row.current_user_assigned === true;
-  const policy = rolePolicyForUser(currentUser);
+  const policy = policyScopeSetsForUser(currentUser);
   const scopedEntity = {
     createdByUserId: createdBy,
     managerUserId,
@@ -684,7 +676,7 @@ function mapBoardCard(row: BoardRow, currentUser: CurrentUser): OrderStatusBoard
   };
   const canUpdateOrder =
     currentUser.permissions.includes('orders.update') &&
-    allowsScope(currentUser, policy.orders.update, scopedEntity);
+    allowsScopeSet(currentUser, policy.orders.update, scopedEntity);
   const canChangeOrderStatus =
     currentUser.permissions.includes('orders.change_status') &&
     (canUpdateOrder || currentUser.role === 'packer');
@@ -692,7 +684,7 @@ function mapBoardCard(row: BoardRow, currentUser: CurrentUser): OrderStatusBoard
     currentUser.permissions.includes('orders.change_production_status') &&
     (
       canUpdateOrder ||
-      (policy.productionTasks.update === 'assigned' && assigned)
+      (policy.productionTasks.update.includes('assigned') && assigned)
     );
   const finalAmount = toNullableNumber(row.final_amount);
   const paidAmount = toNullableNumber(row.paid_amount);

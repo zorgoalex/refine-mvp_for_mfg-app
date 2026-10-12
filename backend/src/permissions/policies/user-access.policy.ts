@@ -34,7 +34,9 @@ export type UserDenialReason =
   | 'role_hierarchy_denied'
   | 'role_assignment_denied'
   | 'self_target_denied'
-  | 'target_role_changed';
+  | 'target_role_changed'
+  /** The account (after the change) would have permissions or scopes the administrator lacks (access groups 0A.4). */
+  | 'privilege_escalation_denied';
 
 export class UserAccessPolicy {
   canCreateUser(actor: CurrentUser, targetRole: UserRole): UserDenialReason | null {

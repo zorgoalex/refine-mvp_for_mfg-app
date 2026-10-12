@@ -39,7 +39,7 @@ describe('permissions foundation', () => {
     expect(can('worker', 'users.manage_sso')).toBe(false);
   });
 
-  it('grants superadmin every registered permission', () => {
+  it('grants superadmin every registered permission (batch linking too — migration 252)', () => {
     expect(getPermissionsForRole('superadmin')).toHaveLength(PERMISSIONS.length);
 
     for (const permission of PERMISSIONS) {
@@ -282,6 +282,7 @@ describe('permissions foundation', () => {
       'groups.members.manage',
       'groups.participants.view',
       'groups.participants.manage',
+      'groups.batch_link',
     ];
 
     // Audit event names (groups.*_changed / groups.notification_created) are NOT
@@ -297,6 +298,13 @@ describe('permissions foundation', () => {
     }
   });
 
+  it('keeps the permissions of the former role-name checks in the OpenAPI PermissionName enum (0A.3)', () => {
+    const contractPermissions = readPermissionNameEnum(readOpenApiContract());
+    for (const permission of ['bitrix24.requests.view_all', 'bitrix24.requests.view_assigned', 'groups.batch_link']) {
+      expect(contractPermissions).toContain(permission);
+    }
+  });
+
   it('keeps the 1C data permissions of the client card in the OpenAPI PermissionName enum, for manager and above only', () => {
     const contractPermissions = readPermissionNameEnum(readOpenApiContract());
     for (const permission of ['clients.onec_data.view', 'clients.onec_documents.view'] as const) {
@@ -304,6 +312,12 @@ describe('permissions foundation', () => {
       for (const role of ['superadmin', 'admin', 'top_manager', 'manager'] as const) expect(can(role, permission)).toBe(true);
       for (const role of ['operator', 'worker', 'packer', 'viewer', 'onec_operator'] as const) expect(can(role, permission)).toBe(false);
     }
+  });
+
+  it('keeps the calendar send permission in the OpenAPI PermissionName enum, for top manager and above only', () => {
+    expect(readPermissionNameEnum(readOpenApiContract())).toContain('whatsapp.calendar_send');
+    for (const role of ['superadmin', 'admin', 'top_manager'] as const) expect(can(role, 'whatsapp.calendar_send')).toBe(true);
+    for (const role of ['manager', 'operator', 'worker', 'packer', 'viewer', 'onec_operator'] as const) expect(can(role, 'whatsapp.calendar_send')).toBe(false);
   });
 
   it('keeps label permissions in the static OpenAPI PermissionName enum', () => {

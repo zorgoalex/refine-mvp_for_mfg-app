@@ -61,6 +61,7 @@ import { GroupsRuntimeConfigService } from '../groups/groups-runtime-config.serv
           repository: database.isConfigured
             ? new PgDeadlineRepository(database)
             : new UnavailableDeadlineRepository(),
+          ...(database.isConfigured ? { database } : {}),
         }),
       inject: [DatabaseService],
     },

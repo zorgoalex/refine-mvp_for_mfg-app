@@ -895,14 +895,27 @@ paths:
         '409': {description: 'BROADCAST_VERSION_CONFLICT'}
         '422': {description: Invalid request}
         '503': {description: 'BROADCAST_CALENDAR_UNAVAILABLE'}
+  /api/v1/whatsapp/calendar-send/availability:
+    get:
+      tags: [WhatsApp]
+      operationId: getWhatsAppCalendarSendAvailability
+      summary: 'Whether «Отправить в чат» can be used from the calendar now (no settings content)'
+      description: 'For the calendar button of a user with the calendar send permission: whether a destination group is chosen, the frequency threshold and its state. Carries neither the group id nor the caption; the settings themselves need whatsapp.manage. Besides the permissions the order visibility scope «all» is required (403 PERMISSION_DENIED otherwise).'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.calendar_send, calendar.view, orders.view, orders.view_financials]
+      responses:
+        '200': {description: Calendar send availability, content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppCalendarSendAvailability'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '503': {description: 'BROADCAST_CALENDAR_UNAVAILABLE'}
   /api/v1/whatsapp/calendar-send/runs:
     post:
       tags: [WhatsApp]
       operationId: createWhatsAppCalendarSendRun
       summary: 'Queue the order cards of one calendar day for the configured chat (idempotent)'
-      description: 'Sends right away (no send window, no confirmation): all production orders planned for that day, like a broadcast. The same idempotencyKey with the same payload returns the original run. At most one calendar send is active, and calendar deliveries start at most once per the configured interval (409 BROADCAST_CALENDAR_COOLDOWN with details.nextAllowedAt). A day without orders creates an empty run and does not use the threshold.'
+      description: 'Sends right away (no send window, no confirmation): all production orders planned for that day, like a broadcast. The same idempotencyKey with the same payload returns the original run. At most one calendar send is active, and calendar deliveries start at most once per the configured interval (409 BROADCAST_CALENDAR_COOLDOWN with details.nextAllowedAt). A day without orders creates an empty run and does not use the threshold. Besides the permissions the caller needs the order visibility scope «all» (the send takes every order of the day): 403 PERMISSION_DENIED otherwise; the scope of the run author and initiator is checked again before each delivery.'
       security: [{bearerAuth: []}]
-      x-permissions: [whatsapp.manage, calendar.view, orders.view, orders.view_financials]
+      x-permissions: [whatsapp.calendar_send, calendar.view, orders.view, orders.view_financials]
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/WhatsAppCalendarSendRunRequest'}}}
@@ -11969,6 +11982,8 @@ paths:
       security:
         - bearerAuth: []
       x-permission: users.create
+      parameters:
+        - $ref: '#/components/parameters/UsersCommandIdempotencyKey'
       requestBody:
         required: true
         content:
@@ -12025,9 +12040,15 @@ paths:
         - Users
       operationId: updateUser
       summary: Обновить пользователя
+      description: >-
+        Смена роли или активности повышает версию прав (текущие токены обновляются), выключение отзывает сессии.
+        409 — устаревший expectedVersion (USER_VERSION_CONFLICT), смена роли цели (USER_ROLE_CHANGED), последний
+        администратор (PERMISSIONS_LOCKOUT_DENIED), занятый логин/e-mail.
       security:
         - bearerAuth: []
       x-permission: users.update
+      parameters:
+        - $ref: '#/components/parameters/UsersCommandIdempotencyKey'
       requestBody:
         required: true
         content:
@@ -12065,6 +12086,8 @@ paths:
       security:
         - bearerAuth: []
       x-permission: users.change_password
+      parameters:
+        - $ref: '#/components/parameters/UsersCommandIdempotencyKey'
       requestBody:
         required: true
         content:
@@ -12100,6 +12123,14 @@ paths:
       security:
         - bearerAuth: []
       x-permission: users.deactivate
+      parameters:
+        - $ref: '#/components/parameters/UsersCommandIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserActivationRequest'
       responses:
         '200':
           description: Пользователь деактивирован
@@ -12127,6 +12158,14 @@ paths:
       security:
         - bearerAuth: []
       x-permission: users.activate
+      parameters:
+        - $ref: '#/components/parameters/UsersCommandIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserActivationRequest'
       responses:
         '200':
           description: Пользователь активирован
@@ -20058,6 +20097,18 @@ components:
         minLength: 8
         maxLength: 200
         example: order-delete:01HZX8K5T3M2F5F7K9A2S1QW3E
+    UsersCommandIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >-
+        Переходный контракт команд пользователей: ключ необязателен. С ключом повтор того же запроса возвращает
+        сохранённый ответ без новых изменений, аудита и событий; тот же ключ с другим запросом — 409 IDEMPOTENCY_KEY_REUSED.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 200
+        pattern: '^[A-Za-z0-9_.:-]{8,200}$'
     IfMatchVersion:
       name: If-Match
       in: header
@@ -21916,6 +21967,10 @@ components:
         - groups.manage_links
         - clients.onec_data.view
         - clients.onec_documents.view
+        - groups.batch_link
+        - whatsapp.calendar_send
+        - bitrix24.requests.view_all
+        - bitrix24.requests.view_assigned
         - groups.view_history
         - groups.members.view
         - groups.members.manage
@@ -29161,6 +29216,7 @@ components:
         - permissions
         - isActive
         - createdAt
+        - rowVersion
       properties:
         id:
           type: integer
@@ -29193,6 +29249,19 @@ components:
           type: string
           format: date-time
           nullable: true
+        rowVersion:
+          type: integer
+          format: int64
+          description: Растёт с каждой командой над пользователем; отправляется обратно как expectedVersion.
+
+    UserActivationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 1
 
     CreateUserRequest:
       type: object
@@ -29251,6 +29320,11 @@ components:
           maxLength: 255
         isActive:
           type: boolean
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          description: rowVersion формы; если пользователь изменён после загрузки — 409 USER_VERSION_CONFLICT.
 
     ChangePasswordRequest:
       type: object
@@ -29265,6 +29339,11 @@ components:
         revokeExistingSessions:
           type: boolean
           default: true
+        expectedVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          description: rowVersion открытой формы; если пользователь изменён после загрузки — 409 USER_VERSION_CONFLICT.
 
     ChangePasswordResponse:
       type: object
@@ -29278,6 +29357,10 @@ components:
           type: integer
           minimum: 0
           example: 2
+        rowVersion:
+          type: integer
+          format: int64
+          description: users.row_version после смены пароля (форма продолжает сохранять без ложного 409).
 
     VlmHealthResponse:
       type: object
@@ -29860,6 +29943,15 @@ components:
           properties:
             id: {type: string}
             username: {type: string, nullable: true}
+    WhatsAppCalendarSendAvailability:
+      type: object
+      additionalProperties: false
+      required: [configured, minIntervalMinutes, nextAllowedAt, activeRun]
+      properties:
+        configured: {type: boolean, description: A destination group is chosen in the settings}
+        minIntervalMinutes: {type: integer, minimum: 1, maximum: 1440}
+        nextAllowedAt: {type: string, format: date-time, nullable: true}
+        activeRun: {type: boolean}
     WhatsAppCalendarSendEnvelope:
       type: object
       required: [settings, nextAllowedAt, activeRun, runtime]

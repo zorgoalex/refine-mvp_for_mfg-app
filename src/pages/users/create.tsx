@@ -3,7 +3,8 @@ import { Create, useForm, useSelect } from "@refinedev/antd";
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { Form, Input, Select, Checkbox, message } from "antd";
 import { authStorage } from "../../utils/auth";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { createActionKeyStore } from "../../api/actionIdempotency";
 import { usersApi } from "../../api/usersApi";
 import { legacyApiRoutes } from "../../api/legacyApiRoutes";
 import { featureFlags } from "../../config/featureFlags";
@@ -12,13 +13,18 @@ import { mapBackendCreateUserRequest } from "./userFormMapping";
 export const UserCreate: React.FC<IResourceComponentsProps> = () => {
   const { list } = useNavigation();
   const [loading, setLoading] = useState(false);
+  // Repeating the same «Create» after a lost response returns the user already created instead of a name conflict.
+  const createKeys = useRef(createActionKeyStore()).current;
   const { selectProps: employeeSelectProps } = useSelect({ resource: "employees", optionLabel: "full_name", optionValue: "employee_id" });
 
   const handleSubmit = async (values: any) => {
     setLoading(true);
     try {
       if (featureFlags.useBackendUsers) {
-        await usersApi.create(mapBackendCreateUserRequest(values));
+        const request = mapBackendCreateUserRequest(values);
+        const key = createKeys.keyFor(request);
+        await usersApi.create(request, key);
+        createKeys.succeeded(key);
 
         message.success('Пользователь успешно создан');
         list('users');

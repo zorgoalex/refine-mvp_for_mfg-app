@@ -1,7 +1,8 @@
 import { getPermissionsForRole, mapRoleIdToRole } from '../../permissions/permissions';
 import type { CurrentUser } from '../../permissions/current-user';
+import { currentUserFromAuthorization } from '../../permissions/current-user-from-authorization';
 import type { PermissionsService } from '../../permissions/permissions.service';
-import { rolePolicyForUser } from '../../permissions/policies/scope';
+import { policyScopeSetsForUser, rolePolicyForUser } from '../../permissions/policies/scope';
 import {
   InvalidCredentialsError,
   LoginMethodNotAllowedError,
@@ -35,7 +36,7 @@ export interface AuthServicePorts {
   tokens: AccessTokenIssuerPort;
   audit: AuthAuditPort;
   rateLimits: LoginRateLimitPort;
-  permissions?: Pick<PermissionsService, 'loadRoleAuthorization'>;
+  permissions?: Pick<PermissionsService, 'loadUserAuthorization'>;
 }
 
 export class AuthService {
@@ -119,31 +120,21 @@ export class AuthService {
       throw new UnknownRoleError(user.roleId);
     }
 
-    const authorization = await this.loadAuthorization(user.roleId, role);
+    if (this.ports.permissions) {
+      // One-statement snapshot: role, grants, scopes and version together (access groups stage 0A).
+      const snapshot = await this.ports.permissions.loadUserAuthorization(user.id);
+      if (snapshot && !snapshot.role) throw new UnknownRoleError(snapshot.roleId);
+      return currentUserFromAuthorization(snapshot, { sessionId });
+    }
 
     return {
       id: user.id,
       username: user.username,
       role,
       roleId: user.roleId,
-      permissions: authorization.permissions,
-      policyScopes: authorization.scopes,
-      permissionsVersion: authorization.version,
-      sessionId,
-    };
-  }
-
-  private async loadAuthorization(
-    roleId: number,
-    role: NonNullable<ReturnType<typeof mapRoleIdToRole>>,
-  ) {
-    if (this.ports.permissions) {
-      return this.ports.permissions.loadRoleAuthorization(roleId);
-    }
-    return {
       permissions: getPermissionsForRole(role),
-      scopes: undefined,
-      version: 0,
+      permissionsVersion: 0,
+      sessionId,
     };
   }
 
@@ -178,6 +169,7 @@ export class AuthService {
         permissions: user.permissions,
         permissionsVersion: user.permissionsVersion ?? 0,
         policyScopes: rolePolicyForUser(user),
+        policyScopeSets: policyScopeSetsForUser(user),
       },
     };
   }
