@@ -1008,7 +1008,11 @@ export const ConfigurationPage: React.FC = () => {
                       key={item.key}
                       className="wb-cfg-nav__item"
                       aria-current={item.key === resolvedActiveTab ? 'true' : undefined}
-                      onClick={() => handleTabChange(item.key)}
+                      onClick={() => {
+                        handleTabChange(item.key);
+                        // новый раздел открывается с начала, а не с места прокрутки прежнего
+                        window.scrollTo({ top: 0 });
+                      }}
                     >
                       {item.label ?? tabLabels.get(item.key)}
                     </button>

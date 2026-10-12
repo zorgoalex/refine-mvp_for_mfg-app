@@ -96,10 +96,10 @@
 
 :root[data-ui-variant="workbench"] .wb-cfg-nav {
   position: sticky;
-  top: calc(var(--configuration-sticky-top, 0px) + 16px);
+  top: calc(var(--wb-chrome-height, 88px) + 16px);
   flex: 0 0 240px;
   min-width: 0;
-  max-height: calc(100vh - var(--configuration-sticky-top, 0px) - 72px);
+  max-height: calc(100vh - var(--wb-chrome-height, 88px) - 72px);
   padding: 8px;
   overflow-x: hidden;
   overflow-y: auto;
