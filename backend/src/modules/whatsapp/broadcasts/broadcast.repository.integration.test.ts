@@ -130,7 +130,11 @@ describe.skipIf(!databaseUrl)('BroadcastRepository PostgreSQL (isolated schema)'
   const prepare = async (id: number, date: string, now: Date, orderIds = [1, 2, 3]) => {
     const run = await autoRunOf(id, date);
     const context = await repository.getPreparationContext(run.run_id) as PreparationContext;
-    return { context, outcome: await repository.completePreparation(context, { snapshot: snapshotFor(context.targetDate, orderIds), images: [image(1, [1, 2]), image(2, [3])], imageExpiresAt: FAR_FUTURE, clock: () => now }) };
+    const outcome = await repository.completePreparation(context, { snapshot: snapshotFor(context.targetDate, orderIds), images: [image(1, [1, 2]), image(2, [3])], imageExpiresAt: FAR_FUTURE, clock: () => now });
+    // The messages become due at the database's real time (column default), while these tests run on fixed dates:
+    // put them on the test clock, or they are «not due yet» whenever the real date is past the fixed one.
+    await q('UPDATE whatsapp_broadcast_messages SET next_attempt_at = $2 WHERE run_id = $1', [run.run_id, now]);
+    return { context, outcome };
   };
 
   it('migration 209 created broadcast #1 from the disabled digest singleton and audited the cutover', async () => {
