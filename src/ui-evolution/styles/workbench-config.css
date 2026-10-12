@@ -1,0 +1,236 @@
+/* «NewLine»: экран «Конфигурация». Слева — список разделов по группам с поиском (вместо ряда вкладок),
+   справа — выбранный раздел одной панелью. Только оформление: панели разделов те же. */
+
+:root[data-ui-variant="workbench"] .wb-cfg-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-head__text {
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-head h1 {
+  margin: 0;
+  color: var(--evo-text);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-head p {
+  margin: 2px 0 0;
+  color: var(--evo-text-secondary);
+  font-size: 13.5px;
+  line-height: 20px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-head__tools {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-nav__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 260px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-md, 8px);
+  background: var(--evo-surface);
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-nav__search:focus-within {
+  border-color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-nav__search input {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--evo-text);
+  font: inherit;
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-nav__search input::placeholder {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-nav__toggle {
+  display: grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--evo-radius-md, 8px);
+  background: transparent;
+  color: var(--evo-text-secondary);
+  cursor: pointer;
+  place-items: center;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-nav__toggle:hover {
+  background: var(--evo-surface-muted);
+  color: var(--evo-text);
+}
+
+/* --- раскладка --- */
+:root[data-ui-variant="workbench"] .wb-cfg-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-nav {
+  position: sticky;
+  top: calc(var(--configuration-sticky-top, 0px) + 16px);
+  flex: 0 0 240px;
+  min-width: 0;
+  max-height: calc(100vh - var(--configuration-sticky-top, 0px) - 72px);
+  padding: 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+  scrollbar-width: thin;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-nav__group + .wb-cfg-nav__group {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-nav__group-label {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-nav__item {
+  display: block;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--evo-radius-md, 8px);
+  background: transparent;
+  color: var(--evo-text);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 32px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-nav__item:hover {
+  background: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-nav__item[aria-current="true"] {
+  background: color-mix(in srgb, var(--evo-primary) 12%, transparent);
+  color: var(--evo-primary);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-nav__item .anticon {
+  margin-right: 6px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-nav__item:focus-visible,
+:root[data-ui-variant="workbench"] .wb-cfg-nav__toggle:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: 1px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-nav__none {
+  padding: 14px 10px;
+  color: var(--evo-text-secondary);
+  font-size: 13.5px;
+}
+
+/* --- выбранный раздел --- */
+:root[data-ui-variant="workbench"] .wb-cfg-main {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 16px 20px 20px;
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-section-head {
+  margin-bottom: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-section-head__group {
+  display: block;
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+  line-height: 18px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-section-head h2 {
+  margin: 0;
+  color: var(--evo-text);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cfg-section-head p {
+  max-width: 720px;
+  margin: 4px 0 0;
+  color: var(--evo-text-secondary);
+  font-size: 13.5px;
+  line-height: 20px;
+}
+
+/* узкий экран: список разделов встаёт над разделом */
+@media (max-width: 1100px) {
+  :root[data-ui-variant="workbench"] .wb-cfg-body {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  :root[data-ui-variant="workbench"] .wb-cfg-nav {
+    position: static;
+    flex: 0 0 auto;
+    max-height: 260px;
+  }
+
+  :root[data-ui-variant="workbench"] .wb-cfg-main {
+    flex: 0 0 auto;
+    padding: 12px;
+  }
+
+  :root[data-ui-variant="workbench"] .wb-cfg-head {
+    flex-wrap: wrap;
+  }
+
+  :root[data-ui-variant="workbench"] .wb-cfg-nav__search {
+    width: min(260px, 60vw);
+  }
+}

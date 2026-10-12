@@ -33,6 +33,9 @@ import {
   MessageOutlined,
   ShoppingOutlined,
   DesktopOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { useAppSettings, SETTING_KEYS, CurrencySettings } from '../../hooks/useAppSettings';
 import { featureFlags } from '../../config/featureFlags';
@@ -81,7 +84,25 @@ import {
   useOperationalUi,
 } from '../../ui-operational/OperationalPrimitives';
 
+import { useOptionalUiVariant } from '../../ui-variant/UiVariantProvider';
+import {
+  CONFIGURATION_SECTION_DESCRIPTIONS,
+  buildConfigurationNav,
+  configurationSectionHasOwnHeading,
+  filterConfigurationNav,
+} from './configurationSections';
+
 const { Text } = Typography;
+
+const CONFIGURATION_NAV_HIDDEN_KEY = 'erp.configuration.navHidden';
+
+const readConfigurationNavHidden = (): boolean => {
+  try {
+    return window.localStorage.getItem(CONFIGURATION_NAV_HIDDEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
 
 export const CONFIGURATION_ACTIVE_TAB_STORAGE_KEY = 'configuration:activeTab';
 
@@ -644,6 +665,9 @@ const TableVisibilityByRoleTab: React.FC = () => {
 // ============================================================================
 export const ConfigurationPage: React.FC = () => {
   const isOperational = useOperationalUi();
+  const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
+  const [navQuery, setNavQuery] = useState('');
+  const [navHidden, setNavHidden] = useState(readConfigurationNavHidden);
   const stickyTabsRef = useConfigurationStickyTabs();
   const [activeTab, setActiveTab] = useState(() => readStoredConfigurationActiveTab() ?? 'orders');
   const statusAutomationVisible =
@@ -918,8 +942,95 @@ export const ConfigurationPage: React.FC = () => {
       items={tabItems}
       type={isOperational ? 'line' : 'card'}
       tabBarGutter={isOperational ? 12 : 4}
+      // NewLine: разделы переключает левый список, ряд вкладок не нужен; сами панели те же
+      renderTabBar={isWorkbench ? () => <></> : undefined}
     />
   );
+
+  if (isWorkbench) {
+    const navGroups = buildConfigurationNav(availableTabKeys);
+    const shownGroups = filterConfigurationNav(navGroups, navQuery);
+    const tabLabels = new Map<string, React.ReactNode>(tabItems.map((item) => [item.key, item.label]));
+    const currentItem = navGroups.flatMap((group) => group.items).find((item) => item.key === resolvedActiveTab);
+    const currentGroup = navGroups.find((group) => group.items.some((item) => item.key === resolvedActiveTab));
+    const currentDescription = CONFIGURATION_SECTION_DESCRIPTIONS[resolvedActiveTab];
+    const toggleNav = () => {
+      const next = !navHidden;
+      try {
+        window.localStorage.setItem(CONFIGURATION_NAV_HIDDEN_KEY, next ? '1' : '0');
+      } catch {
+        // список просто не запомнит выбор
+      }
+      setNavHidden(next);
+    };
+    return (
+      <div className={`configuration-page wb-cfg${navHidden ? ' wb-cfg--nav-hidden' : ''}`} ref={stickyTabsRef}>
+        <header className="wb-cfg-head">
+          <div className="wb-cfg-head__text">
+            <h1>Конфигурация</h1>
+            <p>Настройки ERP по разделам.</p>
+          </div>
+          <div className="wb-cfg-head__tools">
+            {navHidden ? null : (
+              <label className="wb-cfg-nav__search">
+                <SearchOutlined aria-hidden />
+                <input
+                  value={navQuery}
+                  onChange={(event) => setNavQuery(event.target.value)}
+                  placeholder="Найти раздел настроек"
+                  aria-label="Найти раздел настроек"
+                  autoComplete="off"
+                />
+              </label>
+            )}
+            <button
+              type="button"
+              className="wb-cfg-nav__toggle"
+              aria-label={navHidden ? 'Показать список разделов' : 'Скрыть список разделов'}
+              title={navHidden ? 'Показать список разделов' : 'Скрыть список разделов'}
+              aria-expanded={!navHidden}
+              onClick={toggleNav}
+            >
+              {navHidden ? <MenuUnfoldOutlined aria-hidden /> : <MenuFoldOutlined aria-hidden />}
+            </button>
+          </div>
+        </header>
+        <div className="wb-cfg-body">
+          {navHidden ? null : (
+            <nav className="wb-cfg-nav" aria-label="Разделы конфигурации">
+              {shownGroups.length === 0 ? <div className="wb-cfg-nav__none">Раздел не найден</div> : null}
+              {shownGroups.map((group) => (
+                <div className="wb-cfg-nav__group" key={group.label}>
+                  <div className="wb-cfg-nav__group-label">{group.label}</div>
+                  {group.items.map((item) => (
+                    <button
+                      type="button"
+                      key={item.key}
+                      className="wb-cfg-nav__item"
+                      aria-current={item.key === resolvedActiveTab ? 'true' : undefined}
+                      onClick={() => handleTabChange(item.key)}
+                    >
+                      {item.label ?? tabLabels.get(item.key)}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </nav>
+          )}
+          <section className="wb-cfg-main" data-section={resolvedActiveTab}>
+            {configurationSectionHasOwnHeading(resolvedActiveTab) ? null : (
+              <div className="wb-cfg-section-head">
+                {navHidden && currentGroup ? <span className="wb-cfg-section-head__group">{currentGroup.label}</span> : null}
+                <h2>{currentItem?.label ?? tabLabels.get(resolvedActiveTab)}</h2>
+                {currentDescription ? <p>{currentDescription}</p> : null}
+              </div>
+            )}
+            {configurationTabs}
+          </section>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="configuration-page" ref={stickyTabsRef}>
