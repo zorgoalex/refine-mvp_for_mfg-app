@@ -84,6 +84,9 @@ suite('1C matching report (E3c) — isolated PostgreSQL', () => {
     await mirror('counterparties', K.f, { Code: '006', Description: 'Незнакомец', Покупатель: true, IsFolder: false });
     await mirror('counterparties', randomUUID(), { Description: 'Группа', IsFolder: true });
     await mirror('counterparty_phones', `["${K.f}",1]`, { Ref_Key: K.f, LineNumber: 1, Тип: 'Телефон', Представление: '+7 (701) 555-44-33' });
+    // The phones set has a fresh, not revoked snapshot unless a test says otherwise.
+    await pool.query(`DELETE FROM ${schema}.onec_etl_entity_state;
+      INSERT INTO ${schema}.onec_etl_entity_state (source_id, entity_code, snapshot_version) VALUES (1, 'counterparty_phones', now())`);
   });
 
   it('matches by 1C key, normalized name (legal forms, quotes, spaces) and phone; flags ambiguity; suggests similar names', async () => {
@@ -98,6 +101,30 @@ suite('1C matching report (E3c) — isolated PostgreSQL', () => {
     expect(byCode['005'].status).toBe('unmatched');
     if (report.suggestionsAvailable) expect(byCode['005'].suggestions[0]).toMatchObject({ kind: 'client', id: 6, name: 'Мебельный центр' });
     expect(report.rows.some((row) => row.name === 'Группа')).toBe(false);
+  });
+
+  it('phones are personal data: a revoked, expired or never loaded phones set is not compared — no phone match in rows or counters', async () => {
+    const phoneMatch = async () => {
+      const report = await service.counterparties({ agentId: 'agent-a', limit: '50' });
+      const row = report.rows.find((item) => item.code === '006')!;
+      return { byPhone: report.summary.byPhone, matched: report.summary.matched, status: row.status, matches: row.matches.length };
+    };
+    expect(await phoneMatch()).toEqual({ byPhone: 1, matched: 4, status: 'matched', matches: 1 });
+    for (const state of [
+      `UPDATE ${schema}.onec_etl_entity_state SET revoked_at = now()`,
+      `UPDATE ${schema}.onec_etl_entity_state SET revoked_at = NULL, snapshot_version = now() - interval '31 days'`,
+      `UPDATE ${schema}.onec_etl_entity_state SET snapshot_version = NULL`,
+      `DELETE FROM ${schema}.onec_etl_entity_state`,
+    ]) {
+      await pool.query(state);
+      // The rows still lie in the copy until the purge; the match by phone is gone everywhere.
+      expect([state, await phoneMatch()]).toEqual([state, { byPhone: 0, matched: 3, status: 'unmatched', matches: 0 }]);
+    }
+    // A deleted or gone phone row is not compared either.
+    await pool.query(`INSERT INTO ${schema}.onec_etl_entity_state (source_id, entity_code, snapshot_version) VALUES (1, 'counterparty_phones', now())`);
+    expect((await phoneMatch()).byPhone).toBe(1);
+    await pool.query(`UPDATE ${schema}.onec_etl_mirror_rows SET deleted = true WHERE entity_code = 'counterparty_phones'`);
+    expect((await phoneMatch()).byPhone).toBe(0);
   });
 
   it('filters by status, role and search, and pages', async () => {

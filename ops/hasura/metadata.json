@@ -573,7 +573,18 @@
                                 "set": {
                                     "created_by": "x-hasura-User-Id"
                                 },
-                                "columns": "*"
+                                "columns": [
+                                        "client_id",
+                                        "client_name",
+                                        "created_at",
+                                        "created_by",
+                                        "edited_by",
+                                        "is_active",
+                                        "notes",
+                                        "person_type",
+                                        "sort_order",
+                                        "updated_at"
+                                    ]
                             },
                             "comment": ""
                         },
@@ -584,7 +595,18 @@
                                 "set": {
                                     "created_by": "x-hasura-User-Id"
                                 },
-                                "columns": "*"
+                                "columns": [
+                                        "client_id",
+                                        "client_name",
+                                        "created_at",
+                                        "created_by",
+                                        "edited_by",
+                                        "is_active",
+                                        "notes",
+                                        "person_type",
+                                        "sort_order",
+                                        "updated_at"
+                                    ]
                             },
                             "comment": ""
                         },
@@ -595,7 +617,18 @@
                                 "set": {
                                     "created_by": "x-hasura-User-Id"
                                 },
-                                "columns": "*"
+                                "columns": [
+                                        "client_id",
+                                        "client_name",
+                                        "created_at",
+                                        "created_by",
+                                        "edited_by",
+                                        "is_active",
+                                        "notes",
+                                        "person_type",
+                                        "sort_order",
+                                        "updated_at"
+                                    ]
                             },
                             "comment": ""
                         },
@@ -606,7 +639,18 @@
                                 "set": {
                                     "created_by": "x-hasura-User-Id"
                                 },
-                                "columns": "*"
+                                "columns": [
+                                        "client_id",
+                                        "client_name",
+                                        "created_at",
+                                        "created_by",
+                                        "edited_by",
+                                        "is_active",
+                                        "notes",
+                                        "person_type",
+                                        "sort_order",
+                                        "updated_at"
+                                    ]
                             },
                             "comment": ""
                         }
@@ -662,7 +706,18 @@
                         {
                             "role": "manager",
                             "permission": {
-                                "columns": "*",
+                                "columns": [
+                                        "client_id",
+                                        "client_name",
+                                        "created_at",
+                                        "created_by",
+                                        "edited_by",
+                                        "is_active",
+                                        "notes",
+                                        "person_type",
+                                        "sort_order",
+                                        "updated_at"
+                                    ],
                                 "filter": {},
                                 "check": {},
                                 "set": {
@@ -674,7 +729,18 @@
                         {
                             "role": "operator",
                             "permission": {
-                                "columns": "*",
+                                "columns": [
+                                        "client_id",
+                                        "client_name",
+                                        "created_at",
+                                        "created_by",
+                                        "edited_by",
+                                        "is_active",
+                                        "notes",
+                                        "person_type",
+                                        "sort_order",
+                                        "updated_at"
+                                    ],
                                 "filter": {},
                                 "check": {},
                                 "set": {
@@ -686,7 +752,18 @@
                         {
                             "role": "superadmin",
                             "permission": {
-                                "columns": "*",
+                                "columns": [
+                                        "client_id",
+                                        "client_name",
+                                        "created_at",
+                                        "created_by",
+                                        "edited_by",
+                                        "is_active",
+                                        "notes",
+                                        "person_type",
+                                        "sort_order",
+                                        "updated_at"
+                                    ],
                                 "filter": {},
                                 "check": {},
                                 "set": {
@@ -698,7 +775,18 @@
                         {
                             "role": "top_manager",
                             "permission": {
-                                "columns": "*",
+                                "columns": [
+                                        "client_id",
+                                        "client_name",
+                                        "created_at",
+                                        "created_by",
+                                        "edited_by",
+                                        "is_active",
+                                        "notes",
+                                        "person_type",
+                                        "sort_order",
+                                        "updated_at"
+                                    ],
                                 "filter": {},
                                 "check": {}
                             },

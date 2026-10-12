@@ -92,9 +92,6 @@ export const ClientCreate: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Активен" name="is_active" valuePropName="checked">
           <Checkbox>Активен</Checkbox>
         </Form.Item>
-        <Form.Item label="Ключ 1C" name="ref_key_1c">
-          <Input />
-        </Form.Item>
         <ReferenceSortOrderFormItem />
       </Form>
 

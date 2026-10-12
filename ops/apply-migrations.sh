@@ -2626,6 +2626,10 @@ probe_file() {
     # 233: queue instead of refusals (no «one active» index), manual cancel, image forms + their pages.
     # 230's probe checks its end state: 233 drops the one-active index, so 230 does not require it.
     # 235: employee work contacts + an employee as an order card send recipient.
+    # 244: permissions of the 1C counterparty data in the client card (manager and above).
+    244_client_onec_permissions*) probe_all \
+      "SELECT (SELECT count(*) FROM permissions_catalog WHERE permission_name IN ('clients.onec_data.view','clients.onec_documents.view') AND is_active) = 2;" \
+      "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'manager' AND rp.permission_name = 'clients.onec_data.view');" ;;
     # 247: expected daily silence of a 1C agent (column + format check).
     247_onec_agent_expected_silence*) probe_all \
       "$(q_col onec_agents expected_silence_utc)" \
@@ -2818,7 +2822,7 @@ verify_applied_effect() {
     193_onec_agent_foundation*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|245_onec_operator_role*|247_onec_agent_expected_silence*)
+    231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|245_onec_operator_role*|247_onec_agent_expected_silence*|244_client_onec_permissions*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

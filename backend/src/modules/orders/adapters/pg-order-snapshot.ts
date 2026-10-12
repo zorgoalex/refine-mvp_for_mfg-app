@@ -1317,14 +1317,16 @@ async function upsertClient(
 
   if (mapped) {
     const clientId = Number(mapped.local_entity_id);
+    // The link to a 1C counterparty (clients.ref_key_1c) is never written by an import: it is set, replaced and
+    // removed only by the audited command of the client card; a snapshot key would silently bring an old link back.
     await tx.query(
       `
       UPDATE clients
-      SET client_name = $2, ref_key_1c = COALESCE($3::uuid, ref_key_1c), notes = COALESCE($4, notes),
-          is_active = $5
+      SET client_name = $2, notes = COALESCE($3, notes),
+          is_active = $4
       WHERE client_id = $1
       `,
-      [clientId, client.clientName, client.refKey1c, client.notes, client.isActive],
+      [clientId, client.clientName, client.notes, client.isActive],
     );
     await upsertMap(tx, { source, entityType: SNAPSHOT_ENTITY_TYPES.client, sourceId: client.sourceId, localId: String(clientId), localOrderId: null, payloadHash });
     return clientId;
@@ -2502,14 +2504,15 @@ async function deleteMissingImportedDeadlineRows(
   );
 }
 
+/** A new client comes without a 1C counterparty: the snapshot key is only used to find an existing client. */
 async function insertClient(tx: TransactionClient, client: OrderSnapshotDto['data']['client']): Promise<number> {
   const result = await tx.query<IdRow>(
     `
-    INSERT INTO clients (client_name, ref_key_1c, notes, is_active)
-    VALUES ($1, $2::uuid, $3, $4)
+    INSERT INTO clients (client_name, notes, is_active)
+    VALUES ($1, $2, $3)
     RETURNING client_id AS id
     `,
-    [client.clientName, client.refKey1c, client.notes, client.isActive],
+    [client.clientName, client.notes, client.isActive],
   );
   return Number(result.rows[0].id);
 }
@@ -3440,6 +3443,7 @@ function jsonOrNull(value: unknown): string | null {
 // ---------------------------------------------------------------------------
 export {
   orderHeaderParams as _testOnlyOrderHeaderInsertParams,
+  upsertClient as _testOnlyUpsertClient,
   orderHeaderUpdateParams as _testOnlyOrderHeaderUpdateParams,
   mapOrderHeaderSnapshot as _testOnlyMapOrderHeaderSnapshot,
   mapDetailSnapshot as _testOnlyMapDetailSnapshot,

@@ -7,6 +7,7 @@ import { PermissionsGuard } from '../../permissions/permissions.guard';
 import { RequirePermissions } from '../../permissions/require-permissions.decorator';
 import { EMPLOYEE_CONTACT_KINDS, EMPLOYEE_CONTACTS_MAX, type EmployeeContactInput } from '../employees/employee-contacts';
 import type { PartyKind } from './party-contacts';
+import { CONFIRM_MAX, ClientCounterpartyRepository } from './client-counterparty.repository';
 import { PartyContactsRepository } from './party-contacts.repository';
 import { SupplierCounterpartyRepository, parseRefKey1c } from './supplier-counterparty.repository';
 
@@ -22,10 +23,13 @@ const replaceSchema = z.object({
 }).strict();
 
 const linkSchema = z.object({ refKey1c: z.string().nullable(), expectedRefKey1c: z.string().nullable() }).strict();
+const confirmSchema = z.object({
+  pairs: z.array(z.object({ clientId: z.number().int().positive(), refKey1c: z.string() }).strict()).min(1).max(CONFIRM_MAX),
+}).strict();
 const fromCounterpartySchema = z.object({ refKey1c: z.string() }).strict();
 
 /**
- * Contacts of suppliers, vendors and clients, and the supplier ↔ 1C counterparty link. One explicit route per
+ * Contacts of suppliers, vendors and clients, and the supplier / client ↔ 1C counterparty links. One explicit route per
  * owner, so each carries its own permissions (view: <owner>.view; change: suppliers.manage / vendors.manage /
  * clients.update).
  */
@@ -37,6 +41,7 @@ export class PartyContactsController {
   constructor(
     @Inject(PartyContactsRepository) private readonly contacts: PartyContactsRepository,
     @Inject(SupplierCounterpartyRepository) private readonly counterparties: SupplierCounterpartyRepository,
+    @Inject(ClientCounterpartyRepository) private readonly clientCounterparties: ClientCounterpartyRepository,
   ) {}
 
   @ApiOperation({ summary: 'Contacts of a supplier with the set version' })
@@ -99,6 +104,49 @@ export class PartyContactsController {
     if (!parsed.success) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос');
     const { user, requestId } = actor(request);
     return this.counterparties.createFromCounterparty(parseRefKey1c(parsed.data.refKey1c), user, requestId);
+  }
+
+  @ApiOperation({ summary: 'The 1C counterparty a client is linked to' })
+  @Get('clients/:id/counterparty') @RequirePermissions(['clients.view'])
+  clientCounterparty(@Param('id') id: string, @Req() request: RequestWithCurrentUser) {
+    // Phones and BIN/IIN of the counterparty — only with `clients.onec_data.view`; the name and the code — with `clients.view`.
+    return this.clientCounterparties.link(parseId(id), undefined, actor(request).user.permissions.includes('clients.onec_data.view'));
+  }
+
+  // The search opens the whole 1C counterparty directory (names, BIN/IIN, phones): only for those who may link
+  // and may see the data of 1C counterparties.
+  @ApiOperation({ summary: '1C counterparties for a client: by a search text, or the ones that look like the client (name, phone)' })
+  @Get('clients/:id/counterparty-candidates') @RequirePermissions(['clients.update', 'clients.onec_data.view'])
+  async clientCounterpartyCandidates(@Param('id') id: string, @Query('search') search: unknown) {
+    const text = typeof search === 'string' && search.trim() ? search.trim().slice(0, 100) : null;
+    return { items: await this.clientCounterparties.candidates(parseId(id), text) };
+  }
+
+  @ApiOperation({ summary: 'Link, relink or unlink a client and a 1C counterparty (compare-and-swap on the previous key)' })
+  @Put('clients/:id/counterparty') @RequirePermissions(['clients.update'])
+  linkClient(@Param('id') id: string, @Body() body: unknown, @Req() request: RequestWithCurrentUser) {
+    const parsed = linkSchema.safeParse(body);
+    if (!parsed.success) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос сопоставления');
+    const { user, requestId } = actor(request);
+    return this.clientCounterparties.setLink(parseId(id), parsed.data.refKey1c === null ? null : parseRefKey1c(parsed.data.refKey1c),
+      parsed.data.expectedRefKey1c === null ? null : parseRefKey1c(parsed.data.expectedRefKey1c), user, requestId);
+  }
+
+  @ApiOperation({ summary: 'Bulk view: clients without a 1C counterparty and their exact candidates (unambiguous pairs and ambiguous clients)' })
+  @Get('client-counterparty-matches') @RequirePermissions(['clients.update', 'clients.onec_data.view'])
+  clientCounterpartyMatches() { return this.clientCounterparties.matches(); }
+
+  @ApiOperation({ summary: 'Confirm pairs of the bulk view: link each client that has no counterparty yet; impossible pairs are reported and skipped' })
+  @Post('client-counterparty-matches/confirm') @HttpCode(200) @RequirePermissions(['clients.update', 'clients.onec_data.view'])
+  async confirmClientCounterparties(@Body() body: unknown, @Req() request: RequestWithCurrentUser) {
+    const parsed = confirmSchema.safeParse(body);
+    if (!parsed.success) throw new ApiError(422, 'VALIDATION_ERROR', `Некорректный запрос подтверждения (не более ${CONFIRM_MAX} пар)`);
+    const pairs = parsed.data.pairs.map((pair) => ({ clientId: pair.clientId, refKey1c: parseRefKey1c(pair.refKey1c) }));
+    if (new Set(pairs.map((pair) => pair.clientId)).size !== pairs.length || new Set(pairs.map((pair) => pair.refKey1c)).size !== pairs.length) {
+      throw new ApiError(422, 'VALIDATION_ERROR', 'Клиент и контрагент в запросе не должны повторяться');
+    }
+    const { user, requestId } = actor(request);
+    return { results: await this.clientCounterparties.confirm(pairs, user, requestId) };
   }
 
   private replace(party: PartyKind, id: string, body: unknown, request: RequestWithCurrentUser) {

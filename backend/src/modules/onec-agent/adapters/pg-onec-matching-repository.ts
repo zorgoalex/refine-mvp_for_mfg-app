@@ -1,25 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { QueryResultRow } from 'pg';
 import { DatabaseService } from '../../../database/database.service';
+import { livePersonalSnapshotJoin, normalizedName, normalizedPhone } from '../domain/onec-matching-sql';
 
 /**
  * Read-only matching of the 1C copy against ERP reference data (plan §9 «Сопоставление»): nothing is
  * written anywhere. ERP has no BIN and no 1C keys yet (clients.ref_key_1c is empty), so a counterparty
  * is matched by the 1C key when present, by normalized name, and — for clients — by phone.
  */
-
-/**
- * Lowercase, drop quotes and legal-form words, collapse everything but letters/digits to single spaces.
- * Kazakh letters (ә ғ қ ң ө ұ ү һ і) are letters: «Қанат» and «Ғанат» stay different.
- */
-const normalizedName = (expr: string) =>
-  `btrim(regexp_replace(regexp_replace(regexp_replace(lower(coalesce(${expr}, '')), '[«»"''“”„\`]', '', 'g'),
-     '(^|\\s)(тоо|ип|ао|оао|зао|ооо|пк|кх|too|llp|ip)(?=\\s|$)', ' ', 'g'), '[^0-9a-zа-яёәғқңөұүһі]+', ' ', 'g'))`;
-/**
- * KZ numbers: all digits, the first 11 (an extension typed after the number is dropped), then the last
- * 10 (+7 / 8 prefix does not matter). "+7 (701) 555-44-33", "87015554433", "87015554433-123" → 7015554433.
- */
-const normalizedPhone = (expr: string) => `right(left(regexp_replace(coalesce(${expr}, ''), '\\D', '', 'g'), 11), 10)`;
 
 export type CounterpartyMatchStatus = 'matched' | 'ambiguous' | 'unmatched';
 
@@ -40,8 +28,11 @@ const MATCHES_CTE = `
      WHERE m.source_id = $1 AND m.entity_code = 'counterparties' AND NOT COALESCE((m.data->>'IsFolder')::boolean, false)),
   cl AS (SELECT client_id, client_name::text AS name, ref_key_1c, ${normalizedName('client_name::text')} AS n FROM clients),
   sp AS (SELECT supplier_id, supplier_name AS name, ref_key_1c, ${normalizedName('supplier_name')} AS n FROM suppliers),
-  ph AS (SELECT data->>'Ref_Key' AS source_key, ${normalizedPhone("data->>'Представление'")} AS p
-           FROM onec_etl_mirror_rows WHERE source_id = $1 AND entity_code = 'counterparty_phones'),
+  ph AS (SELECT m.data->>'Ref_Key' AS source_key, ${normalizedPhone("m.data->>'Представление'")} AS p
+           FROM onec_etl_mirror_rows m
+           -- Phones are personal data: a revoked or expired snapshot is not compared either.
+           ${livePersonalSnapshotJoin('m')}
+          WHERE m.source_id = $1 AND m.entity_code = 'counterparty_phones' AND NOT m.deleted AND m.missing_in_source_at IS NULL),
   cph AS (SELECT DISTINCT client_id, ${normalizedPhone('phone_number')} AS p FROM client_phones),
   hits AS (
     SELECT cp.source_key, 'client' AS kind, cl.client_id::bigint AS id, cl.name, 'ref_key' AS by
