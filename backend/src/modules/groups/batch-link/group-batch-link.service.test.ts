@@ -21,7 +21,7 @@ describe('GroupBatchLinkService', () => {
     });
 
     await expect(service.dryRun(command({
-      currentUser: user('superadmin', ['groups.manage_links', 'orders.view']),
+      currentUser: user('manager', ['groups.manage_links', 'orders.view']),
     }))).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
 
     await expect(service.dryRun(command({
@@ -237,8 +237,8 @@ function repository(overrides: Partial<GroupBatchLinkRepositoryPort> = {}): Grou
   };
 }
 
-/** groups.batch_link goes with the roles the matrix grants it to (admin, top_manager), as the old role list did. */
+/** groups.batch_link goes with the roles the matrix grants it to (superadmin, admin, top_manager). */
 function user(role: UserRole, permissions: PermissionName[]): CurrentUser {
-  const batch: PermissionName[] = role === 'admin' || role === 'top_manager' ? ['groups.batch_link'] : [];
+  const batch: PermissionName[] = role === 'superadmin' || role === 'admin' || role === 'top_manager' ? ['groups.batch_link'] : [];
   return { id: '1', username: 'tester', role, roleId: 1, permissions: [...permissions, ...batch] };
 }

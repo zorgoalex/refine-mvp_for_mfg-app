@@ -39,11 +39,11 @@ describe('permissions foundation', () => {
     expect(can('worker', 'users.manage_sso')).toBe(false);
   });
 
-  it('grants superadmin every registered permission except batch linking (never allowed to it, 0A.3)', () => {
-    expect(getPermissionsForRole('superadmin')).toHaveLength(PERMISSIONS.length - 1);
+  it('grants superadmin every registered permission (batch linking too — migration 252)', () => {
+    expect(getPermissionsForRole('superadmin')).toHaveLength(PERMISSIONS.length);
 
     for (const permission of PERMISSIONS) {
-      expect(can('superadmin', permission)).toBe(permission !== 'groups.batch_link');
+      expect(can('superadmin', permission)).toBe(true);
     }
   });
 
