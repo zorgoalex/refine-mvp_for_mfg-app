@@ -437,7 +437,9 @@ class Hasura:
         return sorted(self._rows(MATRIX_SQL, True))
 
     def flag(self):
-        rows = self._rows("SELECT hasura_access_predicates::text FROM public.permissions_state WHERE id = true", True)
+        # to_jsonb: before migration 253 the column does not exist and the answer is false, not an error.
+        rows = self._rows("SELECT coalesce((to_jsonb(ps) ->> 'hasura_access_predicates')::boolean, false)::text "
+                          "FROM public.permissions_state ps WHERE ps.id = true", True)
         return rows == ["true"]
 
     def set_flag(self, value, run, details):

@@ -164,7 +164,7 @@ function fakeHasura(options: { bumpAfterExport?: boolean; loseReplaceAnswer?: nu
           state.audits.push(sql);
           return reply(200, { result: [['ok'], ['ok']] });
         }
-        if (sql.startsWith('SELECT hasura_access_predicates')) return reply(200, { result: [['v'], [String(state.flag)]] });
+        if (sql.includes("to_jsonb(ps) ->> 'hasura_access_predicates'")) return reply(200, { result: [['v'], [String(state.flag)]] });
         return reply(200, { result_type: 'TuplesOk', result: [['grant'], ...state.matrix.map((row) => [row])] });
       }
       return reply(400, { error: `unexpected ${payload.type}` });
