@@ -24,6 +24,7 @@ import {
   type RawAuthorizationSnapshot,
   type UserAuthorizationSnapshot,
 } from './user-authorization-snapshot';
+import { assertNoUnclosedHasuraNarrowing, hasuraFollowsPermissions } from './hasura-unclosed-permissions';
 
 export const ROLE_POLICY_SCOPE_KEYS = [
   'orders.view',
@@ -319,6 +320,7 @@ export class PermissionsService {
       this.assertExpectedVersion(request.version, before.version);
       const next = normalizeRequestedMatrix(request, before);
       assertDangerousConfirmed(before, next, request.confirmDangerous === true);
+      assertNoUnclosedHasuraNarrowing(before, next, await hasuraFollowsPermissions(tx));
       await assertLockoutSafe(tx, next);
 
       await writeMatrixRows(tx, next);
@@ -357,6 +359,7 @@ export class PermissionsService {
       const next = cloneMatrixState(before);
       next.rolePermissions[String(roleId)] = defaultPermissionsForRoleCode(role.roleCode);
       next.roleScopes[String(roleId)] = defaultScopesForRoleCode(role.roleCode);
+      assertNoUnclosedHasuraNarrowing(before, next, await hasuraFollowsPermissions(tx));
       await assertLockoutSafe(tx, next);
 
       await writeMatrixRows(tx, next, { onlyRoleId: roleId });
@@ -546,7 +549,8 @@ export class PermissionsService {
         'bitrix24.requests.view_all': 'Заявки Bitrix24: все', 'bitrix24.requests.view_assigned': 'Заявки Bitrix24: назначенные',
         'groups.batch_link': 'Группы: пакетная привязка',
         'clients.onec_data.view': 'Клиенты: данные контрагента 1С', 'clients.onec_documents.view': 'Клиенты: документы 1С',
-        'whatsapp.calendar_send': 'WhatsApp: отправка из календаря' } as Partial<Record<PermissionName, string>>)[permission] ?? permission,
+        'whatsapp.calendar_send': 'WhatsApp: отправка из календаря',
+        'references.quick_create': 'Справочники: быстрое добавление из заказа' } as Partial<Record<PermissionName, string>>)[permission] ?? permission,
       description: null as string | null,
       sortOrder: index + 1,
       isDangerous: DANGEROUS_PERMISSIONS.has(permission),
@@ -855,6 +859,9 @@ function applyPermissionDependencies(row: Record<string, boolean>): void {
     }
     if (permission.startsWith('payments.')) {
       row['orders.view'] = true;
+    }
+    if (permission === 'references.quick_create' && 'references.view' in row) {
+      row['references.view'] = true;
     }
   }
 }

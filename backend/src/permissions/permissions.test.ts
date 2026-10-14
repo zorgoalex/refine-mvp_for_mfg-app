@@ -320,6 +320,12 @@ describe('permissions foundation', () => {
     for (const role of ['manager', 'operator', 'worker', 'packer', 'viewer', 'onec_operator'] as const) expect(can(role, 'whatsapp.calendar_send')).toBe(false);
   });
 
+  it('keeps the quick add of references in the OpenAPI PermissionName enum, for the roles that could add them (0Б)', () => {
+    expect(readPermissionNameEnum(readOpenApiContract())).toContain('references.quick_create');
+    for (const role of ['superadmin', 'admin', 'top_manager', 'manager', 'operator'] as const) expect(can(role, 'references.quick_create')).toBe(true);
+    for (const role of ['worker', 'packer', 'viewer', 'onec_operator'] as const) expect(can(role, 'references.quick_create')).toBe(false);
+  });
+
   it('keeps label permissions in the static OpenAPI PermissionName enum', () => {
     const contract = readOpenApiContract();
     const contractPermissions = readPermissionNameEnum(contract);

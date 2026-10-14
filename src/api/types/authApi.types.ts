@@ -40,6 +40,7 @@ export type PermissionName =
   | 'employees.manage'
   | 'references.view'
   | 'references.manage'
+  | 'references.quick_create'
   | 'finance.analytics.view'
   | 'payments.onec.view'
   | 'payments.onec.manage'

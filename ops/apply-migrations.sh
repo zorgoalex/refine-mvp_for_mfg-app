@@ -2622,6 +2622,11 @@ probe_file() {
     # 254: trim_text_fields() escapes trimmed strings (values with quotes/newlines no longer rejected).
     254_trim_text_fields_json_escape*) probe_all \
       "SELECT COALESCE((SELECT strpos(prosrc, 'to_jsonb(btrim(e.v #>> ''{}''::text[]))') > 0 AND strpos(prosrc, '|| btrim(') = 0 FROM pg_proc WHERE oid = to_regprocedure('public.trim_text_fields()')), false);" ;;
+    # 253: quick add of references from the order form behind its own permission (access groups 0Б).
+    253_references_quick_create_permission*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM permissions_catalog WHERE permission_name = 'references.quick_create' AND is_active);" \
+      "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'manager' AND rp.permission_name = 'references.quick_create');" \
+      "$(q_col permissions_state hasura_access_predicates)" ;;
     249_role_checks_to_permissions*) probe_all \
       "SELECT (SELECT count(*) FROM permissions_catalog WHERE permission_name IN ('bitrix24.requests.view_all','bitrix24.requests.view_assigned','groups.batch_link') AND is_active) = 3;" \
       "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'top_manager' AND rp.permission_name = 'groups.batch_link');" ;;
@@ -3140,7 +3145,7 @@ verify_applied_effect() {
     205_warehouses_onec_key_required*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|244_client_onec_permissions*|251_whatsapp_calendar_send_permission*|240_payment_onec_matches*|241_client_screen_settings*|245_onec_operator_role*|246_clients_analytics_view_real_orders*|247_onec_agent_expected_silence*|248_authorization_snapshot*|249_role_checks_to_permissions*|250_onec_stock_snapshots*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*)
+    231_cut_result_render_v2*|209_whatsapp_broadcasts*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|234_reference_nomenclature_note*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|244_client_onec_permissions*|251_whatsapp_calendar_send_permission*|240_payment_onec_matches*|241_client_screen_settings*|245_onec_operator_role*|246_clients_analytics_view_real_orders*|247_onec_agent_expected_silence*|248_authorization_snapshot*|249_role_checks_to_permissions*|250_onec_stock_snapshots*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|253_references_quick_create_permission*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

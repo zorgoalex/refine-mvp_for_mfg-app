@@ -74,6 +74,7 @@ import { CutJobVersionLines } from '../../CutJobVersionLines';
 import { cutJobDeepLink } from '../../cutColumnHelpers';
 import { featureFlags } from '../../../../config/featureFlags';
 import { can } from '../../../../utils/permissions';
+import { canQuickCreateReference } from '../../../../utils/resourcePermissions';
 import {
   OrderSaveValidationContext,
   orderValidationDetailKey,
@@ -1003,6 +1004,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const [activeSorter, setActiveSorter] = useState<DetailSorterState>(() => (
     readDetailSorterCheckpoint(restored?.activeSorter)
   ));
+  const canQuickCreateReferences = canQuickCreateReference();
   const [filmQuickCreateOpen, setFilmQuickCreateOpen] = useState(
     () => restored?.filmQuickCreateOpen === true,
   );
@@ -2370,7 +2372,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               virtual
               listHeight={256}
               style={{ width: '100%', textAlign: 'left' }}
-              dropdownRender={(menu) => (
+              dropdownRender={canQuickCreateReferences ? (menu) => (
                 <>
                   {menu}
                   <Divider style={{ margin: '8px 0' }} />
@@ -2386,7 +2388,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
                     Создать плёнку
                   </Button>
                 </>
-              )}
+              ) : undefined}
             />
           </Form.Item>
         ) : (
