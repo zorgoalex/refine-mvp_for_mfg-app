@@ -142,6 +142,7 @@ function makeRelay(
     config?: ReturnType<typeof makeConfig>;
     logger?: unknown;
     stageLane?: {runLocked(prove:()=>Promise<void>):Promise<void>};
+    paidPaymentRecovery?: {recoverDue(guard:()=>Promise<void>):Promise<{completed:number;failed:number}>};
   } = {},
 ) {
   const config = opts.config ?? makeConfig();
@@ -155,6 +156,7 @@ function makeRelay(
     db: db as never,
     config: config as never,
     stageLane: opts.stageLane,
+    paidPaymentRecovery: opts.paidPaymentRecovery,
     logger: (opts.logger as never) ?? { log: vi.fn(), error: vi.fn() },
   });
 }
@@ -174,6 +176,30 @@ describe('CrmSyncRelayService', () => {
     const consumer=makeConsumer([clientIntent()]);const stageLane={runLocked:vi.fn().mockRejectedValue(new Error('stage unavailable'))};
     const result=await makeRelay({outboxRepo,consumer,stageLane}).runTick();
     expect(result.processed).toBe(1);expect(consumer.sync).toHaveBeenCalledOnce();expect(outboxRepo.releaseWriterLock).toHaveBeenCalledOnce();
+  });
+  it('finishes started paid-payment operations under the writer before new events',async()=>{
+    const order:string[]=[];
+    const outboxRepo=makeOutboxRepo({claimBatch:vi.fn().mockResolvedValue([makeClaimedEvent()]),markProcessed:vi.fn().mockResolvedValue(1)});
+    const consumer=makeConsumer([clientIntent()]);
+    vi.mocked(consumer.sync).mockImplementation(async()=>{order.push('event');return [clientIntent()];});
+    const paidPaymentRecovery={recoverDue:vi.fn(async(guard:()=>Promise<void>)=>{await guard();order.push('recovery');return {completed:1,failed:0};})};
+    await makeRelay({outboxRepo,consumer,paidPaymentRecovery}).runTick();
+    expect(order).toEqual(['recovery','event']);
+    expect(outboxRepo.heartbeatWriterLock).toHaveBeenCalled();
+  });
+  it('a recovery failure does not block normal CRM delivery',async()=>{
+    const outboxRepo=makeOutboxRepo({claimBatch:vi.fn().mockResolvedValue([makeClaimedEvent()]),markProcessed:vi.fn().mockResolvedValue(1)});
+    const consumer=makeConsumer([clientIntent()]);
+    const paidPaymentRecovery={recoverDue:vi.fn().mockRejectedValue(new Error('Bitrix down'))};
+    const result=await makeRelay({outboxRepo,consumer,paidPaymentRecovery}).runTick();
+    expect(result.processed).toBe(1);expect(outboxRepo.releaseWriterLock).toHaveBeenCalledOnce();
+  });
+  it('persists extra audit rows of an intent in the same transaction',async()=>{
+    const outboxRepo=makeOutboxRepo({claimBatch:vi.fn().mockResolvedValue([makeClaimedEvent()]),markProcessed:vi.fn().mockResolvedValue(1)});
+    const audit=makeAudit();
+    const intent={...orderIntent(),extraAudits:[{...NOOP_AUDIT_EVENT,event:'crm_sync.stale_delete_projected'}]};
+    await makeRelay({outboxRepo,consumer:makeConsumer([intent]),audit}).runTick();
+    expect(vi.mocked(audit.record).mock.calls.map((call)=>(call[1] as {event:string}).event)).toContain('crm_sync.stale_delete_projected');
   });
   // ── (a) consumer returns [clientIntent, orderIntent], markProcessed → 1 ──────
   describe('(a) two intents, markProcessed=1', () => {

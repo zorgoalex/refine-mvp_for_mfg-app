@@ -192,6 +192,17 @@ export interface Bitrix24SyncHealth {
     ambiguous: number;
   };
   paymentSystemCatalogLastFetchedAt: string | null;
+  /** ERP → Bitrix24 queue; absent on an older backend. */
+  outbound?: {
+    /** Orders/clients whose latest sync event failed. */
+    failed: number;
+    failedRows: number;
+    paidResetOpen: number;
+    paidResetStuck: number;
+    paidResetEnabled: boolean;
+    /** Canary allowlist of the paid-payment reset; empty = every order. */
+    paidResetOrderIds: number[];
+  };
 }
 
 export interface Bitrix24ProductMapping {
@@ -442,6 +453,13 @@ export const bitrix24Api = {
 
   retryFailed(): Promise<{ retried: number }> {
     return httpClient.post(apiRoutes.bitrix24.retryFailed, {});
+  },
+
+  retryFailedOutbound(orderIds?: number[]): Promise<{ retried: number; orderIds: number[] | null }> {
+    return httpClient.post(
+      apiRoutes.bitrix24.retryFailedOutbound,
+      orderIds && orderIds.length > 0 ? { orderIds: orderIds.map(validId) } : {},
+    );
   },
 };
 

@@ -21,6 +21,7 @@ import { RequirePermissions } from '../../../permissions/require-permissions.dec
 import { Bitrix24ReverseProcessorService } from './bitrix24-reverse-processor.service';
 import { PgBitrix24ReverseRepository } from './pg-bitrix24-reverse-repository';
 import { bitrix24RequestScope } from './bitrix24-request-scope';
+import { CrmSyncRuntimeConfigService } from '../http/crm-sync-runtime-config.service';
 
 const positiveId = z.coerce.number().int().positive();
 const requestDetailSchema = z.object({
@@ -47,6 +48,7 @@ export class Bitrix24ReverseAdminController {
   constructor(
     private readonly repository: PgBitrix24ReverseRepository,
     private readonly processor: Bitrix24ReverseProcessorService,
+    private readonly config: CrmSyncRuntimeConfigService,
   ) {}
 
   @ApiOperation({ summary: 'List Bitrix24 incoming requests' })
@@ -404,8 +406,39 @@ export class Bitrix24ReverseAdminController {
   @ApiOperation({ summary: 'Get Bitrix24 reverse synchronization health' })
   @Get('sync-health')
   @RequirePermissions('bitrix24.integration.manage')
-  syncHealth() {
-    return this.repository.getSyncHealth();
+  async syncHealth() {
+    const health = await this.repository.getSyncHealth();
+    const paidReset = this.config.getPaidPaymentReset();
+    return {
+      ...health,
+      outbound: {
+        ...(health.outbound as Record<string, number>),
+        paidResetEnabled: paidReset.enabled,
+        paidResetOrderIds: [...paidReset.orderIds].map(Number),
+      },
+    };
+  }
+
+  @ApiOperation({ summary: 'Retry failed ERP → Bitrix24 sync of orders and clients' })
+  @Post('sync-health/retry-failed-outbound')
+  @HttpCode(200)
+  @RequirePermissions('bitrix24.integration.manage')
+  async retryFailedOutbound(
+    @Req() request: RequestWithCurrentUser,
+    @Body() body: unknown,
+  ) {
+    const actor = requireUser(request);
+    const parsed = retryFailedOutboundSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid retry request', {
+        issues: parsed.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message })),
+      });
+    }
+    return this.repository.retryFailedOutbound({
+      actorUserId: actor.id,
+      auditRequestId: requireRequestId(request),
+      orderIds: parsed.data.orderIds ?? null,
+    });
   }
 
   @ApiOperation({ summary: 'Retry failed Bitrix24 inbound events' })
@@ -422,6 +455,12 @@ export class Bitrix24ReverseAdminController {
     };
   }
 }
+
+const retryFailedOutboundSchema = z.object({
+  orderIds: z.array(positiveId).min(1).max(50)
+    .refine((values) => new Set(values).size === values.length, 'Order IDs must be unique')
+    .optional(),
+}).strict();
 
 const materializePaymentsSchema = z.object({
   bitrixPaymentIds: z.array(z.string().regex(/^[1-9][0-9]*$/)).min(1).max(500)

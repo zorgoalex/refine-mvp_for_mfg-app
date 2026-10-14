@@ -88,6 +88,13 @@ export const BITRIX_EVENT_CATALOG: BitrixEventDefinition[] = [
     'other',
     'skipped'
   ),
+  definition('crm_sync.stale_delete_projected','Устаревшее удаление заменено отправкой текущих данных','forward','other','skipped'),
+  definition('crm_sync.retry_failed','Запрошен повтор неудачной отправки в Bitrix','forward','processing','started'),
+  definition('crm_sync.payment_paid_reset_requested','Запрошено изменение оплаты «Оплачено» в Bitrix','forward','payment','started'),
+  definition('crm_sync.payment_paid_reset_unpaid','Снята отметка «Оплачено» в Bitrix','forward','payment','started'),
+  definition('crm_sync.payment_paid_reset_action_changed','Изменение оплаты Bitrix заменено удалением','forward','payment','started'),
+  definition('crm_sync.payment_paid_reset_completed','Оплата «Оплачено» изменена в Bitrix','forward','payment','success'),
+  definition('crm_sync.payment_paid_reset_stuck','Не удаётся завершить изменение оплаты в Bitrix','forward','payment','error'),
   definition(
     'bitrix24_reverse.client_upsert',
     'Клиент получен из Bitrix',

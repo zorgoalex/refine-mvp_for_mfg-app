@@ -10,6 +10,8 @@ import {
   Bitrix24SyncConsumer,
   CrmSyncTargetError,
 } from './bitrix24-sync-consumer';
+import { Bitrix24PaidPaymentGuard, type PaidPaymentOperationStore } from './bitrix24-paid-payment-guard';
+import type { PaidPaymentOperation } from '../adapters/pg-crm-sync-paid-payment-operation-repository';
 import type {
   ClientRow,
   CrmSourcePort,
@@ -87,6 +89,7 @@ function harness(input?: {
   mappings?: MappingRow[];
   guards?: PaymentCreateGuardRow[];
   hasOrders?: boolean;
+  paidPayments?: Bitrix24PaidPaymentGuard;
 }) {
   const mappings = input?.mappings ?? [];
   const guards = new Map(
@@ -153,6 +156,7 @@ function harness(input?: {
     db,
     options,
     durablePaymentCreates: true,
+    paidPayments: input?.paidPayments,
   });
   return { consumer, source, bitrix, calls, guards, mapping };
 }
@@ -583,5 +587,195 @@ describe('Bitrix24SyncConsumer', () => {
       ...event('client', '1', 'upsert'),
       payload: { entity: 'bogus', id: '1', op: 'upsert' },
     })).rejects.toThrow(/unknown entity/);
+  });
+});
+
+describe('Bitrix24SyncConsumer — paid payments and stale deletes', () => {
+  const paymentMapping = (erpId: string, bitrixId: string, sourceSystem: 'erp' | 'bitrix24' = 'erp'): MappingRow => ({
+    entityType: 'payment', erpId, bitrixObject: 'payment', bitrixId, parentErpId: '2',
+    status: 'active', lastHash: 'h', sourceSystem,
+  });
+  const orderMapping: MappingRow = {
+    entityType: 'order', erpId: '2', bitrixObject: 'deal', bitrixId: '50', parentErpId: '1',
+    status: 'active', lastHash: 'h', sourceSystem: 'erp',
+  };
+  const guardMock = () => ({
+    update: vi.fn().mockResolvedValue('applied'),
+    delete: vi.fn().mockResolvedValue(undefined),
+    settle: vi.fn().mockResolvedValue(undefined),
+    settleOrder: vi.fn().mockResolvedValue(undefined),
+  });
+
+  it('finishes open operations of the order and the payment before reading mappings and guards', async () => {
+    const paid = guardMock();
+    const h = harness({
+      payments: [makePayment()],
+      mappings: [orderMapping, paymentMapping('3', '700')],
+      paidPayments: paid as unknown as Bitrix24PaidPaymentGuard,
+    });
+    vi.mocked(h.bitrix.listDealPaymentIds).mockResolvedValue(['700']);
+    await h.consumer.sync(event('order', '2', 'upsert'));
+    expect(paid.settleOrder).toHaveBeenCalledWith('2', ['3'], 'event-1');
+    expect(paid.settle).toHaveBeenCalledWith('3', 'event-1');
+    const settleOrderAt = paid.settleOrder.mock.invocationCallOrder[0];
+    const settleAt = paid.settle.mock.invocationCallOrder[0];
+    const paymentMappingReads = vi.mocked(h.mapping.get).mock.calls
+      .map((call, index) => [call[1], vi.mocked(h.mapping.get).mock.invocationCallOrder[index]] as const)
+      .filter(([type]) => type === 'payment');
+    expect(paymentMappingReads.every(([, at]) => at > settleAt && at > settleOrderAt)).toBe(true);
+  });
+
+  it('settles a soft-deleted order before deleting its payments', async () => {
+    const paid = guardMock();
+    const h = harness({ order: makeOrder({ deleteFlag: true }), mappings: [orderMapping], paidPayments: paid as unknown as Bitrix24PaidPaymentGuard });
+    await h.consumer.sync(event('order', '2', 'upsert'));
+    expect(paid.settleOrder).toHaveBeenCalledWith('2', [], 'event-1');
+  });
+
+  it('never records a vanished Bitrix payment as synced', async () => {
+    const paid = guardMock();
+    paid.update.mockResolvedValue('remote_missing');
+    const h = harness({
+      payments: [makePayment()],
+      mappings: [orderMapping, paymentMapping('3', '700')],
+      paidPayments: paid as unknown as Bitrix24PaidPaymentGuard,
+    });
+    vi.mocked(h.bitrix.listDealPaymentIds).mockResolvedValue(['700']);
+    await expect(h.consumer.sync(event('order', '2', 'upsert'))).rejects.toThrow(/is gone \(remote_missing\)/);
+  });
+
+  it('routes payment updates through the paid-payment guard', async () => {
+    const paid = guardMock();
+    const h = harness({
+      payments: [makePayment()],
+      mappings: [orderMapping, paymentMapping('3', '700')],
+      paidPayments: paid as unknown as Bitrix24PaidPaymentGuard,
+    });
+    vi.mocked(h.bitrix.listDealPaymentIds).mockResolvedValue(['700']);
+    await h.consumer.sync(event('order', '2', 'upsert'));
+    expect(paid.update).toHaveBeenCalledWith(expect.objectContaining({
+      bitrixId: '700', dealId: '50', requestId: 'event-1',
+      payment: expect.objectContaining({ paymentId: '3' }),
+      fields: expect.objectContaining({ sum: 50, paid: 'Y' }),
+    }));
+    expect(h.bitrix.updatePayment).not.toHaveBeenCalled();
+  });
+
+  it('routes payment deletes of a soft-deleted order through the guard and keeps Bitrix-owned payments (8)', async () => {
+    const paid = guardMock();
+    const h = harness({
+      order: makeOrder({ deleteFlag: true }),
+      mappings: [orderMapping, paymentMapping('3', '700'), paymentMapping('4', '701', 'bitrix24')],
+      guards: [{ erpPaymentId: '5', erpOrderId: '2', bitrixDealId: '50', beforeIds: [] }],
+      paidPayments: paid as unknown as Bitrix24PaidPaymentGuard,
+    });
+    vi.mocked(h.bitrix.listDealPaymentIds).mockResolvedValue(['702']);
+    await h.consumer.sync(event('order', '2', 'upsert'));
+    expect(paid.delete).toHaveBeenCalledWith(expect.objectContaining({ erpPaymentId: '5', bitrixId: '702', erpOrderId: '2' }));
+    expect(paid.delete).toHaveBeenCalledWith(expect.objectContaining({ erpPaymentId: '3', bitrixId: '700', erpOrderId: '2' }));
+    expect(paid.delete).not.toHaveBeenCalledWith(expect.objectContaining({ erpPaymentId: '4' }));
+    expect(h.bitrix.deletePayment).not.toHaveBeenCalled();
+    expect(h.bitrix.deleteCrmItem).toHaveBeenCalledWith(2, '50');
+  });
+
+  it('routes deletes of removed ERP payments of a live order through the guard', async () => {
+    const paid = guardMock();
+    const h = harness({
+      payments: [],
+      mappings: [orderMapping, paymentMapping('3', '700')],
+      paidPayments: paid as unknown as Bitrix24PaidPaymentGuard,
+    });
+    await h.consumer.sync(event('order', '2', 'upsert'));
+    expect(paid.delete).toHaveBeenCalledWith(expect.objectContaining({
+      erpPaymentId: '3', erpOrderId: '2', dealId: '50', bitrixId: '700', requestId: 'event-1',
+    }));
+  });
+
+  it('projects an order instead of deleting its Deal when a delete event meets a live order (14)', async () => {
+    const h = harness({ mappings: [orderMapping] });
+    const intents = await h.consumer.sync(event('order', '2', 'delete'));
+    expect(h.bitrix.deleteCrmItem).not.toHaveBeenCalled();
+    const order = intents.find((intent) => intent.mapping.entityType === 'order');
+    expect(order?.mapping).toMatchObject({ status: 'active', bitrixId: '50' });
+    expect(order?.extraAudits?.[0]).toMatchObject({
+      event: 'crm_sync.stale_delete_projected', entityType: 'order', entityId: '2', relatedOrderId: 2,
+    });
+  });
+
+  it('still deletes the Deal when the order is gone at execution', async () => {
+    const h = harness({ order: null, mappings: [orderMapping] });
+    await h.consumer.sync(event('order', '2', 'delete'));
+    expect(h.bitrix.deleteCrmItem).toHaveBeenCalledWith(2, '50');
+  });
+
+  it('projects a client instead of deleting its Contact when the client exists (14)', async () => {
+    const h = harness({
+      mappings: [{ entityType: 'client', erpId: '1', bitrixObject: 'contact', bitrixId: '8', parentErpId: null, status: 'active', lastHash: 'old' }],
+    });
+    const intents = await h.consumer.sync(event('client', '1', 'delete'));
+    expect(h.bitrix.deleteCrmItem).not.toHaveBeenCalled();
+    expect(intents[0]?.extraAudits?.[0]).toMatchObject({ event: 'crm_sync.stale_delete_projected', entityType: 'client' });
+  });
+});
+
+describe('Bitrix24SyncConsumer with the real paid-payment guard (backfill and relay share it)', () => {
+  const openOperation: PaidPaymentOperation = {
+    operationId: 'op-1', erpPaymentId: '3', erpOrderId: '2', bitrixPaymentId: '700', bitrixDealId: '50',
+    action: 'update', phase: 'unpaid', attempts: 0, stuckAt: null,
+    originOutboxEventId: null, bitrixSumBefore: 142000, targetSum: 50,
+  };
+  const store = (open: PaidPaymentOperation[]): PaidPaymentOperationStore => ({
+    findOpen: vi.fn(async (id: string) => open.find((op) => op.erpPaymentId === id) ?? null),
+    listOpenFor: vi.fn(async () => open),
+    listDue: vi.fn(async () => open),
+    begin: vi.fn(),
+    markUnpaid: vi.fn(),
+    switchToDelete: vi.fn(),
+    complete: vi.fn(async () => true),
+    recordFailure: vi.fn(async () => undefined),
+  });
+  const realGuard = (bitrix: Bitrix24ApiPort, operations: PaidPaymentOperation[]) => new Bitrix24PaidPaymentGuard({
+    bitrix,
+    store: store(operations),
+    source: { getPaymentById: async () => makePayment() },
+    options,
+    // As in the backfill CLI: never starts a new operation.
+    policy: () => ({ enabled: false, orderIds: new Set<string>() }),
+  });
+
+  it('cannot create a replacement payment while an open operation cannot be finished', async () => {
+    const h = harness({ payments: [makePayment()], mappings: [{
+      entityType: 'order', erpId: '2', bitrixObject: 'deal', bitrixId: '50', parentErpId: '1',
+      status: 'active', lastHash: 'h', sourceSystem: 'erp',
+    }] });
+    (h.bitrix as unknown as { getPayment: unknown }).getPayment = vi.fn().mockRejectedValue(new Error('Bitrix down'));
+    const consumer = new Bitrix24SyncConsumer({
+      source: h.source, bitrix: h.bitrix, mapping: h.mapping,
+      db: { transaction: vi.fn(async (handler) => handler({})) } as unknown as DatabaseService,
+      options, durablePaymentCreates: true,
+      paidPayments: realGuard(h.bitrix, [openOperation]),
+    });
+    await expect(consumer.sync(event('order', '2', 'upsert'))).rejects.toThrow('Bitrix down');
+    expect(h.bitrix.createDealPayment).not.toHaveBeenCalled();
+    expect(h.mapping.insertPaymentCreateGuard).not.toHaveBeenCalled();
+  });
+
+  it('refuses to delete an untagged payment through the consumer', async () => {
+    const h = harness({
+      payments: [],
+      mappings: [
+        { entityType: 'order', erpId: '2', bitrixObject: 'deal', bitrixId: '50', parentErpId: '1', status: 'active', lastHash: 'h', sourceSystem: 'erp' },
+        { entityType: 'payment', erpId: '3', bitrixObject: 'payment', bitrixId: '700', parentErpId: '2', status: 'active', lastHash: 'h', sourceSystem: 'erp' },
+      ],
+    });
+    (h.bitrix as unknown as { getPayment: unknown }).getPayment = vi.fn().mockResolvedValue({ paid: 'N', sum: 50, xmlId: null });
+    const consumer = new Bitrix24SyncConsumer({
+      source: h.source, bitrix: h.bitrix, mapping: h.mapping,
+      db: { transaction: vi.fn(async (handler) => handler({})) } as unknown as DatabaseService,
+      options, durablePaymentCreates: true,
+      paidPayments: realGuard(h.bitrix, []),
+    });
+    await expect(consumer.sync(event('order', '2', 'upsert'))).rejects.toThrow('BITRIX24_PAYMENT_NOT_OWNED');
+    expect(h.bitrix.deletePayment).not.toHaveBeenCalled();
   });
 });

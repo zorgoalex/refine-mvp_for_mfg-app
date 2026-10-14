@@ -219,6 +219,7 @@ export const apiRoutes = {
       backendApiPath(`/bitrix24/payment-commands/${encodeURIComponent(commandId)}/resolve-ambiguity`),
     syncHealth: backendApiPath('/bitrix24/sync-health'),
     retryFailed: backendApiPath('/bitrix24/sync-health/retry-failed'),
+    retryFailedOutbound: backendApiPath('/bitrix24/sync-health/retry-failed-outbound'),
   },
   cutJobs: {
     list: backendApiPath('/cut-jobs'),

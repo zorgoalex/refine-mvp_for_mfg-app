@@ -14,6 +14,8 @@ import { PgCrmSyncOutboxRepository } from '../src/modules/crm-sync/adapters/pg-c
 import { PgCrmSyncBackfillCheckpointRepository } from '../src/modules/crm-sync/adapters/pg-crm-sync-backfill-checkpoint-repository';
 import { PgCrmSyncBackfillPersistence } from '../src/modules/crm-sync/adapters/pg-crm-sync-backfill-persistence';
 import { Bitrix24SyncConsumer } from '../src/modules/crm-sync/application/bitrix24-sync-consumer';
+import { Bitrix24PaidPaymentGuard } from '../src/modules/crm-sync/application/bitrix24-paid-payment-guard';
+import { PgCrmSyncPaidPaymentOperationRepository } from '../src/modules/crm-sync/adapters/pg-crm-sync-paid-payment-operation-repository';
 import { Bitrix24ApiClient, NoopBitrix24ApiClient } from '../src/modules/crm-sync/adapters/bitrix24-api-client';
 import { AuditService } from '../src/common/audit/audit.service';
 import {
@@ -238,6 +240,19 @@ const bitrix = dryRun
     },
   );
 
+// Live backfill shares the relay's paid-payment protocol: open operations are finished before any
+// payment discovery/create and every delete proves ERP ownership. It never STARTS a new «paid»
+// operation (that stays with the relay and its runtime flag). Dry-run keeps the plain Noop client.
+const paidPayments = dryRun
+  ? undefined
+  : new Bitrix24PaidPaymentGuard({
+    bitrix,
+    store: new PgCrmSyncPaidPaymentOperationRepository(dbShim, audit),
+    source,
+    options: effectiveConfig,
+    policy: () => ({ enabled: false, orderIds: new Set<string>() }),
+  });
+
 const consumer = new Bitrix24SyncConsumer({
   source,
   bitrix,
@@ -245,6 +260,7 @@ const consumer = new Bitrix24SyncConsumer({
   db: dbShim,
   options: effectiveConfig,
   durablePaymentCreates: !dryRun,
+  paidPayments,
 });
 
 // ---------------------------------------------------------------------------

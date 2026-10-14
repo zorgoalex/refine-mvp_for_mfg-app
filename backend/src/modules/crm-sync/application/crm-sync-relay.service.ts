@@ -30,6 +30,10 @@ class OwnershipLost extends Error {
 
 interface CrmSyncRelayServiceDeps {
   stageLane?: { runLocked(proveWriter: () => Promise<void>): Promise<void> };
+  /** Finishes started «paid payment» operations (Bitrix24PaidPaymentGuard.recoverDue). */
+  paidPaymentRecovery?: {
+    recoverDue(requestGuard: () => Promise<void>): Promise<{ completed: number; failed: number }>;
+  };
   outboxRepo: PgCrmSyncOutboxRepository;
   consumer: Bitrix24SyncConsumer;
   dryRunConsumer: Bitrix24SyncConsumer;
@@ -51,6 +55,7 @@ interface CrmSyncRelayServiceDeps {
  */
 export class CrmSyncRelayService {
   private readonly stageLane: CrmSyncRelayServiceDeps['stageLane'];
+  private readonly paidPaymentRecovery: CrmSyncRelayServiceDeps['paidPaymentRecovery'];
   private readonly outboxRepo: PgCrmSyncOutboxRepository;
   private readonly consumer: Bitrix24SyncConsumer;
   private readonly dryRunConsumer: Bitrix24SyncConsumer;
@@ -62,6 +67,7 @@ export class CrmSyncRelayService {
 
   constructor(deps: CrmSyncRelayServiceDeps) {
     this.stageLane = deps.stageLane;
+    this.paidPaymentRecovery = deps.paidPaymentRecovery;
     this.outboxRepo = deps.outboxRepo;
     this.consumer = deps.consumer;
     this.dryRunConsumer = deps.dryRunConsumer;
@@ -199,6 +205,22 @@ export class CrmSyncRelayService {
         });
       } catch (error) {
         this.logger.error(redactLogFields({ event: 'crm_sync_stage_lane_failed', errorMessage: error instanceof Error ? error.message : String(error) }));
+      }
+      // Started «paid payment» operations are finished before new events, under the same writer
+      // and independent of the events that started them (their attempts may be exhausted).
+      try {
+        const recovered = await this.paidPaymentRecovery?.recoverDue(async () => {
+          await assertAdvisoryOwned();
+          if (writerOwnershipLost || !await this.outboxRepo.heartbeatWriterLock(this.db, writerToken)) {
+            writerOwnershipLost = true;
+            throw new OwnershipLost();
+          }
+        });
+        if (recovered && recovered.completed + recovered.failed > 0) {
+          this.logger.log(redactLogFields({ event: 'crm_sync_paid_payment_recovery', ...recovered }));
+        }
+      } catch (error) {
+        this.logger.error(redactLogFields({ event: 'crm_sync_paid_payment_recovery_failed', errorMessage: error instanceof Error ? error.message : String(error) }));
       }
       for (const event of claimed) {
       if (writerOwnershipLost || !await proveOwnership(
@@ -348,6 +370,9 @@ export class CrmSyncRelayService {
           for (const intent of intents) {
             await this.mapping.upsertSuccess(tx, intent.mapping);
             await this.audit.record(tx, intent.audit);
+            for (const extra of intent.extraAudits ?? []) {
+              await this.audit.record(tx, extra);
+            }
             if (intent.clearPaymentCreateGuardId) {
               await this.mapping.deletePaymentCreateGuard(
                 tx,
