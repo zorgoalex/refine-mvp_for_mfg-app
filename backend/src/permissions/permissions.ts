@@ -209,6 +209,11 @@ export const PERMISSIONS = [
   // «Отправить в чат» from the calendar day header (user decision 2026-10-11: top manager and above). Appended.
   /** Queue the order cards of a calendar day for the configured chat; the settings stay behind whatsapp.manage. */
   'whatsapp.calendar_send',
+
+  // Quick add of an edge type / milling type / film from the order form (access groups 0Б, user decision
+  // 2026-10-14: the roles that could do it through Hasura keep it, migration 253). Appended.
+  /** Insert a new edge type, milling type or film from the order form; editing and deleting need references.manage. */
+  'references.quick_create',
 ] as const;
 
 export type PermissionName = (typeof PERMISSIONS)[number];
@@ -291,6 +296,7 @@ export const ROLE_PERMISSIONS = {
     'materials.manage',
     'references.view',
     'references.manage',
+    'references.quick_create',
 
     'calendar.view',
     'production.view',
@@ -387,6 +393,7 @@ export const ROLE_PERMISSIONS = {
 
     'materials.view',
     'references.view',
+    'references.quick_create',
 
     'calendar.view',
     'production.view',
@@ -453,6 +460,7 @@ export const ROLE_PERMISSIONS = {
 
     'materials.view',
     'references.view',
+    'references.quick_create',
 
     'calendar.view',
     'production.view',

@@ -24,7 +24,8 @@ const metadata = JSON.parse(
 ) as HasuraMetadata;
 const filmTable = metadata.sources.flatMap((source) => source.tables)
   .find((entry) => entry.table.schema === 'public' && entry.table.name === 'films');
-const roles = ['manager', 'operator', 'superadmin', 'top_manager'];
+// erp_admin: the ERP administrator's Hasura role (access groups 0Б); who may write is decided by the predicate.
+const roles = ['erp_admin', 'manager', 'operator', 'superadmin', 'top_manager'];
 const allowlist = [
   'film_name',
   'film_type_id',

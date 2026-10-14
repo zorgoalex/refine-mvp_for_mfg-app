@@ -11,6 +11,7 @@ import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { MillingTypeQuickCreate } from './MillingTypeQuickCreate';
 import { EdgeTypeQuickCreate } from './EdgeTypeQuickCreate';
+import { canQuickCreateReference } from '../../../../utils/resourcePermissions';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
 import {
@@ -58,6 +59,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   const [calculatedCost, setCalculatedCost] = useState<number>(0);
   const [millingTypeModalOpen, setMillingTypeModalOpen] = useState(false);
   const [edgeTypeModalOpen, setEdgeTypeModalOpen] = useState(false);
+  const canQuickCreateReferences = canQuickCreateReference();
   const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(null);
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
@@ -414,7 +416,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 showSearch
                 placeholder="Выберите пленку"
                 allowClear
-                dropdownRender={(menu) => (
+                dropdownRender={canQuickCreateReferences ? (menu) => (
                   <>
                     {menu}
                     <Space style={{ padding: '8px' }}>
@@ -430,7 +432,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                       </Button>
                     </Space>
                   </>
-                )}
+                ) : undefined}
               />
             </Form.Item>
           </Col>
@@ -446,7 +448,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               <Select
                 {...resolvedMillingTypeSelectProps}
                 placeholder="Выберите тип"
-                dropdownRender={(menu) => (
+                dropdownRender={canQuickCreateReferences ? (menu) => (
                   <>
                     {menu}
                     <div style={{ borderTop: '1px solid var(--app-border-soft)', padding: '8px' }}>
@@ -460,7 +462,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                       </Button>
                     </div>
                   </>
-                )}
+                ) : undefined}
               />
             </Form.Item>
           </Col>
@@ -487,7 +489,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               <Select
                 {...resolvedEdgeTypeSelectProps}
                 placeholder="Выберите тип"
-                dropdownRender={(menu) => (
+                dropdownRender={canQuickCreateReferences ? (menu) => (
                   <>
                     {menu}
                     <div style={{ borderTop: '1px solid var(--app-border-soft)', padding: '8px' }}>
@@ -501,7 +503,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                       </Button>
                     </div>
                   </>
-                )}
+                ) : undefined}
               />
             </Form.Item>
           </Col>

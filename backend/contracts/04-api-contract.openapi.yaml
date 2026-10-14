@@ -22022,6 +22022,7 @@ components:
         - clients.onec_documents.view
         - groups.batch_link
         - whatsapp.calendar_send
+        - references.quick_create
         - bitrix24.requests.view_all
         - bitrix24.requests.view_assigned
         - groups.view_history

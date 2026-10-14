@@ -6,6 +6,7 @@ import type { PermissionName, UserRole } from '../../../permissions/permissions'
 import type { RolePolicy } from '../../../permissions/policies/role-policies';
 import type { RolePolicyScopeSets } from '../../../permissions/policies/scope-sets';
 import type { AccessTokenIssuerPort, IssuedAccessToken } from '../auth.types';
+import { hasuraRoleForErpRole } from './hasura-role';
 
 export interface AccessTokenPayload {
   sub: string;
@@ -64,8 +65,8 @@ export class JwtAccessTokenIssuer implements AccessTokenIssuerPort {
       sessionId: user.sessionId,
       tokenType: 'access',
       'https://hasura.io/jwt/claims': {
-        'x-hasura-allowed-roles': [user.role],
-        'x-hasura-default-role': user.role,
+        'x-hasura-allowed-roles': [hasuraRoleForErpRole(user.role)],
+        'x-hasura-default-role': hasuraRoleForErpRole(user.role),
         'x-hasura-user-id': user.id,
       },
     };

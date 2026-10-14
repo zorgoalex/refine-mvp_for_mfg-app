@@ -99,10 +99,13 @@ const live: SelectPermission[] = [
 describe('roles select aggregations', () => {
   it('lets every role that reads roles also count them in the metadata snapshot', () => {
     const permissions = rolesSelectPermissions();
-    expect(permissions.map((p) => p.role).sort()).toEqual(['manager', 'operator', 'superadmin', 'top_manager', 'viewer']);
+    expect(permissions.map((p) => p.role).sort()).toEqual(['erp_admin', 'manager', 'operator', 'superadmin', 'top_manager', 'viewer']);
     for (const permission of permissions) {
       expect(permission.permission.allow_aggregations, permission.role).toBe(true);
-      expect(permission.permission.filter, permission.role).toEqual({});
+      // Access groups 0Б: the open role filter is wrapped in the user's effective-permission predicate.
+      const filter = permission.permission.filter as { _and?: unknown[] };
+      expect(filter._and?.[0], permission.role).toEqual({});
+      expect(JSON.stringify(filter._and?.[1]), permission.role).toContain('user_effective_permissions');
     }
   });
 

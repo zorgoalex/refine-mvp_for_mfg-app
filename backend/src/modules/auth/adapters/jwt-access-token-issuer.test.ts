@@ -27,6 +27,23 @@ describe('JwtAccessTokenIssuer', () => {
     });
   });
 
+  it('gives the ERP administrator the ordinary Hasura role erp_admin, never the Hasura superuser role admin', async () => {
+    const hasuraClaims = async (role: CurrentUser['role']) => {
+      const issued = await issuer.issueAccessToken({ ...currentUser(), role });
+      return (jwt.decode(issued.accessToken) as Record<string, Record<string, unknown>>)['https://hasura.io/jwt/claims'];
+    };
+
+    expect(await hasuraClaims('admin')).toEqual({
+      'x-hasura-allowed-roles': ['erp_admin'],
+      'x-hasura-default-role': 'erp_admin',
+      'x-hasura-user-id': '10',
+    });
+    expect(await hasuraClaims('manager')).toMatchObject({ 'x-hasura-default-role': 'manager' });
+    // The ERP role itself is unchanged for the backend.
+    const issued = await issuer.issueAccessToken({ ...currentUser(), role: 'admin' });
+    expect(issuer.verifyAccessToken(issued.accessToken)).toMatchObject({ role: 'admin' });
+  });
+
   it('rejects invalid access tokens', () => {
     expect(() => issuer.verifyAccessToken('not-a-jwt')).toThrow(/Access token is invalid/);
   });
