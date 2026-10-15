@@ -1,3 +1,7 @@
+import {
+  clientNotesWithoutErpLines,
+  commentMarksErpClientInactive,
+} from '../application/bitrix24-client-notes';
 import { hash } from '../application/bitrix24-sync-mapper';
 import { bitrixActorId } from './bitrix24-authorship';
 import type {
@@ -21,7 +25,10 @@ export function normalizeBitrixClient(
     objectType,
     bitrixId,
     name,
-    notes: cleanText(item.comments),
+    // Not truncated: ERP's own notes come back through this echo and must round-trip whole into
+    // clients.notes (TEXT); the comment is whatever Bitrix24 stores for the Contact/Company.
+    notes: clientNotesWithoutErpLines(item.comments),
+    erpMarkedInactive: commentMarksErpClientInactive(item.comments),
     phones,
     originErpId,
     normalizedHash: hash(rawSnapshot),
@@ -166,7 +173,12 @@ function selectClientSnapshot(
   return {
     objectType,
     name,
+    // Bounded text for the snapshot row (CHECK raw_snapshot ≤ 256 KiB) plus a hash of the whole comment,
+    // so the change detection still covers all of the notes kept in ERP (see normalizeBitrixClient).
     comments: cleanText(item.comments),
+    commentsHash: typeof item.comments === 'string' && item.comments.trim()
+      ? hash({ comments: item.comments.trim() })
+      : null,
     phones,
     originatorId: cleanText(item.originatorId),
     originId: cleanText(item.originId),
@@ -227,7 +239,10 @@ function phoneType(value: unknown): 'mobile' | 'work' | 'home' | 'fax' {
 function cleanText(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const text = value.trim();
-  return text ? text.slice(0, 10000) : null;
+  if (!text) return null;
+  // Never cut a surrogate pair: a lone surrogate makes the JSON snapshot invalid for PostgreSQL jsonb.
+  const end = text.length > 10000 && /[\ud800-\udbff]/.test(text[9999]) ? 9999 : 10000;
+  return text.slice(0, end);
 }
 
 function finiteNumber(value: unknown): number | null {

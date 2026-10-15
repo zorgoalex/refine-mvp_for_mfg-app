@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ClientRow, OrderRow, PaymentRow } from './crm-sync.types';
+import { clientNotesWithoutErpLines } from './bitrix24-client-notes';
 
 export const BITRIX24_ENTITY_TYPE = {
   deal: 2,
@@ -54,7 +55,7 @@ export function mapClient(
 ): Bitrix24CounterpartyPayload {
   const isCompany = client.personType === 'legal';
   const comments = [
-    client.notes?.trim() || null,
+    clientNotesWithoutErpLines(client.notes),
     client.isActive ? null : 'Статус ERP: неактивен',
     `ERP ID клиента: ${client.clientId}`,
   ].filter(Boolean).join('\n');
