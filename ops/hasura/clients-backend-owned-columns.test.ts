@@ -28,7 +28,7 @@ function allColumnsLive(): Live {
 }
 
 // A minimal Hasura metadata API: export_metadata v2 and bulk with resource_version checks.
-function fakeHasura(initial: Live, options: { bumpAfterExport?: boolean; failBulk?: boolean } = {}) {
+function fakeHasura(initial: Live, options: { bumpAfterExport?: boolean; failBulk?: boolean; paddingBytes?: number } = {}) {
   const state = {
     version: 7,
     clients: JSON.parse(JSON.stringify(initial)) as Live,
@@ -51,6 +51,8 @@ function fakeHasura(initial: Live, options: { bumpAfterExport?: boolean; failBul
           metadata: { version: 3, sources: [{ name: 'default', tables: [
             { table: { schema: 'public', name: 'clients' }, insert_permissions: state.clients.insert, update_permissions: state.clients.update },
             { table: { schema: 'public', name: 'other' }, insert_permissions: [state.other] },
+            // Access-group predicates make real metadata megabytes: more than one environment string may hold.
+            ...(options.paddingBytes ? [{ table: { schema: 'public', name: 'padding' }, configuration: { comment: 'x'.repeat(options.paddingBytes) } }] : []),
           ] }] },
         };
         // Someone edits metadata right after our read.
@@ -182,6 +184,15 @@ describe('clients backend-owned columns script', () => {
     expect(secondResult.code).not.toBe(0);
     expect(secondResult.output).toContain("only live: ['secret_note']");
     expect(second.state.bulkRequests).toBe(0);
+  });
+
+  it('reads metadata of several megabytes (more than the 128 KiB limit of one environment string)', async () => {
+    const { server, state } = fakeHasura(allColumnsLive(), { paddingBytes: 3 * 1024 * 1024 });
+    const result = await runScript(server);
+    expect(result.code, result.output).toBe(0);
+    expect(result.output).not.toContain('Argument list too long');
+    expect(state.bulkRequests).toBe(1);
+    expect(byRole(state.clients.insert)[roles[0]].columns).toEqual(wanted('insert', roles[0]));
   });
 
   it('dry run changes nothing; a second run is a no-op; --revert gives all columns back', async () => {
