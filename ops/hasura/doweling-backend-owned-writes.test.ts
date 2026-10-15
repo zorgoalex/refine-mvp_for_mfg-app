@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { readFileSync, rmSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
@@ -36,7 +36,7 @@ function revokedLive(): Live {
 }
 
 // A minimal Hasura metadata API: export_metadata v2 and bulk with resource_version checks.
-function fakeHasura(initial: Live, options: { bumpAfterExport?: boolean; failBulk?: boolean } = {}) {
+function fakeHasura(initial: Live, options: { bumpAfterExport?: boolean; failBulk?: boolean; padding?: number } = {}) {
   const state = { version: 7, tables: JSON.parse(JSON.stringify(initial)) as Live, bulkRequests: 0 };
   const server: Server = createServer((request, response) => {
     let body = '';
@@ -54,6 +54,8 @@ function fakeHasura(initial: Live, options: { bumpAfterExport?: boolean; failBul
           metadata: { version: 3, sources: [{ name: 'default', tables: [
             ...TABLES.map((name) => ({ table: { schema: 'public', name }, ...state.tables[name] })),
             { table: { schema: 'public', name: 'other' }, insert_permissions: [{ role: 'viewer', permission: { columns: '*', check: {} } }] },
+            // The real metadata after access groups 0Б is megabytes.
+            ...(options.padding ? [{ table: { schema: 'public', name: 'padding' }, comment: 'x'.repeat(options.padding) }] : []),
           ] }] },
         };
         if (options.bumpAfterExport) state.version += 1;
@@ -140,6 +142,15 @@ describe('doweling backend-owned Hasura writes', () => {
     expect(state.bulkRequests).toBe(1);
     expect(state.tables).toEqual(revokedLive());
     expect(result.output).toContain('doweling_orders/delete: granted (erp_admin, manager, superadmin) -> revoked');
+  });
+
+  it('handles metadata of several megabytes (it never passes through an environment variable)', async () => {
+    const { server, state } = fakeHasura(grantedLive(), { padding: 3 * 1024 * 1024 });
+    const result = await runScript(server);
+    expect(result.code, result.output).toBe(0);
+    expect(state.bulkRequests).toBe(1);
+    // No temp file (metadata may carry connection settings) is left behind.
+    expect(readdirSync('/tmp').filter((name) => name.startsWith('doweling-writes-metadata-'))).toEqual([]);
   });
 
   it('a second run is a no-op; --revert recreates exactly the reference; dry run changes nothing', async () => {
