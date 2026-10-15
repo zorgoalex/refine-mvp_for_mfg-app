@@ -57,6 +57,7 @@ interface RemotePayment {
   sum: number | null;
   currency: string | null;
   xmlId: string | null;
+  paySystemId: number | null;
 }
 
 /** Steps an operation may need: unpay, apply/delete, plus a switch to delete. */
@@ -257,7 +258,7 @@ export class Bitrix24PaidPaymentGuard {
       const targetSum = Number(fields.sum);
       if (remote.paid && !sameAmount(remote.sum, targetSum)) {
         if (!(targetSum > 0)) throw new Error(`CRM sync: ERP payment ${payment.paymentId} has no positive amount`);
-        await this.deps.bitrix.updatePayment(id, { paid: 'N' });
+        await this.deps.bitrix.updatePayment(id, this.unpaidFields(remote));
         return this.deps.store.markUnpaid(operation, requestId);
       }
       // Unpaid, or paid with the current amount (incl. a lost response of the full update):
@@ -272,7 +273,7 @@ export class Bitrix24PaidPaymentGuard {
     }
 
     if (remote.paid) {
-      await this.deps.bitrix.updatePayment(id, { paid: 'N' });
+      await this.deps.bitrix.updatePayment(id, this.unpaidFields(remote));
       return this.deps.store.markUnpaid(operation, requestId);
     }
     await this.deps.bitrix.deletePayment(id);
@@ -294,7 +295,17 @@ export class Bitrix24PaidPaymentGuard {
       sum: Number.isFinite(sum) ? sum : null,
       currency: typeof payment.currency === 'string' && payment.currency ? payment.currency : null,
       xmlId: typeof payment.xmlId === 'string' ? payment.xmlId : null,
+      paySystemId: positiveInteger(payment.paySystemId),
     };
+  }
+
+  /**
+   * Fields that only remove the paid flag. sale.payment.update rejects an update without paySystemId
+   * («Required fields: paySystemId», production 15.10), so the payment's own pay system is sent back
+   * unchanged; the configured one only when Bitrix24 did not report it.
+   */
+  private unpaidFields(remote: RemotePayment): Record<string, unknown> {
+    return { paid: 'N', paySystemId: remote.paySystemId ?? this.deps.options.paySystemId };
   }
 }
 
@@ -312,4 +323,9 @@ function sameAmount(left: number | null, right: number): boolean {
 
 function uuidOrNull(value: string): string | null {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ? value : null;
+}
+
+function positiveInteger(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }

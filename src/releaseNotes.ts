@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-15", title: "Bitrix24: изменение оплат «Оплачено» — исправление",
+    services: ["ERP", "CRM"], repositories: ["repo_erp"],
+    fixed: [
+      "Изменение или удаление оплаты, отмеченной в Bitrix24 «Оплачено», больше не останавливается на снятии отметки: Bitrix24 требовал указать платёжную систему, теперь ERP передаёт ту, что уже стоит у оплаты.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-15", title: "Bitrix24: заметки клиентов без служебных строк ERP",
     services: ["ERP", "CRM"], repositories: ["repo_erp"],
     fixed: [
