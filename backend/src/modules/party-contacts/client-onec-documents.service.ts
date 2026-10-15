@@ -5,9 +5,11 @@ import { ApiError } from '../../common/errors/api-error';
 import type { BackendEnv } from '../../config/env.validation';
 import { DatabaseService } from '../../database/database.service';
 import type { CurrentUser } from '../../permissions/current-user';
-import { rolePolicyForUser } from '../../permissions/policies/scope';
-import { clientOrdersScope } from '../clients-read/application/client-list-facts.service';
-import type { ClientOrdersScope } from '../clients-read/application/client-list-facts.types';
+import { appendOrderReadVisibilitySql } from '../../permissions/policies/order-read-scope-sql';
+import { policyScopeSetsForUser } from '../../permissions/policies/scope';
+import { scalarScope } from '../../permissions/policies/scope-sets';
+import { clientOrderReadScope } from '../clients-read/application/client-list-facts.service';
+import type { ClientOrderReadScope } from '../clients-read/application/client-list-facts.types';
 import { erpOrderOfOnecOrderSql } from '../payments-onec/domain/onec-order-link-sql';
 import { ClientCounterpartyRepository } from './client-counterparty.repository';
 
@@ -70,7 +72,7 @@ export interface ClientOnecDocumentsResponseDto {
   summary?: ClientOnecDocumentsSummaryDto[];
 }
 
-type VisibleScope = Exclude<ClientOrdersScope, { kind: 'none' }>;
+type VisibleScope = Exclude<ClientOrderReadScope, { kind: 'none' }>;
 
 /** The 1C customer orders a document refers to: itself (a customer order), its header, its live lines. */
 const ORDER_REFS = `(
@@ -102,10 +104,12 @@ const GROUP = `CASE d.doc_kind WHEN 'customer_order' THEN 'orders' WHEN 'sales_s
  * client is linked to. Read-only; needs `clients.view`, `clients.onec_documents.view` and `orders.view`; money
  * needs `orders.view_financials`. Rights are checked here by literal membership, so a refusal is audited.
  *
- * The order visibility of the user is part of every query (rows, counts and sums use one predicate). A user
- * limited to his own orders sees a document only when it refers to at least one 1C customer order and EVERY
- * order it refers to resolves (manual link, otherwise the series rule — the resolution of the receipts read
- * model) to an ERP order of his own — creator or manager, the same rule as «Документы ERP» — and no live line of it
+ * The order visibility of the user is part of every query (rows, counts and sums use one predicate). It is the
+ * shared order read visibility (`clientOrderReadScope` → `appendOrderReadVisibilitySql`, the rule of the orders list,
+ * the order card and «Документы ERP», from the user's effective scope sets). A user whose reads are limited to his
+ * own orders sees a document only when it refers to at least one 1C customer order and EVERY order it refers to
+ * resolves (manual link, otherwise the series rule — the resolution of the receipts read model) to an ERP order he
+ * may read — creator or manager — and no live line of it
  * is left without an order (unknown belonging hides the whole document: its amount is shown in full or not at all).
  * A document that also pays another manager's order is therefore not shown, and
  * a refund (which refers to a receipt, not to an order) is shown only to users who see all orders.
@@ -126,7 +130,7 @@ export class ClientOnecDocumentsService {
   async list(
     user: CurrentUser, clientId: number, query: { group?: ClientOnecDocumentGroup; page: number; pageSize: number }, requestId: string,
   ): Promise<ClientOnecDocumentsResponseDto> {
-    const scope = clientOrdersScope(user);
+    const scope = clientOrderReadScope(user);
     const missing = REQUIRED.filter((permission) => !user.permissions.includes(permission));
     if (missing.length > 0 || scope.kind === 'none') {
       await auditService.recordDenied(this.database, {
@@ -134,7 +138,7 @@ export class ClientOnecDocumentsService {
         actorUserId: user.id, actorUsername: user.username, actorRole: user.role, requestId,
         source: 'backend-party-contacts', reason: missing.length > 0 ? 'missing_permission' : 'scope_not_allowed',
         requiredPermissions: [...REQUIRED],
-        metadata: { action: 'client_onec_documents', missingPermissions: missing, orderScope: rolePolicyForUser(user).orders.view },
+        metadata: { action: 'client_onec_documents', missingPermissions: missing, orderScope: scalarScope(policyScopeSetsForUser(user).orders.view), orderScopeSet: policyScopeSetsForUser(user).orders.view },
       });
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра документов 1С клиента', { requiredPermissions: [...REQUIRED] });
     }
@@ -170,7 +174,7 @@ export class ClientOnecDocumentsService {
     const listSeries = ownSeries ?? `$${listParams.push(this.series())}`;
     const groupFilter = query.group ? ` AND d.doc_kind = ANY($${listParams.push([...CLIENT_ONEC_DOCUMENT_GROUPS[query.group]])}::text[])` : '';
     // ERP orders of the document: through its 1C orders, never beyond the order visibility of the user.
-    const erpOwn = scope.kind === 'own' ? ` AND (o.created_by = $${listParams.push(scope.userId)} OR o.manager_id = $${listParams.length})` : '';
+    const erpOwn = scope.kind === 'own' ? ` AND ${appendOrderReadVisibilitySql(listParams, scope.viewer, 'o')}` : '';
     const rows = (await this.database.query<{
       id: string; grp: ClientOnecDocumentGroup; doc_kind: string; number: string | null; doc_date: string | null; state: ClientOnecDocumentState;
       state_name: string | null; responsible_name: string | null; amount: string | null; currency: string | null;
@@ -203,11 +207,10 @@ export class ClientOnecDocumentsService {
     };
   }
 
-  /** «The 1C order `r.ref` of the document `d` is an ERP order of the user's own» — pushes the user id. */
+  /** «The 1C order `r.ref` of the document `d` is an ERP order the user may read» — pushes the actor parameter. */
   private ownOrderSql(params: unknown[], scope: Extract<VisibleScope, { kind: 'own' }>, erpOrder: string): string {
-    const user = `$${params.push(scope.userId)}`;
     return `SELECT 1 FROM orders o
-             WHERE o.order_id = ${erpOrder} AND o.delete_flag = false AND (o.created_by = ${user} OR o.manager_id = ${user})`;
+             WHERE o.order_id = ${erpOrder} AND o.delete_flag = false AND ${appendOrderReadVisibilitySql(params, scope.viewer, 'o')}`;
   }
 }
 

@@ -7,6 +7,7 @@ import type { BackendEnv } from '../../config/env.validation';
 import { DatabaseService } from '../../database/database.service';
 import type { CurrentUser } from '../../permissions/current-user';
 import { ROLE_POLICIES } from '../../permissions/policies/role-policies';
+import { scopeSetsFromPolicy, type ScopeGrant } from '../../permissions/policies/scope-sets';
 import type { PermissionName } from '../../permissions/permissions';
 import { ClientCounterpartyRepository } from './client-counterparty.repository';
 import { ClientOnecDocumentsService, summarize } from './client-onec-documents.service';
@@ -37,6 +38,11 @@ describe.skipIf(!url)('1C documents of a client — read model, real PostgreSQL'
 
   const user = (userId: number, role: 'admin' | 'manager', permissions: PermissionName[] = FULL): CurrentUser =>
     ({ id: String(userId), username: `${tag}-${userId}`, role, roleId: role === 'admin' ? 1 : 10, permissions, policyScopes: ROLE_POLICIES[role] });
+  // A reader whose order visibility comes from access groups (effective scope sets of the token), whatever his role.
+  const grouped = (userId: number, role: 'admin' | 'manager', view: ScopeGrant[]): CurrentUser => {
+    const sets = scopeSetsFromPolicy(ROLE_POLICIES[role]);
+    return { ...user(userId, role), policyScopeSets: { ...sets, orders: { ...sets.orders, view } } };
+  };
   const service = (series: string | null = SERIES) => new ClientOnecDocumentsService(
     database, new ClientCounterpartyRepository(database),
     new ConfigService<BackendEnv, true>({ BACKEND_ONEC_ORDER_NUMBER_SERIES: series ?? '' } as Partial<BackendEnv>));
@@ -245,6 +251,22 @@ describe.skipIf(!url)('1C documents of a client — read model, real PostgreSQL'
     expect(ids(await list(user(MANAGER, 'manager'), {}, CLIENT, null))).toEqual([doc.payCleaned.id, doc.orderManual.id]);
   });
 
+  it('follows the shared order read visibility from the effective scope sets, not the role', async () => {
+    const all = ids(await list(user(ADMIN, 'admin')));
+    const own = ids(await list(user(MANAGER, 'manager')));
+    // An admin limited by his access groups to his own orders sees what a manager limited to his own orders sees.
+    const limitedAdmin = await list(grouped(MANAGER, 'admin', ['own']));
+    expect(limitedAdmin.scope).toBe('own');
+    expect(ids(limitedAdmin)).toEqual(own);
+    // «assigned» does not restrict order reads (the orders list and the card show all orders), and neither does
+    // own ∪ assigned: such a reader sees every document, as for «all».
+    for (const view of [['assigned'], ['own', 'assigned']] as ScopeGrant[][]) {
+      const response = await list(grouped(MANAGER, 'manager', view));
+      expect(response.scope, view.join('+')).toBe('all');
+      expect(ids(response), view.join('+')).toEqual(all);
+    }
+  });
+
   it('money is absent, not zero, without the right to see order financials', async () => {
     const response = await list(user(ADMIN, 'admin', ['clients.view', 'clients.onec_documents.view', 'orders.view']));
     expect(response.summary).toBeUndefined();
@@ -263,22 +285,21 @@ describe.skipIf(!url)('1C documents of a client — read model, real PostgreSQL'
     expect(await code(list(user(ADMIN, 'admin'), {}, 999_999_999))).toBe('CLIENT_NOT_FOUND');
   });
 
-  it('refuses and audits a reader without a right or with an order visibility that is neither «all» nor «own»', async () => {
+  it('refuses and audits a reader without a right or without any order visibility', async () => {
     const audit = new ClientOnecDocumentsService(database, new ClientCounterpartyRepository(database), new ConfigService<BackendEnv, true>({} as Partial<BackendEnv>));
     for (const missing of FULL.slice(0, 3)) {
       const reader = user(MANAGER, 'manager', FULL.filter((permission) => permission !== missing));
       expect(await code(audit.list(reader, CLIENT, { page: 1, pageSize: 20 }, `req-${tag}-${missing}`))).toBe('PERMISSION_DENIED');
     }
-    const assigned: CurrentUser = { ...user(MANAGER, 'manager'), policyScopes: { ...ROLE_POLICIES.manager, orders: { ...ROLE_POLICIES.manager.orders, view: 'assigned' } } };
-    expect(await code(audit.list(assigned, CLIENT, { page: 1, pageSize: 20 }, `req-${tag}-assigned`))).toBe('PERMISSION_DENIED');
+    expect(await code(audit.list(grouped(MANAGER, 'manager', []), CLIENT, { page: 1, pageSize: 20 }, `req-${tag}-none`))).toBe('PERMISSION_DENIED');
     const rows = (await db.query(
-      `SELECT request_id, related_client_id::text AS related_client_id, status_code, metadata_json->'missingPermissions' AS missing, metadata_json->>'orderScope' AS order_scope
+      `SELECT request_id, related_client_id::text AS related_client_id, status_code, metadata_json->'missingPermissions' AS missing, metadata_json->>'orderScope' AS order_scope, metadata_json->'orderScopeSet' AS order_scope_set
          FROM audit_log WHERE event = 'clients.onec_documents_denied' AND request_id LIKE $1 ORDER BY request_id`, [`req-${tag}-%`])).rows;
     expect(rows).toEqual([
-      { request_id: `req-${tag}-assigned`, related_client_id: String(CLIENT), status_code: 'scope_not_allowed', missing: [], order_scope: 'assigned' },
-      { request_id: `req-${tag}-clients.onec_documents.view`, related_client_id: String(CLIENT), status_code: 'missing_permission', missing: ['clients.onec_documents.view'], order_scope: 'own' },
-      { request_id: `req-${tag}-clients.view`, related_client_id: String(CLIENT), status_code: 'missing_permission', missing: ['clients.view'], order_scope: 'own' },
-      { request_id: `req-${tag}-orders.view`, related_client_id: String(CLIENT), status_code: 'missing_permission', missing: ['orders.view'], order_scope: 'own' },
+      { request_id: `req-${tag}-clients.onec_documents.view`, related_client_id: String(CLIENT), status_code: 'missing_permission', missing: ['clients.onec_documents.view'], order_scope: 'own', order_scope_set: ['own'] },
+      { request_id: `req-${tag}-clients.view`, related_client_id: String(CLIENT), status_code: 'missing_permission', missing: ['clients.view'], order_scope: 'own', order_scope_set: ['own'] },
+      { request_id: `req-${tag}-none`, related_client_id: String(CLIENT), status_code: 'scope_not_allowed', missing: [], order_scope: 'none', order_scope_set: [] },
+      { request_id: `req-${tag}-orders.view`, related_client_id: String(CLIENT), status_code: 'missing_permission', missing: ['orders.view'], order_scope: 'own', order_scope_set: ['own'] },
     ]);
   });
 });
