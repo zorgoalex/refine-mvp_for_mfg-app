@@ -469,6 +469,25 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
     }
   };
 
+  const retryFailedOutbound = async () => {
+    const canary = health?.outbound?.paidResetOrderIds ?? [];
+    setSettingsLoading(true);
+    try {
+      const result = await bitrix24Api.retryFailedOutbound(canary);
+      notification.success({
+        message: `Поставлено в отправку в Bitrix: ${result.retried}`,
+        description: result.orderIds ? `Только заказы: ${result.orderIds.join(', ')}` : undefined,
+      });
+      await loadSettings();
+    } catch (error) {
+      notification.error({
+        message: 'Не удалось повторить отправку в Bitrix',
+        description: errorMessage(error),
+      });
+      setSettingsLoading(false);
+    }
+  };
+
   const updateUserMapping = async (
     bitrixUserId: string,
     erpUserId: number,
@@ -1022,6 +1041,21 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
                 {health.lastError}
               </Descriptions.Item>
             )}
+            {health?.outbound && (
+              <Descriptions.Item label="Не ушло в Bitrix (заказы и клиенты)">
+                {health.outbound.failed}
+              </Descriptions.Item>
+            )}
+            {health?.outbound && (
+              <Descriptions.Item label="Изменение оплат «Оплачено»">
+                {health.outbound.paidResetEnabled
+                  ? health.outbound.paidResetOrderIds.length > 0
+                    ? `включено для заказов ${health.outbound.paidResetOrderIds.join(', ')}`
+                    : 'включено'
+                  : 'выключено'}
+                {` · в работе ${health.outbound.paidResetOpen}, застряло ${health.outbound.paidResetStuck}`}
+              </Descriptions.Item>
+            )}
           </Descriptions>
 
           <Space>
@@ -1039,6 +1073,17 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
             >
               Повторить ошибки
             </Button>
+            {health?.outbound && (
+              <Button
+                disabled={health.outbound.failed === 0}
+                loading={settingsLoading}
+                onClick={() => void retryFailedOutbound()}
+              >
+                {health.outbound.paidResetOrderIds.length > 0
+                  ? 'Повторить отправку в Bitrix (только заказы из списка)'
+                  : 'Повторить отправку в Bitrix'}
+              </Button>
+            )}
           </Space>
 
           {ambiguousCommands.length > 0 && (

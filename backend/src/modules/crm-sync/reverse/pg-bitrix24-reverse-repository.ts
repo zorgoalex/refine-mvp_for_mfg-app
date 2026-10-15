@@ -3884,7 +3884,116 @@ export class PgBitrix24ReverseRepository {
         ambiguous: Number(row?.widget_ambiguous ?? 0),
       },
       paymentSystemCatalogLastFetchedAt: toIso(row?.catalog_last_fetched_at ?? null),
+      outbound: await this.getOutboundHealth(),
     };
+  }
+
+  /**
+   * ERP → Bitrix24 queue health. `failed` counts entities whose LATEST event failed (older failed
+   * rows superseded by later events are history, counted in `failedRows`).
+   */
+  private async getOutboundHealth(): Promise<Record<string, number>> {
+    const result = await this.db.query<{
+      failed: string | number;
+      failed_rows: string | number;
+      paid_reset_open: string | number;
+      paid_reset_stuck: string | number;
+    }>(
+      `SELECT
+         (SELECT COUNT(*) FROM (
+            SELECT DISTINCT ON (idempotency_key) status
+              FROM crm_sync_outbox
+             WHERE event_type LIKE 'crm.sync.%' AND idempotency_key IS NOT NULL
+             ORDER BY idempotency_key, created_at DESC, outbox_event_id DESC
+          ) latest WHERE latest.status='failed') AS failed,
+         (SELECT COUNT(*) FROM crm_sync_outbox
+           WHERE event_type LIKE 'crm.sync.%' AND status='failed') AS failed_rows,
+         (SELECT COUNT(*) FROM crm_sync_paid_payment_operation
+           WHERE phase <> 'completed') AS paid_reset_open,
+         (SELECT COUNT(*) FROM crm_sync_paid_payment_operation
+           WHERE phase <> 'completed' AND stuck_at IS NOT NULL) AS paid_reset_stuck`,
+    );
+    const row = result.rows[0];
+    return {
+      failed: Number(row?.failed ?? 0),
+      failedRows: Number(row?.failed_rows ?? 0),
+      paidResetOpen: Number(row?.paid_reset_open ?? 0),
+      paidResetStuck: Number(row?.paid_reset_stuck ?? 0),
+    };
+  }
+
+  /**
+   * Requeues ERP → Bitrix24 sync: for every entity (`order:<id>` / `client:<id>`) whose latest
+   * event failed and that has nothing pending/processing, that latest event goes back to pending.
+   * The consumer projects the CURRENT ERP state, and a stale delete of an existing entity is
+   * projected instead of executed, so replaying is safe. `orderIds` limits it to those orders.
+   */
+  async retryFailedOutbound(input: {
+    actorUserId: string;
+    auditRequestId: string;
+    orderIds: number[] | null;
+  }): Promise<{ retried: number; orderIds: number[] | null }> {
+    return this.db.transaction(async (tx) => {
+      const result = await tx.query<{ idempotency_key: string; payload_json: Record<string, unknown> | null }>(
+        `WITH latest AS (
+           SELECT DISTINCT ON (idempotency_key) outbox_event_id, idempotency_key, status, payload_json
+             FROM crm_sync_outbox
+            WHERE event_type LIKE 'crm.sync.%' AND idempotency_key IS NOT NULL
+            ORDER BY idempotency_key, created_at DESC, outbox_event_id DESC
+         ), target AS (
+           SELECT latest.outbox_event_id
+             FROM latest
+            WHERE latest.status='failed'
+              AND NOT EXISTS (
+                SELECT 1 FROM crm_sync_outbox other
+                 WHERE other.idempotency_key=latest.idempotency_key
+                   AND other.status IN ('pending','processing')
+              )
+              AND ($1::text[] IS NULL OR (
+                latest.payload_json->>'entity'='order' AND latest.payload_json->>'id' = ANY($1::text[])
+              ))
+         )
+         UPDATE crm_sync_outbox event
+            SET status='pending', attempts=0, next_attempt_at=now(),
+                locked_at=NULL, locked_by=NULL, lock_token=NULL
+           FROM target
+          WHERE event.outbox_event_id=target.outbox_event_id AND event.status='failed'
+         RETURNING event.idempotency_key, event.payload_json`,
+        [input.orderIds ? input.orderIds.map(String) : null],
+      );
+      const retried = result.rowCount ?? 0;
+      // One row per requeued entity with normalized dimensions (filterable by order/client),
+      // plus the command row; all share the actor and request id.
+      for (const row of result.rows) {
+        const entity = String(row.payload_json?.entity ?? '');
+        const id = String(row.payload_json?.id ?? '');
+        if ((entity !== 'order' && entity !== 'client') || !/^\d+$/.test(id)) continue;
+        const clientId = String(row.payload_json?.clientId ?? '');
+        await this.audit.record(tx, {
+          event: 'crm_sync.retry_failed',
+          entityType: entity,
+          entityId: id,
+          actorUserId: input.actorUserId,
+          requestId: input.auditRequestId,
+          source: 'backend-bitrix24',
+          relatedOrderId: entity === 'order' ? Number(id) : null,
+          relatedClientId: entity === 'client' ? Number(id) : /^\d+$/.test(clientId) ? Number(clientId) : null,
+          after: { requeued: true },
+          metadata: { idempotencyKey: row.idempotency_key },
+        });
+      }
+      await this.audit.record(tx, {
+        event: 'crm_sync.retry_failed',
+        entityType: 'crm_sync_outbox',
+        entityId: 'failed',
+        actorUserId: input.actorUserId,
+        requestId: input.auditRequestId,
+        source: 'backend-bitrix24',
+        after: { retried },
+        metadata: { orderIds: input.orderIds },
+      });
+      return { retried, orderIds: input.orderIds };
+    });
   }
 
   async retryFailedEvents(input: {

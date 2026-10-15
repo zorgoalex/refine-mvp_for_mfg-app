@@ -1,0 +1,415 @@
+import { describe, expect, it } from 'vitest';
+import { Bitrix24ApiError, type Bitrix24ApiPort } from '../adapters/bitrix24-api-client';
+import type {
+  BeginPaidPaymentOperation,
+  PaidPaymentOperation,
+  PaidPaymentOutcome,
+} from '../adapters/pg-crm-sync-paid-payment-operation-repository';
+import {
+  Bitrix24PaidPaymentGuard,
+  type PaidPaymentOperationStore,
+  type PaidPaymentStartPolicy,
+} from './bitrix24-paid-payment-guard';
+import { mapPayment, paymentXmlId } from './bitrix24-sync-mapper';
+import type { PaymentRow } from './crm-sync.types';
+
+const options = { erpBaseUrl: 'https://erp.example', currencyId: 'KZT', assignedById: 1, paySystemId: 6 };
+const EVENT = '11111111-1111-4111-8111-111111111111';
+
+interface RemoteState { paid: 'Y' | 'N'; sum: number; currency: string; xmlId: string | null }
+
+/** Bitrix24 as the portal behaves: a paid payment keeps its amount and cannot be deleted. */
+function fakeBitrix(initial: Record<string, RemoteState>) {
+  const payments = new Map(Object.entries(initial).map(([id, state]) => [id, { ...state }]));
+  const calls: string[] = [];
+  const failures: Array<{ match: (call: string) => boolean; error?: Error }> = [];
+  const maybeFail = (call: string) => {
+    const index = failures.findIndex((failure) => failure.match(call));
+    if (index >= 0) {
+      const [failure] = failures.splice(index, 1);
+      throw failure.error ?? new Bitrix24ApiError('net', 'NETWORK_ERROR', 0, 'fetch failed');
+    }
+  };
+  const bitrix = {
+    withRequestGuard: async (guard: () => Promise<void>, operation: () => Promise<unknown>) => {
+      await guard();
+      return operation();
+    },
+    getPayment: async (id: string) => {
+      calls.push(`get:${id}`);
+      maybeFail(`get:${id}`);
+      const payment = payments.get(id);
+      if (!payment) throw new Bitrix24ApiError('sale.payment.get', 'ERROR_NOT_FOUND', 400, 'payment not found');
+      return { ...payment };
+    },
+    updatePayment: async (id: string, fields: Record<string, unknown>) => {
+      const call = `update:${id}:${fields.paid ?? '-'}:${fields.sum ?? '-'}`;
+      calls.push(call);
+      maybeFail(call);
+      const payment = payments.get(id);
+      if (!payment) throw new Bitrix24ApiError('sale.payment.update', 'ERROR_NOT_FOUND', 400, 'payment not found');
+      if (payment.paid === 'Y' && fields.sum !== undefined && Number(fields.sum) !== payment.sum) {
+        throw new Bitrix24ApiError('sale.payment.update', '0', 400, 'Нельзя изменить сумму оплаты, если установлен статус "Оплачено"');
+      }
+      if (fields.sum !== undefined) payment.sum = Number(fields.sum);
+      if (fields.paid !== undefined) payment.paid = fields.paid as 'Y' | 'N';
+      if (fields.xmlId !== undefined) payment.xmlId = String(fields.xmlId);
+    },
+    deletePayment: async (id: string) => {
+      calls.push(`delete:${id}`);
+      maybeFail(`delete:${id}`);
+      const payment = payments.get(id);
+      if (!payment) return;
+      if (payment.paid === 'Y') {
+        throw new Bitrix24ApiError('crm.item.payment.delete', 'SALE_PAYMENT_DELETE_EXIST_PAID', 400, 'Оплата оплачена. Отмените оплату');
+      }
+      payments.delete(id);
+    },
+  } as unknown as Bitrix24ApiPort;
+  return { bitrix, payments, calls, failures };
+}
+
+function memoryStore() {
+  const operations = new Map<string, PaidPaymentOperation & { outcome?: PaidPaymentOutcome; reproject?: boolean }>();
+  const audits: string[] = [];
+  const domainEvents: string[] = [];
+  let sequence = 0;
+  const store: PaidPaymentOperationStore & { crashAfterComplete?: boolean } = {
+    async findOpen(erpPaymentId) {
+      return [...operations.values()].find((op) => op.erpPaymentId === erpPaymentId && op.phase !== 'completed') ?? null;
+    },
+    async listDue() {
+      return [...operations.values()].filter((op) => op.phase !== 'completed');
+    },
+    async listOpenFor(orderId, paymentIds) {
+      return [...operations.values()].filter((op) =>
+        op.phase !== 'completed' && (op.erpOrderId === orderId || paymentIds.includes(op.erpPaymentId)));
+    },
+    async begin(input: BeginPaidPaymentOperation) {
+      const open = await this.findOpen(input.erpPaymentId);
+      if (open) return open;
+      const op: PaidPaymentOperation = {
+        operationId: `op-${++sequence}`,
+        erpPaymentId: input.erpPaymentId,
+        erpOrderId: input.erpOrderId,
+        bitrixPaymentId: input.bitrixPaymentId,
+        bitrixDealId: input.bitrixDealId,
+        action: input.action,
+        phase: 'requested',
+        attempts: 0,
+        stuckAt: null,
+        originOutboxEventId: input.originOutboxEventId,
+        bitrixSumBefore: input.bitrixSumBefore,
+        targetSum: input.targetSum,
+      };
+      operations.set(op.operationId, op);
+      audits.push(`requested:${op.erpPaymentId}`);
+      return { ...op };
+    },
+    async markUnpaid(op) {
+      const stored = operations.get(op.operationId)!;
+      if (stored.phase !== 'unpaid') audits.push(`unpaid:${op.erpPaymentId}`);
+      stored.phase = 'unpaid';
+      return { ...stored };
+    },
+    async switchToDelete(op) {
+      const stored = operations.get(op.operationId)!;
+      stored.action = 'delete';
+      stored.targetSum = null;
+      audits.push(`action_changed:${op.erpPaymentId}`);
+      return { ...stored };
+    },
+    async complete(op, outcome, { reproject }) {
+      const stored = operations.get(op.operationId)!;
+      if (stored.phase === 'completed') return false;
+      stored.phase = 'completed';
+      stored.outcome = outcome;
+      stored.reproject = reproject;
+      stored.stuckAt = null;
+      audits.push(`completed:${op.erpPaymentId}:${outcome}`);
+      domainEvents.push(`completed:${op.operationId}`);
+      return true;
+    },
+    async recordFailure(op) {
+      const stored = operations.get(op.operationId);
+      if (!stored || stored.phase === 'completed') return;
+      stored.attempts += 1;
+      if (stored.attempts >= 5 && stored.stuckAt === null) {
+        stored.stuckAt = new Date().toISOString();
+        audits.push(`stuck:${op.erpPaymentId}`);
+        domainEvents.push(`stuck:${op.operationId}`);
+      }
+    },
+  };
+  return { store, operations, audits, domainEvents };
+}
+
+function payment(overrides: Partial<PaymentRow> = {}): PaymentRow {
+  return {
+    paymentId: '3',
+    orderId: '2',
+    typePaidId: '1',
+    typePaidName: 'Наличные',
+    amount: 300,
+    paymentDate: '2026-08-03',
+    notes: null,
+    ...overrides,
+  };
+}
+
+function setup(input: {
+  remote: Record<string, RemoteState>;
+  erpPayments?: PaymentRow[];
+  policy?: Partial<PaidPaymentStartPolicy>;
+}) {
+  const fake = fakeBitrix(input.remote);
+  const memory = memoryStore();
+  const erp = new Map((input.erpPayments ?? [payment()]).map((row) => [row.paymentId, row]));
+  const policy: PaidPaymentStartPolicy = {
+    enabled: input.policy?.enabled ?? true,
+    orderIds: input.policy?.orderIds ?? new Set<string>(),
+  };
+  const guard = new Bitrix24PaidPaymentGuard({
+    bitrix: fake.bitrix,
+    store: memory.store,
+    source: { getPaymentById: async (id) => erp.get(id) ?? null },
+    options,
+    policy: () => policy,
+  });
+  return { guard, ...fake, ...memory, erp, policy };
+}
+
+const ours = (paid: 'Y' | 'N', sum: number): RemoteState => ({ paid, sum, currency: 'KZT', xmlId: paymentXmlId('3') });
+const fieldsOf = (row: PaymentRow) => mapPayment(row, options).fields;
+const update = (env: ReturnType<typeof setup>, row = payment()) =>
+  env.guard.update({ payment: row, dealId: '50', bitrixId: '700', fields: fieldsOf(row), requestId: EVENT });
+const remove = (env: ReturnType<typeof setup>, bitrixId = '700') =>
+  env.guard.delete({ erpPaymentId: '3', erpOrderId: '2', dealId: '50', bitrixId, requestId: EVENT });
+
+describe('Bitrix24PaidPaymentGuard — update', () => {
+  it('unpays, applies the new amount and pays back a paid ERP payment (1)', async () => {
+    const env = setup({ remote: { 700: ours('Y', 142000) } });
+    await update(env);
+    expect(env.payments.get('700')).toMatchObject({ paid: 'Y', sum: 300 });
+    expect(env.calls).toEqual(['update:700:Y:300', 'get:700', 'get:700', 'update:700:N:-', 'get:700', 'update:700:Y:300']);
+    expect(env.audits).toEqual(['requested:3', 'unpaid:3', 'completed:3:applied']);
+    expect(env.domainEvents).toHaveLength(1);
+    expect([...env.operations.values()][0]).toMatchObject({ reproject: false, originOutboxEventId: EVENT });
+  });
+
+  it('keeps the old error and starts nothing while the flag is off (2)', async () => {
+    const env = setup({ remote: { 700: ours('Y', 142000) }, policy: { enabled: false } });
+    await expect(update(env)).rejects.toThrow('Нельзя изменить сумму');
+    expect(env.operations.size).toBe(0);
+    expect(env.calls).toEqual(['update:700:Y:300']);
+  });
+
+  it.each([
+    ['another owner', { paid: 'Y', sum: 142000, currency: 'KZT', xmlId: 'MANAGER' } as RemoteState],
+    ['no tag', { paid: 'Y', sum: 142000, currency: 'KZT', xmlId: null } as RemoteState],
+    ['another currency', { ...ours('Y', 142000), currency: 'USD' }],
+  ])('never unpays when Bitrix shows %s (3)', async (_label, remote) => {
+    const env = setup({ remote: { 700: remote } });
+    await expect(update(env)).rejects.toThrow('Нельзя изменить сумму');
+    expect(env.operations.size).toBe(0);
+    expect(env.calls.filter((call) => call.includes(':N:'))).toEqual([]);
+  });
+
+  it('does not treat a rejection with the same amount as a paid-lock (3)', async () => {
+    const env = setup({ remote: { 700: ours('Y', 300) } });
+    env.failures.push({
+      match: (call) => call === 'update:700:Y:300',
+      error: new Bitrix24ApiError('sale.payment.update', 'OTHER', 400, 'some other validation'),
+    });
+    await expect(update(env)).rejects.toThrow('some other validation');
+    expect(env.operations.size).toBe(0);
+  });
+
+  it('rejects a non-positive ERP amount before unpaying (3)', async () => {
+    const env = setup({ remote: { 700: ours('Y', 142000) }, erpPayments: [payment({ amount: 0 })] });
+    await expect(update(env, payment({ amount: 0 }))).rejects.toThrow('Нельзя изменить сумму');
+    expect(env.operations.size).toBe(0);
+  });
+
+  it('leaves the operation unpaid on a permanent second-step error and recovery finishes it (4)', async () => {
+    const env = setup({ remote: { 700: ours('Y', 142000) } });
+    env.failures.push({ match: (call) => call === 'update:700:Y:300' && env.payments.get('700')!.paid === 'N' });
+    await expect(update(env)).rejects.toThrow('fetch failed');
+    const op = [...env.operations.values()][0];
+    expect(op).toMatchObject({ phase: 'unpaid', attempts: 1 });
+    expect(env.payments.get('700')).toMatchObject({ paid: 'N' });
+
+    const recovered = await env.guard.recoverDue(async () => undefined);
+    expect(recovered).toEqual({ completed: 1, failed: 0 });
+    expect(env.payments.get('700')).toMatchObject({ paid: 'Y', sum: 300 });
+    expect(op).toMatchObject({ phase: 'completed', outcome: 'applied', reproject: true });
+  });
+
+  it('flags stuck once after five failures, keeps the phase and clears it on success (12)', async () => {
+    const env = setup({ remote: { 700: ours('Y', 142000) } });
+    for (let i = 0; i < 6; i++) env.failures.push({ match: (call) => call === 'get:700' && env.payments.get('700')!.paid === 'N' });
+    env.failures.push({ match: (call) => call === 'update:700:Y:300' && env.payments.get('700')!.paid === 'N' });
+    await expect(update(env)).rejects.toThrow();
+    for (let i = 0; i < 5; i++) await env.guard.recoverDue(async () => undefined);
+    const op = [...env.operations.values()][0];
+    expect(op.phase).toBe('unpaid');
+    expect(op.stuckAt).not.toBeNull();
+    expect(env.domainEvents.filter((event) => event.startsWith('stuck:'))).toHaveLength(1);
+
+    await env.guard.recoverDue(async () => undefined);
+    await env.guard.recoverDue(async () => undefined);
+    expect(op).toMatchObject({ phase: 'completed', stuckAt: null });
+    expect(env.payments.get('700')).toMatchObject({ paid: 'Y', sum: 300 });
+  });
+
+  it('continues from the observed state after a crash before the phase commit (5)', async () => {
+    const env = setup({ remote: { 700: ours('Y', 142000) } });
+    const markUnpaid = env.store.markUnpaid.bind(env.store);
+    env.store.markUnpaid = async () => { throw new Error('process died'); };
+    await expect(update(env)).rejects.toThrow('process died');
+    env.store.markUnpaid = markUnpaid;
+    expect([...env.operations.values()][0].phase).toBe('requested');
+    expect(env.payments.get('700')!.paid).toBe('N');
+
+    await env.guard.recoverDue(async () => undefined);
+    expect(env.payments.get('700')).toMatchObject({ paid: 'Y', sum: 300 });
+    expect([...env.operations.values()][0].phase).toBe('completed');
+  });
+
+  it('keeps the phase when the lease is lost between steps; the next owner finishes (6)', async () => {
+    const env = setup({ remote: { 700: ours('Y', 142000) } });
+    env.failures.push({
+      match: (call) => call === 'update:700:Y:300' && env.payments.get('700')!.paid === 'N',
+      error: new Error('crm-sync: ownership lost'),
+    });
+    await expect(update(env)).rejects.toThrow('ownership lost');
+    expect([...env.operations.values()][0].phase).toBe('unpaid');
+    await env.guard.recoverDue(async () => undefined);
+    expect(env.payments.get('700')).toMatchObject({ paid: 'Y', sum: 300 });
+  });
+
+  it('a lost response of the full update, then a new ERP amount: unpays again instead of replaying (11)', async () => {
+    const env = setup({ remote: { 700: ours('Y', 142000) } });
+    // Bitrix applies the full update but the response is lost.
+    env.failures.push({
+      match: (call) => {
+        if (call === 'update:700:Y:300' && env.payments.get('700')!.paid === 'N') {
+          env.payments.set('700', ours('Y', 300));
+          return true;
+        }
+        return false;
+      },
+    });
+    await expect(update(env)).rejects.toThrow('fetch failed');
+    env.erp.set('3', payment({ amount: 450 }));
+
+    await env.guard.recoverDue(async () => undefined);
+    expect(env.payments.get('700')).toMatchObject({ paid: 'Y', sum: 450 });
+    expect(env.calls.slice(-4)).toEqual(['get:700', 'update:700:N:-', 'get:700', 'update:700:Y:450']);
+  });
+
+  it('switches an open update to a delete when the ERP payment disappeared (10)', async () => {
+    const env = setup({ remote: { 700: ours('Y', 142000) } });
+    env.failures.push({ match: (call) => call === 'update:700:Y:300' && env.payments.get('700')!.paid === 'N' });
+    await expect(update(env)).rejects.toThrow();
+    env.erp.delete('3');
+    await env.guard.recoverDue(async () => undefined);
+    expect(env.payments.has('700')).toBe(false);
+    expect([...env.operations.values()][0]).toMatchObject({ phase: 'completed', outcome: 'deleted', action: 'delete' });
+    expect(env.audits).toContain('action_changed:3');
+  });
+
+  it('reports remote_missing inline and reprojects when the payment vanishes after the check (R-code #3)', async () => {
+    const env = setup({ remote: { 700: ours('Y', 142000) } });
+    const getPayment = env.bitrix.getPayment.bind(env.bitrix);
+    let reads = 0;
+    env.bitrix.getPayment = async (id: string) => {
+      reads++;
+      const result = await getPayment(id);
+      if (reads === 1) env.payments.delete('700');
+      return result;
+    };
+    await expect(update(env)).resolves.toBe('remote_missing');
+    expect([...env.operations.values()][0]).toMatchObject({ phase: 'completed', outcome: 'remote_missing', reproject: true });
+  });
+
+  it('finishes an open operation before a new update of the same payment (settle first)', async () => {
+    const env = setup({ remote: { 700: ours('Y', 142000) } });
+    env.failures.push({ match: (call) => call === 'update:700:Y:300' && env.payments.get('700')!.paid === 'N' });
+    await expect(update(env)).rejects.toThrow();
+    await expect(update(env)).resolves.toBe('applied');
+    expect([...env.operations.values()][0]).toMatchObject({ phase: 'completed', reproject: true });
+    expect(env.payments.get('700')).toMatchObject({ paid: 'Y', sum: 300 });
+  });
+
+  it('completes as remote_missing when the payment is gone in Bitrix', async () => {
+    const env = setup({ remote: { 700: ours('Y', 142000) } });
+    env.failures.push({ match: (call) => call === 'update:700:Y:300' && env.payments.get('700')!.paid === 'N' });
+    await expect(update(env)).rejects.toThrow();
+    env.payments.delete('700');
+    await env.guard.recoverDue(async () => undefined);
+    expect([...env.operations.values()][0]).toMatchObject({ phase: 'completed', outcome: 'remote_missing', reproject: true });
+  });
+});
+
+describe('Bitrix24PaidPaymentGuard — delete', () => {
+  it('unpays and deletes a paid ERP payment; a retry on the confirmed id is a success (7)', async () => {
+    const env = setup({ remote: { 700: ours('Y', 142000) } });
+    await remove(env);
+    expect(env.payments.has('700')).toBe(false);
+    expect([...env.operations.values()][0]).toMatchObject({ phase: 'completed', outcome: 'deleted' });
+    await remove(env);
+    expect(env.operations.size).toBe(1);
+  });
+
+  it.each([
+    ['paid, no tag', { paid: 'Y', sum: 5000, currency: 'KZT', xmlId: null } as RemoteState],
+    ['unpaid, no tag (manager payment picked as a create-guard candidate)', { paid: 'N', sum: 5000, currency: 'KZT', xmlId: null } as RemoteState],
+    ['unpaid, foreign tag', { paid: 'N', sum: 5000, currency: 'KZT', xmlId: paymentXmlId('99') } as RemoteState],
+  ])('never deletes a payment without our exact tag: %s (7)', async (_label, remote) => {
+    const env = setup({ remote: { 700: remote } });
+    await expect(remove(env)).rejects.toThrow('BITRIX24_PAYMENT_NOT_OWNED');
+    expect(env.payments.has('700')).toBe(true);
+    expect(env.calls.some((call) => call.startsWith('delete:') || call.includes(':N:'))).toBe(false);
+    expect(env.operations.size).toBe(0);
+  });
+
+  it('deletes our unpaid payment without an operation; a missing one is a success', async () => {
+    const env = setup({ remote: { 700: ours('N', 5000) } });
+    await remove(env);
+    expect(env.payments.has('700')).toBe(false);
+    expect(env.operations.size).toBe(0);
+    await remove(env);
+    expect(env.calls.filter((call) => call.startsWith('delete:'))).toEqual(['delete:700']);
+  });
+
+  it('a paid payment while the flag is off keeps Bitrix24 refusal', async () => {
+    const env = setup({ remote: { 700: ours('Y', 5000) }, policy: { enabled: false } });
+    await expect(remove(env)).rejects.toThrow('SALE_PAYMENT_DELETE_EXIST_PAID');
+    expect(env.operations.size).toBe(0);
+  });
+});
+
+describe('Bitrix24PaidPaymentGuard — start policy', () => {
+  it('starts operations only for allow-listed orders while recovery is never limited (15)', async () => {
+    const env = setup({ remote: { 700: ours('Y', 142000) }, policy: { orderIds: new Set(['11548']) } });
+    await expect(update(env)).rejects.toThrow('Нельзя изменить сумму');
+    expect(env.operations.size).toBe(0);
+
+    env.policy.orderIds = new Set(['2']);
+    env.failures.push({ match: (call) => call === 'update:700:Y:300' && env.payments.get('700')!.paid === 'N' });
+    await expect(update(env)).rejects.toThrow();
+    env.policy.orderIds = new Set(['11548']);
+    env.policy.enabled = false;
+    await env.guard.recoverDue(async () => undefined);
+    expect(env.payments.get('700')).toMatchObject({ paid: 'Y', sum: 300 });
+  });
+
+  it('recovery proves writer ownership before Bitrix calls', async () => {
+    const env = setup({ remote: { 700: ours('Y', 142000) } });
+    env.failures.push({ match: (call) => call === 'update:700:Y:300' && env.payments.get('700')!.paid === 'N' });
+    await expect(update(env)).rejects.toThrow();
+    await expect(env.guard.recoverDue(async () => { throw new Error('ownership lost'); })).rejects.toThrow('ownership lost');
+    expect(env.payments.get('700')!.paid).toBe('N');
+  });
+});
