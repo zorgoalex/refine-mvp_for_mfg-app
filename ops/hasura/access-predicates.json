@@ -29,7 +29,9 @@
     "client_phones": ["insert", "update", "delete"],
     "production_status_events": ["insert", "update", "delete"],
     "roles": ["insert", "update", "delete"],
-    "users": ["insert", "update", "delete"]
+    "users": ["insert", "update", "delete"],
+    "doweling_orders": ["insert", "update", "delete"],
+    "order_doweling_links": ["insert", "update"]
   },
   "tables": {
     "app_settings": {
@@ -47,16 +49,11 @@
       }
     },
     "doweling_orders": {
-      "select": { "any": ["doweling.view"], "doweling": "read" },
-      "insert": { "any": ["doweling.create"], "doweling": "insert" },
-      "update": { "any": ["doweling.update"], "doweling": "write" },
-      "delete": { "any": ["doweling.delete"], "doweling": "write" }
+      "select": { "any": ["doweling.view"], "doweling": "read" }
     },
     "doweling_orders_view": { "select": { "any": ["doweling.view"], "dowelingRead": "doweling_order" } },
     "order_doweling_links": {
-      "select": { "any": ["orders.view"], "orderRead": "order" },
-      "insert": { "any": ["doweling.update"], "orderUpdate": "order", "dowelingVia": "doweling_order" },
-      "update": { "any": ["doweling.update"], "orderUpdate": "order", "dowelingVia": "doweling_order" }
+      "select": { "any": ["orders.view"], "orderRead": "order" }
     },
     "order_details": { "select": { "any": ["orders.view"], "orderRead": "order" } },
     "order_details_view": { "select": { "any": ["orders.view"], "orderRead": "order" } },
@@ -104,10 +101,6 @@
     "payments": { "select": { "columns": "*", "allow_aggregations": true } },
     "payments_view": { "select": { "columns": "*", "allow_aggregations": true } },
     "order_workshops": { "select": { "columns": "*", "allow_aggregations": true } },
-    "order_resource_requirements": { "select": { "columns": "*", "allow_aggregations": true } },
-    "order_doweling_links": {
-      "insert": { "columns": ["order_id", "doweling_order_id", "delete_flag", "version"], "set": { "created_by": "x-hasura-User-Id" } },
-      "update": { "columns": ["order_id", "doweling_order_id", "delete_flag"], "set": { "edited_by": "x-hasura-User-Id" } }
-    }
+    "order_resource_requirements": { "select": { "columns": "*", "allow_aggregations": true } }
   }
 }

@@ -112,9 +112,13 @@ export const HASURA_WRITE_PERMISSIONS: Readonly<Record<string, Partial<Record<Ha
   vlm_prompts: manageWrite('vlm.configure'),
   app_settings: manageWrite('settings.manage'),
   clients: { insert: ['clients.create'], update: ['clients.update'], delete: ['clients.delete'] },
-  doweling_orders: { insert: ['doweling.create'], update: ['doweling.update'], delete: ['doweling.delete'] },
-  order_doweling_links: { insert: ['doweling.update'], update: ['doweling.update'] },
 };
+
+/**
+ * Resources whose writes are backend commands only (their Hasura write permissions are revoked): the doweling card and
+ * the quick-create use `/api/v1/doweling-orders`, links of an order go with the order save.
+ */
+export const BACKEND_OWNED_HASURA_WRITES: ReadonlySet<string> = new Set(['doweling_orders', 'order_doweling_links']);
 
 export function canMutateHasuraResource(
   resource: string,
@@ -126,6 +130,7 @@ export function canMutateHasuraResource(
 
   const roleKey = getCurrentUserRoleKey(user);
   if (roleKey === 'packer') return false;
+  if (BACKEND_OWNED_HASURA_WRITES.has(resource)) return false;
 
   if (featureFlags.useBackendPermissions && operation) {
     const required = HASURA_WRITE_PERMISSIONS[resource]?.[operation];

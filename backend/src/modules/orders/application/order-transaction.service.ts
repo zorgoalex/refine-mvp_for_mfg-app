@@ -1027,6 +1027,13 @@ export class OrderTransactionService {
     await unitOfWork.upsertWorkshops(orderId, prepared.order.workshops);
     await unitOfWork.deleteRequirements(orderId, prepared.order.deleted.requirementIds);
     await unitOfWork.upsertRequirements(orderId, prepared.order.requirements);
+    await unitOfWork.assertDowelingLinkChangesAllowed({
+      orderId,
+      links: prepared.order.dowelingLinks,
+      deletedLinkIds: prepared.order.deleted.dowelingLinkIds,
+      currentUser,
+      requestId,
+    });
     await unitOfWork.deleteDowelingLinks(orderId, prepared.order.deleted.dowelingLinkIds);
     await unitOfWork.upsertDowelingLinks(orderId, prepared.order.dowelingLinks);
     return new Map(

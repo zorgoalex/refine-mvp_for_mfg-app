@@ -276,6 +276,17 @@ describe('PgOrderTransactionManager', () => {
     expect(database.queries.some((query) => query.params.includes('new-link'))).toBe(true);
   });
 
+  it('refuses to bring back a link that was removed meanwhile (stale order form): 409', async () => {
+    const database = createDatabase({ dowelingLinkKeptRowCount: 0 });
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await expect(
+      manager.runInTransaction((uow) => uow.upsertDowelingLinks(100, [dowelingLink({ id: 51, dowelingOrderId: 44 })])),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'ORDER_DOWELING_LINK_STALE' });
+    const keep = database.queries.find((query) => normalizeSql(query.text).startsWith('UPDATE order_doweling_links SET doweling_order_id = $3'));
+    expect(normalizeSql(keep!.text)).toContain('AND delete_flag = false');
+  });
+
   it('does not update doweling engineer when designEngineerId is omitted', async () => {
     const database = createDatabase();
     const manager = new PgOrderTransactionManager(database.service);
@@ -1435,6 +1446,7 @@ function createDatabase(
   options: {
     childCount?: number;
     dowelingEngineerRowCount?: number;
+    dowelingLinkKeptRowCount?: number;
     existingIdempotencyResponse?: OrderDto;
     existingRestoreIdempotencyResponse?: { order: OrderDto; auditId?: string; requestId: string };
     restoreIdempotencyStatus?: 'completed' | 'failed' | 'processing';
@@ -1704,6 +1716,10 @@ function createDatabase(
 
       if (normalized.startsWith('UPDATE order_workshops SET delete_flag = false')) {
         return { rows: [], rowCount: options.restoredRowCount ?? 1 };
+      }
+
+      if (normalized.startsWith('UPDATE order_doweling_links SET doweling_order_id = $3')) {
+        return { rows: [], rowCount: options.dowelingLinkKeptRowCount ?? 1 };
       }
 
       if (normalized.startsWith('UPDATE order_doweling_links SET delete_flag = false')) {

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
+import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
+import { scopeSetsFromPolicy } from '../../../permissions/policies/scope-sets';
 import { PgDowelingRepository } from './pg-doweling-repository';
 
 const dto = {
@@ -26,7 +28,7 @@ describe('PgDowelingRepository.createDowelingOrder', () => {
     expect(sql).toContain('INSERT INTO command_idempotency_keys');
     expect(sql).toContain('INSERT INTO doweling_orders');
     expect(sql).not.toContain('order_doweling_links'); // create-only: never links
-    expect(sql.match(/INSERT INTO audit_log/g)).toHaveLength(1);
+    expect(sql.match(/INSERT INTO audit_log(?!_)/g)).toHaveLength(1);
     expect(sql.match(/INSERT INTO outbox_events/g)).toHaveLength(1);
     expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
   });
@@ -87,6 +89,82 @@ describe('PgDowelingRepository.createDowelingOrder', () => {
     expect(idempotencyHash(base.queries)).not.toBe(idempotencyHash(changed.queries));
   });
 
+  it('quick-create from an order: links the new doweling order in the same transaction, audits the order', async () => {
+    const database = createDatabase({
+      insertedDoweling: { doweling_order_id: 555, doweling_order_name: 'Тест присадка', version: 0 },
+      orders: [{ order_id: 101, created_by: 1, manager_id: 1, delete_flag: false, order_kind: 'production_order' }],
+    });
+    const res = await new PgDowelingRepository(database.service).createDowelingOrder({
+      currentUser: currentUser(),
+      requestId: 'r',
+      dto: { ...dto, orderId: 101 },
+    });
+
+    expect(res.link).toEqual({ orderDowelingLinkId: 9001, orderId: 101 });
+    const sql = normalizedSql(database.queries);
+    expect(sql).toContain('FOR KEY SHARE');
+    expect(sql.indexOf('FOR KEY SHARE')).toBeLessThan(sql.indexOf('INSERT INTO doweling_orders'));
+    expect(sql).toContain('INSERT INTO order_doweling_links');
+    expect(sql).toContain('SET CONSTRAINTS ALL IMMEDIATE');
+    const auditRow = database.queries.find((q) => normalizeSql(q.text).startsWith('INSERT INTO audit_log ('));
+    expect(auditRow!.params[22] as string).toContain('"orderId":101');
+    const outbox = database.queries.find((q) => normalizeSql(q.text).startsWith('INSERT INTO outbox_events'));
+    expect(String(outbox!.params[3])).toContain('"orderIds":[101]');
+  });
+
+  it('quick-create into a foreign order of an own-scope manager: 403, durable denied audit, nothing inserted', async () => {
+    const database = createDatabase({
+      insertedDoweling: { doweling_order_id: 555, doweling_order_name: 'x', version: 0 },
+      orders: [{ order_id: 102, created_by: 2, manager_id: 2, delete_flag: false, order_kind: 'production_order' }],
+    });
+    await expect(
+      new PgDowelingRepository(database.service).createDowelingOrder({
+        currentUser: ownScopeManager(),
+        requestId: 'r',
+        dto: { ...dto, orderId: 102 },
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+    expect(normalizedSql(database.queries)).not.toContain('INSERT INTO doweling_orders');
+    expect(database.audit.some((q) => q.params[0] === 'doweling.create_denied')).toBe(true);
+  });
+
+  it('quick-create into a missing or non-production order is 404 ORDER_NOT_FOUND', async () => {
+    const database = createDatabase({
+      orders: [{ order_id: 105, created_by: 1, manager_id: 1, delete_flag: false, order_kind: 'template' }],
+    });
+    for (const orderId of [105, 999]) {
+      await expect(
+        new PgDowelingRepository(database.service).createDowelingOrder({ currentUser: currentUser(), requestId: 'r', dto: { ...dto, orderId } }),
+      ).rejects.toMatchObject({ statusCode: 404, code: 'ORDER_NOT_FOUND' });
+    }
+  });
+
+  it('a standalone create keeps the request-hash shape of the earlier release (stored keys still replay)', async () => {
+    const database = createDatabase({ insertedDoweling: { doweling_order_id: 1, doweling_order_name: 'x', version: 0 } });
+    await new PgDowelingRepository(database.service).createDowelingOrder({ currentUser: currentUser(), requestId: 'r', dto });
+    // sha256 of the stable JSON of the 0.5.24 request shape (no orderId key).
+    const { createHash } = await import('node:crypto');
+    const legacyShape = {
+      actorUserId: '1', commandName: 'doweling.create', designEngineerId: 3, dowelingOrderDate: null,
+      dowelingOrderName: 'Тест присадка', linkCadFile: null, linkPdfFile: null, operatorId: null, partsCount: null,
+      paymentStatusId: 1, productionStatusId: null,
+    };
+    const stable = `{${Object.keys(legacyShape).sort().map((key) => `${JSON.stringify(key)}:${JSON.stringify((legacyShape as Record<string, unknown>)[key])}`).join(',')}}`;
+    expect(idempotencyHash(database.queries)).toBe(createHash('sha256').update(stable).digest('hex'));
+  });
+
+  it('the idempotency hash covers the order to link', async () => {
+    const orders = [
+      { order_id: 101, created_by: 1, manager_id: 1, delete_flag: false, order_kind: 'production_order' },
+      { order_id: 103, created_by: 1, manager_id: 1, delete_flag: false, order_kind: 'production_order' },
+    ];
+    const a = createDatabase({ insertedDoweling: { doweling_order_id: 1, doweling_order_name: 'x', version: 0 }, orders });
+    await new PgDowelingRepository(a.service).createDowelingOrder({ currentUser: currentUser(), requestId: 'r', dto: { ...dto, orderId: 101 } });
+    const b = createDatabase({ insertedDoweling: { doweling_order_id: 2, doweling_order_name: 'x', version: 0 }, orders });
+    await new PgDowelingRepository(b.service).createDowelingOrder({ currentUser: currentUser(), requestId: 'r', dto: { ...dto, orderId: 103 } });
+    expect(idempotencyHash(a.queries)).not.toBe(idempotencyHash(b.queries));
+  });
+
   it('maps FK violation (23503) to 404 DOWELING_REFERENCE_NOT_FOUND', async () => {
     const database = createDatabase({ throwOnDowelingInsert: { code: '23503' } });
     await expect(
@@ -104,9 +182,11 @@ function createDatabase(
     insertedDoweling?: { doweling_order_id: number; doweling_order_name: string; version: number };
     idempotencyCompletedResponse?: unknown;
     throwOnDowelingInsert?: { code: string };
+    orders?: Array<{ order_id: number; created_by: number; manager_id: number | null; delete_flag: boolean; order_kind: string }>;
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+  const audit: Array<{ text: string; params: readonly unknown[] }> = [];
   let lastRequestHash: unknown = 'hash';
   let auditId = 0;
   const tx = {
@@ -146,9 +226,24 @@ function createDatabase(
         return { rows: [options.insertedDoweling], rowCount: 1 };
       }
 
-      if (normalized.startsWith('INSERT INTO audit_log')) {
+      if (normalized.startsWith('INSERT INTO audit_log (') || normalized.startsWith('INSERT INTO audit_log(')) {
         auditId += 1;
         return { rows: [{ audit_id: `audit-id-${auditId}` }], rowCount: 1 };
+      }
+
+      if (normalized.startsWith('SELECT order_id, created_by, manager_id, delete_flag, order_kind FROM orders')) {
+        const rows = (options.orders ?? []).filter((row) => (params[0] as number[]).includes(row.order_id));
+        return { rows, rowCount: rows.length };
+      }
+
+      if (normalized.startsWith('SELECT o.order_id FROM orders o WHERE o.order_id = ANY')) {
+        // Read visibility of an own-scope reader: the fixtures' orders authored by user 1.
+        const rows = (options.orders ?? []).filter((row) => (params[0] as number[]).includes(row.order_id) && row.created_by === 1);
+        return { rows, rowCount: rows.length };
+      }
+
+      if (normalized.startsWith('INSERT INTO order_doweling_links')) {
+        return { rows: [{ order_doweling_link_id: 9001 }], rowCount: 1 };
       }
 
       return { rows: [], rowCount: 1 };
@@ -157,9 +252,15 @@ function createDatabase(
 
   return {
     queries,
+    audit,
     service: {
       async transaction<T>(handler: (client: typeof tx) => Promise<T>) {
         return handler(tx);
+      },
+      // Pool-backed writes outside the transaction (denied audit).
+      async query(text: string, params: readonly unknown[] = []) {
+        audit.push({ text, params });
+        return { rows: [{ audit_id: 'denied-audit' }], rowCount: 1 };
       },
     } as unknown as DatabaseService,
   };
@@ -167,6 +268,12 @@ function createDatabase(
 
 function currentUser(role: CurrentUser['role'] = 'manager'): CurrentUser {
   return { id: '1', username: role, role, roleId: 1, permissions: getPermissionsForRole(role) };
+}
+
+function ownScopeManager(): CurrentUser {
+  const user = currentUser();
+  const sets = scopeSetsFromPolicy(ROLE_POLICIES.manager);
+  return { ...user, policyScopeSets: { ...sets, orders: { ...sets.orders, view: ['all'], update: ['own'] } } };
 }
 
 function idempotencyHash(queries: Array<{ text: string; params: readonly unknown[] }>): unknown {

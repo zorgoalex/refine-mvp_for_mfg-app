@@ -5,6 +5,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { assertDowelingOrdersWritable } from '../../doweling/adapters/doweling-write-guard';
 import { auditService } from '../../../common/audit/audit.service';
 import { computeDiff } from '../../../common/audit/audit-diff';
 import { PgOrderReadRepository } from './pg-order-read-repository';
@@ -1472,14 +1473,23 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
   ): Promise<void> {
     for (const link of links) {
       if (link.id) {
-        await this.tx.query(
+        // Only a link that is still active: a link removed meanwhile (the doweling card, another save) must not come
+        // back from a stale order form — the user re-adds the doweling order instead (then it has no id).
+        const kept = await this.tx.query(
           `
           UPDATE order_doweling_links
           SET doweling_order_id = $3, ref_key_1c = $4, delete_flag = false
-          WHERE order_doweling_link_id = $1 AND order_id = $2
+          WHERE order_doweling_link_id = $1 AND order_id = $2 AND delete_flag = false
           `,
           [link.id, orderId, link.dowelingOrderId, link.refKey1c],
         );
+        if (kept.rowCount === 0) {
+          throw new ApiError(409, 'ORDER_DOWELING_LINK_STALE', 'Связь с присадкой уже снята. Обновите заказ и повторите', {
+            orderId,
+            orderDowelingLinkId: link.id,
+            dowelingOrderId: link.dowelingOrderId,
+          });
+        }
       } else {
         const restored = await this.tx.query(
           `
@@ -1530,6 +1540,30 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         }
       }
     }
+  }
+
+  /**
+   * Doweling rule of the order save (same as the doweling commands and the Hasura predicate they replace): attaching,
+   * detaching or changing the design engineer of a doweling order needs `doweling.update` and update access to every
+   * OTHER order that doweling order is linked to. Links that stay as they are need nothing.
+   */
+  async assertDowelingLinkChangesAllowed(input: {
+    orderId: number;
+    links: readonly NormalizedSaveOrderDowelingLinkDto[];
+    deletedLinkIds: readonly number[];
+    currentUser: CurrentUser;
+    requestId?: string;
+  }): Promise<void> {
+    const dowelingOrderIds = await changedDowelingOrderIds(this.tx, input.orderId, input.links, input.deletedLinkIds);
+    await assertDowelingOrdersWritable({
+      database: this.database,
+      tx: this.tx,
+      currentUser: input.currentUser,
+      requestId: input.requestId && input.requestId.length > 0 ? input.requestId : 'order-save',
+      action: 'order_save',
+      dowelingOrderIds,
+      ownOrderId: input.orderId,
+    });
   }
 
   async deleteDowelingLinks(orderId: number, ids: readonly number[]): Promise<void> {
@@ -2816,4 +2850,72 @@ async function softDeleteByIds(
 
 function toNullableString(value: string | number | null | undefined): string | null {
   return value === null || value === undefined ? null : String(value);
+}
+
+/**
+ * Doweling orders whose links or design engineer this save changes, compared with the stored links of the order.
+ * Every doweling order the save touches is locked FOR UPDATE in id order BEFORE the comparison (the order row is already
+ * locked by the save): the comparison cannot go stale before the writes, and two saves that touch the same doweling
+ * orders take their locks in the same order (no deadlock when they attach D1/D2 in opposite order).
+ */
+async function changedDowelingOrderIds(
+  tx: TransactionClient,
+  orderId: number,
+  links: readonly NormalizedSaveOrderDowelingLinkDto[],
+  deletedLinkIds: readonly number[],
+): Promise<number[]> {
+  if (links.length === 0 && deletedLinkIds.length === 0) return [];
+  const stored = (
+    await tx.query<{ order_doweling_link_id: string | number; doweling_order_id: string | number; delete_flag: boolean }>(
+      'SELECT order_doweling_link_id, doweling_order_id, delete_flag FROM order_doweling_links WHERE order_id = $1',
+      [orderId],
+    )
+  ).rows.map((row) => ({ id: Number(row.order_doweling_link_id), dowelingOrderId: Number(row.doweling_order_id), active: !row.delete_flag }));
+  const byId = new Map(stored.map((row) => [row.id, row]));
+
+  const touched = new Set<number>(links.map((link) => link.dowelingOrderId));
+  for (const link of links) {
+    const row = link.id ? byId.get(link.id) : undefined;
+    if (row) touched.add(row.dowelingOrderId);
+  }
+  for (const id of deletedLinkIds) {
+    const row = byId.get(id);
+    if (row) touched.add(row.dowelingOrderId);
+  }
+  const engineers = new Map(
+    (
+      await tx.query<{ doweling_order_id: string | number; design_engineer_id: string | number }>(
+        `
+        SELECT doweling_order_id, design_engineer_id
+        FROM doweling_orders
+        WHERE doweling_order_id = ANY($1::bigint[])
+        ORDER BY doweling_order_id
+        FOR UPDATE
+        `,
+        [[...touched].sort((a, b) => a - b)],
+      )
+    ).rows.map((row) => [Number(row.doweling_order_id), Number(row.design_engineer_id)]),
+  );
+
+  const activeDoweling = new Set(stored.filter((row) => row.active).map((row) => row.dowelingOrderId));
+  const changed = new Set<number>();
+  for (const id of deletedLinkIds) {
+    const row = byId.get(id);
+    if (row?.active) changed.add(row.dowelingOrderId);
+  }
+  for (const link of links) {
+    const row = link.id ? byId.get(link.id) : undefined;
+    if (row) {
+      if (row.dowelingOrderId !== link.dowelingOrderId) {
+        changed.add(row.dowelingOrderId);
+        changed.add(link.dowelingOrderId);
+      }
+    } else if (!activeDoweling.has(link.dowelingOrderId)) {
+      changed.add(link.dowelingOrderId);
+    }
+    if (typeof link.designEngineerId === 'number' && engineers.get(link.dowelingOrderId) !== link.designEngineerId) {
+      changed.add(link.dowelingOrderId);
+    }
+  }
+  return [...changed];
 }
