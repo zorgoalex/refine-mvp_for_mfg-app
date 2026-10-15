@@ -72,6 +72,13 @@ describe('Bitrix24 sync mapper', () => {
     });
   });
 
+  it('sends ERP service lines once even when they leaked into client notes', () => {
+    const result = mapClient(client({ notes: 'Заметка\nERP ID клиента: 10\n[p]ERP ID клиента: 10[/p]' }), 12);
+    expect(result.fields.comments).toBe('Заметка\nERP ID клиента: 10');
+    expect(mapClient(client({ notes: 'ERP ID клиента: 10', isActive: false }), 12).fields.comments)
+      .toBe('Статус ERP: неактивен\nERP ID клиента: 10');
+  });
+
   it('maps legal entity to Company', () => {
     const result = mapClient(client({ personType: 'legal', clientName: 'ТОО Мебель' }), null);
     expect(result.entityTypeId).toBe(BITRIX24_ENTITY_TYPE.company);

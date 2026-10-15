@@ -6,6 +6,7 @@ import {
   normalizeBitrixPayment,
   paymentIsErpOrigin,
 } from './bitrix24-reverse-normalizer';
+import { hash, mapClient } from '../application/bitrix24-sync-mapper';
 
 describe('Bitrix24 reverse normalizer', () => {
   it('keeps creator separate from assignment without changing business hash', () => {
@@ -43,6 +44,59 @@ describe('Bitrix24 reverse normalizer', () => {
         isPrimary: true,
       }],
     });
+  });
+
+  it('does not bring ERP service lines or BB-code back into client notes', () => {
+    expect(normalizeBitrixClient('contact', '77', {
+      name: 'Иван',
+      comments: '[p]\nERP ID клиента - 2550\n[/p]\nERP ID клиента: 2550',
+    }).notes).toBeNull();
+    expect(normalizeBitrixClient('company', '78', {
+      title: 'ТОО Тест',
+      comments: 'ТОО "Тест"\nвторая строка\nERP ID клиента: 10',
+    }).notes).toBe('ТОО "Тест"\nвторая строка');
+  });
+
+  it('marks ERP\'s own inactive projection so the echo does not reactivate the client', () => {
+    expect(normalizeBitrixClient('contact', '79', {
+      name: 'Иван',
+      comments: 'Заметка\nСтатус ERP: неактивен\nERP ID клиента: 10',
+    })).toMatchObject({ notes: 'Заметка', erpMarkedInactive: true });
+    expect(normalizeBitrixClient('contact', '79', { name: 'Иван', comments: 'Заметка' }).erpMarkedInactive).toBe(false);
+  });
+
+  it('round-trips long ERP notes through Bitrix24 unchanged (ERP → comment → echo → notes)', () => {
+    const notes = 'а'.repeat(9999) + '😀' + 'б'.repeat(25) + '\n\nвторой абзац "в кавычках"';
+    for (const isActive of [true, false]) {
+      const sent = mapClient({
+        clientId: '10', clientName: 'Иван', personType: 'individual', notes, isActive, phones: [],
+      }, null);
+      const echo = normalizeBitrixClient('contact', '80', { name: 'Иван', comments: sent.fields.comments });
+      expect(echo.notes).toBe(notes);
+      expect(echo.erpMarkedInactive).toBe(!isActive);
+      // The snapshot is stored as jsonb: no lone surrogate may reach it.
+      expect(JSON.stringify(echo.rawSnapshot)).not.toMatch(/\\ud83d(?!\\ude00)/i);
+      expect(String(echo.rawSnapshot.comments)).toBe(String(sent.fields.comments).trim().slice(0, 9999));
+      expect(echo.rawSnapshot.commentsHash).toBe(hash({ comments: String(sent.fields.comments).trim() }));
+    }
+  });
+
+  it('keeps the client snapshot within the 256 KiB row limit for any comment size', () => {
+    const comments = 'я'.repeat(140000);
+    const result = normalizeBitrixClient('contact', '81', { name: 'Иван', comments });
+    expect(result.notes).toBe(comments);
+    expect(Buffer.byteLength(JSON.stringify(result.rawSnapshot), 'utf8')).toBeLessThan(64 * 1024);
+    const changed = normalizeBitrixClient('contact', '81', { name: 'Иван', comments: comments + 'ю' });
+    expect(changed.normalizedHash).not.toBe(result.normalizedHash);
+  });
+
+  it('cuts long deal text before, not inside, a surrogate pair', () => {
+    const title = 'т'.repeat(9999) + '😀' + 'хвост';
+    const deal = normalizeBitrixDeal('21', { title }, {
+      clientId: null, portalDomain: 'mebelkz.bitrix24.kz', portalTimezone: 'Asia/Almaty', counterparty: null,
+    });
+    expect(deal.rawSnapshot.title).toBe('т'.repeat(9999));
+    expect(JSON.stringify(deal.rawSnapshot)).not.toMatch(/\\ud83d/i);
   });
 
   it('keeps Deal opportunity separate and chooses Company before Contact', () => {
