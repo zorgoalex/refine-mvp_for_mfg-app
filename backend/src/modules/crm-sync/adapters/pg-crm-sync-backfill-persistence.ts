@@ -41,6 +41,9 @@ export class PgCrmSyncBackfillPersistence {
       for (const intent of intents) {
         await this.mapping.upsertSuccess(tx, intent.mapping);
         await this.audit.record(tx, intent.audit);
+        for (const extra of intent.extraAudits ?? []) {
+          await this.audit.record(tx, extra);
+        }
         if (intent.clearPaymentCreateGuardId) {
           await this.mapping.deletePaymentCreateGuard(
             tx,

@@ -126,6 +126,29 @@ export class PgCrmSourceRepository implements CrmSourcePort {
     }));
   }
 
+  /** Current ERP payment (null when deleted); reads the same columns as getPaymentsByOrderId. */
+  async getPaymentById(paymentId: string): Promise<PaymentRow | null> {
+    const { rows } = await this.db.query(
+      `SELECT p.payment_id, p.order_id, p.type_paid_id, pt.type_paid_name,
+              p.amount, p.payment_date, p.notes
+         FROM payments p
+         LEFT JOIN payment_types pt ON pt.type_paid_id = p.type_paid_id
+        WHERE p.payment_id = $1 AND p.delete_flag = false`,
+      [paymentId],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      paymentId: String(row.payment_id),
+      orderId: String(row.order_id),
+      typePaidId: String(row.type_paid_id),
+      typePaidName: row.type_paid_name ?? null,
+      amount: Number(row.amount),
+      paymentDate: toErpDateString(row.payment_date) ?? '',
+      notes: row.notes ?? null,
+    };
+  }
+
   async hasOrdersForClient(clientId: string): Promise<boolean> {
     const { rows } = await this.db.query(
       `SELECT EXISTS (

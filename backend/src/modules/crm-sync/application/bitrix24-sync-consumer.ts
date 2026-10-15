@@ -26,10 +26,13 @@ import {
   type Bitrix24RequestGuard,
 } from '../adapters/bitrix24-api-client';
 import type { PgCrmSyncMappingRepository } from '../adapters/pg-crm-sync-mapping-repository';
+import type { Bitrix24PaidPaymentGuard } from './bitrix24-paid-payment-guard';
 
 export type SyncIntent = {
   mapping: MappingRow;
   audit: AuditEvent;
+  /** Additional audit rows persisted with the intent (same transaction). */
+  extraAudits?: AuditEvent[];
   clearPaymentCreateGuardId?: string;
 };
 
@@ -59,6 +62,8 @@ interface Bitrix24SyncConsumerDeps {
   db: DatabaseService;
   options: Bitrix24MapperOptions;
   durablePaymentCreates?: boolean;
+  /** Changes/deletes paid ERP payments in Bitrix24; absent = plain calls (dry-run, legacy). */
+  paidPayments?: Bitrix24PaidPaymentGuard;
 }
 
 export class Bitrix24SyncConsumer {
@@ -117,11 +122,16 @@ export class Bitrix24SyncConsumer {
     op: 'upsert' | 'delete',
     event: OutboxEventRecord,
   ): Promise<SyncIntent[]> {
-    if (op === 'delete') return this.deleteClient(erpId, event);
     const row = await this.deps.source.getClientById(erpId);
     if (!row) return this.deleteClient(erpId, event);
+    // Decided at execution: a delete event for a client that exists now is stale (e.g. a retried
+    // old event) and must not remove its Contact/Company — the current state is projected instead.
     const result = await this.upsertClientRow(row, event);
-    return result.intent ? [result.intent] : [];
+    if (!result.intent) return [];
+    if (op === 'delete') {
+      result.intent.extraAudits = [staleDeleteAudit('client', erpId, event, Number(erpId), null)];
+    }
+    return [result.intent];
   }
 
   private async upsertClientRow(
@@ -302,8 +312,10 @@ export class Bitrix24SyncConsumer {
         },
       }];
     }
-    if (op === 'delete') return this.deleteOrder(erpId, event);
     if (!order || order.deleteFlag) return this.deleteOrder(erpId, event);
+    // Decided at execution: a delete event for an order that exists now is stale (e.g. a retried
+    // old event) and must not remove its Deal and payments — the current state is projected instead.
+    const staleDelete = op === 'delete';
 
     const intents: SyncIntent[] = [];
     const counterparty = await this.ensureCounterparty(order.clientId, event);
@@ -359,6 +371,9 @@ export class Bitrix24SyncConsumer {
             counterpartyObject: counterparty.object,
           },
         },
+        extraAudits: staleDelete
+          ? [staleDeleteAudit('order', erpId, event, Number(order.clientId), Number(erpId))]
+          : undefined,
     });
 
     if (!dealId) {
@@ -401,6 +416,11 @@ export class Bitrix24SyncConsumer {
     event: OutboxEventRecord,
   ): Promise<SyncIntent[]> {
     const current = await this.deps.source.getPaymentsByOrderId(orderId);
+    await this.deps.paidPayments?.settleOrder(
+      orderId,
+      current.map((payment) => payment.paymentId),
+      event.outboxEventId,
+    );
     const mappedForOrder = await this.deps.mapping.listByParent(
       this.deps.db,
       'payment',
@@ -435,7 +455,7 @@ export class Bitrix24SyncConsumer {
         if (currentIds.has(guard.erpPaymentId)) continue;
         try {
           const recoveredId = await this.recoverGuardedPayment(guard);
-          await this.deps.bitrix.deletePayment(recoveredId);
+          await this.removePayment(guard.erpPaymentId, guard.erpOrderId, guard.bitrixDealId, recoveredId, event);
           intents.push(this.paymentDeleteIntent(
             guard.erpPaymentId,
             orderId,
@@ -471,7 +491,7 @@ export class Bitrix24SyncConsumer {
           [mapping.bitrixId, foundId].filter((id): id is string => Boolean(id)),
         );
         for (const candidateId of candidateIds) {
-          await this.deps.bitrix.deletePayment(candidateId);
+          await this.removePayment(mapping.erpId, orderId, dealId, candidateId, event);
         }
         intents.push(this.paymentDeleteIntent(
           mapping.erpId,
@@ -499,6 +519,9 @@ export class Bitrix24SyncConsumer {
     dealId: string,
     event: OutboxEventRecord,
   ): Promise<SyncIntent | null> {
+    // An unfinished paid-payment operation is finished before any discovery or create, then the
+    // mapping and guard are read fresh.
+    await this.deps.paidPayments?.settle(payment.paymentId, event.outboxEventId);
     const payload = mapPayment(payment, this.deps.options);
     const nextHash = hash(payload.fields);
     const mapping = await this.deps.mapping.get(this.deps.db, 'payment', payment.paymentId);
@@ -512,7 +535,13 @@ export class Bitrix24SyncConsumer {
 
     if (guard && guard.bitrixDealId !== dealId) {
       const recoveredOnOldDeal = await this.recoverGuardedPayment(guard);
-      await this.deps.bitrix.deletePayment(recoveredOnOldDeal);
+      await this.removePayment(
+        payment.paymentId,
+        guard.erpOrderId,
+        guard.bitrixDealId,
+        recoveredOnOldDeal,
+        event,
+      );
       await this.clearPaymentCreateGuard(payment.paymentId);
       guard = null;
     }
@@ -520,7 +549,7 @@ export class Bitrix24SyncConsumer {
     // A successfully tagged payment is the strongest recovery signal. It must
     // also belong to the target Deal; sale.payment.update cannot re-parent it.
     if (foundByXmlId && targetPaymentIds.has(foundByXmlId)) {
-      await this.deps.bitrix.updatePayment(foundByXmlId, payload.fields);
+      await this.writePayment(payment, dealId, foundByXmlId, payload.fields, event);
       return this.paymentUpsertIntent(payment, dealId, foundByXmlId, nextHash, payload.xmlId, event);
     }
 
@@ -548,7 +577,15 @@ export class Bitrix24SyncConsumer {
       obsoleteIds.add(foundByXmlId);
     }
     for (const obsoleteId of obsoleteIds) {
-      if (obsoleteId !== bitrixId) await this.deps.bitrix.deletePayment(obsoleteId);
+      if (obsoleteId !== bitrixId) {
+        await this.removePayment(
+          payment.paymentId,
+          mapping?.parentErpId ?? payment.orderId,
+          null,
+          obsoleteId,
+          event,
+        );
+      }
     }
 
     if (
@@ -567,7 +604,7 @@ export class Bitrix24SyncConsumer {
 
     // Keep the guard on every update failure. A retry recovers this exact
     // candidate and never calls crm.item.payment.add a second time.
-    await this.deps.bitrix.updatePayment(bitrixId, payload.fields);
+    await this.writePayment(payment, dealId, bitrixId, payload.fields, event);
 
     return this.paymentUpsertIntent(
       payment,
@@ -659,6 +696,54 @@ export class Bitrix24SyncConsumer {
     }
   }
 
+  private async writePayment(
+    payment: PaymentRow,
+    dealId: string,
+    bitrixId: string,
+    fields: Record<string, unknown>,
+    event: OutboxEventRecord,
+  ): Promise<void> {
+    if (!this.deps.paidPayments) {
+      await this.deps.bitrix.updatePayment(bitrixId, fields);
+      return;
+    }
+    const outcome = await this.deps.paidPayments.update({
+      payment,
+      dealId,
+      bitrixId,
+      fields,
+      requestId: event.outboxEventId,
+    });
+    if (outcome !== 'applied') {
+      // The Bitrix payment is gone: never record it as synced. The operation already queued a
+      // fresh projection; this event is retried and will create the payment anew.
+      throw new Error(
+        `CRM sync: Bitrix payment ${bitrixId} of ERP payment ${payment.paymentId} is gone ` +
+        `(${outcome}); the order is queued for a fresh projection`,
+      );
+    }
+  }
+
+  private async removePayment(
+    erpPaymentId: string,
+    erpOrderId: string,
+    dealId: string | null,
+    bitrixId: string,
+    event: OutboxEventRecord,
+  ): Promise<void> {
+    if (!this.deps.paidPayments) {
+      await this.deps.bitrix.deletePayment(bitrixId);
+      return;
+    }
+    await this.deps.paidPayments.delete({
+      erpPaymentId,
+      erpOrderId,
+      dealId,
+      bitrixId,
+      requestId: event.outboxEventId,
+    });
+  }
+
   private async recoverGuardedPayment(guard: PaymentCreateGuardRow): Promise<string> {
     const before = new Set(guard.beforeIds);
     const current = await this.deps.bitrix.listDealPaymentIds(guard.bitrixDealId);
@@ -681,6 +766,7 @@ export class Bitrix24SyncConsumer {
     erpId: string,
     event: OutboxEventRecord,
   ): Promise<SyncIntent[]> {
+    await this.deps.paidPayments?.settleOrder(erpId, [], event.outboxEventId);
     const mapping = await this.deps.mapping.get(this.deps.db, 'order', erpId);
     const payload = event.payload as { clientId?: string | null };
     const clientId = payload.clientId ?? mapping?.parentErpId ?? null;
@@ -698,7 +784,7 @@ export class Bitrix24SyncConsumer {
       for (const guard of guards) {
         try {
           const recoveredId = await this.recoverGuardedPayment(guard);
-          await this.deps.bitrix.deletePayment(recoveredId);
+          await this.removePayment(guard.erpPaymentId, guard.erpOrderId, guard.bitrixDealId, recoveredId, event);
           intents.push(this.paymentDeleteIntent(
             guard.erpPaymentId,
             erpId,
@@ -737,7 +823,13 @@ export class Bitrix24SyncConsumer {
           [paymentMapping.bitrixId, foundId].filter((id): id is string => Boolean(id)),
         );
         for (const candidateId of candidateIds) {
-          await this.deps.bitrix.deletePayment(candidateId);
+          await this.removePayment(
+            paymentMapping.erpId,
+            erpId,
+            mapping?.bitrixId ?? null,
+            candidateId,
+            event,
+          );
         }
         intents.push(this.paymentDeleteIntent(
           paymentMapping.erpId,
@@ -887,4 +979,24 @@ function isAmbiguousCreateFailure(error: unknown): boolean {
     error.code === 'INVALID_JSON' ||
     error.code === 'UNEXPECTED_RESPONSE'
   );
+}
+
+function staleDeleteAudit(
+  entityType: 'client' | 'order',
+  erpId: string,
+  event: OutboxEventRecord,
+  relatedClientId: number | null,
+  relatedOrderId: number | null,
+): AuditEvent {
+  return {
+    event: 'crm_sync.stale_delete_projected',
+    entityType,
+    entityId: erpId,
+    requestId: event.outboxEventId,
+    source: 'crm-sync',
+    actorUserId: null,
+    relatedClientId,
+    relatedOrderId,
+    metadata: { eventType: event.eventType, reason: 'entity_exists_at_execution' },
+  };
 }

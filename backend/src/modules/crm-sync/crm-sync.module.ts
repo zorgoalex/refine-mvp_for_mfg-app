@@ -13,6 +13,8 @@ import { PgCrmSyncOutboxRepository } from './adapters/pg-crm-sync-outbox-reposit
 import { Bitrix24ApiClient, Bitrix24AdmissionState, NoopBitrix24ApiClient } from './adapters/bitrix24-api-client';
 import { FailingBitrix24ApiClient } from './adapters/failing-bitrix24-api-client';
 import { Bitrix24SyncConsumer } from './application/bitrix24-sync-consumer';
+import { Bitrix24PaidPaymentGuard } from './application/bitrix24-paid-payment-guard';
+import { PgCrmSyncPaidPaymentOperationRepository } from './adapters/pg-crm-sync-paid-payment-operation-repository';
 import { CrmSyncRelayService } from './application/crm-sync-relay.service';
 import { CrmSyncRelaySchedulerService } from './application/crm-sync-relay-scheduler.service';
 import { Bitrix24LocalAppClient } from './reverse/bitrix24-local-app-client';
@@ -328,9 +330,8 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
         stageLane: StageWorker,
       ) => {
         // Source repository — falls back to no-op if DB is not configured.
-        const source = database.isConfigured
-          ? new PgCrmSourceRepository(database)
-          : new UnavailableCrmSourceRepository();
+        const pgSource = database.isConfigured ? new PgCrmSourceRepository(database) : null;
+        const source = pgSource ?? new UnavailableCrmSourceRepository();
 
         const bitrixConfig = config.getBitrix24();
         const noopBitrix = new NoopBitrix24ApiClient();
@@ -341,6 +342,17 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
           paySystemId: bitrixConfig.paySystemId ?? 1,
         };
 
+        // Paid ERP payments: unpay → change/delete → pay back, durable and recoverable.
+        const paidPayments = pgSource
+          ? new Bitrix24PaidPaymentGuard({
+            bitrix: realBitrix,
+            store: new PgCrmSyncPaidPaymentOperationRepository(database, audit),
+            source: pgSource,
+            options,
+            policy: () => config.getPaidPaymentReset(),
+          })
+          : undefined;
+
         const consumer = new Bitrix24SyncConsumer({
           source,
           bitrix: realBitrix,
@@ -348,6 +360,7 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
           db: database,
           options,
           durablePaymentCreates: true,
+          paidPayments,
         });
 
         const dryRunConsumer = new Bitrix24SyncConsumer({
@@ -361,6 +374,7 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
 
         return new CrmSyncRelayService({
           stageLane,
+          paidPaymentRecovery: paidPayments,
           outboxRepo,
           consumer,
           dryRunConsumer,

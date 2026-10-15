@@ -2650,6 +2650,17 @@ probe_file() {
     # 252: superadmin gets groups.batch_link (user decision 2026-10-12).
     252_superadmin_group_batch_link*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'superadmin' AND rp.permission_name = 'groups.batch_link' AND rp.is_enabled);" ;;
+    # 255: durable operations for paid ERP payments in Bitrix24 (new table only).
+    255_crm_sync_paid_payment_operations*) probe_all \
+      "$(q_tbl crm_sync_paid_payment_operation)" \
+      "$(q_idx uq_crm_sync_paid_payment_operation_open)" \
+      "$(q_idx idx_crm_sync_paid_payment_operation_due)" \
+      "$(q_idx idx_crm_sync_paid_payment_operation_order)" \
+      "$(q_con_on crm_sync_paid_payment_operation chk_crm_sync_paid_payment_operation_completed)" \
+      "$(q_con_on crm_sync_paid_payment_operation chk_crm_sync_paid_payment_operation_stuck)" ;;
+    # 254: trim_text_fields() escapes trimmed strings (values with quotes/newlines no longer rejected).
+    254_trim_text_fields_json_escape*) probe_all \
+      "SELECT COALESCE((SELECT strpos(prosrc, 'to_jsonb(btrim(e.v #>> ''{}''::text[]))') > 0 AND strpos(prosrc, '|| btrim(') = 0 FROM pg_proc WHERE oid = to_regprocedure('public.trim_text_fields()')), false);" ;;
     247_onec_agent_expected_silence*) probe_all \
       "$(q_col onec_agents expected_silence_utc)" \
       "$(q_con_on onec_agents chk_onec_agents_expected_silence_utc)" ;;
@@ -2841,7 +2852,7 @@ verify_applied_effect() {
     193_onec_agent_foundation*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|245_onec_operator_role*|247_onec_agent_expected_silence*|244_client_onec_permissions*|248_authorization_snapshot*|249_role_checks_to_permissions*|251_whatsapp_calendar_send_permission*|252_superadmin_group_batch_link*)
+    231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|245_onec_operator_role*|247_onec_agent_expected_silence*|244_client_onec_permissions*|248_authorization_snapshot*|249_role_checks_to_permissions*|251_whatsapp_calendar_send_permission*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|255_crm_sync_paid_payment_operations*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

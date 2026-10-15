@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   BackfillInterruptedError,
@@ -51,5 +52,15 @@ describe('CRM backfill CLI options', () => {
     const waiting = interruptibleSleep(60_000, controller.signal);
     controller.abort();
     await expect(waiting).rejects.toBeInstanceOf(BackfillInterruptedError);
+  });
+});
+
+describe('CRM backfill CLI wiring', () => {
+  const script = readFileSync(new URL('./crm-sync-backfill.ts', import.meta.url), 'utf8');
+
+  it('shares the paid-payment protocol in live mode but never starts a new operation', () => {
+    expect(script).toMatch(/const paidPayments = dryRun\s+\? undefined\s+: new Bitrix24PaidPaymentGuard\(/);
+    expect(script).toMatch(/policy: \(\) => \(\{ enabled: false, orderIds: new Set<string>\(\) \}\)/);
+    expect(script).toMatch(/durablePaymentCreates: !dryRun,\s+paidPayments,/);
   });
 });

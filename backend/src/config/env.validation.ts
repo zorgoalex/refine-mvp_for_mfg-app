@@ -540,6 +540,17 @@ export const envSchema = z
       .optional(),
     BACKEND_ENABLE_BITRIX24_REVERSE_SYNC: booleanFromEnv.default(false),
     BACKEND_BITRIX24_AUTO_CONVERT_PAID_REQUESTS: booleanFromEnv.default(false),
+    // ERP → Bitrix24: изменение/удаление оплаты, которую Bitrix держит «Оплачено» (снять отметку → изменить →
+    // вернуть). Только начало НОВЫХ операций; начатые доводятся всегда. Список заказов — канарейка (пусто = все).
+    BACKEND_BITRIX24_PAID_PAYMENT_RESET: booleanFromEnv.default(false),
+    BACKEND_BITRIX24_PAID_PAYMENT_RESET_ORDER_IDS: z.string().trim().default('').refine(
+      (value) => {
+        const ids = value.split(',').map((id) => id.trim()).filter(Boolean);
+        // Same limit as the retry command (orderIds ≤ 50): the button sends this list.
+        return new Set(ids).size === ids.length && ids.length <= 50 && ids.every((id) => /^[1-9][0-9]{0,17}$/.test(id));
+      },
+      'BACKEND_BITRIX24_PAID_PAYMENT_RESET_ORDER_IDS: up to 50 distinct positive order ids, comma-separated',
+    ),
     BACKEND_BITRIX24_REVERSE_SYNC_RELAY_OWNER: z
       .enum(['none', 'in_process', 'external'])
       .default('none'),

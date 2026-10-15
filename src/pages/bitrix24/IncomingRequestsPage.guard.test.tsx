@@ -40,6 +40,15 @@ describe('Bitrix24 incoming requests UI wiring', () => {
     expect(page).toMatch(/canViewFinancials\s*&&\s*can\('bitrix24\.payments\.materialize'/);
   });
 
+  it('retries the ERP → Bitrix queue through the backend command, only when the backend reports it', () => {
+    expect(page).toMatch(/bitrix24Api\.retryFailedOutbound\(canary\)/);
+    expect(page).toMatch(/const canary = health\?\.outbound\?\.paidResetOrderIds \?\? \[\]/);
+    expect(page).toMatch(/\{health\?\.outbound && \(\s*<Button\s+disabled=\{health\.outbound\.failed === 0\}/);
+    expect(api).toMatch(/retryFailedOutbound\(orderIds\?: number\[\]\)/);
+    expect(api).toMatch(/apiRoutes\.bitrix24\.retryFailedOutbound/);
+    expect(api).toMatch(/outbound\?: \{/);
+  });
+
   it('does not create or link a second ERP order from a Bitrix request', () => {
     expect(orderCreate).not.toMatch(/bitrix|Bitrix/);
     expect(orderForm).not.toMatch(/bitrixRequestDraft|Bitrix24OrderDraft/);

@@ -2695,6 +2695,59 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/bitrix24/sync-health/retry-failed-outbound:
+    post:
+      tags:
+        - Bitrix24
+      operationId: retryFailedBitrix24OutboundSync
+      summary: Requeue ERP → Bitrix24 sync of entities whose latest event failed
+      description: >-
+        For every order or client whose latest ERP → Bitrix24 sync event failed and that has no
+        pending or processing event, that latest event goes back to the queue. The worker projects the
+        current ERP state. `orderIds` limits the retry to those orders (canary).
+      security:
+        - bearerAuth: []
+      x-permission: bitrix24.integration.manage
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                orderIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  uniqueItems: true
+                  items:
+                    type: integer
+                    minimum: 1
+      responses:
+        '200':
+          description: Number of requeued entities
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [retried, orderIds]
+                properties:
+                  retried:
+                    type: integer
+                    minimum: 0
+                  orderIds:
+                    type: array
+                    nullable: true
+                    items:
+                      type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
   /api/v1/audit:
     get:
       tags:
