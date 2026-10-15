@@ -39,6 +39,13 @@ describe('Bitrix24 reverse repository financial guards', () => {
     );
   });
 
+  it('keeps a client inactive when Bitrix24 echoes ERP\'s own inactive projection', () => {
+    expect(source).toMatch(
+      /UPDATE clients\s+SET client_name=\$2, person_type=\$3, notes=\$4,\s+is_active=CASE WHEN \$5::boolean THEN is_active ELSE true END/,
+    );
+    expect(source).toContain('snapshot.erpMarkedInactive === true');
+  });
+
   it('reads the canonical payment type name column', () => {
     expect(source).toContain('type.type_paid_name AS type_paid_name');
     expect(source).toContain('COALESCE(mapping.active, false) AS active');

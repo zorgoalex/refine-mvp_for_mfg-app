@@ -67,6 +67,8 @@ export interface ReverseClientSnapshot {
   bitrixId: string;
   name: string;
   notes: string | null;
+  /** Comment carries ERP's «Статус ERP: неактивен» line (ERP's own echo): keep the client's activity. */
+  erpMarkedInactive?: boolean;
   phones: Array<{
     phoneNumber: string;
     phoneType: 'mobile' | 'work' | 'home' | 'fax';
@@ -629,13 +631,15 @@ export class PgBitrix24ReverseRepository {
       if (mapping) {
         const result = await tx.query(
           `UPDATE clients
-              SET client_name=$2, person_type=$3, notes=$4, is_active=true
+              SET client_name=$2, person_type=$3, notes=$4,
+                  is_active=CASE WHEN $5::boolean THEN is_active ELSE true END
             WHERE client_id=$1`,
           [
             clientId,
             snapshot.name,
             snapshot.objectType === 'company' ? 'legal' : 'individual',
             snapshot.notes,
+            snapshot.erpMarkedInactive === true,
           ],
         );
         if (result.rowCount !== 1) {
@@ -4067,12 +4071,49 @@ export class PgBitrix24ReverseRepository {
     auditRequestId: string;
   }): Promise<number> {
     return this.db.transaction(async (tx) => {
-      const result = await tx.query(
+      // At most one open (pending/failed) event per object (uq_bitrix24_inbound_event_open_object).
+      // Failed events are already the open one; of the dead events only the newest of an object with no
+      // open event is requeued (processing re-reads the object from Bitrix24). Older dead duplicates stay
+      // dead and are requeued by the next retry, after this one is processed. A webhook may open an event
+      // for the same object concurrently: each requeue runs under its own savepoint and is skipped on a
+      // unique violation — that newer open event processes the object.
+      const failed = await tx.query(
         `UPDATE bitrix24_inbound_event
             SET status='pending', attempts=0, next_attempt_at=now(),
                 last_error=NULL, locked_at=NULL, locked_by=NULL, lock_token=NULL
-          WHERE status IN ('failed','dead')`,
+          WHERE status='failed'`,
       );
+      const candidates = await tx.query<{ inbound_event_id: string }>(
+        `SELECT DISTINCT ON (d.member_id, d.object_type, d.bitrix_id) d.inbound_event_id
+           FROM bitrix24_inbound_event d
+          WHERE d.status='dead'
+            AND NOT EXISTS (
+              SELECT 1 FROM bitrix24_inbound_event o
+               WHERE o.member_id=d.member_id AND o.object_type=d.object_type
+                 AND o.bitrix_id=d.bitrix_id AND o.status IN ('pending','processing','failed'))
+          ORDER BY d.member_id, d.object_type, d.bitrix_id, d.created_at DESC, d.inbound_event_id DESC`,
+      );
+      let deadRequeued = 0;
+      let deadSkipped = 0;
+      for (const candidate of candidates.rows) {
+        await tx.query('SAVEPOINT bitrix24_retry_dead');
+        try {
+          const requeued = await tx.query(
+            `UPDATE bitrix24_inbound_event
+                SET status='pending', attempts=0, next_attempt_at=now(),
+                    last_error=NULL, locked_at=NULL, locked_by=NULL, lock_token=NULL
+              WHERE inbound_event_id=$1 AND status='dead'`,
+            [candidate.inbound_event_id],
+          );
+          await tx.query('RELEASE SAVEPOINT bitrix24_retry_dead');
+          deadRequeued += requeued.rowCount ?? 0;
+        } catch (error) {
+          await tx.query('ROLLBACK TO SAVEPOINT bitrix24_retry_dead');
+          if ((error as { code?: string }).code !== '23505') throw error;
+          deadSkipped += 1;
+        }
+      }
+      const result = { rowCount: (failed.rowCount ?? 0) + deadRequeued };
       const blocked = await tx.query(
         `WITH installation AS (
            SELECT member_id
@@ -4091,7 +4132,8 @@ export class PgBitrix24ReverseRepository {
                 'admin-retry:' || request.request_id || ':' || gen_random_uuid()::text
            FROM bitrix24_incoming_request request
            CROSS JOIN installation
-          WHERE request.sync_status='blocked'`,
+          WHERE request.sync_status='blocked'
+         ON CONFLICT DO NOTHING`,
       );
       const retried = (result.rowCount ?? 0) + (blocked.rowCount ?? 0);
       await this.audit.record(tx, {
@@ -4104,6 +4146,7 @@ export class PgBitrix24ReverseRepository {
         after: {
           retried,
           failedEventsRetried: result.rowCount ?? 0,
+          deadSkippedOpenEvent: deadSkipped,
           blockedRequestsEnqueued: blocked.rowCount ?? 0,
         },
       });
