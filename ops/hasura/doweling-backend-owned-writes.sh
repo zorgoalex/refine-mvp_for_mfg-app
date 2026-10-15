@@ -67,20 +67,26 @@ hasura_api() {
     "${METADATA_URL}"
 }
 
-log "Fetching current Hasura metadata (with resource_version)..."
-METADATA_JSON="$(hasura_api '{"type":"export_metadata","version":2,"args":{}}')"
-
+# Cleanup is registered before the first temp file exists, so a failing mktemp/chmod leaves nothing behind.
+BULK_FILE=""
+METADATA_FILE=""
+trap 'rm -f ${BULK_FILE:+"$BULK_FILE"} ${METADATA_FILE:+"$METADATA_FILE"}' EXIT
 BULK_FILE="$(mktemp /tmp/doweling-writes-bulk-XXXXXX.json)"
-trap 'rm -f "$BULK_FILE"' EXIT
+# The metadata after access groups 0Б is megabytes: it goes through an owner-only file, never an environment variable
+# (a single environment string is limited to 128 KiB).
+METADATA_FILE="$(mktemp /tmp/doweling-writes-metadata-XXXXXX.json)"
+chmod 600 "$METADATA_FILE"
 
-export _DOWELING_METADATA="$METADATA_JSON"
+log "Fetching current Hasura metadata (with resource_version)..."
+hasura_api '{"type":"export_metadata","version":2,"args":{}}' > "$METADATA_FILE"
+
 export _DOWELING_REVERT="$REVERT"
-python3 - "$BULK_FILE" "$REFERENCE_FILE" <<'PY'
+python3 - "$BULK_FILE" "$REFERENCE_FILE" "$METADATA_FILE" <<'PY'
 import json
 import os
 import sys
 
-bulk_path, reference_path = sys.argv[1], sys.argv[2]
+bulk_path, reference_path, metadata_path = sys.argv[1], sys.argv[2], sys.argv[3]
 
 
 def die(message):
@@ -101,9 +107,10 @@ def normalized(permissions):
     return json.dumps(result, sort_keys=True)
 
 
-raw = os.environ.get("_DOWELING_METADATA", "")
+with open(metadata_path, "r", encoding="utf-8") as handle:
+    raw = handle.read()
 if not raw:
-    die("_DOWELING_METADATA is empty")
+    die("export_metadata returned nothing")
 exported = json.loads(raw)
 resource_version = exported.get("resource_version")
 metadata = exported.get("metadata")
@@ -166,7 +173,7 @@ with open(bulk_path, "w") as f:
     json.dump({"type": "bulk", "resource_version": resource_version, "args": args}, f)
 print(f"Permission changes: {len(args)}", file=sys.stderr)
 PY
-unset _DOWELING_METADATA _DOWELING_REVERT
+unset _DOWELING_REVERT
 
 COUNT="$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))['args']))" "$BULK_FILE")"
 if [[ "$COUNT" == "0" ]]; then
@@ -181,7 +188,7 @@ fi
 log "Applying ${COUNT} permission change(s) in one bulk request..."
 RESPONSE_FILE="$(mktemp /tmp/doweling-writes-response-XXXXXX.json)"
 KEEP_RESPONSE=false
-trap 'rm -f "$BULK_FILE"; $KEEP_RESPONSE || rm -f "$RESPONSE_FILE"' EXIT
+trap 'rm -f "$BULK_FILE" "$METADATA_FILE"; $KEEP_RESPONSE || rm -f "$RESPONSE_FILE"' EXIT
 HTTP_CODE="$(curl -sS -o "$RESPONSE_FILE" -w '%{http_code}' \
   -H "Content-Type: application/json" \
   -H "x-hasura-admin-secret: ${ADMIN_SECRET}" \
