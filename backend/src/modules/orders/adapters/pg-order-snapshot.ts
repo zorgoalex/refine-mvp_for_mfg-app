@@ -12,6 +12,7 @@ import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { assertDowelingOrdersWritable } from '../../doweling/adapters/doweling-write-guard';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import type {
   ExportedOrderSnapshotBatchFile,
@@ -444,7 +445,7 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
           snapshot,
           command.referenceMappings ?? [],
         );
-        const result = await importSnapshotInTransaction(tx, remappedSnapshot, payloadHash, runId, command);
+        const result = await importSnapshotInTransaction(tx, remappedSnapshot, payloadHash, runId, command, this.database);
         await finishImportRun(tx, runId, result.status, result.orderId, result.summary);
         await writeAudit(
           tx,
@@ -1225,6 +1226,7 @@ async function importSnapshotInTransaction(
   payloadHash: string,
   importRunId: string,
   command: ImportOrderSnapshotCommand,
+  database: DatabaseService,
 ): Promise<Omit<ImportOrderSnapshotResponseDto, 'importRunId'>> {
   const source = snapshot.source.sourceInstanceId;
   const orderSourceId = snapshot.identity.order.sourceId;
@@ -1278,7 +1280,18 @@ async function importSnapshotInTransaction(
 
   const orderId = await upsertOrderHeader(tx, snapshot, clientId, payloadHash, command);
   await upsertClientPhones(tx, snapshot, clientId, orderId, payloadHash);
-  const dowelingOrderIds = await upsertDowelingOrders(tx, snapshot, orderId, payloadHash);
+  // An existing doweling order is overwritten only under the doweling rule of the order save (doweling-write-guard.ts).
+  const guardDowelingOrders = (dowelingOrderIds: number[]) =>
+    assertDowelingOrdersWritable({
+      database,
+      tx,
+      currentUser: command.currentUser,
+      requestId: command.requestId && command.requestId.length > 0 ? command.requestId : 'order-snapshot-import',
+      action: 'order_snapshot_import',
+      dowelingOrderIds,
+      ownOrderId: orderId,
+    });
+  const dowelingOrderIds = await upsertDowelingOrders(tx, snapshot, orderId, payloadHash, guardDowelingOrders);
   await upsertOrderChildren(tx, snapshot, orderId, dowelingOrderIds, payloadHash, command);
   await upsertProductionEvents(tx, snapshot, orderId, payloadHash);
   await upsertDeadlines(tx, snapshot, orderId, payloadHash);
@@ -1539,20 +1552,39 @@ async function upsertClientPhones(
   }
 }
 
-async function upsertDowelingOrders(
+/**
+ * Existing doweling orders of the snapshot are resolved first, locked FOR UPDATE in ascending id order (the lock order
+ * of the order save and the doweling commands), authorized under that lock (their links cannot change any more) and
+ * only then overwritten; new ones are inserted. Exported for the PostgreSQL integration test of that lock order.
+ */
+export async function upsertDowelingOrders(
   tx: TransactionClient,
   snapshot: OrderSnapshotDto,
   orderId: number,
   payloadHash: string,
+  guard: (dowelingOrderIds: number[]) => Promise<void>,
 ): Promise<Map<string, number>> {
   const source = snapshot.source.sourceInstanceId;
   const result = new Map<string, number>();
 
+  const targets: Array<{ item: DowelingOrderSnapshotDto; existingId: number | null }> = [];
   for (const item of snapshot.data.dowelingOrders) {
     const mapped = await getMap(tx, source, SNAPSHOT_ENTITY_TYPES.dowelingOrder, item.sourceId);
-    const id = mapped
-      ? await updateDowelingOrder(tx, Number(mapped.local_entity_id), orderId, item)
-      : await findOrInsertDowelingOrder(tx, orderId, item);
+    targets.push({ item, existingId: mapped ? Number(mapped.local_entity_id) : await findExistingDowelingOrder(tx, orderId, item) });
+  }
+  const existing = [...new Set(targets.map((target) => target.existingId).filter((id): id is number => id !== null))].sort((a, b) => a - b);
+  if (existing.length > 0) {
+    await tx.query(
+      'SELECT doweling_order_id FROM doweling_orders WHERE doweling_order_id = ANY($1::bigint[]) ORDER BY doweling_order_id FOR UPDATE',
+      [existing],
+    );
+    await guard(existing);
+  }
+
+  for (const { item, existingId } of targets) {
+    const id = existingId !== null
+      ? await updateDowelingOrder(tx, existingId, orderId, item)
+      : await insertDowelingOrder(tx, orderId, item);
     result.set(item.sourceId, id);
     await upsertMap(tx, { source, entityType: SNAPSHOT_ENTITY_TYPES.dowelingOrder, sourceId: item.sourceId, localId: String(id), localOrderId: orderId, payloadHash });
   }
@@ -2567,21 +2599,26 @@ async function updateClientPhone(
   return phoneId;
 }
 
-async function findOrInsertDowelingOrder(
+async function findExistingDowelingOrder(
   tx: TransactionClient,
   orderId: number,
   item: DowelingOrderSnapshotDto,
-): Promise<number> {
+): Promise<number | null> {
   const byRef = item.refKey1c
     ? await readOptionalId(tx, 'SELECT doweling_order_id AS id FROM doweling_orders WHERE ref_key_1c = $1::uuid', [item.refKey1c])
     : null;
-  const byName = byRef ?? await readOptionalId(
+  return byRef ?? readOptionalId(
     tx,
     'SELECT doweling_order_id AS id FROM doweling_orders WHERE order_id = $1 AND doweling_order_name = $2 AND delete_flag = false',
     [orderId, item.dowelingOrderName],
   );
-  if (byName) return updateDowelingOrder(tx, byName, orderId, item);
+}
 
+async function insertDowelingOrder(
+  tx: TransactionClient,
+  orderId: number,
+  item: DowelingOrderSnapshotDto,
+): Promise<number> {
   const result = await tx.query<IdRow>(
     `
     INSERT INTO doweling_orders (

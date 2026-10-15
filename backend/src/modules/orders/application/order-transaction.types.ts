@@ -448,6 +448,14 @@ export interface OrderWriteUnitOfWork {
     links: readonly NormalizedSaveOrderDowelingLinkDto[],
   ): Promise<void>;
   deleteDowelingLinks(orderId: number, ids: readonly number[]): Promise<void>;
+  /** Doweling rule for attach/detach/design-engineer changes; call before deleteDowelingLinks/upsertDowelingLinks. */
+  assertDowelingLinkChangesAllowed(input: {
+    orderId: number;
+    links: readonly NormalizedSaveOrderDowelingLinkDto[];
+    deletedLinkIds: readonly number[];
+    currentUser: CurrentUser;
+    requestId?: string;
+  }): Promise<void>;
   updateOrderTotalsAndVersion(input: {
     orderId: number;
     totals: OrderTotalsDto;

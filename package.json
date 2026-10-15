@@ -22,6 +22,7 @@
     "test:backend": "vitest run backend",
     "test:backend:deadline-integration": "vitest run --config vitest.deadline-integration.config.ts",
     "test:backend:notification-integration": "vitest run --config vitest.notification-engine-integration.config.ts",
+    "test:backend:doweling-integration": "vitest run --config vitest.doweling-integration.config.ts",
     "test:backend:cut-integration": "vitest run --config vitest.cut-integration.config.ts",
     "test:backend:workos-multilink-integration": "vitest run --config vitest.workos-multilink-integration.config.ts",
     "test:backend:production-actions-integration": "vitest run --config vitest.production-actions-integration.config.ts",

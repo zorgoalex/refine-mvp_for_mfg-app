@@ -1,12 +1,17 @@
 import { humanName } from '../../../shared/human-name-schema';
-import { Body, Controller, HttpCode, Inject, Post, Req } from '@nestjs/common';
+import { Body, Controller, HttpCode, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { DowelingService } from '../application/doweling.service';
-import type { CreateDowelingOrderRequestDto, CreateDowelingOrderResponseDto } from '../dto/doweling.dto';
+import type {
+  CreateDowelingOrderRequestDto,
+  CreateDowelingOrderResponseDto,
+  UpdateDowelingOrderRequestDto,
+  UpdateDowelingOrderResponseDto,
+} from '../dto/doweling.dto';
 import { DowelingRuntimeConfigService } from './doweling-runtime-config.service';
 
 const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
@@ -36,8 +41,65 @@ const createDowelingRequestSchema = z.object({
   partsCount: z.number().int().nonnegative().nullish(),
   linkCadFile: z.string().trim().max(2000).nullish(),
   linkPdfFile: z.string().trim().max(2000).nullish(),
+  orderId: z.number().int().positive().nullish(),
   idempotencyKey: z.string().trim().min(8).max(200),
 });
+
+const calendarDate = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD')
+  .refine(isRealCalendarDate, 'Invalid calendar date');
+const MAX_AMOUNT = 9_999_999_999.99;
+const amount = z.number().finite().nonnegative().max(MAX_AMOUNT).transform((value) => Math.round(value * 100) / 100);
+const optionalLink = z
+  .string()
+  .trim()
+  .max(2000)
+  .nullable()
+  .transform((value) => (value ? value : null));
+const MAX_LINKED_ORDERS = 50;
+
+const updateDowelingRequestSchema = z
+  .object({
+    expectedVersion: z.number().int().nonnegative(),
+    dowelingOrderName: humanName(200, 1),
+    dowelingOrderDate: calendarDate,
+    paymentStatusId: z.number().int().positive(),
+    designEngineerId: z.number().int().positive(),
+    productionStatusId: z.number().int().positive().nullable(),
+    operatorId: z.number().int().positive().nullable(),
+    issueDate: calendarDate.nullable(),
+    paymentDate: calendarDate.nullable(),
+    partsCount: z.number().int().nonnegative().max(1_000_000),
+    totalAmount: amount.nullable(),
+    finalAmount: amount.nullable(),
+    discount: amount,
+    surcharge: amount,
+    paidAmount: amount,
+    linkCadFile: optionalLink,
+    linkPdfFile: optionalLink,
+    refKey1c: z
+      .string()
+      .trim()
+      .nullable()
+      .transform((value) => (value ? value.toLowerCase() : null))
+      .refine((value) => value === null || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value), 'Ref Key 1C must be a UUID'),
+    isActive: z.boolean(),
+    orderIds: z.array(z.number().int().positive()).max(MAX_LINKED_ORDERS),
+    baseOrderIds: z.array(z.number().int().positive()).max(MAX_LINKED_ORDERS * 4),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (new Set(value.orderIds).size !== value.orderIds.length) {
+      context.addIssue({ code: 'custom', path: ['orderIds'], message: 'Order ids must be unique' });
+    }
+    if (!value.isActive && value.orderIds.length > 0) {
+      context.addIssue({ code: 'custom', path: ['orderIds'], message: 'An inactive doweling order has no orders' });
+    }
+  });
+
+const dowelingIdSchema = z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 
 const createDowelingRequestSwaggerSchema = {
   type: 'object',
@@ -52,7 +114,69 @@ const createDowelingRequestSwaggerSchema = {
     partsCount: { type: 'integer', minimum: 0, nullable: true },
     linkCadFile: { type: 'string', maxLength: 2000, nullable: true },
     linkPdfFile: { type: 'string', maxLength: 2000, nullable: true },
+    orderId: { type: 'integer', nullable: true, description: 'Link to this production order in the same transaction' },
     idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 },
+  },
+} as const;
+
+const updateDowelingRequestSwaggerSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'expectedVersion', 'dowelingOrderName', 'dowelingOrderDate', 'paymentStatusId', 'designEngineerId',
+    'productionStatusId', 'operatorId', 'issueDate', 'paymentDate', 'partsCount', 'totalAmount', 'finalAmount',
+    'discount', 'surcharge', 'paidAmount', 'linkCadFile', 'linkPdfFile', 'refKey1c', 'isActive', 'orderIds',
+    'baseOrderIds',
+  ],
+  properties: {
+    expectedVersion: { type: 'integer', minimum: 0 },
+    dowelingOrderName: { type: 'string', minLength: 1, maxLength: 200 },
+    dowelingOrderDate: { type: 'string', format: 'date' },
+    paymentStatusId: { type: 'integer' },
+    designEngineerId: { type: 'integer' },
+    productionStatusId: { type: 'integer', nullable: true },
+    operatorId: { type: 'integer', nullable: true },
+    issueDate: { type: 'string', format: 'date', nullable: true },
+    paymentDate: { type: 'string', format: 'date', nullable: true },
+    partsCount: { type: 'integer', minimum: 0 },
+    totalAmount: { type: 'number', minimum: 0, nullable: true },
+    finalAmount: { type: 'number', minimum: 0, nullable: true },
+    discount: { type: 'number', minimum: 0 },
+    surcharge: { type: 'number', minimum: 0 },
+    paidAmount: { type: 'number', minimum: 0 },
+    linkCadFile: { type: 'string', maxLength: 2000, nullable: true },
+    linkPdfFile: { type: 'string', maxLength: 2000, nullable: true },
+    refKey1c: { type: 'string', format: 'uuid', nullable: true },
+    isActive: { type: 'boolean' },
+    orderIds: { type: 'array', maxItems: 50, items: { type: 'integer' }, description: 'Orders linked after the save; empty when inactive' },
+    baseOrderIds: { type: 'array', maxItems: 200, items: { type: 'integer' }, description: 'Orders the card showed; 409 DOWELING_LINKS_CONFLICT when they are no longer the current ones' },
+  },
+} as const;
+
+const linkSwaggerSchema = {
+  type: 'object',
+  required: ['orderDowelingLinkId', 'orderId'],
+  properties: { orderDowelingLinkId: { type: 'integer' }, orderId: { type: 'integer' } },
+} as const;
+
+const updateDowelingResponseSwaggerSchema = {
+  type: 'object',
+  required: ['dowelingOrder', 'links', 'changed', 'requestId'],
+  properties: {
+    dowelingOrder: {
+      type: 'object',
+      required: ['dowelingOrderId', 'dowelingOrderName', 'version', 'isActive'],
+      properties: {
+        dowelingOrderId: { type: 'integer' },
+        dowelingOrderName: { type: 'string' },
+        version: { type: 'integer' },
+        isActive: { type: 'boolean' },
+      },
+    },
+    links: { type: 'array', items: linkSwaggerSchema },
+    changed: { type: 'boolean' },
+    auditId: { type: 'string' },
+    requestId: { type: 'string' },
   },
 } as const;
 
@@ -69,6 +193,7 @@ const dowelingResponseSwaggerSchema = {
         version: { type: 'integer' },
       },
     },
+    link: { ...linkSwaggerSchema, nullable: true },
     auditId: { type: 'string' },
     requestId: { type: 'string' },
   },
@@ -106,6 +231,32 @@ export class DowelingController {
     });
   }
 
+  @ApiOperation({ operationId: 'updateDowelingOrder', summary: 'Change a doweling order and the orders it is linked to' })
+  @ApiBody({ schema: swaggerSchema(updateDowelingRequestSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Doweling order after the save', schema: swaggerSchema(updateDowelingResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions or an order outside the update scope' })
+  @ApiResponse({ status: 404, description: 'Doweling order, order or reference not found' })
+  @ApiResponse({ status: 409, description: 'Stale version, concurrent change or duplicate' })
+  @ApiResponse({ status: 422, description: 'Invalid payload or inconsistent amounts' })
+  @ApiResponse({ status: 503, description: 'Doweling commands API is disabled or database unavailable' })
+  @Patch(':id')
+  @HttpCode(200)
+  async update(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<UpdateDowelingOrderResponseDto> {
+    this.assertDowelingEnabled();
+
+    return this.doweling.updateDowelingOrder({
+      currentUser: this.requireCurrentUser(request),
+      dowelingOrderId: parseDowelingOrderId(id),
+      dto: parseUpdateDowelingRequest(body),
+      requestId: request.requestId,
+    });
+  }
+
   private assertDowelingEnabled(): void {
     if (!this.runtimeConfig.getFeatureFlags().dowelingCommandsEnabled) {
       throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Doweling commands API is disabled', {
@@ -129,6 +280,23 @@ export function parseCreateDowelingRequest(body: unknown): CreateDowelingOrderRe
     throw dowelingValidationError(parsed.error);
   }
 
+  return parsed.data;
+}
+
+export function parseUpdateDowelingRequest(body: unknown): UpdateDowelingOrderRequestDto {
+  const parsed = updateDowelingRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    throw dowelingValidationError(parsed.error);
+  }
+
+  return parsed.data;
+}
+
+export function parseDowelingOrderId(value: unknown): number {
+  const parsed = dowelingIdSchema.safeParse(value);
+  if (!parsed.success) {
+    throw dowelingValidationError(parsed.error);
+  }
   return parsed.data;
 }
 

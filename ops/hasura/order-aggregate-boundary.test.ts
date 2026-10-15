@@ -67,19 +67,14 @@ describe('Hasura order aggregate boundary', () => {
     expect(entry.delete_permissions).toBeUndefined();
   });
 
-  it('keeps public.order_doweling_links read-only for roles; erp_admin links doweling orders only with order update rights', () => {
+  it('keeps public.order_doweling_links read-only for every role (links are written by backend commands)', () => {
     const entry = table('order_doweling_links');
     expect(entry.select_permissions?.length).toBeGreaterThan(0);
+    // The doweling card, the quick-create from an order and the order save link through the backend
+    // (doweling-backend-owned-writes.sh revoked the last Hasura grants, user decision 2026-10-14).
+    expect(entry.insert_permissions).toBeUndefined();
+    expect(entry.update_permissions).toBeUndefined();
     expect(entry.delete_permissions).toBeUndefined();
-    // Accepted debt (user decision 2026-10-14): the doweling edit form links through Hasura until the backend command
-    // exists; before 0Б only the Hasura superuser could do it, now erp_admin with orders.update and the order scope.
-    for (const kind of ['insert_permissions', 'update_permissions'] as const) {
-      const permissions = (entry[kind] ?? []) as Array<{ role: string; permission: unknown }>;
-      expect(permissions.map((permission) => permission.role)).toEqual(['erp_admin']);
-      const rule = JSON.stringify(permissions[0].permission);
-      expect(rule).toContain('"orders.update"');
-      expect(rule).toContain('"doweling.update"');
-    }
   });
 
   it('reads public.payments_view only as erp_admin with the payments analytics rights', () => {

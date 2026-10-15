@@ -1,9 +1,10 @@
 // Quick Create Modal for Dowelling Order
-// Allows creating a new dowelling order and linking it to the main order via order_doweling_links
+// Creates a new doweling order linked to the main order in ONE backend command
+// (POST /api/v1/doweling-orders with orderId: audit, order scope, same transaction) — no Hasura writes.
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Modal, Form, Input, Select, notification } from 'antd';
-import { useCreate } from '@refinedev/core';
+import { buildCreateDowelingRequest, createDowelingIdempotencyKey, dowelingApi } from '../../../../api/dowelingApi';
 import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { useWorkspaceModalFormCheckpoint } from '../../../../workspace/workspaceModalFormCheckpoint';
@@ -26,8 +27,11 @@ export const DowellingOrderQuickCreate: React.FC<DowellingOrderQuickCreateProps>
   const [form] = Form.useForm();
   const workspaceKey = useWorkspaceModalFormCheckpoint('dowelling-quick-create', open, form);
   const [isCreating, setIsCreating] = useState(false);
-  const { mutateAsync: createDowellingOrder } = useCreate();
-  const { mutateAsync: createDowelingLink } = useCreate();
+  // One key per opening of the modal: a retry after a lost answer replays the same create instead of a duplicate.
+  const idempotencyKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (open) idempotencyKeyRef.current = createDowelingIdempotencyKey('doweling-order-quick-create');
+  }, [open]);
 
   // Load employees for design_engineer selector
   const { selectProps: employeeSelectProps } = useSelect({
@@ -58,45 +62,29 @@ export const DowellingOrderQuickCreate: React.FC<DowellingOrderQuickCreateProps>
         );
         const designEngineerName = selectedEmployee?.label as string | undefined;
 
-        // Шаг 1: Создаем заказ на присадку БЕЗ order_id (many-to-many)
-        const dowelingResult = await createDowellingOrder({
-          resource: 'doweling_orders',
-          values: {
-            doweling_order_name: values.doweling_order_name.trim(),
-            doweling_order_date: orderDate || new Date().toISOString().split('T')[0],
-            design_engineer_id: values.design_engineer_id,
-            operator_id: values.design_engineer_id, // По умолчанию тот же что и конструктор
-            payment_status_id: 1, // По умолчанию - первый статус (обычно "Не оплачен")
-            production_status_id: 1, // По умолчанию - первый статус
-            discount: 0,
-            paid_amount: 0,
-            parts_count: 0,
-            delete_flag: false,
-            version: 0,
-          },
-        });
+        const created = await dowelingApi.create(
+          buildCreateDowelingRequest({
+            dowelingOrderName: values.doweling_order_name,
+            designEngineerId: values.design_engineer_id,
+            operatorId: values.design_engineer_id, // По умолчанию тот же, что и конструктор
+            paymentStatusId: 1, // По умолчанию первый статус (обычно «Не оплачен»)
+            productionStatusId: 1,
+            dowelingOrderDate: /^\d{4}-\d{2}-\d{2}/.test(orderDate ?? '') ? orderDate!.slice(0, 10) : new Date().toISOString().split('T')[0],
+            orderId,
+            idempotencyKey: idempotencyKeyRef.current ?? createDowelingIdempotencyKey('doweling-order-quick-create'),
+          }),
+        );
 
-        const newDowelingOrderId = dowelingResult.data.doweling_order_id;
-        const newDowelingOrderName = dowelingResult.data.doweling_order_name;
-
-        // Шаг 2: Создаем связь в order_doweling_links
-        const linkResult = await createDowelingLink({
-          resource: 'order_doweling_links',
-          values: {
-            order_id: orderId,
-            doweling_order_id: newDowelingOrderId,
-            delete_flag: false,
-            version: 0,
-          },
-        });
-
-        const newLinkId = linkResult.data.order_doweling_link_id;
+        const newDowelingOrderId = created.dowelingOrder.dowelingOrderId;
+        const newDowelingOrderName = created.dowelingOrder.dowelingOrderName;
+        const newLinkId = created.link?.orderDowelingLinkId;
 
         notification.success({
           message: 'Присадка создана',
           description: `Заказ на присадку "${newDowelingOrderName}" успешно создан и связан с заказом`,
         });
         form.resetFields();
+        idempotencyKeyRef.current = null;
         onSuccess(newDowelingOrderId, newDowelingOrderName, values.design_engineer_id, designEngineerName, newLinkId);
         onClose();
       } catch (error: any) {

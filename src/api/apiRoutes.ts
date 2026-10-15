@@ -290,6 +290,7 @@ export const apiRoutes = {
   },
   dowelingOrders: {
     create: backendApiPath('/doweling-orders'),
+    update: (dowelingOrderId: number) => backendApiPath(`/doweling-orders/${dowelingOrderId}`),
   },
   bazis: {
     imports: backendApiPath('/bazis/imports'),

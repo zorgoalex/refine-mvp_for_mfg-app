@@ -1,21 +1,15 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Edit, useSelect } from "@refinedev/antd";
-import {
-  IResourceComponentsProps,
-  useCreate,
-  useGo,
-  useInvalidate,
-  useList,
-  useUpdate,
-} from "@refinedev/core";
+import { IResourceComponentsProps, useGo, useInvalidate, useList, useOne } from "@refinedev/core";
 import { Form, Input, InputNumber, DatePicker, Select, Switch, message } from "antd";
-import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
 import { useParams } from "react-router-dom";
 import dayjs, { Dayjs } from "dayjs";
+import { buildUpdateDowelingRequest, dowelingApi } from "../../api/dowelingApi";
+import { isApiError } from "../../api/apiError";
 
 type DowelingEditValues = {
   doweling_order_name?: string;
-  order_id?: number | string | null;
+  order_ids?: Array<number | string>;
   doweling_order_date?: Dayjs | string | null;
   payment_status_id?: number | string | null;
   production_status_id?: number | string | null;
@@ -41,85 +35,68 @@ const toNullableNumber = (value: unknown): number | null => {
   return Number.isFinite(numeric) ? numeric : null;
 };
 
-const toNumberOrDefault = (value: unknown, fallback: number): number => {
-  const numeric = toNullableNumber(value);
-  return numeric ?? fallback;
-};
-
 const toOptionalDate = (value: Dayjs | string | null | undefined): string | null => {
   if (!value) return null;
   const parsed = dayjs.isDayjs(value) ? value : dayjs(value);
   return parsed.isValid() ? parsed.format("YYYY-MM-DD") : null;
 };
 
-const toRequiredDate = (value: Dayjs | string | null | undefined, fallback?: string | null): string => {
-  return toOptionalDate(value) ?? fallback ?? dayjs().format("YYYY-MM-DD");
-};
-
-const activeLinksFor = (links: any[]) =>
-  links
-    .filter((link) => link?.delete_flag !== true)
-    .sort((a, b) => Number(b.order_doweling_link_id ?? 0) - Number(a.order_doweling_link_id ?? 0));
+const toDayjs = (value: unknown) => (value ? dayjs(String(value)) : undefined);
 
 export const DowelOrderEdit: React.FC<IResourceComponentsProps> = () => {
   const { id } = useParams<{ id: string }>();
   const go = useGo();
   const invalidate = useInvalidate();
-  const { mutateAsync: updateDowelingLink } = useUpdate();
-  const { mutateAsync: createDowelingLink } = useCreate();
+  const [form] = Form.useForm<DowelingEditValues>();
+  const [saving, setSaving] = useState(false);
+  const dowelingOrderId = toNullableNumber(id);
 
-  const { formProps, saveButtonProps, queryResult } = useFormWithHighlight({
+  // Reads stay on Hasura (doweling.view + order scope); every write goes through the backend command
+  // PATCH /api/v1/doweling-orders/:id (audit, version, order scope of all linked orders).
+  const { data: recordData, isLoading, refetch } = useOne({
     resource: "doweling_orders",
-    successResource: "doweling_orders_view",
-    idField: "doweling_order_id",
-    action: "edit",
-    navigateOnSuccess: false,
-    formProps: {
-      id,
-    },
+    id: dowelingOrderId ?? undefined,
+    queryOptions: { enabled: !!dowelingOrderId, staleTime: 0 },
   });
+  const record = recordData?.data;
 
-  const record = queryResult?.data?.data;
-  const dowelingOrderId = toNullableNumber(record?.doweling_order_id ?? id);
-
-  const { data: dowelingLinksData } = useList({
+  const { data: dowelingLinksData, refetch: refetchLinks } = useList({
     resource: "order_doweling_links",
     filters: [
-      {
-        field: "doweling_order_id",
-        operator: "eq",
-        value: dowelingOrderId,
-      },
+      { field: "doweling_order_id", operator: "eq", value: dowelingOrderId },
+      { field: "delete_flag", operator: "eq", value: false },
     ],
     pagination: { pageSize: 100 },
-    queryOptions: {
-      enabled: !!dowelingOrderId,
-      staleTime: 0,
-    },
+    queryOptions: { enabled: !!dowelingOrderId, staleTime: 0 },
   });
-
-  const dowelingLinks = useMemo(() => dowelingLinksData?.data || [], [dowelingLinksData?.data]);
-  const activeLinks = useMemo(() => activeLinksFor(dowelingLinks), [dowelingLinks]);
-  const linkedOrderId = toNullableNumber(record?.order_id) ?? toNullableNumber(activeLinks[0]?.order_id);
+  // The orders of the doweling order: active links ∪ the legacy order_id (a legacy-only order must not vanish on save).
+  const linkedOrderIds = useMemo(
+    () =>
+      [...new Set([...(dowelingLinksData?.data ?? []).map((link: any) => toNullableNumber(link.order_id)), toNullableNumber(record?.order_id)])]
+        .filter((orderId): orderId is number => orderId !== null)
+        .sort((a, b) => a - b),
+    [dowelingLinksData?.data, record?.order_id],
+  );
 
   useEffect(() => {
-    const form = formProps.form;
-    if (!form || !record) return;
+    if (!record || !dowelingLinksData) return;
+    form.setFieldsValue({
+      ...record,
+      order_ids: linkedOrderIds,
+      is_active: record.delete_flag !== true,
+      doweling_order_date: toDayjs(record.doweling_order_date),
+      issue_date: toDayjs(record.issue_date),
+      payment_date: toDayjs(record.payment_date),
+    } as DowelingEditValues);
+  }, [form, record, dowelingLinksData, linkedOrderIds]);
 
-    if (!form.isFieldTouched("order_id")) {
-      form.setFieldsValue({ order_id: linkedOrderId ?? undefined });
-    }
-
-    if (!form.isFieldTouched("is_active")) {
-      form.setFieldsValue({ is_active: record.delete_flag !== true });
-    }
-  }, [formProps.form, linkedOrderId, record]);
+  const isActive = Form.useWatch("is_active", form);
 
   const { selectProps: orderSelectProps } = useSelect({
     resource: "orders",
     optionLabel: "order_name",
     optionValue: "order_id",
-    defaultValue: linkedOrderId ?? undefined,
+    defaultValue: linkedOrderIds,
     pagination: { mode: "server", pageSize: 100 },
   });
 
@@ -143,124 +120,61 @@ export const DowelOrderEdit: React.FC<IResourceComponentsProps> = () => {
     optionValue: "employee_id",
   });
 
-  const syncDowelingLinks = async (nextOrderId: number | null) => {
-    if (!dowelingOrderId) return;
-
-    const matchingLinks = dowelingLinks
-      .filter((link: any) => toNullableNumber(link.order_id) === nextOrderId)
-      .sort((a: any, b: any) => Number(b.order_doweling_link_id ?? 0) - Number(a.order_doweling_link_id ?? 0));
-    const linkToKeep = nextOrderId ? matchingLinks[0] : undefined;
-    const activeLinksToRemove = activeLinks.filter((link: any) => {
-      if (!nextOrderId) return true;
-      return Number(link.order_doweling_link_id) !== Number(linkToKeep?.order_doweling_link_id);
-    });
-
-    await Promise.all(
-      activeLinksToRemove.map((link: any) =>
-        updateDowelingLink({
-          resource: "order_doweling_links",
-          id: link.order_doweling_link_id,
-          values: { delete_flag: true },
-        }),
-      ),
+  const handleFinish = async (values: DowelingEditValues) => {
+    if (!dowelingOrderId || !record) return;
+    const request = buildUpdateDowelingRequest(
+      {
+        ...values,
+        doweling_order_date: toOptionalDate(values.doweling_order_date),
+        issue_date: toOptionalDate(values.issue_date),
+        payment_date: toOptionalDate(values.payment_date),
+      },
+      {
+        expectedVersion: Number(record.version ?? 0),
+        // The backend refuses the save when these are no longer the current orders (separate reads may disagree).
+        baseOrderIds: linkedOrderIds,
+        fallbackDate: toOptionalDate(record.doweling_order_date) ?? dayjs().format("YYYY-MM-DD"),
+      },
     );
 
-    if (!nextOrderId) {
-      return;
-    }
-
-    if (linkToKeep) {
-      if (linkToKeep.delete_flag === true) {
-        await updateDowelingLink({
-          resource: "order_doweling_links",
-          id: linkToKeep.order_doweling_link_id,
-          values: {
-            order_id: nextOrderId,
-            doweling_order_id: dowelingOrderId,
-            delete_flag: false,
-          },
-        });
+    setSaving(true);
+    try {
+      const result = await dowelingApi.update(dowelingOrderId, request);
+      await Promise.all([
+        invalidate({ resource: "doweling_orders", invalidates: ["list", "detail"] }),
+        invalidate({ resource: "doweling_orders_view", invalidates: ["list", "detail"] }),
+        invalidate({ resource: "order_doweling_links", invalidates: ["list", "detail"] }),
+        invalidate({ resource: "orders_view", invalidates: ["list", "detail"] }),
+      ]);
+      if (!result.changed) {
+        message.info("Изменений нет");
+      } else {
+        message.success(result.dowelingOrder.isActive ? "Присадка сохранена" : "Присадка деактивирована");
       }
-      return;
+      if (result.dowelingOrder.isActive) {
+        go({ to: { resource: "doweling_orders_view", action: "show", id: dowelingOrderId }, type: "replace" });
+      } else {
+        go({ to: { resource: "doweling_orders_view", action: "list" }, type: "replace" });
+      }
+    } catch (error) {
+      if (isApiError(error, "DOWELING_VERSION_CONFLICT") || isApiError(error, "DOWELING_LINKS_CONFLICT")) {
+        message.error("Присадку уже изменили. Данные обновлены — проверьте и сохраните ещё раз");
+        await Promise.all([refetch(), refetchLinks()]);
+      } else {
+        message.error(error instanceof Error && error.message ? error.message : "Не удалось сохранить присадку");
+      }
+    } finally {
+      setSaving(false);
     }
-
-    await createDowelingLink({
-      resource: "order_doweling_links",
-      values: {
-        order_id: nextOrderId,
-        doweling_order_id: dowelingOrderId,
-        delete_flag: false,
-        version: 0,
-      },
-    });
-  };
-
-  const handleFinish = async (values: DowelingEditValues) => {
-    const isActive = values.is_active !== false;
-    const nextOrderId = isActive ? toNullableNumber(values.order_id) : null;
-    const payload = {
-      doweling_order_name: String(values.doweling_order_name ?? "").trim(),
-      order_id: nextOrderId,
-      doweling_order_date: toRequiredDate(values.doweling_order_date, record?.doweling_order_date),
-      payment_status_id: toNullableNumber(values.payment_status_id),
-      production_status_id: toNullableNumber(values.production_status_id),
-      design_engineer_id: toNullableNumber(values.design_engineer_id),
-      operator_id: toNullableNumber(values.operator_id),
-      issue_date: toOptionalDate(values.issue_date),
-      total_amount: toNullableNumber(values.total_amount),
-      discount: toNumberOrDefault(values.discount, 0),
-      surcharge: toNumberOrDefault(values.surcharge, 0),
-      final_amount: toNullableNumber(values.final_amount),
-      paid_amount: toNumberOrDefault(values.paid_amount, 0),
-      payment_date: toOptionalDate(values.payment_date),
-      parts_count: toNumberOrDefault(values.parts_count, 0),
-      link_cad_file: values.link_cad_file || null,
-      link_pdf_file: values.link_pdf_file || null,
-      ref_key_1c: values.ref_key_1c || null,
-      delete_flag: !isActive,
-    };
-
-    await formProps.onFinish?.(payload);
-    await syncDowelingLinks(nextOrderId);
-
-    await Promise.all([
-      invalidate({ resource: "doweling_orders", invalidates: ["list", "detail"] }),
-      invalidate({ resource: "doweling_orders_view", invalidates: ["list", "detail"] }),
-      invalidate({ resource: "order_doweling_links", invalidates: ["list", "detail"] }),
-      invalidate({ resource: "orders_view", invalidates: ["list", "detail"] }),
-    ]);
-
-    message.success(isActive ? "Присадка сохранена" : "Присадка деактивирована");
-    if (isActive && dowelingOrderId) {
-      go({ to: { resource: "doweling_orders_view", action: "show", id: dowelingOrderId }, type: "replace" });
-    } else {
-      go({ to: { resource: "doweling_orders_view", action: "list" }, type: "replace" });
-    }
-  };
-
-  const initialValues = {
-    ...formProps.initialValues,
-    order_id: linkedOrderId ?? undefined,
-    is_active: formProps.initialValues?.delete_flag !== true,
-    doweling_order_date: formProps.initialValues?.doweling_order_date
-      ? dayjs(formProps.initialValues.doweling_order_date)
-      : undefined,
-    issue_date: formProps.initialValues?.issue_date
-      ? dayjs(formProps.initialValues.issue_date)
-      : undefined,
-    payment_date: formProps.initialValues?.payment_date
-      ? dayjs(formProps.initialValues.payment_date)
-      : undefined,
   };
 
   return (
-    <Edit saveButtonProps={saveButtonProps} title="Редактирование присадки">
-      <Form
-        {...formProps}
-        layout="vertical"
-        initialValues={initialValues}
-        onFinish={handleFinish}
-      >
+    <Edit
+      isLoading={isLoading}
+      saveButtonProps={{ onClick: () => form.submit(), loading: saving, disabled: !record }}
+      title="Редактирование присадки"
+    >
+      <Form form={form} layout="vertical" onFinish={handleFinish}>
         <Form.Item
           label="Название присадки"
           name="doweling_order_name"
@@ -270,13 +184,25 @@ export const DowelOrderEdit: React.FC<IResourceComponentsProps> = () => {
         </Form.Item>
 
         <Form.Item label="Активен" name="is_active" valuePropName="checked">
-          <Switch checkedChildren="Да" unCheckedChildren="Нет" />
+          <Switch
+            checkedChildren="Да"
+            unCheckedChildren="Нет"
+            onChange={(checked) => {
+              if (!checked) form.setFieldsValue({ order_ids: [] });
+            }}
+          />
         </Form.Item>
 
-        <Form.Item label="Заказ" name="order_id">
+        <Form.Item
+          label="Заказы"
+          name="order_ids"
+          extra={isActive === false ? "Неактивная присадка не связана с заказами" : "Присадка может относиться к нескольким заказам"}
+        >
           <Select
             {...orderSelectProps}
-            placeholder="Выберите заказ"
+            mode="multiple"
+            disabled={isActive === false}
+            placeholder="Выберите заказы"
             allowClear
             showSearch
             filterOption={(input, option) =>
