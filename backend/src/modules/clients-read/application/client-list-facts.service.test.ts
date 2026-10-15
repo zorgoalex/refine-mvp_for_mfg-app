@@ -6,7 +6,7 @@ vi.mock('../../../common/audit/audit.service', () => ({ auditService: audit }));
 import type { CurrentUser } from '../../../permissions/current-user';
 import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import { scopeSetsFromPolicy } from '../../../permissions/policies/scope-sets';
-import { ClientListFactsService, clientOrderReadScope, clientOrdersScope } from './client-list-facts.service';
+import { ClientListFactsService, clientOrderReadScope } from './client-list-facts.service';
 
 const user = (role: string, permissions: string[], id = '7'): CurrentUser =>
   ({ id, username: 'u', role, permissions } as unknown as CurrentUser);
@@ -36,14 +36,6 @@ describe('client list facts', () => {
     // the effective scope set of the token wins over the role: «own» ∪ «assigned» is not restricted
     const both = { ...manager, policyScopeSets: { ...scopeSetsFromPolicy(ROLE_POLICIES.manager), orders: { ...scopeSetsFromPolicy(ROLE_POLICIES.manager).orders, view: ['own', 'assigned'] } } } as CurrentUser;
     expect(clientOrderReadScope(both)).toEqual({ kind: 'all', viewer: both });
-  });
-
-  it('the strict scope of the 1C documents is unchanged: «assigned» and a broken id get nothing', () => {
-    expect(clientOrdersScope(user('top_manager', ['clients.view', 'orders.view']))).toEqual({ kind: 'all' });
-    expect(clientOrdersScope(user('manager', ['clients.view', 'orders.view'], '42'))).toEqual({ kind: 'own', userId: 42 });
-    expect(clientOrdersScope(user('worker', ['clients.view', 'orders.view']))).toEqual({ kind: 'none' });
-    expect(clientOrdersScope(user('top_manager', ['clients.view']))).toEqual({ kind: 'none' });
-    expect(clientOrdersScope(user('manager', ['clients.view', 'orders.view'], 'not-a-number'))).toEqual({ kind: 'none' });
   });
 
   it('reads the facts with the scope of the user', async () => {

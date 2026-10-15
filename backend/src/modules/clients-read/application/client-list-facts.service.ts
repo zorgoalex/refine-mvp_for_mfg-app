@@ -3,25 +3,10 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { appendOrderReadVisibilitySql, orderReadVisibilityIsRestricted } from '../../../permissions/policies/order-read-scope-sql';
-import { rolePolicyForUser } from '../../../permissions/policies/scope';
-import type { ClientListFactsDto, ClientListFactsResponseDto, ClientOrderReadScope, ClientOrdersScope } from './client-list-facts.types';
+import type { ClientListFactsDto, ClientListFactsResponseDto, ClientOrderReadScope } from './client-list-facts.types';
 
 export interface ClientListFactsReadPort {
   facts(clientIds: readonly number[], scope: ClientOrderReadScope): Promise<ClientListFactsDto[]>;
-}
-
-/**
- * Strict scope kept for the 1C documents of a client (party-contacts): all for «all», the user's own for «own»,
- * nothing for any other scope («assigned» is refused there — those documents are not behind the orders list).
- * ERP order reads use `clientOrderReadScope`.
- */
-export function clientOrdersScope(user: CurrentUser): ClientOrdersScope {
-  if (!user.permissions.includes('orders.view')) return { kind: 'none' };
-  const scope = rolePolicyForUser(user).orders.view;
-  if (scope === 'all') return { kind: 'all' };
-  const userId = Number(user.id);
-  if (scope === 'own' && Number.isInteger(userId) && userId > 0) return { kind: 'own', userId };
-  return { kind: 'none' };
 }
 
 /**

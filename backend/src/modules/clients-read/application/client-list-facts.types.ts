@@ -18,12 +18,6 @@ export interface ClientListFactsResponseDto {
 }
 
 /**
- * Strict scope of the 1C documents of a client (`clientOrdersScope`): all, only the user's own (creator or manager),
- * or nothing for any other scope. Not the rule of the ERP order reads below.
- */
-export type ClientOrdersScope = { kind: 'all' } | { kind: 'own'; userId: number } | { kind: 'none' };
-
-/**
  * Which ERP orders of a client are read: none, or the ones the viewer may read — all of them or only the viewer's
  * own (creator or manager). The SQL of the rule is the shared order read visibility, built from `viewer` by the
  * repositories.
