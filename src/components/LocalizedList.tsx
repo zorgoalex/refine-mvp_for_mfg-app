@@ -14,6 +14,8 @@ export const LocalizedList: React.FC<ListProps> = (props) => {
   const group = isWorkbench ? referenceGroupLabel(resource?.name) : null;
   const description = isWorkbench && resource?.name ? REFERENCE_DESCRIPTIONS[resource.name] : undefined;
   // Только справочники из перечня: прочие экраны на этой обёртке (документы 1С, потребности) оформлены отдельно.
+  // экран сам оформлен панелью NewLine (например, «Пользователи»): кнопка создания — как у справочников
+  const panel = !!group || (isWorkbench && String(props.wrapperProps?.className ?? "").split(/\s+/).includes("wb-refs"));
   const workbenchProps: Partial<ListProps> = group ? {
     wrapperProps: {
       ...props.wrapperProps,
@@ -53,7 +55,7 @@ export const LocalizedList: React.FC<ListProps> = (props) => {
             return child;
           }
 
-          if (group) {
+          if (panel) {
             return React.cloneElement(child, { ...child.props, type: "primary" }, "Добавить");
           }
 

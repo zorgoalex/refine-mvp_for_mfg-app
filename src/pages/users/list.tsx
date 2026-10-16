@@ -189,7 +189,7 @@ const WorkbenchUserList: React.FC<{
                 <span className="wb-avatar" aria-hidden>{userInitials(name) || "—"}</span>
                 <span className="wb-users__names">
                   <span className="wb-users__name">{name}</span>
-                  <span className="wb-users__login">{record.username}<span className="wb-users__id"> · #{record.user_id}</span></span>
+                  <span className="wb-users__login">{[record.username !== name ? record.username : null, `#${record.user_id}`].filter(Boolean).join(" · ")}</span>
                 </span>
               </span>
             );
@@ -206,7 +206,8 @@ const WorkbenchUserList: React.FC<{
         <Table.Column
           dataIndex="last_login_at"
           title="Последний вход"
-          render={(value) => (value ? <DateField value={value} format={DISPLAY_DATE_TIME_FORMAT} /> : <span className="wb-list__muted">ещё не входил</span>)}
+          // сервис пользователей время входа пока не отдаёт: пусто — значит «нет данных», а не «не входил»
+          render={(value) => (value ? <DateField value={value} format={DISPLAY_DATE_TIME_FORMAT} /> : <span className="wb-list__muted">—</span>)}
         />
         <Table.Column
           dataIndex="is_active"
