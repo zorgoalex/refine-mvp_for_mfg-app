@@ -16,12 +16,13 @@ import type { PaymentRow } from './crm-sync.types';
 const options = { erpBaseUrl: 'https://erp.example', currencyId: 'KZT', assignedById: 1, paySystemId: 6 };
 const EVENT = '11111111-1111-4111-8111-111111111111';
 
-interface RemoteState { paid: 'Y' | 'N'; sum: number; currency: string; xmlId: string | null }
+interface RemoteState { paid: 'Y' | 'N'; sum: number; currency: string; xmlId: string | null; paySystemId?: number }
 
 /** Bitrix24 as the portal behaves: a paid payment keeps its amount and cannot be deleted. */
 function fakeBitrix(initial: Record<string, RemoteState>) {
   const payments = new Map(Object.entries(initial).map(([id, state]) => [id, { ...state }]));
   const calls: string[] = [];
+  const paySystems: unknown[] = [];
   const failures: Array<{ match: (call: string) => boolean; error?: Error }> = [];
   const maybeFail = (call: string) => {
     const index = failures.findIndex((failure) => failure.match(call));
@@ -46,8 +47,13 @@ function fakeBitrix(initial: Record<string, RemoteState>) {
       const call = `update:${id}:${fields.paid ?? '-'}:${fields.sum ?? '-'}`;
       calls.push(call);
       maybeFail(call);
+      paySystems.push(fields.paySystemId);
       const payment = payments.get(id);
       if (!payment) throw new Bitrix24ApiError('sale.payment.update', 'ERROR_NOT_FOUND', 400, 'payment not found');
+      // The portal rejects any sale.payment.update without paySystemId (production 15.10).
+      if (fields.paySystemId === undefined) {
+        throw new Bitrix24ApiError('sale.payment.update', '0', 400, 'Required fields: paySystemId');
+      }
       if (payment.paid === 'Y' && fields.sum !== undefined && Number(fields.sum) !== payment.sum) {
         throw new Bitrix24ApiError('sale.payment.update', '0', 400, 'Нельзя изменить сумму оплаты, если установлен статус "Оплачено"');
       }
@@ -66,7 +72,7 @@ function fakeBitrix(initial: Record<string, RemoteState>) {
       payments.delete(id);
     },
   } as unknown as Bitrix24ApiPort;
-  return { bitrix, payments, calls, failures };
+  return { bitrix, payments, calls, failures, paySystems };
 }
 
 function memoryStore() {
@@ -195,6 +201,17 @@ describe('Bitrix24PaidPaymentGuard — update', () => {
     expect(env.audits).toEqual(['requested:3', 'unpaid:3', 'completed:3:applied']);
     expect(env.domainEvents).toHaveLength(1);
     expect([...env.operations.values()][0]).toMatchObject({ reproject: false, originOutboxEventId: EVENT });
+  });
+
+  it('sends the payment\'s own pay system with the unpaid step (portal requires paySystemId, prod 15.10)', async () => {
+    const env = setup({ remote: { 700: { ...ours('Y', 142000), paySystemId: 9 } } });
+    await update(env);
+    expect(env.payments.get('700')).toMatchObject({ paid: 'Y', sum: 300 });
+    // full update (refused: paid lock) → unpaid step with the portal's pay system 9 → full update with config 6
+    expect(env.paySystems).toEqual([6, 9, 6]);
+    const fallback = setup({ remote: { 700: ours('Y', 142000) } });
+    await update(fallback);
+    expect(fallback.paySystems).toEqual([6, 6, 6]);
   });
 
   it('keeps the old error and starts nothing while the flag is off (2)', async () => {
@@ -356,6 +373,7 @@ describe('Bitrix24PaidPaymentGuard — delete', () => {
   it('unpays and deletes a paid ERP payment; a retry on the confirmed id is a success (7)', async () => {
     const env = setup({ remote: { 700: ours('Y', 142000) } });
     await remove(env);
+    expect(env.paySystems).toEqual([6]);
     expect(env.payments.has('700')).toBe(false);
     expect([...env.operations.values()][0]).toMatchObject({ phase: 'completed', outcome: 'deleted' });
     await remove(env);
