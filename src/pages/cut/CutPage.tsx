@@ -3292,11 +3292,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         title: 'Дата',
         dataIndex: 'createdAt',
         key: 'createdAt',
-        width: 84,
+        width: 168,
+        className: 'cut-jobs-date-cell',
         sorter: (a, b) => cutJobCreatedAtSortValue(a.createdAt) - cutJobCreatedAtSortValue(b.createdAt),
         render: (value: string | undefined) => (
           <Tooltip title={formatCutJobCreatedDateTime(value)}>
-            <Text className="app-tabular">{formatCutJobCreatedDate(value)}</Text>
+            <Text className="app-tabular cut-jobs-date-value">{formatCutJobCreatedDate(value)}</Text>
           </Tooltip>
         ),
       },
@@ -3460,6 +3461,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     [busy, canManage, canViewOrders, createMdfBoardCard, deleteMdfBoardCard, mdfBoardCardActions, openJob, deleteJob, profiles, cutSettings, isOperational, show],
   );
 
+  // Bath (vacuum) jobs show the detail's position in its order instead of the
+  // internal order_detail id: the id carries no meaning for the operator.
+  const isBathDetailsView = job ? isVacuumCutJobDisplayNumber(job, profiles) : jobKindTab === CUT_JOB_KIND_TAB_VACUUM;
+
   const eligibleColumns: ColumnsType<EligibleDetailDto> = useMemo(
     () => {
       const rows = eligible ?? [];
@@ -3481,7 +3486,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       const width = {
         order: cutDetailColumnWidth(rows, 'Заказ', (row) => row.orderName?.trim() || `#${row.orderId}`, { min: 96, max: 190 }),
         client: cutDetailColumnWidth(rows, 'Клиент', (row) => row.clientName, { min: 88, max: 220 }),
-        pos: cutDetailColumnWidth(rows, 'Поз.', (row) => row.detailNumber, { min: 52, max: 70 }),
+        pos: cutDetailColumnWidth(rows, isBathDetailsView ? 'Позиция' : 'Поз.', (row) => row.detailNumber, { min: 52, max: 90 }),
         name: cutDetailColumnWidth(rows, 'Наименование', (row) => row.detailName, { min: 116, max: 280 }),
         detailId: cutDetailColumnWidth(rows, 'Деталь', (row) => row.orderDetailId, { min: 68, max: 95 }),
         size: cutDetailColumnWidth(rows, 'Размер (Ш×В)', sizeText, { min: 100, max: 125 }),
@@ -3512,8 +3517,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           ),
         },
         { title: 'Клиент', key: 'client', width: width.client, fixed: 'left', render: (_: unknown, row: EligibleDetailDto) => dash(row.clientName) },
-        { title: 'Поз.', key: 'pos', width: width.pos, render: (_: unknown, row: EligibleDetailDto) => dash(row.detailNumber) },
-        { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detailId', width: width.detailId },
+        { title: isBathDetailsView ? 'Позиция' : 'Поз.', key: 'pos', width: width.pos, render: (_: unknown, row: EligibleDetailDto) => dash(row.detailNumber) },
+        ...(isBathDetailsView ? [] : [{ title: 'Деталь', dataIndex: 'orderDetailId', key: 'detailId', width: width.detailId }]),
         {
           title: 'Размер (Ш×В)',
           key: 'size',
@@ -3601,7 +3606,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         },
       ];
     },
-    [eligible, show],
+    [eligible, isBathDetailsView, show],
   );
   const eligibleTableScrollX = useMemo(
     () => tableScrollX(eligibleColumns, CUT_DETAIL_SELECTION_COLUMN_WIDTH),
@@ -3637,7 +3642,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const jobItemColumns: ColumnsType<CutJobItemDto> = useMemo(() => {
     const dash = (value: unknown) => (value === null || value === undefined || value === '' ? '—' : String(value));
     return [
-      { title: 'Поз.', key: 'pos', width: 60, fixed: 'left', render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.detailNumber) },
+      { title: isBathDetailsView ? 'Позиция' : 'Поз.', key: 'pos', width: isBathDetailsView ? 84 : 60, fixed: 'left', render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.detailNumber) },
       { title: 'Наименование', key: 'name', width: 180, fixed: 'left', render: (_: unknown, r: CutJobItemDto) => dash(r.detail?.detailName) },
       {
         title: 'Заказ',
@@ -3655,7 +3660,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           />
         ),
       },
-      { title: 'Деталь', dataIndex: 'orderDetailId', key: 'detailId', width: 90 },
+      ...(isBathDetailsView ? [] : [{ title: 'Деталь', dataIndex: 'orderDetailId', key: 'detailId', width: 90 }]),
       {
         title: 'Размер (Ш×В)',
         key: 'size',
@@ -3756,7 +3761,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           ) : null,
       },
     ];
-  }, [busy, canManage, isArchivedJob, jobBathCutJobByDetailId, openJob, removeJobItem, show]);
+  }, [busy, canManage, isArchivedJob, isBathDetailsView, jobBathCutJobByDetailId, openJob, removeJobItem, show]);
 
   const informationalJobDetailColumns: ColumnsType<InformationalCutDetailRow> = useMemo(() => {
     const dash = (value: unknown) => (value === null || value === undefined || value === '' ? '—' : String(value));
@@ -3777,7 +3782,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           ) : dash(row.orderName)
         ),
       },
-      { title: 'Поз.', dataIndex: 'detailNumber', key: 'position', width: 80, render: (value: unknown, row: InformationalCutDetailRow) => row.positionLabel ?? dash(value) },
+      { title: isBathDetailsView ? 'Позиция' : 'Поз.', dataIndex: 'detailNumber', key: 'position', width: isBathDetailsView ? 84 : 80, render: (value: unknown, row: InformationalCutDetailRow) => row.positionLabel ?? dash(value) },
       {
         title: 'Размер (Ш×В)',
         key: 'size',
@@ -3792,7 +3797,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       { title: 'Материал', dataIndex: 'materialName', key: 'material', width: 180, render: dash },
       { title: 'Связь с БД', key: 'link', width: 170, render: (_: unknown, row: InformationalCutDetailRow) => row.sourceOnly ? 'Исходная подпись SVG' : row.orderId === null ? 'Заказ не сопоставлен' : 'Деталь не сопоставлена' },
     ];
-  }, [show]);
+  }, [isBathDetailsView, show]);
 
   const noSheetMsg = noSheetSpecMessage(noSheetSpecCount);
   const isCreationPreview = job === null && eligible !== null;

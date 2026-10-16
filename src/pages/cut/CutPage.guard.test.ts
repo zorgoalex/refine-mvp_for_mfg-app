@@ -13,6 +13,11 @@ const appCss = readFileSync(fileURLToPath(new URL('../../styles/app.css', import
 const pdfTemplateEventsSource = readFileSync(fileURLToPath(new URL('../../api/cutPdfTemplateEvents.ts', import.meta.url)), 'utf8');
 
 describe('CutPage source guards', () => {
+  it('shows the order position instead of the detail id in bath job detail tables', () => {
+    expect(source).toContain('const isBathDetailsView = job ? isVacuumCutJobDisplayNumber(job, profiles) : jobKindTab === CUT_JOB_KIND_TAB_VACUUM;');
+    expect(source.match(/\.\.\.\(isBathDetailsView \? \[\] : \[\{ title: 'Деталь', dataIndex: 'orderDetailId'/g)).toHaveLength(2);
+    expect(source.match(/title: isBathDetailsView \? 'Позиция' : 'Поз\.'/g)).toHaveLength(3);
+  });
   it('pauses automatic reads for inactive lifecycle surfaces without gating commands', () => {
     expect(source).toContain('useOrderLifecycleReadActive');
     expect(source).toContain('useOrderAsyncReadGuard(cutPageResourceScope)');
@@ -259,6 +264,15 @@ describe('CutPage source guards', () => {
     expect(source).toContain('a.totals.details - b.totals.details');
     expect(source).toContain('a.totals.area - b.totals.area');
     expect(source).toContain('totalFilmUsageMeters(a.totals.filmUsage) - totalFilmUsageMeters(b.totals.filmUsage)');
+  });
+
+  it('keeps the cut-job date on one line in a doubled column with a smaller font', () => {
+    const dateColumn = source.slice(source.indexOf("title: 'Дата',"), source.indexOf("title: 'Название',"));
+    expect(dateColumn).toContain('width: 168');
+    expect(dateColumn).toContain("className: 'cut-jobs-date-cell'");
+    expect(dateColumn).toContain('cut-jobs-date-value');
+    expect(appCss).toContain('td.cut-jobs-date-cell {\n  white-space: nowrap;');
+    expect(appCss).toContain('.cut-jobs-table .cut-jobs-date-value {\n  font-size: 88%;\n  white-space: nowrap;');
   });
 
   it('keeps cut-detail selection collapsed until the existing header button opens it', () => {

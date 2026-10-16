@@ -7,6 +7,13 @@ const pdfRenderer = readFileSync(new URL('../render/sheet-pdf.ts', import.meta.u
 const labelsRepository = readFileSync(new URL('../../labels/adapters/pg-labels-repository.ts', import.meta.url), 'utf8');
 
 describe('cut result history implementation guards', () => {
+  it('orients a frozen group PDF by the stored sheet geometry, not the screen flag', () => {
+    const groupPdf = repository.slice(repository.indexOf('async renderGroupPdf('), repository.indexOf('async renderJobPdf('));
+    expect(groupPdf).toContain('frozenFirstSheet.sheet_height_mm > frozenFirstSheet.sheet_width_mm');
+    expect(groupPdf).toContain('const rotate90 = frozenContext ? frozenRotate90 : currentContext!.rotate90;');
+    expect(groupPdf).not.toContain('query.rotate90');
+  });
+
   it('allocates result numbers under job transaction and freezes whole-job snapshot', () => {
     expect(repository).toContain('next_cut_result_no');
     expect(repository).toContain('validateFrozenJobSnapshot(snapshot)');
