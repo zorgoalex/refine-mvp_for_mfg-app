@@ -154,3 +154,75 @@
 :root[data-ui-variant="workbench"] .ca-card__tag:not([data-recency]) {
   background: var(--evo-surface-muted);
 }
+
+/* --- «Пользователи»: панель как у справочников, поиск и отбор над таблицей --- */
+:root[data-ui-variant="workbench"] .wb-users__counts {
+  display: inline-flex;
+  gap: 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-users__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-users__search {
+  width: 290px;
+  max-width: 100%;
+}
+
+:root[data-ui-variant="workbench"] .wb-users__who {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-users__names {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+:root[data-ui-variant="workbench"] .wb-users__name {
+  color: var(--evo-text);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-users__login {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-users__role {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--evo-radius-sm, 6px);
+  background: var(--evo-surface-muted);
+  color: var(--evo-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-users .reference-table .ant-table-tbody > tr.ant-table-row > td {
+  height: 48px;
+}
+
+/* у пользователей первая колонка — имя, а не служебный id: не приглушаем */
+:root[data-ui-variant="workbench"] .wb-users .reference-table .ant-table-tbody > tr.ant-table-row > td:first-child {
+  color: inherit;
+}
+
+:root[data-ui-variant="workbench"] .wb-users .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
