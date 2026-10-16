@@ -29,6 +29,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-16", title: "Раскрой ванн: позиция вместо ID детали, альбомный PDF листа",
+    services: ["ERP", "Cutting"], repositories: ["repo_erp"],
+    changed: [
+      "В списке деталей задания на раскрой ванны (и в подборе подходящих деталей для него) вместо внутреннего ID детали показывается колонка «Позиция» — номер позиции в заказе.",
+    ],
+    fixed: [
+      "Предпросмотр PDF листа для открытого результата раскроя (из истории, из колонки «Расчет ванны» или с МДФ-доски) больше не разворачивает лист ванны в портрет: страница альбомная, как и у текущего результата.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-16", title: "NewLine: список пользователей",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

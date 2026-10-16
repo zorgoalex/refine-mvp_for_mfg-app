@@ -13,6 +13,11 @@ const appCss = readFileSync(fileURLToPath(new URL('../../styles/app.css', import
 const pdfTemplateEventsSource = readFileSync(fileURLToPath(new URL('../../api/cutPdfTemplateEvents.ts', import.meta.url)), 'utf8');
 
 describe('CutPage source guards', () => {
+  it('shows the order position instead of the detail id in bath job detail tables', () => {
+    expect(source).toContain('const isBathDetailsView = job ? isVacuumCutJobDisplayNumber(job, profiles) : jobKindTab === CUT_JOB_KIND_TAB_VACUUM;');
+    expect(source.match(/\.\.\.\(isBathDetailsView \? \[\] : \[\{ title: 'Деталь', dataIndex: 'orderDetailId'/g)).toHaveLength(2);
+    expect(source.match(/title: isBathDetailsView \? 'Позиция' : 'Поз\.'/g)).toHaveLength(3);
+  });
   it('pauses automatic reads for inactive lifecycle surfaces without gating commands', () => {
     expect(source).toContain('useOrderLifecycleReadActive');
     expect(source).toContain('useOrderAsyncReadGuard(cutPageResourceScope)');
