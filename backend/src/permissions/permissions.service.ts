@@ -24,7 +24,7 @@ import {
   type RawAuthorizationSnapshot,
   type UserAuthorizationSnapshot,
 } from './user-authorization-snapshot';
-import { assertNoUnclosedHasuraNarrowing, hasuraFollowsPermissions } from './hasura-unclosed-permissions';
+import { assertNoUnclosedHasuraNarrowing, hasuraFinancialsState, hasuraFollowsPermissions } from './hasura-unclosed-permissions';
 
 export const ROLE_POLICY_SCOPE_KEYS = [
   'orders.view',
@@ -320,7 +320,7 @@ export class PermissionsService {
       this.assertExpectedVersion(request.version, before.version);
       const next = normalizeRequestedMatrix(request, before);
       assertDangerousConfirmed(before, next, request.confirmDangerous === true);
-      assertNoUnclosedHasuraNarrowing(before, next, await hasuraFollowsPermissions(tx));
+      assertNoUnclosedHasuraNarrowing(before, next, await hasuraFollowsPermissions(tx), await hasuraFinancialsState(tx));
       await assertLockoutSafe(tx, next);
 
       await writeMatrixRows(tx, next);
@@ -359,7 +359,7 @@ export class PermissionsService {
       const next = cloneMatrixState(before);
       next.rolePermissions[String(roleId)] = defaultPermissionsForRoleCode(role.roleCode);
       next.roleScopes[String(roleId)] = defaultScopesForRoleCode(role.roleCode);
-      assertNoUnclosedHasuraNarrowing(before, next, await hasuraFollowsPermissions(tx));
+      assertNoUnclosedHasuraNarrowing(before, next, await hasuraFollowsPermissions(tx), await hasuraFinancialsState(tx));
       await assertLockoutSafe(tx, next);
 
       await writeMatrixRows(tx, next, { onlyRoleId: roleId });

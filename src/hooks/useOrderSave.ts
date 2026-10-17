@@ -531,6 +531,8 @@ export const useOrderSave = (
 
       const savedDetailsResult = await dataProvider().getList<OrderDetail>({
         resource: 'order_details',
+        // Money through Hasura `financials` (access groups «финансы»): only where this path shows it.
+        meta: { financials: true },
         filters: [{ field: 'order_id', operator: 'eq', value: createdOrderId }],
         pagination: { current: 1, pageSize: 1000 },
       });

@@ -3,8 +3,9 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { UpdateDowelingOrderCommand } from '../application/doweling.types';
 import type { DowelingOrderLinkDto, UpdateDowelingOrderRequestDto, UpdateDowelingOrderResponseDto } from '../dto/doweling.dto';
+import { hasDowelingMoney } from '../dto/doweling.dto';
 import { DowelingLinksConflictError, DowelingOrderNotFoundError, DowelingVersionConflictError } from '../errors/doweling.errors';
-import { assertDowelingAccess, lockOrders, mapDowelingWriteError, readOrders, requestIdOrFallback, setSessionUser, SOURCE } from './doweling-sql';
+import { assertDowelingAccess, assertDowelingMoneyAllowed, lockOrders, mapDowelingWriteError, readOrders, requestIdOrFallback, setSessionUser, SOURCE } from './doweling-sql';
 
 /** The editable state of a doweling order, compared field by field to decide what changed. */
 export interface DowelingState {
@@ -114,6 +115,10 @@ export async function updateDowelingOrder(
   const { dowelingOrderId, dto, currentUser } = command;
   const requestId = requestIdOrFallback(command.requestId);
   const wantedOrderIds = [...new Set(dto.orderIds)].sort((a, b) => a - b);
+  await assertDowelingMoneyAllowed(
+    { database, currentUser, requestId, action: 'doweling_update', dowelingOrderId },
+    hasDowelingMoney(dto),
+  );
 
   try {
     return await database.transaction(async (tx) => {
@@ -197,7 +202,7 @@ export async function updateDowelingOrder(
 
       // 4. What changes.
       const before = stateFromRow(row);
-      const after = stateFromDto(dto);
+      const after = stateFromDto(dto, before);
       const changedFields = STATE_FIELDS.filter((field) => before[field] !== after[field]);
       const removedOrderIds = currentOrderIds.filter((orderId) => !wantedOrderIds.includes(orderId));
       const nextLegacyOrderId = legacyOrderId !== null && wantedOrderIds.includes(legacyOrderId) ? legacyOrderId : null;
@@ -380,7 +385,7 @@ export async function updateDowelingOrder(
     throw mapDowelingWriteError(
       error,
       {
-        paymentStatusId: dto.paymentStatusId,
+        paymentStatusId: dto.paymentStatusId ?? null,
         productionStatusId: dto.productionStatusId,
         designEngineerId: dto.designEngineerId,
         operatorId: dto.operatorId,
@@ -432,22 +437,24 @@ export function stateFromRow(row: DowelingRow): DowelingState {
   };
 }
 
-export function stateFromDto(dto: UpdateDowelingOrderRequestDto): DowelingState {
+/** The state after the save; without the money group (access groups «финансы») the money stays as it is. */
+export function stateFromDto(dto: UpdateDowelingOrderRequestDto, before: DowelingState): DowelingState {
+  const money = hasDowelingMoney(dto) ? dto : before;
   return {
     dowelingOrderName: dto.dowelingOrderName,
     dowelingOrderDate: dto.dowelingOrderDate,
-    paymentStatusId: dto.paymentStatusId,
+    paymentStatusId: money.paymentStatusId as number,
     productionStatusId: dto.productionStatusId,
     designEngineerId: dto.designEngineerId,
     operatorId: dto.operatorId,
     issueDate: dto.issueDate,
-    paymentDate: dto.paymentDate,
+    paymentDate: money.paymentDate as string | null,
     partsCount: dto.partsCount,
-    totalAmount: dto.totalAmount,
-    finalAmount: dto.finalAmount,
-    discount: dto.discount,
-    surcharge: dto.surcharge,
-    paidAmount: dto.paidAmount,
+    totalAmount: money.totalAmount as number | null,
+    finalAmount: money.finalAmount as number | null,
+    discount: money.discount as number,
+    surcharge: money.surcharge as number,
+    paidAmount: money.paidAmount as number | null,
     linkCadFile: dto.linkCadFile,
     linkPdfFile: dto.linkPdfFile,
     refKey1c: dto.refKey1c === null ? null : dto.refKey1c.toLowerCase(),

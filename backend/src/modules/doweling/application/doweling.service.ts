@@ -20,7 +20,7 @@ export class DowelingService {
         requiredPermissions: ['doweling.create'],
       });
     }
-    // Order scope of a quick-create from an order is checked by the repository under the order lock.
+    // Order scope of a quick-create from an order and the money right are checked by the repository.
     return this.ports.doweling.createDowelingOrder(command);
   }
 
@@ -30,7 +30,8 @@ export class DowelingService {
         requiredPermissions: ['doweling.update'],
       });
     }
-    // Scope over the linked orders (current and new) is checked by the repository under the locks.
+    // Scope over the linked orders (current and new) and the money right (orders.view_financials, audited refusal) are
+    // checked by the repository.
     return this.ports.doweling.updateDowelingOrder(command);
   }
 }

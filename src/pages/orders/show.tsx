@@ -1096,6 +1096,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     refetch: refetchDetails,
   } = useList({
     resource: "order_details",
+    // Money through Hasura `financials` (access groups «финансы»): only where this path shows it.
+    meta: { financials: true },
     filters: [
       {
         field: "order_id",
@@ -1308,6 +1310,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       } else {
         const result = await dataProvider().getList({
           resource: "order_details",
+          // Money through Hasura `financials` (access groups «финансы»): only where this path shows it.
+          meta: { financials: true },
           filters: [{ field: "order_id", operator: "eq", value: orderId }],
           pagination: { pageSize: 1000 },
           sorters: [{ field: "detail_id", order: "asc" }],

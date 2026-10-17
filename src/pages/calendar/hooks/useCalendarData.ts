@@ -39,6 +39,8 @@ export const useCalendarData = (
   // Загружаем заказы из orders_view
   const { data, isLoading, refetch, isError, error } = useList<CalendarOrder>({
     resource: 'orders_view',
+    // Money through Hasura `financials` (access groups «финансы»): only where this path shows it.
+    meta: { financials: true },
     filters: [
       {
         field: 'planned_completion_date',

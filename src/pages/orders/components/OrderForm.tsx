@@ -809,6 +809,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
 
   const { data: detailsData, isLoading: detailsLoading, isFetching: detailsFetching } = useList({
     resource: 'order_details',
+    // Money through Hasura `financials` (access groups «финансы»): only where this path shows it.
+    meta: { financials: true },
     filters: [{ field: 'order_id', operator: 'eq', value: orderId || 0 }],
     pagination: { pageSize: 1000 },
     queryOptions: {

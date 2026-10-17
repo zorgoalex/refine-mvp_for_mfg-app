@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """Access groups 0Б: build Hasura metadata in which every permission requires the user's effective permission.
 
-Rules: ops/hasura/access-predicates.json. Two steps (plan report 2026-10-13, section 5):
+Rules: ops/hasura/access-predicates.json. Steps (plan report 2026-10-13, section 5; finances plan 2026-10-17 §2):
   A — additive: track user_effective_permissions / user_effective_scopes, add relationships, create the permissions of
       the admin role (erp_admin) with predicates. No existing role changes.
   B — every other role: wrap each permission in its predicate, drop revoked permissions. Fails on a permission that is
       neither in the rules nor an explicit exception.
-Both steps are pure functions of (metadata, rules) and idempotent: a second build returns the same metadata.
+  F1 — additive (finances): track the money projections and the relationships `financials` (source → projection); a
+      projection has no root fields (query_root_fields: []), so it is reached only from a row the role may read — its
+      select needs just orders.view_financials.
+  F2 — every role's select of the money sources loses the money columns (they stay readable only through F1).
+All steps are pure functions of (metadata, rules) and idempotent: a second build returns the same metadata.
 
 CLI (used by access-predicates.sh and tests):
-  access_predicates.py build --step A|B --rules RULES.json < metadata.json > new-metadata.json
-  access_predicates.py status --rules RULES.json < metadata.json       → prints "A=applied|missing B=applied|missing"
+  access_predicates.py build --step A|B|F1|F2 --rules RULES.json < metadata.json > new-metadata.json
+  access_predicates.py status --rules RULES.json < metadata.json       → prints "A=… B=… F1=… F2=…" (applied|missing)
 Input may be export_metadata v1 (metadata object) or v2 ({resource_version, metadata}); output is the metadata object.
 """
 import argparse
@@ -224,6 +228,8 @@ def build_step_a(metadata, rules):
 
     for entry in tables:
         name = entry["table"]["name"]
+        if name in projection_names(rules):
+            continue  # permissions of the money projections are built by step F1
         for op in OPS:
             key = f"{op}_permissions"
             perms = entry.get(key) or []
@@ -260,6 +266,8 @@ def build_step_b(metadata, rules):
     unmapped = []
     for entry in tables:
         name = entry["table"]["name"]
+        if name in projection_names(rules):
+            continue  # step F1
         for op in OPS:
             key = f"{op}_permissions"
             perms = entry.get(key)
@@ -287,6 +295,84 @@ def build_step_b(metadata, rules):
     if unmapped:
         raise RuleError("permissions without a rule: " + ", ".join(sorted(unmapped)))
     return metadata
+
+
+def projection_names(rules):
+    return set((rules.get("financials") or {}).get("projections", {}))
+
+
+def _add_relationship(entry, rel_type, name, remote_table, mapping):
+    key = "object_relationships" if rel_type == "object" else "array_relationships"
+    wanted = relationship_entry({"name": name, "remoteTable": remote_table, "columnMapping": mapping})
+    existing = entry.setdefault(key, [])
+    other = [r for r in existing if r["name"] == name]
+    if other and other[0] != wanted:
+        raise RuleError(f"{entry['table']['name']}.{name} exists with another definition")
+    if not other:
+        existing.append(wanted)
+
+
+def build_step_f1(metadata, rules):
+    """Money projections without root fields: a projection row is reachable only through `financials` of a source row
+    the role already reads (its own filter, order scope, order kind), so the projection's filter adds only the money
+    permission. No root field means no enumeration and no aggregate over the money of rows the role may not read —
+    and Hasura does not re-plan the source's (heavy) filter for every money read (finances code review R1-5)."""
+    metadata = copy.deepcopy(unwrap_export(metadata))
+    tables = source_tables(metadata)
+    fin = rules["financials"]
+    for name, projection in fin["projections"].items():
+        base = find_table(tables, projection["base"])
+        if base is None:
+            raise RuleError(f"projection {name}: base {projection['base']} is not tracked")
+        entry = find_table(tables, name)
+        if entry is None:
+            entry = {"table": _table(name)}
+            tables.append(entry)
+        roles = sorted({perm["role"] for source_name, source in fin["sources"].items() if source["projection"] == name
+                        for perm in (find_table(tables, source_name) or {}).get("select_permissions") or []})
+        for op in OPS:
+            entry.pop(f"{op}_permissions", None)
+        if roles:
+            entry["select_permissions"] = [{"role": role, "permission": {
+                # No allow_aggregations (false is Hasura's default and is not exported).
+                "columns": list(projection["columns"]), "filter": perm_exists(fin["permission"]),
+                "query_root_fields": [], "subscription_root_fields": []}} for role in roles]
+    for name, source in fin["sources"].items():
+        entry = find_table(tables, name)
+        if entry is None:
+            raise RuleError(f"money source {name} is not tracked")
+        _add_relationship(entry, "object", fin["relationship"], source["projection"], source["mapping"])
+    return metadata
+
+
+def build_step_f2(metadata, rules):
+    metadata = copy.deepcopy(unwrap_export(metadata))
+    tables = source_tables(metadata)
+    for name, source in rules["financials"]["sources"].items():
+        entry = find_table(tables, name)
+        if entry is None:
+            raise RuleError(f"money source {name} is not tracked")
+        money = set(source["financialColumns"])
+        known = money | set(source["otherColumns"])
+        for op in ("insert", "update"):
+            for perm in entry.get(f"{op}_permissions") or []:
+                columns = perm["permission"].get("columns")
+                if columns == "*" or money & set(columns or []):
+                    raise RuleError(f"{name}.{op}/{perm['role']} writes money columns: not expected (backend-owned)")
+        for perm in entry.get("select_permissions") or []:
+            columns = perm["permission"].get("columns")
+            if columns == "*":
+                perm["permission"]["columns"] = list(source["otherColumns"])
+                continue
+            unknown = sorted(set(columns or []) - known)
+            if unknown:
+                raise RuleError(f"{name} select/{perm['role']} has columns unknown to the rules: {', '.join(unknown)}")
+            perm["permission"]["columns"] = [c for c in columns if c not in money]
+    return metadata
+
+
+STEPS = ("A", "B", "F1", "F2")
+BUILDERS = {"A": build_step_a, "B": build_step_b, "F1": build_step_f1, "F2": build_step_f2}
 
 
 def _normalized(metadata):
@@ -322,12 +408,24 @@ def same_metadata(left, right):
 
 def status(metadata, rules):
     metadata = unwrap_export(metadata)
-    a = same_metadata(build_step_a(metadata, rules), metadata)
-    try:
-        b = a and same_metadata(build_step_b(metadata, rules), metadata)
-    except RuleError:
-        b = False
-    return {"A": "applied" if a else "missing", "B": "applied" if b else "missing"}
+    result = {}
+    previous = True
+    for step in STEPS:
+        if step in ("F1", "F2") and not rules.get("financials"):
+            continue
+        try:
+            applied = previous and same_metadata(BUILDERS[step](metadata, rules), metadata)
+        except RuleError:
+            if step == "A":
+                raise  # rules that do not fit the metadata at all (an untracked table) are an error, not «missing»
+            applied = False
+        result[step] = "applied" if applied else "missing"
+        previous = applied
+    return result
+
+
+def status_line(result):
+    return " ".join(f"{step}={value}" for step, value in result.items())
 
 
 # ---------------------------------------------------------------- live Hasura (apply / revert / status)
@@ -394,6 +492,101 @@ def flag_sql(value, run, details):
     )
 
 
+# Finances (plan 2026-10-17 §2.3): permissions_state.hasura_financials_state (migration 258) is
+#   open      — money columns readable by every role that reads the row; the backend refuses to take
+#               orders.view_financials from a role (PERMISSION_NARROWING_BLOCKED);
+#   closed    — step F2 applied: money only through the projections; narrowing allowed;
+#   reverting — a revert of F2 is under way: the backend refuses EVERY authorization change (matrix, user role, groups;
+#               409 AUTHORIZATION_CHANGES_PAUSED), so nobody can lose the right between the check and the restore.
+# F2 records the users with the right in permissions_state.hasura_financials_users, in the same transaction as `closed`
+# (a lost answer or a crash cannot separate them); the revert refuses when one of them lost the right.
+
+FIN_STATE_READ = ("SELECT coalesce(to_jsonb(ps) ->> 'hasura_financials_state', 'open') "
+                  "FROM public.permissions_state ps WHERE ps.id = true")
+
+
+def _fin_users_sql(permission):
+    return ("SELECT u.user_id::text FROM public.users u WHERE u.is_active AND EXISTS (SELECT 1 FROM "
+            f"public.user_effective_permissions p WHERE p.user_id = u.user_id AND p.permission_name = {_quote(permission)})")
+
+
+def _fin_audit_sql(target, run, details, condition="true", extra_metadata_sql=None):
+    metadata = {"correlationId": run["runId"], "operator": run["operator"], **details}
+    metadata_sql = _jsonb(metadata) + (f" || {extra_metadata_sql}" if extra_metadata_sql else "")
+    return (
+        "INSERT INTO public.audit_log (event, entity_type, entity_id, username, request_id, source, before_json, after_json, diff_json, metadata_json) "
+        "SELECT 'permissions.hasura_financials_state.update', 'permissions_state', 'hasura_financials_state', "
+        f"{_quote('ops:' + run['operator'])}, {_quote(run['runId'])}, 'ops', "
+        "jsonb_build_object('hasuraFinancialsState', hasura_financials_state), "
+        f"jsonb_build_object('hasuraFinancialsState', {_quote(target)}), "
+        f"jsonb_build_object('hasuraFinancialsState', jsonb_build_object('from', hasura_financials_state, 'to', {_quote(target)})), "
+        f"{metadata_sql} "
+        f"FROM public.permissions_state WHERE id = true AND hasura_financials_state IS DISTINCT FROM {_quote(target)} AND ({condition}); "
+    )
+
+
+FIN_USERS_READ = ("SELECT coalesce(to_jsonb(ps) -> 'hasura_financials_users', 'null'::jsonb)::text "
+                  "FROM public.permissions_state ps WHERE ps.id = true")
+
+_SNAPSHOT_ROWS = ("SELECT u.value FROM public.permissions_state ps, jsonb_array_elements_text(coalesce(ps.hasura_financials_users, "
+                  "'[]'::jsonb)) AS u(value) WHERE ps.id = true")
+
+
+def _revert_intent_sql(run, allow_reopen, reopened_sql):
+    return (f"jsonb_build_object('run', {_jsonb(run)}, 'allowReopen', {'true' if allow_reopen else 'false'}, "
+            f"'reopened', {reopened_sql})")
+
+
+def fin_state_sql(target, permission, run, details, keep_users=False, revert_intent=None):
+    """Lock permissions_state (the lock every authorization command takes first), audit and set the state; `closed`
+    stores the users holding the money permission in the same transaction (unless `keep_users`: back from a failed
+    revert, the snapshot of F2 stays), `open` clears them. Returns the snapshot."""
+    if keep_users:
+        users = "hasura_financials_users"
+    elif target == "closed":
+        users = (f"(SELECT coalesce(jsonb_agg(f.user_id ORDER BY f.user_id::bigint), '[]'::jsonb) "
+                 f"FROM ({_fin_users_sql(permission)}) AS f(user_id))")
+    elif target == "open":
+        users = "NULL"
+    else:
+        users = "hasura_financials_users"
+    # The intent of a revert lives only while `reverting` (set with the barrier, cleared by `closed`/`open`).
+    intent = _jsonb(revert_intent) if (target == "reverting" and revert_intent is not None) else (
+        "hasura_financials_revert" if target == "reverting" else "NULL")
+    return ("SELECT version FROM public.permissions_state WHERE id = true FOR UPDATE; "
+            + _fin_audit_sql(target, run, details)
+            + f"UPDATE public.permissions_state SET hasura_financials_state = {_quote(target)}, hasura_financials_users = {users}, "
+            f"hasura_financials_revert = {intent}, updated_at = now() WHERE id = true; "
+            + _SNAPSHOT_ROWS)
+
+
+def _lost_users_sql(permission):
+    """Users of the F2 snapshot (permissions_state.hasura_financials_users) who no longer hold the permission but still
+    read money sources (orders / doweling orders)."""
+    return ("SELECT s.user_id::text FROM public.permissions_state ps, "
+            "jsonb_array_elements_text(coalesce(ps.hasura_financials_users, '[]'::jsonb)) AS s(user_id) "
+            "JOIN public.users u ON u.user_id = s.user_id::bigint "
+            "WHERE ps.id = true AND u.is_active AND NOT EXISTS (SELECT 1 FROM public.user_effective_permissions p "
+            f"WHERE p.user_id = u.user_id AND p.permission_name = {_quote(permission)}) AND EXISTS (SELECT 1 FROM "
+            "public.user_effective_permissions p WHERE p.user_id = u.user_id AND p.permission_name IN ('orders.view', 'doweling.view'))")
+
+
+def revert_start_sql(permission, allow_reopen, run, details):
+    """Under the permissions_state lock: closed → reverting unless the snapshot is missing or a snapshot user lost the
+    right (both pass only with --allow-reopen); returns the users who lost it either way."""
+    lost = _lost_users_sql(permission)
+    reopened = f"(SELECT coalesce(jsonb_agg(l.user_id ORDER BY l.user_id::bigint), '[]'::jsonb) FROM ({lost}) AS l(user_id))"
+    condition = "true" if allow_reopen else f"hasura_financials_users IS NOT NULL AND NOT EXISTS ({lost})"
+    # The barrier, its audit (override + reopened users) and the durable intent of this revert: one transaction.
+    return ("SELECT version FROM public.permissions_state WHERE id = true FOR UPDATE; "
+            + _fin_audit_sql("reverting", run, {**details, "allowReopen": allow_reopen},
+                             f"hasura_financials_state = 'closed' AND {condition}", f"jsonb_build_object('reopened', {reopened})")
+            + "UPDATE public.permissions_state SET hasura_financials_state = 'reverting', "
+            f"hasura_financials_revert = {_revert_intent_sql(run, allow_reopen, reopened)}, updated_at = now() "
+            f"WHERE id = true AND hasura_financials_state = 'closed' AND {condition}; "
+            + lost)
+
+
 class HasuraError(Exception):
     def __init__(self, status_code, body):
         super().__init__(f"HTTP {status_code}: {body[:300]}")
@@ -448,6 +641,35 @@ class Hasura:
 
     def audit(self, event, run, details):
         self._rows(audit_sql(event, run, details) + "SELECT 'ok'", False)
+
+    def financials_state(self):
+        rows = self._rows(FIN_STATE_READ, True)
+        return rows[0] if rows else "open"
+
+    def set_financials_state(self, target, permission, run, details, keep_users=False, revert_intent=None):
+        return sorted(self._rows(fin_state_sql(target, permission, run, details, keep_users, revert_intent), False), key=int)
+
+    def financials_revert(self):
+        """The durable intent of the revert under way (None outside `reverting`)."""
+        rows = self._rows("SELECT coalesce(to_jsonb(ps) -> 'hasura_financials_revert', 'null'::jsonb)::text "
+                          "FROM public.permissions_state ps WHERE ps.id = true", True)
+        return json.loads(rows[0]) if rows else None
+
+    def revert_financials_start(self, permission, allow_reopen, run, details):
+        return sorted(self._rows(revert_start_sql(permission, allow_reopen, run, details), False), key=int)
+
+    def financials_users(self):
+        """The users snapshot of F2 stored with `closed` (None when there is none)."""
+        rows = self._rows(FIN_USERS_READ, True)
+        value = json.loads(rows[0]) if rows else None
+        return None if value is None else sorted((str(user) for user in value), key=int)
+
+    def columns(self, names):
+        quoted = ",".join(_quote(name) for name in sorted(names))
+        rows = self._rows("SELECT table_name || '|' || string_agg(column_name, ',' ORDER BY column_name) FROM "
+                          f"information_schema.columns WHERE table_schema = 'public' AND table_name IN ({quoted}) "
+                          "GROUP BY table_name", True)
+        return {row.split("|", 1)[0]: set(row.split("|", 1)[1].split(",")) for row in rows}
 
 
 def _write_json(path, value):
@@ -577,22 +799,79 @@ def _finish_b(hasura, state, generation, run, log):
         state.confirm("B", generation)
 
 
+def check_financial_columns(hasura, rules):
+    """Before F2: the rules' column lists must be exactly the database columns (else F2 would hide or keep a column
+    nobody reviewed), and the projections must exist with their columns."""
+    fin = rules["financials"]
+    names = set(fin["sources"]) | set(fin["projections"])
+    actual = hasura.columns(names)
+    problems = []
+    for name, source in fin["sources"].items():
+        wanted = set(source["financialColumns"]) | set(source["otherColumns"])
+        if actual.get(name) != wanted:
+            got = actual.get(name, set())
+            problems.append(f"{name}: database has {sorted(got - wanted)} not in the rules, rules have {sorted(wanted - got)} not in the database")
+    for name, projection in fin["projections"].items():
+        if not set(projection["columns"]) <= actual.get(name, set()):
+            problems.append(f"projection {name} is missing (migration 258?) or lacks {sorted(set(projection['columns']) - actual.get(name, set()))}")
+    if problems:
+        raise RuleError("money columns of the rules differ from the database: " + "; ".join(problems))
+
+
+def _finish_f2(hasura, rules, state, generation, run, log):
+    """After the metadata of F2 is confirmed: state `closed` and the users holding the money permission, in one
+    transaction (so the snapshot is exactly the set the revert must protect), then the confirmed generation."""
+    import os
+    permission = rules["financials"]["permission"]
+    users_file = os.path.join(generation, "users-at-F2.json")
+    origin = _read_json(os.path.join(generation, "intent.json"))["run"] if os.path.exists(os.path.join(generation, "intent.json")) else run
+    fin_state = hasura.financials_state()
+    if fin_state == "reverting":
+        # Applying F2 during an interrupted revert cancels that revert: the columns stay closed and the protection
+        # baseline stays the ORIGINAL snapshot (a fresh one would drop users who lost the right meanwhile).
+        hasura.set_financials_state("closed", permission, run, {
+            "operation": "apply-F2-cancels-revert", "step": "F2", "generation": os.path.basename(generation)}, keep_users=True)
+    elif fin_state != "closed":
+        # `closed` and the users snapshot are one transaction; the local file is only a copy of it.
+        hasura.set_financials_state("closed", permission, run, {
+            "operation": "apply-F2", "step": "F2", "generation": os.path.basename(generation), "originRunId": origin["runId"]})
+    users = hasura.financials_users()
+    if users is None:
+        raise RuleError("the state is closed without a users snapshot (closed outside this script?): the rollback baseline "
+                        "is missing; a revert of F2 then needs --allow-reopen")
+    _write_json(users_file, users)
+    hasura.audit("permissions.hasura_access_predicates.step", origin, {"step": "F2", "result": "applied", "generation": os.path.basename(generation)})
+    if generation != state.current("F2"):
+        state.confirm("F2", generation)
+
+
 def cmd_apply(hasura, rules, step, state_dir, expect_path, dry_run, run, log):
     import os
     expected = _read_json(expect_path)
     with StateDir(state_dir) as state:
         resource_version, current = hasura.export()
-        if step == "B" and status(current, rules)["A"] != "applied":
-            raise RuleError("step A is not applied; run --step A first")
-        built = (build_step_a if step == "A" else build_step_b)(current, rules)
-        final = build_step_b(built, rules) if step == "A" else built
+        position = STEPS.index(step)
+        live = status(current, rules)
+        missing = [s for s in STEPS[:position] if live.get(s) != "applied"]
+        if missing:
+            raise RuleError(f"step {missing[0]} is not applied; run --step {missing[0]} first")
+        built = BUILDERS[step](current, rules)
+        final = built
+        for later in STEPS[position + 1:]:
+            if later in BUILDERS and (later not in ("F1", "F2") or rules.get("financials")):
+                final = BUILDERS[later](final, rules)
         if not same_metadata(final, expected):
             raise RuleError("the live metadata does not lead to the approved snapshot (--expect): unknown drift; nothing applied")
+        if step == "F2":
+            check_financial_columns(hasura, rules)
         applied = same_metadata(built, current)
         if dry_run:
-            flag = hasura.flag() if step == "B" else None
-            log(f"Dry run: step {step} metadata {'already applied' if applied else 'would change'}"
-                + (f"; flag={'true' if flag else 'false'}" if step == "B" else "") + ". Nothing changed.")
+            extra = ""
+            if step == "B":
+                extra = f"; flag={'true' if hasura.flag() else 'false'}"
+            elif step == "F2":
+                extra = f"; financials={hasura.financials_state()}"
+            log(f"Dry run: step {step} metadata {'already applied' if applied else 'would change'}{extra}. Nothing changed.")
             return 0
         if applied:
             # A confirmed generation of the live metadata wins (it holds the original matrix snapshot); otherwise resume
@@ -610,10 +889,12 @@ def cmd_apply(hasura, rules, step, state_dir, expect_path, dry_run, run, log):
                     state.discard(stale)
             if step == "B":
                 _finish_b(hasura, state, generation, run, log)
+            elif step == "F2":
+                _finish_f2(hasura, rules, state, generation, run, log)
             elif generation != state.current(step):
                 intent_file = os.path.join(generation, "intent.json")
                 origin = _read_json(intent_file)["run"] if os.path.exists(intent_file) else run
-                hasura.audit("permissions.hasura_access_predicates.step", origin, {"step": "A", "result": "applied", "generation": os.path.basename(generation)})
+                hasura.audit("permissions.hasura_access_predicates.step", origin, {"step": step, "result": "applied", "generation": os.path.basename(generation)})
                 state.confirm(step, generation)
             log(f"Step {step}: already applied; state in {state.current(step)}.")
             return 0
@@ -633,8 +914,10 @@ def cmd_apply(hasura, rules, step, state_dir, expect_path, dry_run, run, log):
             raise
         if step == "B":
             _finish_b(hasura, state, pending, run, log)
+        elif step == "F2":
+            _finish_f2(hasura, rules, state, pending, run, log)
         else:
-            hasura.audit("permissions.hasura_access_predicates.step", run, {"step": "A", "result": "applied", "generation": os.path.basename(pending)})
+            hasura.audit("permissions.hasura_access_predicates.step", run, {"step": step, "result": "applied", "generation": os.path.basename(pending)})
             state.confirm(step, pending)
         log(f"Step {step} applied; state saved in {state.current(step)}.")
         return 0
@@ -697,6 +980,115 @@ def cmd_revert(hasura, step, state_dir, allow_reopen, run, log):
         return 0
 
 
+def _f2_generation(state, current):
+    """The confirmed generation of F2, or the pending one whose result is the live metadata (an apply of F2 that stopped
+    after the metadata changed — its revert must still be possible); that one is confirmed now."""
+    import os
+    if os.path.isdir(state.current("F2")):
+        return state.current("F2")
+    resumable = [g for g in state.pendings("F2") if same_metadata(_read_json(os.path.join(g, "after.json")), current)]
+    if not resumable:
+        return None
+    state.confirm("F2", resumable[-1])
+    return state.current("F2")
+
+
+def cmd_revert_f2(hasura, rules, state_dir, allow_reopen, run, log):
+    import os
+    permission = rules["financials"]["permission"]
+    with StateDir(state_dir) as state:
+        resource_version, current = hasura.export()
+        current_dir = _f2_generation(state, current)
+        if current_dir is None:
+            raise RuleError(f"no step F2 generation in {state_dir} for the live metadata")
+        generation = os.path.basename(current_dir)
+        before = _read_json(os.path.join(current_dir, "before.json"))
+        after = _read_json(os.path.join(current_dir, "after.json"))
+        intent_file = os.path.join(current_dir, "revert-intent.json")
+        fin_state = hasura.financials_state()
+
+        def finish(origin, details):
+            if hasura.financials_state() != "open":
+                hasura.set_financials_state("open", permission, run, {"operation": "revert-F2-finish", "step": "F2", "generation": generation})
+            hasura.audit("permissions.hasura_access_predicates.step", origin, {"step": "F2", "result": "reverted", "generation": generation, **details})
+            state.retire("F2", "reverted")
+
+        if same_metadata(current, before):
+            # An earlier revert restored the columns but did not finish: lift the barrier and complete ITS audit.
+            intent = hasura.financials_revert() or (_read_json(intent_file) if os.path.exists(intent_file) else
+                                                    {"run": run, "allowReopen": allow_reopen, "reopened": []})
+            finish(intent["run"], {"allowReopen": intent["allowReopen"], "reopened": intent["reopened"], "completedByRunId": run["runId"]})
+            log("Step F2 is not applied; financials state open, generation retired.")
+            return 0
+        if not same_metadata(current, after):
+            raise RuleError("metadata changed after step F2; refusing to restore the old snapshot over it")
+        if fin_state == "reverting":
+            # Recovery of the same operation (its barrier is still up): its intent is in the database, set with the
+            # barrier (operator, override, reopened users) — a lost answer of the start cannot lose it.
+            intent = hasura.financials_revert()
+            if intent is None:
+                raise RuleError("state reverting without a recorded revert intent: finish manually (apply --step F2 "
+                                "to close again, or restore the metadata and set the state open)")
+        elif fin_state == "closed":
+            lost = hasura.revert_financials_start(permission, allow_reopen, run,
+                                                  {"operation": "revert-F2-start", "step": "F2", "generation": generation})
+            if lost:
+                log(f"Users who lost {permission} after step F2 ({len(lost)}): " + ", ".join(lost[:50]) + (" …" if len(lost) > 50 else ""))
+            if hasura.financials_state() != "reverting":
+                if hasura.financials_users() is None:
+                    raise RuleError("no users snapshot of step F2: the revert cannot check who lost the right; use --allow-reopen")
+                raise RuleError("revert would give these users the money columns again; restore their right first or pass --allow-reopen")
+            intent = hasura.financials_revert()
+        else:
+            # `open` with closed columns: an apply of F2 stopped before its state; nothing was narrowed under it.
+            intent = {"run": run, "allowReopen": allow_reopen, "reopened": []}
+            hasura.set_financials_state("reverting", permission, run, {"operation": "revert-F2-start", "step": "F2", "generation": generation},
+                                        revert_intent=intent)
+        _write_json(intent_file, intent)  # local copy of the durable intent
+        # From here every authorization change is refused (state `reverting`) until the columns are back.
+        try:
+            _replace_confirmed(hasura, resource_version, before, after)
+        except UnknownStateError:
+            raise  # state stays `reverting`: a re-run finishes once the outcome is known
+        except RuleError:
+            # Confirmed: the columns are still closed. Back to `closed`; the attempt is over, so is its intent.
+            try:
+                if same_metadata(hasura.export()[1], after):
+                    hasura.set_financials_state("closed", permission, run, {"operation": "revert-F2-failed", "step": "F2", "generation": generation},
+                                                keep_users=True)
+                    os.remove(intent_file)
+            except (HasuraError, OSError):
+                pass
+            raise
+        finish(intent["run"], {"allowReopen": intent["allowReopen"], "reopened": intent["reopened"]})
+        log("Step F2 reverted: money columns are readable again by every role that reads the row; the backend refuses "
+            "to take orders.view_financials from a role.")
+        return 0
+
+
+def cmd_revert_f1(hasura, state_dir, run, log):
+    """F1 is additive (projections + relationships): restore the metadata before it. Only while F2 is not applied (the
+    revert of F2 comes first), and only over exactly the F1 result. Needed before a revert of B."""
+    import os
+    with StateDir(state_dir) as state:
+        current_dir = state.current("F1")
+        if not os.path.isdir(current_dir):
+            raise RuleError(f"no confirmed step F1 in {state_dir}")
+        if os.path.isdir(state.current("F2")):
+            raise RuleError("step F2 is confirmed: revert F2 first")
+        resource_version, current = hasura.export()
+        before = _read_json(os.path.join(current_dir, "before.json"))
+        after = _read_json(os.path.join(current_dir, "after.json"))
+        if not same_metadata(current, before):
+            if not same_metadata(current, after):
+                raise RuleError("metadata changed after step F1; refusing to restore the old snapshot over it")
+            _replace_confirmed(hasura, resource_version, before, after)
+        hasura.audit("permissions.hasura_access_predicates.step", run, {"step": "F1", "result": "reverted", "generation": os.path.basename(current_dir)})
+        state.retire("F1", "reverted")
+        log("Step F1 reverted: the money projections are no longer tracked.")
+        return 0
+
+
 def main(argv=None):
     import getpass
     import os
@@ -704,21 +1096,21 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
     build = sub.add_parser("build")
-    build.add_argument("--step", choices=["A", "B"], required=True)
+    build.add_argument("--step", choices=list(STEPS), required=True)
     build.add_argument("--rules", required=True)
     st = sub.add_parser("status")
     st.add_argument("--rules", required=True)
     st.add_argument("--live", action="store_true")
     ap = sub.add_parser("apply")
     ap.add_argument("--rules", required=True)
-    ap.add_argument("--step", choices=["A", "B"], required=True)
+    ap.add_argument("--step", choices=list(STEPS), required=True)
     ap.add_argument("--state-dir", required=True)
     ap.add_argument("--expect", required=True, help="approved metadata snapshot after step B (the release's metadata.json)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--operator", help="who runs it (audit); default: the OS account")
     rv = sub.add_parser("revert")
     rv.add_argument("--rules", required=True)
-    rv.add_argument("--step", choices=["A", "B"], required=True)
+    rv.add_argument("--step", choices=["A", "B", "F1", "F2"], required=True)
     rv.add_argument("--state-dir", required=True)
     rv.add_argument("--allow-reopen", action="store_true")
     rv.add_argument("--operator", help="who runs it (audit); default: the OS account")
@@ -743,17 +1135,17 @@ def main(argv=None):
 
     try:
         if args.cmd == "build":
-            built = (build_step_a if args.step == "A" else build_step_b)(json.load(sys.stdin), rules)
+            built = BUILDERS[args.step](json.load(sys.stdin), rules)
             json.dump(built, sys.stdout, ensure_ascii=False, indent=2)
             sys.stdout.write("\n")
         elif args.cmd == "status":
             if args.live:
                 hasura = live()
                 result = status(hasura.export()[1], rules)
-                print(f"A={result['A']} B={result['B']} flag={'true' if hasura.flag() else 'false'}")
+                extra = f" financials={hasura.financials_state()}" if rules.get("financials") else ""
+                print(f"{status_line(result)} flag={'true' if hasura.flag() else 'false'}{extra}")
             else:
-                result = status(json.load(sys.stdin), rules)
-                print(f"A={result['A']} B={result['B']}")
+                print(status_line(status(json.load(sys.stdin), rules)))
         elif args.cmd == "apply":
             run = run_context()
             log(f"Run {run['runId']} by {run['operator']}")
@@ -761,6 +1153,10 @@ def main(argv=None):
         else:
             run = run_context()
             log(f"Run {run['runId']} by {run['operator']}")
+            if args.step == "F2":
+                return cmd_revert_f2(live(), rules, args.state_dir, args.allow_reopen, run, log)
+            if args.step == "F1":
+                return cmd_revert_f1(live(), args.state_dir, run, log)
             return cmd_revert(live(), args.step, args.state_dir, args.allow_reopen, run, log)
     except (RuleError, HasuraError) as error:
         print(f"ERROR: {error}", file=sys.stderr)

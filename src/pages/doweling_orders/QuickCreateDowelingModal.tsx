@@ -6,6 +6,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Form, Input, Modal, Select, message } from 'antd';
 import { useSelect } from '@refinedev/antd';
+import { useOrderFinancialVisibility } from '../../hooks/useOrderFinancialVisibility';
 import {
   buildCreateDowelingRequest,
   createDowelingIdempotencyKey,
@@ -21,7 +22,7 @@ interface QuickCreateDowelingModalProps {
 interface QuickCreateFormValues {
   dowelingOrderName: string;
   designEngineerId: number;
-  paymentStatusId: number;
+  paymentStatusId?: number;
 }
 
 function extractErrorMessage(error: unknown, fallback: string): string {
@@ -66,6 +67,7 @@ export const QuickCreateDowelingModal: React.FC<QuickCreateDowelingModalProps> =
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
   });
 
+  const { canViewFinancials } = useOrderFinancialVisibility();
   const { selectProps: paymentStatusSelectProps } = useSelect({
     resource: 'payment_statuses',
     optionLabel: 'payment_status_name',
@@ -91,7 +93,8 @@ export const QuickCreateDowelingModal: React.FC<QuickCreateDowelingModalProps> =
         buildCreateDowelingRequest({
           dowelingOrderName: values.dowelingOrderName,
           designEngineerId: values.designEngineerId,
-          paymentStatusId: values.paymentStatusId,
+          // Without the money right (or hidden by the settings) the server sets «Не оплачен».
+          paymentStatusId: canViewFinancials ? values.paymentStatusId : undefined,
           idempotencyKey: idempotencyKeyRef.current,
         }),
       );
@@ -170,13 +173,15 @@ export const QuickCreateDowelingModal: React.FC<QuickCreateDowelingModalProps> =
           />
         </Form.Item>
 
-        <Form.Item
-          label="Статус оплаты"
-          name="paymentStatusId"
-          rules={[{ required: true, message: 'Обязательное поле' }]}
-        >
-          <Select {...paymentStatusSelectProps} placeholder="Выберите статус оплаты" />
-        </Form.Item>
+        {canViewFinancials && (
+          <Form.Item
+            label="Статус оплаты"
+            name="paymentStatusId"
+            rules={[{ required: true, message: 'Обязательное поле' }]}
+          >
+            <Select {...paymentStatusSelectProps} placeholder="Выберите статус оплаты" />
+          </Form.Item>
+        )}
       </Form>
     </Modal>
   );

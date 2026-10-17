@@ -133,6 +133,8 @@ export const useOrderExport = (): UseOrderExportResult => {
         }),
         dataProvider().getList({
           resource: 'orders_view',
+          // Money through Hasura `financials` (access groups «финансы»): only where this path shows it.
+          meta: { financials: true },
           filters: [{ field: 'order_id', operator: 'eq', value: order.order_id }],
           pagination: { current: 1, pageSize: 1 },
         }),
@@ -195,6 +197,8 @@ export const useOrderExport = (): UseOrderExportResult => {
       const [detailsResult, paymentsResult, detailNamesResult] = await Promise.all([
         dataProvider().getList({
           resource: 'order_details',
+          // Money through Hasura `financials` (access groups «финансы»): only where this path shows it.
+          meta: { financials: true },
           filters: [
             { field: 'order_id', operator: 'eq', value: order.order_id },
           ],

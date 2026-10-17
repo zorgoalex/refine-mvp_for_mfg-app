@@ -20,14 +20,22 @@ export const ADMINISTRATION_PERMISSIONS: readonly PermissionName[] = [
  * Step 1 of the authorization command protocol (access groups plan §5.1): `permissions_state` is locked before any
  * user row. `update` for commands that change authorization (they serialize), `share` for commands that only depend
  * on it (an SSO invitation): a concurrent change waits for them and they wait for it. Returns the version.
+ *
+ * While a revert of the Hasura step F2 runs (permissions_state.hasura_financials_state = 'reverting', finances plan
+ * 2026-10-17 §2.3) every `update` command is refused: nobody may lose orders.view_financials between the revert's
+ * check and the moment the money columns are readable again. A database without migration 258 has no such state.
  */
 export async function lockAuthorizationState(client: DatabaseClient, mode: 'update' | 'share'): Promise<number> {
-  const result = await client.query<{ version: string | number }>(
-    `SELECT version FROM permissions_state WHERE id = true FOR ${mode === 'update' ? 'UPDATE' : 'SHARE'}`,
+  const result = await client.query<{ version: string | number; financials: string | null }>(
+    `SELECT version, to_jsonb(permissions_state) ->> 'hasura_financials_state' AS financials FROM permissions_state WHERE id = true FOR ${mode === 'update' ? 'UPDATE' : 'SHARE'}`,
   );
   const version = Number(result.rows[0]?.version ?? 0);
   if (!Number.isSafeInteger(version) || version < 1) {
     throw new ApiError(503, 'PERMISSIONS_NOT_READY', 'Permissions runtime state is not initialized');
+  }
+  if (mode === 'update' && result.rows[0]?.financials === 'reverting') {
+    throw new ApiError(409, 'AUTHORIZATION_CHANGES_PAUSED',
+      'Изменение прав временно недоступно: идёт откат закрытия сумм в Hasura. Повторите после его завершения.');
   }
   return version;
 }

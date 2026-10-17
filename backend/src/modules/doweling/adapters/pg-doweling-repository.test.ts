@@ -16,7 +16,7 @@ const dto = {
 describe('PgDowelingRepository.createDowelingOrder', () => {
   it('inserts doweling_orders + ONE audit_log + ONE outbox, no order_doweling_links', async () => {
     const database = createDatabase({
-      insertedDoweling: { doweling_order_id: 555, doweling_order_name: 'Тест присадка', version: 0 },
+      insertedDoweling: { doweling_order_id: 555, doweling_order_name: 'Тест присадка', version: 0, payment_status_id: 1 },
     });
     const repo = new PgDowelingRepository(database.service);
 
@@ -35,7 +35,7 @@ describe('PgDowelingRepository.createDowelingOrder', () => {
 
   it('audit row carries doweling dims via centralized auditService.record path', async () => {
     const database = createDatabase({
-      insertedDoweling: { doweling_order_id: 555, doweling_order_name: 'x', version: 0 },
+      insertedDoweling: { doweling_order_id: 555, doweling_order_name: 'x', version: 0, payment_status_id: 1 },
     });
     await new PgDowelingRepository(database.service).createDowelingOrder({
       currentUser: currentUser(),
@@ -76,10 +76,10 @@ describe('PgDowelingRepository.createDowelingOrder', () => {
   });
 
   it('idempotency request hash covers optional fields (changing partsCount changes the stored hash)', async () => {
-    const base = createDatabase({ insertedDoweling: { doweling_order_id: 1, doweling_order_name: 'x', version: 0 } });
+    const base = createDatabase({ insertedDoweling: { doweling_order_id: 1, doweling_order_name: 'x', version: 0, payment_status_id: 1 } });
     await new PgDowelingRepository(base.service).createDowelingOrder({ currentUser: currentUser(), requestId: 'r', dto });
 
-    const changed = createDatabase({ insertedDoweling: { doweling_order_id: 2, doweling_order_name: 'x', version: 0 } });
+    const changed = createDatabase({ insertedDoweling: { doweling_order_id: 2, doweling_order_name: 'x', version: 0, payment_status_id: 1 } });
     await new PgDowelingRepository(changed.service).createDowelingOrder({
       currentUser: currentUser(),
       requestId: 'r',
@@ -91,7 +91,7 @@ describe('PgDowelingRepository.createDowelingOrder', () => {
 
   it('quick-create from an order: links the new doweling order in the same transaction, audits the order', async () => {
     const database = createDatabase({
-      insertedDoweling: { doweling_order_id: 555, doweling_order_name: 'Тест присадка', version: 0 },
+      insertedDoweling: { doweling_order_id: 555, doweling_order_name: 'Тест присадка', version: 0, payment_status_id: 1 },
       orders: [{ order_id: 101, created_by: 1, manager_id: 1, delete_flag: false, order_kind: 'production_order' }],
     });
     const res = await new PgDowelingRepository(database.service).createDowelingOrder({
@@ -114,7 +114,7 @@ describe('PgDowelingRepository.createDowelingOrder', () => {
 
   it('quick-create into a foreign order of an own-scope manager: 403, durable denied audit, nothing inserted', async () => {
     const database = createDatabase({
-      insertedDoweling: { doweling_order_id: 555, doweling_order_name: 'x', version: 0 },
+      insertedDoweling: { doweling_order_id: 555, doweling_order_name: 'x', version: 0, payment_status_id: 1 },
       orders: [{ order_id: 102, created_by: 2, manager_id: 2, delete_flag: false, order_kind: 'production_order' }],
     });
     await expect(
@@ -126,6 +126,29 @@ describe('PgDowelingRepository.createDowelingOrder', () => {
     ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
     expect(normalizedSql(database.queries)).not.toContain('INSERT INTO doweling_orders');
     expect(database.audit.some((q) => q.params[0] === 'doweling.create_denied')).toBe(true);
+  });
+
+  it('a payment status from a user without orders.view_financials: 403, durable denied audit, nothing inserted', async () => {
+    const database = createDatabase({ insertedDoweling: { doweling_order_id: 555, doweling_order_name: 'x', version: 0, payment_status_id: 1 } });
+    const operator = { id: '7', username: 'operator', role: 'operator', roleId: 3, permissions: getPermissionsForRole('operator') } as CurrentUser;
+    expect(operator.permissions).not.toContain('orders.view_financials');
+    await expect(
+      new PgDowelingRepository(database.service).createDowelingOrder({ currentUser: operator, requestId: 'r', dto }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED', details: { requiredPermissions: ['orders.view_financials'] } });
+    expect(normalizedSql(database.queries)).not.toContain('INSERT INTO doweling_orders');
+    const denied = database.audit.find((q) => q.params[0] === 'doweling.create_denied');
+    expect(denied).toBeDefined();
+    expect(JSON.stringify(denied?.params)).toContain('FINANCIALS_PERMISSION_REQUIRED');
+    expect(JSON.stringify(denied?.params)).toContain('orders.view_financials');
+  });
+
+  it('without a payment status the same user creates (the server sets «Не оплачен» by code)', async () => {
+    const database = createDatabase({ insertedDoweling: { doweling_order_id: 556, doweling_order_name: 'x', version: 0, payment_status_id: 1 } });
+    const operator = { id: '7', username: 'operator', role: 'operator', roleId: 3, permissions: getPermissionsForRole('operator') } as CurrentUser;
+    const { paymentStatusId, ...withoutStatus } = dto;
+    void paymentStatusId;
+    await new PgDowelingRepository(database.service).createDowelingOrder({ currentUser: operator, requestId: 'r', dto: withoutStatus });
+    expect(normalizedSql(database.queries)).toContain("payment_status_code = 'unpaid'");
   });
 
   it('quick-create into a missing or non-production order is 404 ORDER_NOT_FOUND', async () => {
@@ -140,7 +163,7 @@ describe('PgDowelingRepository.createDowelingOrder', () => {
   });
 
   it('a standalone create keeps the request-hash shape of the earlier release (stored keys still replay)', async () => {
-    const database = createDatabase({ insertedDoweling: { doweling_order_id: 1, doweling_order_name: 'x', version: 0 } });
+    const database = createDatabase({ insertedDoweling: { doweling_order_id: 1, doweling_order_name: 'x', version: 0, payment_status_id: 1 } });
     await new PgDowelingRepository(database.service).createDowelingOrder({ currentUser: currentUser(), requestId: 'r', dto });
     // sha256 of the stable JSON of the 0.5.24 request shape (no orderId key).
     const { createHash } = await import('node:crypto');
@@ -158,9 +181,9 @@ describe('PgDowelingRepository.createDowelingOrder', () => {
       { order_id: 101, created_by: 1, manager_id: 1, delete_flag: false, order_kind: 'production_order' },
       { order_id: 103, created_by: 1, manager_id: 1, delete_flag: false, order_kind: 'production_order' },
     ];
-    const a = createDatabase({ insertedDoweling: { doweling_order_id: 1, doweling_order_name: 'x', version: 0 }, orders });
+    const a = createDatabase({ insertedDoweling: { doweling_order_id: 1, doweling_order_name: 'x', version: 0, payment_status_id: 1 }, orders });
     await new PgDowelingRepository(a.service).createDowelingOrder({ currentUser: currentUser(), requestId: 'r', dto: { ...dto, orderId: 101 } });
-    const b = createDatabase({ insertedDoweling: { doweling_order_id: 2, doweling_order_name: 'x', version: 0 }, orders });
+    const b = createDatabase({ insertedDoweling: { doweling_order_id: 2, doweling_order_name: 'x', version: 0, payment_status_id: 1 }, orders });
     await new PgDowelingRepository(b.service).createDowelingOrder({ currentUser: currentUser(), requestId: 'r', dto: { ...dto, orderId: 103 } });
     expect(idempotencyHash(a.queries)).not.toBe(idempotencyHash(b.queries));
   });

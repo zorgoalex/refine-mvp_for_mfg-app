@@ -1,7 +1,22 @@
+/**
+ * Money of a doweling order (access groups «финансы»): changed only with orders.view_financials. A save without
+ * these fields keeps them as they are; a partial set is a validation error (all or none).
+ */
+export const DOWELING_MONEY_FIELDS = [
+  'paymentStatusId', 'paymentDate', 'totalAmount', 'finalAmount', 'discount', 'surcharge', 'paidAmount',
+] as const;
+
+export type DowelingMoneyField = (typeof DOWELING_MONEY_FIELDS)[number];
+
+export function hasDowelingMoney(dto: Partial<Record<DowelingMoneyField, unknown>>): boolean {
+  return DOWELING_MONEY_FIELDS.some((field) => dto[field] !== undefined);
+}
+
 export interface CreateDowelingOrderRequestDto {
   dowelingOrderName: string;
   designEngineerId: number;
-  paymentStatusId: number;
+  /** Needs orders.view_financials; absent = the status with code `unpaid`. */
+  paymentStatusId?: number;
   dowelingOrderDate?: string | null;
   productionStatusId?: number | null;
   operatorId?: number | null;
@@ -25,23 +40,26 @@ export interface CreateDowelingOrderResponseDto {
   requestId: string;
 }
 
-/** Full replacement of the fields of the doweling card («Редактирование присадки»). */
+/**
+ * Full replacement of the fields of the doweling card («Редактирование присадки»). The money group
+ * (DOWELING_MONEY_FIELDS) is all-or-none: without it the money stays as it is; with it orders.view_financials is required.
+ */
 export interface UpdateDowelingOrderRequestDto {
   expectedVersion: number;
   dowelingOrderName: string;
   dowelingOrderDate: string;
-  paymentStatusId: number;
+  paymentStatusId?: number;
   designEngineerId: number;
   productionStatusId: number | null;
   operatorId: number | null;
   issueDate: string | null;
-  paymentDate: string | null;
+  paymentDate?: string | null;
   partsCount: number;
-  totalAmount: number | null;
-  finalAmount: number | null;
-  discount: number;
-  surcharge: number;
-  paidAmount: number;
+  totalAmount?: number | null;
+  finalAmount?: number | null;
+  discount?: number;
+  surcharge?: number;
+  paidAmount?: number;
   linkCadFile: string | null;
   linkPdfFile: string | null;
   refKey1c: string | null;

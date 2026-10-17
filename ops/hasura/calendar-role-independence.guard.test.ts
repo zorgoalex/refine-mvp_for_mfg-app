@@ -18,6 +18,7 @@ interface TableMetadata {
   select_permissions?: SelectPermission[];
 }
 
+const rules = JSON.parse(readFileSync(new URL('./access-predicates.json', import.meta.url), 'utf8'));
 const metadata = JSON.parse(
   readFileSync(new URL('./metadata.json', import.meta.url), 'utf8'),
 ) as { sources: Array<{ name: string; tables: TableMetadata[] }> };
@@ -56,8 +57,11 @@ describe('Hasura calendar role independence', () => {
 
     const permissions = table?.select_permissions ?? [];
     expect(permissions.map(({ role }) => role).sort()).toEqual(calendarRoles);
+    // «Финансы» (step F2): the money sources list every column except the money ones (read through `financials`).
+    const money = rules.financials.sources[name] as { otherColumns: string[] } | undefined;
     for (const { permission } of permissions) {
-      expect(permission.columns).toBe('*');
+      if (money) expect([...(permission.columns as string[])].sort()).toEqual([...money.otherColumns].sort());
+      else expect(permission.columns).toBe('*');
       // Access groups 0Б: the role filter is kept and wrapped in the user's effective-permission predicate.
       const filter = permission.filter as { _and?: unknown[] };
       expect(filter._and?.[0]).toEqual(expectedFilter(name));
