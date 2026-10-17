@@ -73,20 +73,24 @@ hasura_api() {
 
 [[ -f "$SNAPSHOT_FILE" ]] || fail "metadata snapshot not found next to the script: ${SNAPSHOT_FILE}"
 
-log "Fetching current Hasura metadata (with resource_version)..."
-METADATA_JSON="$(hasura_api '{"type":"export_metadata","version":2,"args":{}}')"
-
+# The exported metadata goes through a file, not an environment variable: with the access-group
+# predicates it is megabytes, and one environment string is limited to 128 KiB ("Argument list too long").
+METADATA_FILE="$(mktemp /tmp/suppliers-columns-metadata-XXXXXX.json)"
+trap 'rm -f "$METADATA_FILE"' EXIT
 BULK_FILE="$(mktemp /tmp/suppliers-columns-bulk-XXXXXX.json)"
-trap 'rm -f "$BULK_FILE"' EXIT
+trap 'rm -f "$METADATA_FILE" "$BULK_FILE"' EXIT
+chmod 600 "$METADATA_FILE" "$BULK_FILE"
 
-export _SUPPLIERS_METADATA="$METADATA_JSON"
+log "Fetching current Hasura metadata (with resource_version)..."
+hasura_api '{"type":"export_metadata","version":2,"args":{}}' > "$METADATA_FILE"
+
 export _SUPPLIERS_TARGET="$TARGET"
-python3 - "$BULK_FILE" "$SNAPSHOT_FILE" <<'PY'
+python3 - "$BULK_FILE" "$SNAPSHOT_FILE" "$METADATA_FILE" <<'PY'
 import json
 import os
 import sys
 
-bulk_path, snapshot_path = sys.argv[1], sys.argv[2]
+bulk_path, snapshot_path, metadata_path = sys.argv[1], sys.argv[2], sys.argv[3]
 OWNED = "ref_key_1c"
 TABLE = "suppliers"
 KINDS = ("insert", "update")
@@ -106,9 +110,10 @@ def suppliers_table(root):
     return None, None
 
 
-raw = os.environ.get("_SUPPLIERS_METADATA", "")
-if not raw:
-    die("_SUPPLIERS_METADATA is empty")
+with open(metadata_path, "r", encoding="utf-8") as handle:
+    raw = handle.read()
+if not raw.strip():
+    die("the exported metadata is empty")
 exported = json.loads(raw)
 resource_version = exported.get("resource_version")
 metadata = exported.get("metadata")
@@ -177,7 +182,7 @@ with open(bulk_path, "w") as f:
     json.dump({"type": "bulk", "resource_version": resource_version, "args": args}, f)
 print(f"Permissions to update: {len(args) // 2}", file=sys.stderr)
 PY
-unset _SUPPLIERS_METADATA _SUPPLIERS_TARGET
+unset _SUPPLIERS_TARGET
 
 COUNT="$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))['args']) // 2)" "$BULK_FILE")"
 if [[ "$COUNT" == "0" ]]; then
@@ -192,7 +197,7 @@ fi
 log "Applying ${COUNT} permission update(s) in one bulk request..."
 RESPONSE_FILE="$(mktemp /tmp/suppliers-columns-response-XXXXXX.json)"
 KEEP_RESPONSE=false
-trap 'rm -f "$BULK_FILE"; $KEEP_RESPONSE || rm -f "$RESPONSE_FILE"' EXIT
+trap 'rm -f "$METADATA_FILE" "$BULK_FILE"; $KEEP_RESPONSE || rm -f "$RESPONSE_FILE"' EXIT
 HTTP_CODE="$(curl -sS -o "$RESPONSE_FILE" -w '%{http_code}' \
   -H "Content-Type: application/json" \
   -H "x-hasura-admin-secret: ${ADMIN_SECRET}" \

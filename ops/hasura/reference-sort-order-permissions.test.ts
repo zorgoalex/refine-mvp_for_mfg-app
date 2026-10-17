@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { hasuraRoleForErpRole } from '../../backend/src/modules/auth/adapters/hasura-role';
 import { HASURA_DATA_ROLES, ROLES_WITHOUT_HASURA_GRANTS } from '../../backend/src/permissions/permissions';
 
 const metadata = JSON.parse(
@@ -11,7 +12,7 @@ describe('reference sort-order Hasura permissions', () => {
   it('keeps backend-owned sheet materials select-only', () => {
     const table = tables.find((entry: any) => entry.table.name === 'sheet_material_types');
     expect(table.select_permissions.map((entry: any) => entry.role).sort()).toEqual(
-      HASURA_DATA_ROLES.filter((role) => role !== 'admin').sort(),
+      HASURA_DATA_ROLES.map(hasuraRoleForErpRole).sort(),
     );
     expect(table.select_permissions.every((entry: any) => entry.permission.columns === '*')).toBe(true);
     expect(table.insert_permissions ?? []).toHaveLength(0);

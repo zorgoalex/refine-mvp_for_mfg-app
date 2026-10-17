@@ -1,0 +1,106 @@
+{
+  "comment": "Access groups 0Б: every Hasura permission requires the user's effective permission (user_effective_permissions) and, for order rows, the order scope. Applied by ops/hasura/access-predicates.sh; the frontend mirror of the write rules is src/utils/resourcePermissions.ts HASURA_WRITE_PERMISSIONS.",
+  "version": 1,
+  "adminRole": "erp_admin",
+  "adminTemplateRole": "superadmin",
+  "trackTables": ["user_effective_permissions", "user_effective_scopes"],
+  "relationships": [
+    { "table": "doweling_orders", "type": "object", "name": "order", "remoteTable": "orders", "columnMapping": { "order_id": "order_id" } },
+    { "table": "doweling_orders", "type": "array", "name": "order_links", "remoteTable": "order_doweling_links", "columnMapping": { "doweling_order_id": "doweling_order_id" } },
+    { "table": "doweling_orders_view", "type": "object", "name": "doweling_order", "remoteTable": "doweling_orders", "columnMapping": { "doweling_order_id": "doweling_order_id" } },
+    { "table": "order_resource_requirements", "type": "object", "name": "order", "remoteTable": "orders", "columnMapping": { "order_id": "order_id" } }
+  ],
+  "exceptions": {
+    "app_settings.select": "UI settings and the navigation visibility are read by every role (no secrets; plan §4 0Б.5)"
+  },
+  "revoke": {
+    "business_unit_employees": ["select", "insert", "update", "delete"],
+    "document_types": ["select", "insert", "update", "delete"],
+    "material_transactions": ["select", "insert", "update", "delete"],
+    "material_unit_conversions": ["select", "insert", "update", "delete"],
+    "movement_items": ["select", "insert", "update", "delete"],
+    "movements": ["select", "insert", "update", "delete"],
+    "purchase_requisitions": ["select", "insert", "update", "delete"],
+    "requisition_items": ["select", "insert", "update", "delete"],
+    "vehicles": ["select"],
+    "warehouse_stock": ["select"],
+    "warehouses": ["select"],
+    "order_workshops_report": ["select"],
+    "client_phones": ["insert", "update", "delete"],
+    "production_status_events": ["insert", "update", "delete"],
+    "roles": ["insert", "update", "delete"],
+    "users": ["insert", "update", "delete"],
+    "doweling_orders": ["insert", "update", "delete"],
+    "order_doweling_links": ["insert", "update"]
+  },
+  "tables": {
+    "app_settings": {
+      "insert": { "any": ["settings.manage"] }, "update": { "any": ["settings.manage"] }, "delete": { "any": ["settings.manage"] }
+    },
+    "client_phones": { "select": { "any": ["clients.view"] } },
+    "clients": {
+      "select": { "any": ["clients.view"] },
+      "insert": { "any": ["clients.create"] }, "update": { "any": ["clients.update"] }, "delete": { "any": ["clients.delete"] }
+    },
+    "clients_analytics_view": {
+      "select": {
+        "all": ["clients.analytics.view", "clients.view", "orders.view", "orders.view_financials", "payments.view"],
+        "scopeAll": ["orders.view", "payments.view"]
+      }
+    },
+    "doweling_orders": {
+      "select": { "any": ["doweling.view"], "doweling": "read" }
+    },
+    "doweling_orders_view": { "select": { "any": ["doweling.view"], "dowelingRead": "doweling_order" } },
+    "order_doweling_links": {
+      "select": { "any": ["orders.view"], "orderRead": "order" }
+    },
+    "order_details": { "select": { "any": ["orders.view"], "orderRead": "order" } },
+    "order_details_view": { "select": { "any": ["orders.view"], "orderRead": "order" } },
+    "orders_view": { "select": { "any": ["orders.view"], "orderRead": "" } },
+    "production_status_events": { "select": { "any": ["orders.view"], "orderRead": "order" } },
+    "orders": { "select": { "all": ["orders.view_financials"], "any": ["orders.view"], "orderRead": "" } },
+    "payments": { "select": { "all": ["payments.view", "orders.view_financials"], "scopeAll": ["payments.view"] } },
+    "payments_view": {
+      "select": { "all": ["finance.analytics.view", "payments.view", "orders.view_financials"], "scopeAll": ["payments.view"] }
+    },
+    "order_workshops": { "select": { "any": ["production.view"], "orderRead": "order" } },
+    "order_resource_requirements": { "select": { "any": ["requirements.view"], "orderRead": "order" } },
+
+    "edge_types": { "select": { "any": ["references.view"] }, "insert": { "any": ["references.manage", "references.quick_create"] }, "update": { "any": ["references.manage"] }, "delete": { "any": ["references.manage"] } },
+    "milling_types": { "select": { "any": ["references.view"] }, "insert": { "any": ["references.manage", "references.quick_create"] }, "update": { "any": ["references.manage"] }, "delete": { "any": ["references.manage"] } },
+    "films": { "select": { "any": ["references.view"] }, "insert": { "any": ["references.manage", "references.quick_create"] }, "update": { "any": ["references.manage"] }, "delete": { "any": ["references.manage"] } },
+    "film_types": { "select": { "any": ["references.view"] }, "insert": { "any": ["references.manage"] }, "update": { "any": ["references.manage"] }, "delete": { "any": ["references.manage"] } },
+    "material_types": { "select": { "any": ["references.view"] }, "insert": { "any": ["references.manage"] }, "update": { "any": ["references.manage"] }, "delete": { "any": ["references.manage"] } },
+    "payment_types": { "select": { "any": ["references.view"] }, "insert": { "any": ["references.manage"] }, "update": { "any": ["references.manage"] }, "delete": { "any": ["references.manage"] } },
+    "payment_statuses": { "select": { "any": ["references.view"] }, "insert": { "any": ["references.manage"] }, "update": { "any": ["references.manage"] }, "delete": { "any": ["references.manage"] } },
+    "units": { "select": { "any": ["references.view"] }, "insert": { "any": ["references.manage"] }, "update": { "any": ["references.manage"] }, "delete": { "any": ["references.manage"] } },
+    "requisition_statuses": { "select": { "any": ["references.view"] }, "insert": { "any": ["references.manage"] }, "update": { "any": ["references.manage"] }, "delete": { "any": ["references.manage"] } },
+    "movements_statuses": { "select": { "any": ["references.view"] }, "insert": { "any": ["references.manage"] }, "update": { "any": ["references.manage"] }, "delete": { "any": ["references.manage"] } },
+    "resource_requirements_statuses": { "select": { "any": ["references.view"] }, "insert": { "any": ["references.manage"] }, "update": { "any": ["references.manage"] }, "delete": { "any": ["references.manage"] } },
+    "material_transaction_types": { "select": { "any": ["references.view"] }, "insert": { "any": ["references.manage"] }, "update": { "any": ["references.manage"] }, "delete": { "any": ["references.manage"] } },
+    "transaction_direction": { "select": { "any": ["references.view"] }, "insert": { "any": ["references.manage"] }, "update": { "any": ["references.manage"] }, "delete": { "any": ["references.manage"] } },
+    "order_statuses": { "select": { "any": ["orders.view", "references.view"] }, "insert": { "any": ["references.manage"] }, "update": { "any": ["references.manage"] }, "delete": { "any": ["references.manage"] } },
+    "production_statuses": { "select": { "any": ["orders.view", "references.view"] }, "insert": { "any": ["references.manage"] }, "update": { "any": ["references.manage"] }, "delete": { "any": ["references.manage"] } },
+    "sheet_material_types": { "select": { "any": ["references.view", "sheet_materials.view"] } },
+
+    "employees": { "select": { "any": ["employees.view"] }, "insert": { "any": ["employees.manage"] }, "update": { "any": ["employees.manage"] }, "delete": { "any": ["employees.manage"] } },
+    "materials": { "select": { "any": ["materials.view"] }, "insert": { "any": ["materials.manage"] }, "update": { "any": ["materials.manage"] }, "delete": { "any": ["materials.manage"] } },
+    "suppliers": { "select": { "any": ["suppliers.view"] }, "insert": { "any": ["suppliers.manage"] }, "update": { "any": ["suppliers.manage"] }, "delete": { "any": ["suppliers.manage"] } },
+    "vendors": { "select": { "any": ["vendors.view"] }, "insert": { "any": ["vendors.manage"] }, "update": { "any": ["vendors.manage"] }, "delete": { "any": ["vendors.manage"] } },
+    "workshops": { "select": { "any": ["workshops.view"] }, "insert": { "any": ["workshops.manage"] }, "update": { "any": ["workshops.manage"] }, "delete": { "any": ["workshops.manage"] } },
+    "work_centers": { "select": { "any": ["work_centers.view"] }, "insert": { "any": ["work_centers.manage"] }, "update": { "any": ["work_centers.manage"] }, "delete": { "any": ["work_centers.manage"] } },
+    "vlm_providers": { "select": { "any": ["vlm.use"] }, "insert": { "any": ["vlm.configure"] }, "update": { "any": ["vlm.configure"] }, "delete": { "any": ["vlm.configure"] } },
+    "vlm_provider_models": { "select": { "any": ["vlm.use"] }, "insert": { "any": ["vlm.configure"] }, "update": { "any": ["vlm.configure"] }, "delete": { "any": ["vlm.configure"] } },
+    "vlm_prompts": { "select": { "any": ["vlm.use"] }, "insert": { "any": ["vlm.configure"] }, "update": { "any": ["vlm.configure"] }, "delete": { "any": ["vlm.configure"] } },
+    "roles": { "select": { "any": ["users.view", "settings.view", "notifications.view_rules"] } },
+    "users": { "select": { "any": ["users.view"] } }
+  },
+  "adminExtra": {
+    "orders": { "select": { "columns": "*", "allow_aggregations": true } },
+    "payments": { "select": { "columns": "*", "allow_aggregations": true } },
+    "payments_view": { "select": { "columns": "*", "allow_aggregations": true } },
+    "order_workshops": { "select": { "columns": "*", "allow_aggregations": true } },
+    "order_resource_requirements": { "select": { "columns": "*", "allow_aggregations": true } }
+  }
+}

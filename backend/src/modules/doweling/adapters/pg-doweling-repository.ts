@@ -5,16 +5,20 @@ import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import type { CreateDowelingOrderResponseDto } from '../dto/doweling.dto';
-import type { CreateDowelingOrderCommand, DowelingRepositoryPort } from '../application/doweling.types';
+import type { CreateDowelingOrderResponseDto, DowelingOrderLinkDto, UpdateDowelingOrderResponseDto } from '../dto/doweling.dto';
+import type {
+  CreateDowelingOrderCommand,
+  DowelingRepositoryPort,
+  UpdateDowelingOrderCommand,
+} from '../application/doweling.types';
 import {
   DowelingIdempotencyFailedError,
   DowelingIdempotencyInProgressError,
   DowelingIdempotencyKeyReusedError,
-  DowelingReferenceNotFoundError,
 } from '../errors/doweling.errors';
+import { assertDowelingAccess, lockOrders, mapDowelingWriteError, requestIdOrFallback, setSessionUser, SOURCE } from './doweling-sql';
+import { updateDowelingOrder } from './pg-doweling-update';
 
-const SOURCE = 'backend-doweling-command';
 const COMMAND_NAME = 'doweling.create';
 
 interface IdempotencyRow extends QueryResultRow {
@@ -33,7 +37,29 @@ interface InsertedDowelingRow extends QueryResultRow {
 export class PgDowelingRepository implements DowelingRepositoryPort {
   constructor(private readonly database: DatabaseService) {}
 
-  createDowelingOrder(command: CreateDowelingOrderCommand): Promise<CreateDowelingOrderResponseDto> {
+  updateDowelingOrder(command: UpdateDowelingOrderCommand): Promise<UpdateDowelingOrderResponseDto> {
+    return updateDowelingOrder(this.database, command);
+  }
+
+  async createDowelingOrder(command: CreateDowelingOrderCommand): Promise<CreateDowelingOrderResponseDto> {
+    const orderId = command.dto.orderId ?? null;
+    try {
+      return await this.createInTransaction(command, orderId);
+    } catch (error) {
+      throw mapDowelingWriteError(
+        error,
+        {
+          designEngineerId: command.dto.designEngineerId,
+          paymentStatusId: command.dto.paymentStatusId,
+          productionStatusId: command.dto.productionStatusId ?? null,
+          operatorId: command.dto.operatorId ?? null,
+        },
+        null,
+      );
+    }
+  }
+
+  private createInTransaction(command: CreateDowelingOrderCommand, orderId: number | null): Promise<CreateDowelingOrderResponseDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const requestId = requestIdOrFallback(command.requestId);
@@ -54,15 +80,31 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
           partsCount: command.dto.partsCount ?? null,
           linkCadFile: command.dto.linkCadFile ?? null,
           linkPdfFile: command.dto.linkPdfFile ?? null,
+          // Only when linking: a standalone create keeps the hash shape of the earlier releases, so a key stored
+          // before this release still replays its response.
+          ...(orderId !== null ? { orderId } : {}),
         },
       });
       if (idempotency.completedResponse) {
         return idempotency.completedResponse;
       }
 
-      let inserted: InsertedDowelingRow;
-      try {
-        const result = await tx.query<InsertedDowelingRow>(
+      // Quick-create from an order: the order must be one the user may update (same rule as the order save).
+      if (orderId !== null) {
+        await assertDowelingAccess({
+          database: this.database,
+          tx,
+          currentUser: command.currentUser,
+          requestId,
+          action: 'doweling_create',
+          dowelingOrderId: null,
+          currentOrderIds: [],
+          addedOrderIds: [orderId],
+          orders: await lockOrders(tx, [orderId]),
+        });
+      }
+
+      const result = await tx.query<InsertedDowelingRow>(
           `
           INSERT INTO doweling_orders
             (doweling_order_name, doweling_order_date, payment_status_id, production_status_id,
@@ -82,17 +124,21 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
             command.dto.linkPdfFile ?? null,
           ],
         );
-        inserted = result.rows[0];
-      } catch (error) {
-        if (isForeignKeyViolation(error)) {
-          throw new DowelingReferenceNotFoundError({
-            designEngineerId: command.dto.designEngineerId,
-            paymentStatusId: command.dto.paymentStatusId,
-            productionStatusId: command.dto.productionStatusId ?? null,
-            operatorId: command.dto.operatorId ?? null,
-          });
-        }
-        throw error;
+      const inserted = result.rows[0];
+
+      let link: DowelingOrderLinkDto | null = null;
+      if (orderId !== null) {
+        const linked = await tx.query<{ order_doweling_link_id: string | number }>(
+          `
+          INSERT INTO order_doweling_links (order_id, doweling_order_id)
+          VALUES ($1, $2)
+          RETURNING order_doweling_link_id
+          `,
+          [orderId, inserted.doweling_order_id],
+        );
+        // The «production orders only» link trigger is deferred; fire it now so a failure is this command's error.
+        await tx.query('SET CONSTRAINTS ALL IMMEDIATE');
+        link = { orderDowelingLinkId: Number(linked.rows[0].order_doweling_link_id), orderId };
       }
 
       const auditId = await writeAudit(tx, {
@@ -103,6 +149,7 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
         designEngineerId: command.dto.designEngineerId,
         paymentStatusId: command.dto.paymentStatusId,
         productionStatusId: command.dto.productionStatusId ?? null,
+        link,
       });
 
       await enqueueOutbox(tx, {
@@ -110,12 +157,20 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
         payload: {
           eventType: 'doweling_order.created',
           actorUserId: command.currentUser.id,
+          actorUsername: command.currentUser.username,
+          actorRole: command.currentUser.role,
           requestId,
+          source: SOURCE,
           entityType: 'doweling_order',
           entityId: String(inserted.doweling_order_id),
           dowelingOrderId: inserted.doweling_order_id,
           designEngineerId: command.dto.designEngineerId,
           paymentStatusId: command.dto.paymentStatusId,
+          productionStatusId: command.dto.productionStatusId ?? null,
+          orderIds: link ? [link.orderId] : [],
+          orderDowelingLinkId: link?.orderDowelingLinkId ?? null,
+          version: inserted.version,
+          auditId,
           action: 'doweling_create',
           idempotencyKey: command.dto.idempotencyKey,
         },
@@ -128,6 +183,7 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
           dowelingOrderName: inserted.doweling_order_name,
           version: inserted.version,
         },
+        link,
         auditId,
         requestId,
       };
@@ -137,13 +193,7 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
   }
 }
 
-async function setSessionUser(tx: TransactionClient, userId: string): Promise<void> {
-  await tx.query('SELECT set_session_user($1)', [userId]);
-}
 
-function requestIdOrFallback(requestId: string | undefined): string {
-  return requestId && requestId.length > 0 ? requestId : 'doweling-command';
-}
 
 async function reconcileIdempotency(
   tx: TransactionClient,
@@ -223,8 +273,10 @@ async function writeAudit(
     designEngineerId: number;
     paymentStatusId: number;
     productionStatusId: number | null;
+    link: DowelingOrderLinkDto | null;
   },
 ): Promise<string> {
+  const orderIds = input.link ? [input.link.orderId] : [];
   return auditService.record(tx, {
     event: 'doweling.created',
     entityType: 'doweling_order',
@@ -234,6 +286,9 @@ async function writeAudit(
     actorRole: input.currentUser.role,
     requestId: input.requestId,
     source: SOURCE,
+    relatedOrderId: input.link?.orderId ?? null,
+    statusField: input.productionStatusId === null ? null : 'production_status_id',
+    statusId: input.productionStatusId,
     before: {},
     after: {
       dowelingOrderId: input.dowelingOrderId,
@@ -241,16 +296,23 @@ async function writeAudit(
       designEngineerId: input.designEngineerId,
       paymentStatusId: input.paymentStatusId,
       productionStatusId: input.productionStatusId,
+      orderIds,
     },
-    diff: { created: { from: false, to: true } },
+    diff: { created: { from: false, to: true }, ...(input.link ? { orderIds: { from: [], to: orderIds } } : {}) },
     metadata: {
       source: SOURCE,
       dowelingOrderId: input.dowelingOrderId,
       designEngineerId: input.designEngineerId,
       paymentStatusId: input.paymentStatusId,
+      orderId: input.link?.orderId ?? null,
+      orderDowelingLinkId: input.link?.orderDowelingLinkId ?? null,
       action: 'doweling_create',
       requestId: input.requestId,
     },
+    relatedEntities: [
+      { entityType: 'doweling_order', entityId: input.dowelingOrderId },
+      ...orderIds.map((orderId) => ({ entityType: 'order', entityId: orderId })),
+    ],
   });
 }
 
@@ -274,14 +336,6 @@ async function enqueueOutbox(
   );
 }
 
-function isForeignKeyViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === '23503'
-  );
-}
 
 function hashRequest(value: Record<string, unknown>): string {
   return createHash('sha256').update(stableStringify(value)).digest('hex');

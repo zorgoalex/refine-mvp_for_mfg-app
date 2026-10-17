@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+import { hasuraRoleForErpRole } from '../../backend/src/modules/auth/adapters/hasura-role';
 import { HASURA_DATA_ROLES } from '../../backend/src/permissions/permissions';
 
 interface SelectPermission {
@@ -21,8 +22,9 @@ const metadata = JSON.parse(
   readFileSync(new URL('./metadata.json', import.meta.url), 'utf8'),
 ) as { sources: Array<{ name: string; tables: TableMetadata[] }> };
 const tables = metadata.sources.find((source) => source.name === 'default')?.tables ?? [];
-// Roles without Hasura grants (the 1C integration operator) are not calendar users: see HASURA_DATA_ROLES.
-const calendarRoles = HASURA_DATA_ROLES.filter((role) => role !== 'admin').sort();
+// Roles without Hasura grants (the 1C integration operator) are not calendar users: see HASURA_DATA_ROLES. The ERP
+// administrator reads through the Hasura role erp_admin (access groups 0Б).
+const calendarRoles = HASURA_DATA_ROLES.map(hasuraRoleForErpRole).sort();
 
 const calendarResources = [
   'orders_view',
@@ -56,7 +58,10 @@ describe('Hasura calendar role independence', () => {
     expect(permissions.map(({ role }) => role).sort()).toEqual(calendarRoles);
     for (const { permission } of permissions) {
       expect(permission.columns).toBe('*');
-      expect(permission.filter).toEqual(expectedFilter(name));
+      // Access groups 0Б: the role filter is kept and wrapped in the user's effective-permission predicate.
+      const filter = permission.filter as { _and?: unknown[] };
+      expect(filter._and?.[0]).toEqual(expectedFilter(name));
+      expect(JSON.stringify(filter._and?.[1])).toContain('user_effective_permissions');
       expect(permission.allow_aggregations).toBe(true);
     }
   });

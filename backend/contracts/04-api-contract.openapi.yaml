@@ -6146,6 +6146,12 @@ paths:
                   type: string
                   maxLength: 2000
                   nullable: true
+                orderId:
+                  type: integer
+                  nullable: true
+                  description: >-
+                    Quick-create from an order: link the new doweling order to this production order in the same
+                    transaction (requires orders.update with scope over the order; an invisible order is 404)
                 idempotencyKey:
                   type: string
                   minLength: 8
@@ -6177,6 +6183,8 @@ paths:
                         type: string
                       version:
                         type: integer
+                  link:
+                    $ref: '#/components/schemas/DowelingOrderLink'
                   auditId:
                     type: string
                   requestId:
@@ -6186,7 +6194,7 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          description: Связанная запись присадки не найдена
+          description: Связанная запись присадки (DOWELING_REFERENCE_NOT_FOUND) или заказ (ORDER_NOT_FOUND) не найдены
           content:
             application/json:
               schema:
@@ -6201,6 +6209,138 @@ paths:
                 $ref: '#/components/schemas/ApiErrorEnvelope'
         '422':
           $ref: '#/components/responses/ValidationError'
+        '503':
+          description: >-
+            Doweling commands API is disabled (SERVICE_UNAVAILABLE) or the database is not configured
+            (DATABASE_UNAVAILABLE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/doweling-orders/{id}:
+    patch:
+      tags:
+        - Doweling
+      operationId: updateDowelingOrder
+      summary: Изменить присадку и список её заказов (карточка присадки)
+      security:
+        - bearerAuth: []
+      x-permission: doweling.update
+      description: >-
+        Full replacement of the doweling card with optimistic locking (expectedVersion). Every order the doweling
+        order is linked to now and after the save must be updatable by the user (orders.update with scope); an
+        order or doweling order outside the user's read visibility answers 404. A save without changes writes
+        nothing (changed=false). Audit doweling.updated / doweling.activated / doweling.deactivated, outbox
+        doweling_order.updated (one event per committed version).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion, dowelingOrderName, dowelingOrderDate, paymentStatusId, designEngineerId,
+                productionStatusId, operatorId, issueDate, paymentDate, partsCount, totalAmount, finalAmount, discount,
+                surcharge, paidAmount, linkCadFile, linkPdfFile, refKey1c, isActive, orderIds, baseOrderIds]
+              properties:
+                expectedVersion: { type: integer, minimum: 0 }
+                dowelingOrderName: { type: string, minLength: 1, maxLength: 200 }
+                dowelingOrderDate: { type: string, format: date }
+                paymentStatusId: { type: integer }
+                designEngineerId: { type: integer }
+                productionStatusId: { type: integer, nullable: true }
+                operatorId: { type: integer, nullable: true }
+                issueDate: { type: string, format: date, nullable: true }
+                paymentDate: { type: string, format: date, nullable: true }
+                partsCount: { type: integer, minimum: 0 }
+                totalAmount: { type: number, minimum: 0, nullable: true }
+                finalAmount: { type: number, minimum: 0, nullable: true }
+                discount: { type: number, minimum: 0 }
+                surcharge: { type: number, minimum: 0 }
+                paidAmount: { type: number, minimum: 0 }
+                linkCadFile: { type: string, maxLength: 2000, nullable: true }
+                linkPdfFile: { type: string, maxLength: 2000, nullable: true }
+                refKey1c: { type: string, format: uuid, nullable: true }
+                isActive: { type: boolean }
+                orderIds:
+                  type: array
+                  maxItems: 50
+                  uniqueItems: true
+                  description: Orders linked after the save; must be empty when isActive is false
+                  items: { type: integer }
+                baseOrderIds:
+                  type: array
+                  maxItems: 200
+                  description: >-
+                    Orders the card showed (active links and the legacy order_id); a mismatch with the current ones is
+                    409 DOWELING_LINKS_CONFLICT
+                  items: { type: integer }
+      responses:
+        '200':
+          description: Присадка после сохранения
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [dowelingOrder, links, changed, requestId]
+                properties:
+                  dowelingOrder:
+                    type: object
+                    required: [dowelingOrderId, dowelingOrderName, version, isActive]
+                    properties:
+                      dowelingOrderId: { type: integer }
+                      dowelingOrderName: { type: string }
+                      version: { type: integer }
+                      isActive: { type: boolean }
+                  links:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DowelingOrderLink'
+                  changed: { type: boolean }
+                  auditId: { type: string }
+                  requestId: { type: string }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: >-
+            Doweling order (DOWELING_ORDER_NOT_FOUND), order to link (ORDER_NOT_FOUND) or reference
+            (DOWELING_REFERENCE_NOT_FOUND) not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '409':
+          description: >-
+            Stale version (DOWELING_VERSION_CONFLICT, details.currentVersion), changed orders
+            (DOWELING_LINKS_CONFLICT), concurrent change
+            (DOWELING_CONCURRENT_CHANGE) or duplicate 1C key / name (DOWELING_DUPLICATE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          description: >-
+            Invalid payload (VALIDATION_ERROR), inconsistent amounts (DOWELING_AMOUNTS_INVALID, details.constraint)
+            or an order that is not a production order (ORDER_NOT_PRODUCTION)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
         '503':
           description: >-
             Doweling commands API is disabled (SERVICE_UNAVAILABLE) or the database is not configured
@@ -21919,6 +22059,12 @@ components:
         pageSize: { type: integer, minimum: 1 }
         total: { type: integer, minimum: 0 }
 
+    DowelingOrderLink:
+      type: object
+      required: [orderDowelingLinkId, orderId]
+      properties:
+        orderDowelingLinkId: { type: integer }
+        orderId: { type: integer }
     ApiErrorEnvelope:
       type: object
       required:
@@ -22022,6 +22168,7 @@ components:
         - clients.onec_documents.view
         - groups.batch_link
         - whatsapp.calendar_send
+        - references.quick_create
         - bitrix24.requests.view_all
         - bitrix24.requests.view_assigned
         - groups.view_history

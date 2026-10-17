@@ -21,7 +21,7 @@ import {
   getBackendOrderOneIfEnabled,
   getBackendOrdersListIfEnabled,
 } from '../query/orderPrimaryBootstrap';
-import { canMutateHasuraResource, canQueryHasuraResource } from './resourcePermissions';
+import { canMutateHasuraResource, canQueryHasuraResource, type HasuraWriteOperation } from './resourcePermissions';
 import { getCurrentUserRoleKey } from './resourceVisibility';
 
 type AnyObject = Record<string, any>;
@@ -1528,8 +1528,16 @@ function hasHasuraReadAccess(resource: string): boolean {
   return canQueryHasuraResource(resource, authSession.getUser());
 }
 
-function assertHasuraWriteAccess(resource: string): void {
-  if (canMutateHasuraResource(resource, authSession.getUser())) return;
+export function assertHasuraRowChanged(row: unknown, resource: string): void {
+  if (row !== null && row !== undefined) return;
+  throw {
+    message: `Запись недоступна для изменения или уже удалена (${resource})`,
+    statusCode: 403,
+  };
+}
+
+function assertHasuraWriteAccess(resource: string, operation: HasuraWriteOperation): void {
+  if (canMutateHasuraResource(resource, authSession.getUser(), operation)) return;
   throw {
     message: `Нет прав для изменения ресурса ${resource}`,
     statusCode: 403,
@@ -1904,7 +1912,7 @@ export const dataProvider = (_apiUrl: string) => {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
       assertNotRbacBackendOwnedWrite(resource);
-      assertHasuraWriteAccess(resource);
+      assertHasuraWriteAccess(resource, 'insert');
       getHasuraUrl();
       const selection = fieldsFor(resource);
       const idCol = ID_COLUMNS[resource] ?? "id";
@@ -1995,7 +2003,7 @@ export const dataProvider = (_apiUrl: string) => {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
       assertNotRbacBackendOwnedWrite(resource);
-      assertHasuraWriteAccess(resource);
+      assertHasuraWriteAccess(resource, 'update');
       getHasuraUrl();
       const idCol = ID_COLUMNS[resource] ?? "id";
       // Do not send id, audit fields, or timestamps in _set
@@ -2026,8 +2034,12 @@ export const dataProvider = (_apiUrl: string) => {
         }
       `;
       const data = await gqlRequest(query, varHeader ? varValues : undefined);
+      const updated = data[`update_${resource}_by_pk`];
+      // Hasura answers null when its permission filter excludes the row (e.g. a doweling order of another manager's
+      // order, access groups 0Б) or the row is gone: that is a refusal, not a save.
+      assertHasuraRowChanged(updated, resource);
       notifyOrderFormReferencesChanged(resource);
-      return { data: data[`update_${resource}_by_pk`] };
+      return { data: updated };
     },
 
     deleteOne: async ({ resource, id, meta }: AnyObject) => {
@@ -2051,7 +2063,7 @@ export const dataProvider = (_apiUrl: string) => {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
       assertNotRbacBackendOwnedWrite(resource);
-      assertHasuraWriteAccess(resource);
+      assertHasuraWriteAccess(resource, 'delete');
       getHasuraUrl();
       const idCol = ID_COLUMNS[resource] ?? "id";
       const query = `
@@ -2062,8 +2074,10 @@ export const dataProvider = (_apiUrl: string) => {
         }
       `;
       const data = await gqlRequest(query);
+      const deleted = data[`delete_${resource}_by_pk`];
+      assertHasuraRowChanged(deleted, resource);
       notifyOrderFormReferencesChanged(resource);
-      return { data: data[`delete_${resource}_by_pk`] };
+      return { data: deleted };
     },
 
     // Minimal stubs for unused methods in MVP

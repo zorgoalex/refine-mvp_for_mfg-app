@@ -17,15 +17,16 @@ const metadata = JSON.parse(
 const tables = metadata.sources.flatMap((source) => source.tables);
 
 // Справочник складов пишет только backend (/inventory/warehouses): права, версия,
-// запрет отключения при остатках/черновиках, аудит и outbox. Hasura — только чтение.
+// запрет отключения при остатках/черновиках, аудит и outbox. Читает тоже backend (inventoryApi), поэтому группы
+// доступа 0Б отозвали и чтение через Hasura (ops/hasura/access-predicates.json, revoke).
 describe('warehouses are backend-owned in Hasura', () => {
-  it('has no insert/update/delete permissions for warehouses', () => {
+  it('has no Hasura permissions for warehouses', () => {
     const warehouses = tables.find((entry) => entry.table.schema === 'public' && entry.table.name === 'warehouses');
     expect(warehouses).toBeDefined();
     expect(warehouses?.insert_permissions ?? []).toEqual([]);
     expect(warehouses?.update_permissions ?? []).toEqual([]);
     expect(warehouses?.delete_permissions ?? []).toEqual([]);
-    expect((warehouses?.select_permissions ?? []).length).toBeGreaterThan(0);
+    expect(warehouses?.select_permissions ?? []).toEqual([]);
   });
 
   it('does not expose stock tables for writes', () => {

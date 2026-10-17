@@ -2661,6 +2661,17 @@ probe_file() {
     # 254: trim_text_fields() escapes trimmed strings (values with quotes/newlines no longer rejected).
     254_trim_text_fields_json_escape*) probe_all \
       "SELECT COALESCE((SELECT strpos(prosrc, 'to_jsonb(btrim(e.v #>> ''{}''::text[]))') > 0 AND strpos(prosrc, '|| btrim(') = 0 FROM pg_proc WHERE oid = to_regprocedure('public.trim_text_fields()')), false);" ;;
+    # 256: the version of a doweling order follows every change of its fields and of its links (two triggers).
+    256_doweling_order_version_triggers*) probe_all \
+      "SELECT to_regprocedure('public.doweling_orders_bump_version()') IS NOT NULL AND to_regprocedure('public.order_doweling_links_bump_doweling_version()') IS NOT NULL AND to_regprocedure('public.note_doweling_version_bumped(bigint)') IS NOT NULL;" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_doweling_orders_bump_version' AND tgrelid = 'public.doweling_orders'::regclass AND NOT tgisinternal);" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_odl_bump_doweling_version' AND tgrelid = 'public.order_doweling_links'::regclass AND NOT tgisinternal);" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_doweling_orders_note_created' AND tgrelid = 'public.doweling_orders'::regclass AND NOT tgisinternal);" ;;
+    # 253: quick add of references from the order form behind its own permission (access groups 0Б).
+    253_references_quick_create_permission*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM permissions_catalog WHERE permission_name = 'references.quick_create' AND is_active);" \
+      "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'manager' AND rp.permission_name = 'references.quick_create');" \
+      "$(q_col permissions_state hasura_access_predicates)" ;;
     247_onec_agent_expected_silence*) probe_all \
       "$(q_col onec_agents expected_silence_utc)" \
       "$(q_con_on onec_agents chk_onec_agents_expected_silence_utc)" ;;
@@ -2852,7 +2863,7 @@ verify_applied_effect() {
     193_onec_agent_foundation*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|245_onec_operator_role*|247_onec_agent_expected_silence*|244_client_onec_permissions*|248_authorization_snapshot*|249_role_checks_to_permissions*|251_whatsapp_calendar_send_permission*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|255_crm_sync_paid_payment_operations*)
+    231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|245_onec_operator_role*|247_onec_agent_expected_silence*|244_client_onec_permissions*|248_authorization_snapshot*|249_role_checks_to_permissions*|251_whatsapp_calendar_send_permission*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|255_crm_sync_paid_payment_operations*|253_references_quick_create_permission*|256_doweling_order_version_triggers*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

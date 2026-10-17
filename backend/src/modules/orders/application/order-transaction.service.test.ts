@@ -662,6 +662,10 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     order.dowelingLinks = upsertRows(order.dowelingLinks, links, () => this.state.nextDowelingLinkId++);
   }
 
+  async assertDowelingLinkChangesAllowed(): Promise<void> {
+    this.call('assertDowelingLinkChangesAllowed');
+  }
+
   async deleteDowelingLinks(orderId: number, ids: readonly number[]): Promise<void> {
     this.call('deleteDowelingLinks');
     const order = this.getOrder(orderId);
@@ -1414,6 +1418,7 @@ describe('OrderTransactionService', () => {
       'upsertWorkshops',
       'deleteRequirements',
       'upsertRequirements',
+      'assertDowelingLinkChangesAllowed',
       'deleteDowelingLinks',
       'upsertDowelingLinks',
       'updateOrderTotalsAndVersion',
@@ -2618,6 +2623,10 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toContain('deleteDowelingLinks');
     expect(transactions.calls.indexOf('deleteDowelingLinks')).toBeLessThan(
       transactions.calls.indexOf('upsertDowelingLinks'),
+    );
+    // The doweling rule runs before any link is written (doweling-write-guard.ts).
+    expect(transactions.calls.indexOf('assertDowelingLinkChangesAllowed')).toBeLessThan(
+      transactions.calls.indexOf('deleteDowelingLinks'),
     );
     expect(transactions.calls.indexOf('updateOrderTotalsAndVersion')).toBeGreaterThan(
       transactions.calls.indexOf('upsertDowelingLinks'),

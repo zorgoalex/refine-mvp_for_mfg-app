@@ -31,3 +31,21 @@ describe('DowelingService.createDowelingOrder', () => {
     expect(r.createDowelingOrder).not.toHaveBeenCalled();
   });
 });
+
+describe('DowelingService.updateDowelingOrder', () => {
+  const updateRepo = () => ({ ...repo(), updateDowelingOrder: vi.fn().mockResolvedValue({ changed: true }) }) as any;
+
+  it('requires doweling.update before the repository is reached', async () => {
+    const r = updateRepo();
+    await expect(
+      new DowelingService({ doweling: r }).updateDowelingOrder({ currentUser: user('worker'), dowelingOrderId: 1, dto: {} as any }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED', details: { requiredPermissions: ['doweling.update'] } });
+    expect(r.updateDowelingOrder).not.toHaveBeenCalled();
+  });
+
+  it('passes a manager (doweling.update) to the repository, which checks the order scope', async () => {
+    const r = updateRepo();
+    await new DowelingService({ doweling: r }).updateDowelingOrder({ currentUser: user('manager'), dowelingOrderId: 1, dto: {} as any });
+    expect(r.updateDowelingOrder).toHaveBeenCalledOnce();
+  });
+});
