@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-17", title: "Bitrix: карточка оплаты со старой суммой закрывается",
+    services: ["ERP", "CRM"], repositories: ["repo_erp"],
+    changed: [
+      "Когда ERP исправляет в Bitrix сумму оплаты с отметкой «Оплачено», он закрывает карточку «Поступила оплата от клиента» этой оплаты, если в ней осталась прежняя сумма (то же, что кнопка «Обработано»). Закрытие и неудачная попытка видны в журнале аудита.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-17", title: "Присадка: список заказов в карточке",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: [
