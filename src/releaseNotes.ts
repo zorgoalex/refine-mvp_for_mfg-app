@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-17", title: "Присадка: список заказов в карточке",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "В карточке присадки у пользователей без прав администратора при открытии формы появлялись ошибки «field 'orders' not found»: список заказов читался из закрытого источника. Теперь он берётся из общего списка заказов с учётом доступа пользователя.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-15", title: "Присадка: сохранение через сервер, несколько заказов в карточке",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

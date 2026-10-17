@@ -92,8 +92,9 @@ export const DowelOrderEdit: React.FC<IResourceComponentsProps> = () => {
 
   const isActive = Form.useWatch("is_active", form);
 
+  // orders_view: the backend order list (search + the user's order scope); Hasura `orders` is ERP-admin-only since 0Б.
   const { selectProps: orderSelectProps } = useSelect({
-    resource: "orders",
+    resource: "orders_view",
     optionLabel: "order_name",
     optionValue: "order_id",
     defaultValue: linkedOrderIds,
