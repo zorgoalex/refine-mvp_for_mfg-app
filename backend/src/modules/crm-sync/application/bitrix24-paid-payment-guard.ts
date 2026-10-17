@@ -1,6 +1,7 @@
 import {
   Bitrix24ApiError,
   type Bitrix24ApiPort,
+  type Bitrix24PaymentCard,
   type Bitrix24RequestGuard,
 } from '../adapters/bitrix24-api-client';
 import type {
@@ -30,6 +31,23 @@ export interface PaidPaymentOperationStore {
     options: { requestId: string; reproject: boolean; bitrixSumAfter?: number | null },
   ): Promise<boolean>;
   recordFailure(operation: PaidPaymentOperation, error: string, requestId: string): Promise<void>;
+  /**
+   * Audit of closing the payment cards with an old amount: `requested` (written BEFORE Bitrix24 is
+   * called), then `closed` or `failed`. A failure to write throws, so the operation is not completed
+   * and recovery repeats the step.
+   */
+  recordPaymentCards(operation: PaidPaymentOperation, result: PaymentCardsResult, requestId: string): Promise<void>;
+}
+
+export interface PaymentCardsResult {
+  stage: 'requested' | 'closed' | 'failed';
+  /** Bitrix24 activity ids of the cards (to close, or closed). */
+  cardIds: string[];
+  /** Amount each card shows, as Bitrix24 kept it. */
+  cardSums: number[];
+  /** Amount applied to the payment by this step. */
+  appliedSum: number;
+  error: string | null;
 }
 
 export interface PaidPaymentSource {
@@ -264,6 +282,9 @@ export class Bitrix24PaidPaymentGuard {
       // Unpaid, or paid with the current amount (incl. a lost response of the full update):
       // the full update sets the fields and the flag back.
       await this.deps.bitrix.updatePayment(id, fields);
+      // Before completion: a crash or an audit failure leaves the operation open, and recovery
+      // repeats this step (the payment update is idempotent, a closed card is not listed again).
+      await this.closeStaleCards(operation, targetSum, requestId);
       await this.deps.store.complete(operation, 'applied', {
         requestId,
         reproject,
@@ -279,6 +300,55 @@ export class Bitrix24PaidPaymentGuard {
     await this.deps.bitrix.deletePayment(id);
     await this.deps.store.complete(operation, 'deleted', { requestId, reproject });
     return 'deleted';
+  }
+
+  /**
+   * Closes the open «Поступила оплата от клиента» card of the payment when it still shows another
+   * amount (the old one): Bitrix24 keeps the amount of the moment the payment was first marked paid
+   * and does not create a new card when the flag is set back. Same as the «Обработано» button.
+   * Runs after the payment carries the new amount and before the operation completes. Only a
+   * Bitrix24 error is audited as a failed close and does not stop the payment; any other error (lost
+   * writer ownership from the request guard, an audit write) propagates, the operation stays open and
+   * recovery repeats the step. A card with the current amount or without an amount is left as is.
+   */
+  private async closeStaleCards(
+    operation: PaidPaymentOperation,
+    appliedSum: number,
+    requestId: string,
+  ): Promise<void> {
+    const { bitrix, store } = this.deps;
+    if (!bitrix.listPaymentCards || !bitrix.completeActivity) return;
+    // The paid-reset flag and order allowlist also stop closing for operations already started.
+    if (!this.canStart(operation.erpOrderId)) return;
+    let stale: Bitrix24PaymentCard[];
+    try {
+      stale = (await bitrix.listPaymentCards(operation.bitrixPaymentId))
+        .filter((card) => !card.completed && card.sum !== null && !sameAmount(card.sum, appliedSum));
+    } catch (error) {
+      if (!(error instanceof Bitrix24ApiError)) throw error;
+      await store.recordPaymentCards(operation, {
+        stage: 'failed', cardIds: [], cardSums: [], appliedSum, error: error.message,
+      }, requestId);
+      return;
+    }
+    if (stale.length === 0) return;
+    const cardIds = stale.map((card) => card.id);
+    const cardSums = stale.map((card) => card.sum as number);
+    await store.recordPaymentCards(operation, { stage: 'requested', cardIds, cardSums, appliedSum, error: null }, requestId);
+    const closed: string[] = [];
+    try {
+      for (const card of stale) {
+        await bitrix.completeActivity(card.id);
+        closed.push(card.id);
+      }
+    } catch (error) {
+      if (!(error instanceof Bitrix24ApiError)) throw error;
+      await store.recordPaymentCards(operation, {
+        stage: 'failed', cardIds: closed, cardSums, appliedSum, error: error.message,
+      }, requestId);
+      return;
+    }
+    await store.recordPaymentCards(operation, { stage: 'closed', cardIds, cardSums, appliedSum, error: null }, requestId);
   }
 
   private async read(id: string): Promise<RemotePayment | null> {

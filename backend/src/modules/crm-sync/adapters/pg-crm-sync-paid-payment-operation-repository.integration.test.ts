@@ -201,6 +201,25 @@ describe.skipIf(!databaseUrl)('PgCrmSyncPaidPaymentOperationRepository (PostgreS
     expect((await sql(`SELECT stuck_at FROM crm_sync_paid_payment_operation`)).rows[0].stuck_at).toBeNull();
   });
 
+  it('audits the card close stages with the payment and order dimensions', async () => {
+    const op = await begin('update');
+    const base = { cardSums: [142000], appliedSum: 450 };
+    await repo.recordPaymentCards(op, { ...base, stage: 'requested', cardIds: ['8015'], error: null }, 'req');
+    await repo.recordPaymentCards(op, { ...base, stage: 'closed', cardIds: ['8015'], error: null }, 'req');
+    await repo.recordPaymentCards(op, { ...base, stage: 'failed', cardIds: [], error: 'Access denied' }, 'req');
+    const rows = (await sql(`SELECT event, row FROM audit_rows WHERE event LIKE 'crm_sync.payment_card%' ORDER BY event`)).rows;
+    expect(rows.map((row) => row.event)).toEqual([
+      'crm_sync.payment_card_close_failed', 'crm_sync.payment_card_close_requested', 'crm_sync.payment_card_closed',
+    ]);
+    expect(rows[2].row).toMatchObject({
+      entityType: 'payment', entityId: '3', requestId: 'req', source: 'crm-sync',
+      relatedOrderId: 2, relatedPaymentId: 3,
+      before: { cardSums: [142000] }, after: { sum: 450, cardIds: ['8015'] },
+      metadata: { bitrixPaymentId: '700', bitrixDealId: '50' },
+    });
+    expect(rows[0].row.metadata).toMatchObject({ error: 'Access denied' });
+  });
+
   describe('retry of the failed outbound queue', () => {
     const event = (key: string, status: string, minutesAgo: number, op = 'upsert') => sql(
       `INSERT INTO crm_sync_outbox (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key, status, attempts, created_at)
