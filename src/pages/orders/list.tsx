@@ -954,6 +954,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   // Загружаем детали для заказов на текущей странице
   const { data: detailsData } = useList({
     resource: "order_details",
+    // Money through Hasura `financials` (access groups «финансы»): only where this path shows it.
+    meta: { financials: true },
     filters: [
       {
         field: "order_id",

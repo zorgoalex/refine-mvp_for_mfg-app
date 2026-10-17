@@ -67,7 +67,7 @@ export const DowellingOrderQuickCreate: React.FC<DowellingOrderQuickCreateProps>
             dowelingOrderName: values.doweling_order_name,
             designEngineerId: values.design_engineer_id,
             operatorId: values.design_engineer_id, // По умолчанию тот же, что и конструктор
-            paymentStatusId: 1, // По умолчанию первый статус (обычно «Не оплачен»)
+            // No payment status: the server sets «Не оплачен» (by code; money needs orders.view_financials).
             productionStatusId: 1,
             dowelingOrderDate: /^\d{4}-\d{2}-\d{2}/.test(orderDate ?? '') ? orderDate!.slice(0, 10) : new Date().toISOString().split('T')[0],
             orderId,

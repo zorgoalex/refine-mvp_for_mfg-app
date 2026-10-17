@@ -27,10 +27,10 @@ function python(args: string[], input: string) {
 }
 
 describe('access groups 0Б: Hasura permissions follow effective permissions (metadata snapshot)', () => {
-  it('has both steps applied in the snapshot (a rebuild changes nothing)', () => {
+  it('has every step applied in the snapshot (a rebuild changes nothing)', () => {
     const result = python(['status'], snapshotText);
     expect(result.stderr).toBe('');
-    expect(result.stdout.trim()).toBe('A=applied B=applied');
+    expect(result.stdout.trim()).toBe('A=applied B=applied F1=applied F2=applied');
   });
 
   it('gives every permission of every role an effective-permission predicate, except the listed exceptions', () => {
@@ -50,6 +50,23 @@ describe('access groups 0Б: Hasura permissions follow effective permissions (me
     }
     expect(missing).toEqual([]);
     expect(Object.keys(rules.exceptions)).toEqual(['app_settings.select']);
+  });
+
+  it('money projections are reachable only through `financials` (no root fields) and need orders.view_financials', () => {
+    const projections = Object.keys(rules.financials.projections);
+    for (const name of projections) {
+      const table = tables.find((entry) => entry.table.name === name)!;
+      expect(table.select_permissions?.length, name).toBeGreaterThan(0);
+      for (const { permission } of table.select_permissions ?? []) {
+        expect(permission, name).toMatchObject({ query_root_fields: [], subscription_root_fields: [] });
+        expect(permission.allow_aggregations ?? false, name).toBe(false);
+        expect(JSON.stringify(permission.filter)).toContain('"orders.view_financials"');
+      }
+    }
+    for (const [name, source] of Object.entries(rules.financials.sources as Record<string, { projection: string }>)) {
+      const table = tables.find((entry) => entry.table.name === name)!;
+      expect(JSON.stringify(table.object_relationships ?? []), name).toContain(`"${source.projection}"`);
+    }
   });
 
   it('never lets a role read secrets or session tokens', () => {
@@ -119,10 +136,15 @@ const MATRIX = ['p|manager|references.manage', 'p|manager|references.view', 's|m
 
 // A minimal Hasura: export_metadata v2, replace_metadata with resource_version, run_sql for the role matrix and the
 // permissions_state flag (a write sets it; the matrix is answered from `state.matrix`).
-function fakeHasura(options: { bumpAfterExport?: boolean; loseReplaceAnswer?: number; failFlagWrite?: number; failExportAfterLoss?: number; failAudit?: number } = {}) {
+function fakeHasura(options: { bumpAfterExport?: boolean; loseReplaceAnswer?: number; failFlagWrite?: number; failExportAfterLoss?: number; failAudit?: number; metadata?: unknown; loseFinAnswer?: number; failReplace?: number; loseRevertStartAnswer?: number } = {}) {
   const state = {
-    version: 3, metadata: JSON.parse(JSON.stringify(base)), matrix: [...MATRIX], flag: false, replaces: 0,
+    version: 3, metadata: JSON.parse(JSON.stringify(options.metadata ?? base)), matrix: [...MATRIX], flag: false, replaces: 0,
     flagWrites: [] as boolean[], audits: [] as string[],
+    // «Финансы»: permissions_state.hasura_financials_state, users holding orders.view_financials, database columns.
+    fin: 'open', finWrites: [] as string[], finUsers: ['5', '7'], columns: {} as Record<string, string[]>,
+    snapshot: null as string[] | null, loseFinAnswer: options.loseFinAnswer ?? 0, failReplace: options.failReplace ?? 0,
+    revert: null as null | { run: { runId: string; operator: string }; allowReopen: boolean; reopened: string[] },
+    loseRevertStartAnswer: options.loseRevertStartAnswer ?? 0,
     loseReplaceAnswer: options.loseReplaceAnswer ?? 0, failFlagWrite: options.failFlagWrite ?? 0,
     failExportAfterLoss: options.failExportAfterLoss ?? 0, failAudit: options.failAudit ?? 0, lostAnswer: false,
   };
@@ -141,6 +163,7 @@ function fakeHasura(options: { bumpAfterExport?: boolean; loseReplaceAnswer?: nu
       }
       if (payload.type === 'replace_metadata') {
         if (payload.resource_version !== state.version) return reply(409, { error: 'conflict', code: 'conflict' });
+        if (state.failReplace > 0) { state.failReplace -= 1; return reply(500, { error: 'replace failed, nothing applied' }); }
         state.metadata = payload.args.metadata;
         state.version += 1;
         state.replaces += 1;
@@ -151,6 +174,39 @@ function fakeHasura(options: { bumpAfterExport?: boolean; loseReplaceAnswer?: nu
       }
       if (payload.type === 'run_sql') {
         const sql: string = payload.args.sql;
+        if (sql.includes("to_jsonb(ps) ->> 'hasura_financials_state'")) return reply(200, { result: [['v'], [state.fin]] });
+        if (sql.includes('information_schema.columns')) {
+          return reply(200, { result: [['row'], ...Object.entries(state.columns).map(([name, cols]) => [`${name}|${[...cols].sort().join(',')}`])] });
+        }
+        if (sql.includes("-> 'hasura_financials_users'")) return reply(200, { result: [['v'], [JSON.stringify(state.snapshot)]] });
+        if (sql.includes("-> 'hasura_financials_revert'")) return reply(200, { result: [['v'], [JSON.stringify(state.revert)]] });
+        if (!payload.args.read_only && sql.includes('SET hasura_financials_state')) {
+          expect(sql.indexOf('FOR UPDATE')).toBeLessThan(sql.indexOf('UPDATE public.permissions_state SET hasura_financials_state'));
+          expect(sql).toContain('INSERT INTO public.audit_log');
+          state.audits.push(sql);
+          if (sql.includes("SET hasura_financials_state = 'reverting', hasura_financials_revert = jsonb_build_object")) {
+            // revert start: closed → reverting (+ durable intent) unless the snapshot is missing or a snapshot user lost the right
+            const lost = (state.snapshot ?? []).filter((id) => !state.finUsers.includes(id));
+            const allowed = !sql.includes('hasura_financials_users IS NOT NULL AND NOT EXISTS');
+            if (state.fin === 'closed' && (allowed || (state.snapshot !== null && lost.length === 0))) {
+              state.fin = 'reverting'; state.finWrites.push('reverting');
+              const run = JSON.parse(/jsonb_build_object\('run', \$ag0b\$(.*?)\$ag0b\$::jsonb, 'allowReopen', (true|false)/.exec(sql)![1]);
+              state.revert = { run, allowReopen: /'allowReopen', true/.test(sql), reopened: lost };
+              if (state.loseRevertStartAnswer > 0) { state.loseRevertStartAnswer -= 1; return reply(502, { error: 'bad gateway' }); }
+            }
+            return reply(200, { result: [['user'], ...lost.map((id) => [id])] });
+          }
+          const target = /SET hasura_financials_state = '(\w+)', hasura_financials_users = (NULL|hasura_financials_users|\(SELECT)/.exec(sql)!;
+          state.fin = target[1];
+          const intent = /hasura_financials_revert = (NULL|hasura_financials_revert|\$ag0b\$(.*?)\$ag0b\$::jsonb)/.exec(sql)!;
+          if (intent[1] === 'NULL') state.revert = null;
+          else if (intent[1] !== 'hasura_financials_revert') state.revert = JSON.parse(intent[2]);
+          if (target[2] === 'NULL') state.snapshot = null;
+          else if (target[2] === '(SELECT') state.snapshot = [...state.finUsers];
+          state.finWrites.push(state.fin);
+          if (state.loseFinAnswer > 0) { state.loseFinAnswer -= 1; return reply(502, { error: 'bad gateway' }); }
+          return reply(200, { result: [['user'], ...(state.snapshot ?? []).map((id) => [id])] });
+        }
         if (!payload.args.read_only && sql.includes('SET hasura_access_predicates')) {
           expect(sql.indexOf('FOR UPDATE')).toBeLessThan(sql.indexOf('UPDATE public.permissions_state SET hasura_access_predicates'));
           expect(sql).toContain('INSERT INTO public.audit_log');
@@ -483,6 +539,258 @@ describe('access-predicates apply / revert', () => {
     const last = state.audits[state.audits.length - 1];
     expect(last).toContain('"allowReopen": true');
     expect(last).toContain('p|manager|references.manage');
+  });
+
+  // ---------------------------------------------------------------- «финансы»: steps F1 / F2 and the revert barrier
+  const finBase = {
+    version: 3,
+    sources: [{
+      name: 'default', kind: 'postgres', configuration: {},
+      tables: [{ table: { schema: 'public', name: 'orders_view' },
+        select_permissions: [
+          { role: 'manager', permission: { columns: '*', filter: { order_kind: { _eq: 'production_order' } }, allow_aggregations: true } },
+          { role: 'superadmin', permission: { columns: '*', filter: {}, allow_aggregations: true } },
+        ] }],
+    }],
+  };
+  const finRules = {
+    adminRole: 'erp_admin', adminTemplateRole: 'superadmin', trackTables: [], relationships: [], exceptions: {}, revoke: {},
+    tables: { orders_view: { select: { any: ['orders.view'] } } },
+    financials: {
+      permission: 'orders.view_financials', relationship: 'financials',
+      projections: { order_financials_view: { base: 'orders_view', mapping: { order_id: 'order_id' }, columns: ['order_id', 'final_amount'] } },
+      sources: { orders_view: { projection: 'order_financials_view', mapping: { order_id: 'order_id' }, financialColumns: ['final_amount'], otherColumns: ['order_id', 'order_name'] } },
+    },
+  };
+  const DB_COLUMNS = { orders_view: ['order_id', 'order_name', 'final_amount'], order_financials_view: ['order_id', 'final_amount'] };
+  const prepareFin = () => {
+    stateDir = mkdtempSync(join(tmpdir(), 'agfin-'));
+    const rulesFile = join(stateDir, 'rules.json');
+    writeFileSync(rulesFile, JSON.stringify(finRules));
+    let built = JSON.stringify(finBase);
+    const stages: Record<string, unknown> = {};
+    for (const step of ['A', 'B', 'F1', 'F2']) {
+      built = spawnSync('python3', [modulePath, 'build', '--step', step, '--rules', rulesFile], { input: built, encoding: 'utf8' }).stdout;
+      stages[step] = JSON.parse(built);
+    }
+    const expectFile = join(stateDir, 'expect.json');
+    writeFileSync(expectFile, built);
+    return { rulesFile, expectFile, dir: join(stateDir, 'state'), stages };
+  };
+  const finServer = () => {
+    const fake = fakeHasura({ metadata: finBase });
+    fake.state.columns = JSON.parse(JSON.stringify(DB_COLUMNS));
+    return fake;
+  };
+  const tableOf = (metadata: { sources: Array<{ tables: Table[] }> }, name: string) => metadata.sources[0].tables.find((t) => t.table.name === name)!;
+  const applyAll = async (port: number, files: ReturnType<typeof prepareFin>) => {
+    for (const step of ['A', 'B', 'F1', 'F2']) {
+      const result = await apply(port, step, files);
+      expect(result.code, `${step}: ${result.output.replace(/\n/g, " | ")}`).toBe(0);
+    }
+  };
+  const revertStep = (port: number, files: ReturnType<typeof prepareFin>, step: string, extra: string[] = []) =>
+    runScript(port, ['revert', '--step', step, '--state-dir', files.dir, ...extra], files.rulesFile);
+
+  it('F1 needs B; F1 adds a root-less projection with orders.view_financials; F2 drops the money columns and closes', async () => {
+    const files = prepareFin();
+    const { server, state } = finServer();
+    const port = await listen(server);
+    expect((await apply(port, 'A', files)).code).toBe(0);
+    expect((await apply(port, 'F1', files)).output).toContain('step B is not applied');
+    expect((await apply(port, 'B', files)).code).toBe(0);
+    expect((await apply(port, 'F1', files)).code).toBe(0);
+    const projections = tableOf(state.metadata, 'order_financials_view').select_permissions!;
+    expect(projections.map((p) => p.role)).toEqual(['erp_admin', 'manager', 'superadmin']);
+    const projection = projections.find((p) => p.role === 'manager')!;
+    const filter = JSON.stringify(projection.permission.filter);
+    expect(filter).toContain('"orders.view_financials"');
+    // Reached only through `financials` of a row the role reads: no root field, no aggregate.
+    expect(projection.permission).toMatchObject({ query_root_fields: [], subscription_root_fields: [] });
+    expect(projection.permission.allow_aggregations ?? false).toBe(false);
+    expect(JSON.stringify(tableOf(state.metadata, 'orders_view').object_relationships)).toContain('"order_financials_view"');
+    expect(state.fin).toBe('open');
+    const f2 = await apply(port, 'F2', files);
+    expect(f2.code, f2.output).toBe(0);
+    for (const perm of tableOf(state.metadata, 'orders_view').select_permissions!) expect(perm.permission.columns).toEqual(['order_id', 'order_name']);
+    expect(state.fin).toBe('closed');
+    expect(JSON.parse(readFileSync(join(files.dir, 'F2-current', 'users-at-F2.json'), 'utf8'))).toEqual(['5', '7']);
+    expect((await apply(port, 'F2', files)).output).toContain('already applied');
+  });
+
+  it('F2 refuses when the database columns differ from the rules (a column nobody reviewed), changing nothing', async () => {
+    const files = prepareFin();
+    const { server, state } = finServer();
+    state.columns.orders_view = [...DB_COLUMNS.orders_view, 'new_money_column'];
+    const port = await listen(server);
+    for (const step of ['A', 'B', 'F1']) expect((await apply(port, step, files)).code).toBe(0);
+    const replaces = state.replaces;
+    const result = await apply(port, 'F2', files);
+    expect(result.code).not.toBe(0);
+    expect(result.output).toContain('new_money_column');
+    expect(state.replaces).toBe(replaces);
+    expect(state.fin).toBe('open');
+  });
+
+  it('revert F2 refuses while a user of the F2 snapshot lost the right (state stays closed), reverts through `reverting` once restored', async () => {
+    const files = prepareFin();
+    const { server, state } = finServer();
+    const port = await listen(server);
+    await applyAll(port, files);
+    state.finUsers = ['5'];
+    const refused = await revertStep(port, files, 'F2');
+    expect(refused.code).not.toBe(0);
+    expect(refused.output).toContain('7');
+    expect(state.fin).toBe('closed');
+    expect(state.metadata).toEqual(files.stages.F2);
+
+    state.finUsers = ['5', '7'];
+    const reverted = await revertStep(port, files, 'F2');
+    expect(reverted.code, reverted.output).toBe(0);
+    expect(state.finWrites.slice(-2)).toEqual(['reverting', 'open']);
+    expect(state.metadata).toEqual(files.stages.F1);
+    expect(readdirSync(files.dir)).not.toContain('F2-current');
+  });
+
+  it('keeps `reverting` (authorization changes paused) when the restore outcome is unknown; a re-run finishes', async () => {
+    const files = prepareFin();
+    const { server, state } = finServer();
+    const port = await listen(server);
+    await applyAll(port, files);
+    state.loseReplaceAnswer = 1;
+    state.failExportAfterLoss = 1;
+    const unknown = await revertStep(port, files, 'F2');
+    expect(unknown.code).not.toBe(0);
+    expect(unknown.output).toContain('state unknown');
+    expect(state.fin).toBe('reverting');
+    const finished = await revertStep(port, files, 'F2');
+    expect(finished.code, finished.output).toBe(0);
+    expect(state.fin).toBe('open');
+    expect(state.metadata).toEqual(files.stages.F1);
+  });
+
+  it('--allow-reopen reverts F2 despite a lost right and records the reopened users', async () => {
+    const files = prepareFin();
+    const { server, state } = finServer();
+    const port = await listen(server);
+    await applyAll(port, files);
+    state.finUsers = ['5'];
+    const result = await revertStep(port, files, 'F2', ['--allow-reopen']);
+    expect(result.code, result.output).toBe(0);
+    expect(state.fin).toBe('open');
+    expect(state.audits.some((sql) => sql.includes('"reopened": ["7"]'))).toBe(true);
+  });
+
+  it('revert F1 waits for the revert of F2, then restores the metadata after B', async () => {
+    const files = prepareFin();
+    const { server, state } = finServer();
+    const port = await listen(server);
+    await applyAll(port, files);
+    expect((await revertStep(port, files, 'F1')).output).toContain('revert F2 first');
+    expect((await revertStep(port, files, 'F2')).code).toBe(0);
+    const f1 = await revertStep(port, files, 'F1');
+    expect(f1.code, f1.output).toBe(0);
+    expect(state.metadata).toEqual(files.stages.B);
+  });
+
+  it('a lost answer when F2 closes: the snapshot is in the database with `closed`; a re-run (or a revert) recovers', async () => {
+    const files = prepareFin();
+    const { server, state } = finServer();
+    state.loseFinAnswer = 1;
+    const port = await listen(server);
+    for (const step of ['A', 'B', 'F1']) expect((await apply(port, step, files)).code).toBe(0);
+    expect((await apply(port, 'F2', files)).code).not.toBe(0);
+    expect(state.fin).toBe('closed');
+    expect(state.snapshot).toEqual(['5', '7']);
+    expect(readdirSync(files.dir)).not.toContain('F2-current');
+    // The revert finds the pending generation of the live metadata and still works.
+    const reverted = await revertStep(port, files, 'F2');
+    expect(reverted.code, reverted.output).toBe(0);
+    expect(state.fin).toBe('open');
+    expect(state.snapshot).toBeNull();
+    // Closing again: a re-run after a lost answer confirms from the database snapshot.
+    state.loseFinAnswer = 1;
+    expect((await apply(port, 'F2', files)).code).not.toBe(0);
+    const resumed = await apply(port, 'F2', files);
+    expect(resumed.code, resumed.output).toBe(0);
+    expect(JSON.parse(readFileSync(join(files.dir, 'F2-current', 'users-at-F2.json'), 'utf8'))).toEqual(['5', '7']);
+  });
+
+  it('an empty snapshot (nobody had the right at F2) reverts without an override', async () => {
+    const files = prepareFin();
+    const { server, state } = finServer();
+    state.finUsers = [];
+    const port = await listen(server);
+    await applyAll(port, files);
+    expect(state.snapshot).toEqual([]);
+    const reverted = await revertStep(port, files, 'F2');
+    expect(reverted.code, reverted.output).toBe(0);
+    expect(state.fin).toBe('open');
+  });
+
+  it('a failed restore ends the attempt (closed, snapshot kept, intent dropped); a later override is recorded as itself', async () => {
+    const files = prepareFin();
+    const { server, state } = finServer();
+    const port = await listen(server);
+    await applyAll(port, files);
+    state.failReplace = 1;
+    const failed = await revertStep(port, files, 'F2');
+    expect(failed.code).not.toBe(0);
+    expect(state.fin).toBe('closed');
+    expect(state.snapshot).toEqual(['5', '7']);
+    expect(readdirSync(join(files.dir, 'F2-current'))).not.toContain('revert-intent.json');
+    state.finUsers = ['5'];
+    const refused = await revertStep(port, files, 'F2');
+    expect(refused.code).not.toBe(0);
+    const overridden = await revertStep(port, files, 'F2', ['--allow-reopen', '--operator', 'second-operator']);
+    expect(overridden.code, overridden.output).toBe(0);
+    const completion = state.audits.filter((sql) => sql.includes('"result": "reverted"')).at(-1)!;
+    expect(completion).toContain('"allowReopen": true');
+    expect(completion).toContain('"reopened": ["7"]');
+    expect(completion).toContain('second-operator');
+  });
+
+  it('a lost answer right after the barrier: the retry completes the ORIGINAL revert (operator, override, reopened users)', async () => {
+    const files = prepareFin();
+    const { server, state } = finServer();
+    const port = await listen(server);
+    await applyAll(port, files);
+    state.finUsers = ['5'];
+    state.loseRevertStartAnswer = 1;
+    const lost = await revertStep(port, files, 'F2', ['--allow-reopen', '--operator', 'first-operator']);
+    expect(lost.code).not.toBe(0);
+    expect(state.fin).toBe('reverting');
+    expect(state.revert).toMatchObject({ allowReopen: true, reopened: ['7'], run: { operator: 'first-operator' } });
+    const retried = await revertStep(port, files, 'F2', ['--operator', 'second-operator']);
+    expect(retried.code, retried.output).toBe(0);
+    expect(state.fin).toBe('open');
+    expect(state.revert).toBeNull();
+    const completion = state.audits.filter((sql) => sql.includes('"result": "reverted"')).at(-1)!;
+    expect(completion).toContain('"allowReopen": true');
+    expect(completion).toContain('"reopened": ["7"]');
+    expect(completion).toContain('first-operator');
+    const barrier = state.audits.find((sql) => sql.includes("SET hasura_financials_state = 'reverting', hasura_financials_revert"))!;
+    expect(barrier).toContain('"allowReopen": true');
+    expect(barrier).toContain("jsonb_build_object('reopened'");
+  });
+
+  it('apply F2 during an interrupted revert cancels it and keeps the ORIGINAL snapshot (the next revert still refuses)', async () => {
+    const files = prepareFin();
+    const { server, state } = finServer();
+    const port = await listen(server);
+    await applyAll(port, files);
+    state.finUsers = ['5'];
+    state.loseRevertStartAnswer = 1;
+    expect((await revertStep(port, files, 'F2', ['--allow-reopen'])).code).not.toBe(0);
+    expect(state.fin).toBe('reverting');
+    const cancel = await apply(port, 'F2', files);
+    expect(cancel.code, cancel.output).toBe(0);
+    expect(state.fin).toBe('closed');
+    expect(state.snapshot).toEqual(['5', '7']);
+    expect(state.revert).toBeNull();
+    const refused = await revertStep(port, files, 'F2');
+    expect(refused.code).not.toBe(0);
+    expect(refused.output).toContain('7');
   });
 
   it('the shell wrapper never prints the admin secret', async () => {

@@ -12,6 +12,7 @@ import type {
   UpdateDowelingOrderRequestDto,
   UpdateDowelingOrderResponseDto,
 } from '../dto/doweling.dto';
+import { DOWELING_MONEY_FIELDS } from '../dto/doweling.dto';
 import { DowelingRuntimeConfigService } from './doweling-runtime-config.service';
 
 const swaggerSchema = (schema: unknown): SchemaObject => schema as SchemaObject;
@@ -29,7 +30,7 @@ function isRealCalendarDate(value: string): boolean {
 const createDowelingRequestSchema = z.object({
   dowelingOrderName: humanName(200, 1),
   designEngineerId: z.number().int().positive(),
-  paymentStatusId: z.number().int().positive(),
+  paymentStatusId: z.number().int().positive().optional(),
   dowelingOrderDate: z
     .string()
     .trim()
@@ -65,18 +66,18 @@ const updateDowelingRequestSchema = z
     expectedVersion: z.number().int().nonnegative(),
     dowelingOrderName: humanName(200, 1),
     dowelingOrderDate: calendarDate,
-    paymentStatusId: z.number().int().positive(),
+    paymentStatusId: z.number().int().positive().optional(),
     designEngineerId: z.number().int().positive(),
     productionStatusId: z.number().int().positive().nullable(),
     operatorId: z.number().int().positive().nullable(),
     issueDate: calendarDate.nullable(),
-    paymentDate: calendarDate.nullable(),
+    paymentDate: calendarDate.nullable().optional(),
     partsCount: z.number().int().nonnegative().max(1_000_000),
-    totalAmount: amount.nullable(),
-    finalAmount: amount.nullable(),
-    discount: amount,
-    surcharge: amount,
-    paidAmount: amount,
+    totalAmount: amount.nullable().optional(),
+    finalAmount: amount.nullable().optional(),
+    discount: amount.optional(),
+    surcharge: amount.optional(),
+    paidAmount: amount.optional(),
     linkCadFile: optionalLink,
     linkPdfFile: optionalLink,
     refKey1c: z
@@ -97,17 +98,22 @@ const updateDowelingRequestSchema = z
     if (!value.isActive && value.orderIds.length > 0) {
       context.addIssue({ code: 'custom', path: ['orderIds'], message: 'An inactive doweling order has no orders' });
     }
+    // Money is all or none: a save without it keeps the money (access groups «финансы»).
+    const missing = DOWELING_MONEY_FIELDS.filter((field) => value[field] === undefined);
+    if (missing.length > 0 && missing.length < DOWELING_MONEY_FIELDS.length) {
+      context.addIssue({ code: 'custom', path: [missing[0]], message: `Money fields go together: missing ${missing.join(', ')}` });
+    }
   });
 
 const dowelingIdSchema = z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 
 const createDowelingRequestSwaggerSchema = {
   type: 'object',
-  required: ['dowelingOrderName', 'designEngineerId', 'paymentStatusId', 'idempotencyKey'],
+  required: ['dowelingOrderName', 'designEngineerId', 'idempotencyKey'],
   properties: {
     dowelingOrderName: { type: 'string', minLength: 1, maxLength: 200 },
     designEngineerId: { type: 'integer' },
-    paymentStatusId: { type: 'integer' },
+    paymentStatusId: { type: 'integer', description: 'Needs orders.view_financials; absent = the status with code unpaid' },
     dowelingOrderDate: { type: 'string', format: 'date', nullable: true },
     productionStatusId: { type: 'integer', nullable: true },
     operatorId: { type: 'integer', nullable: true },
@@ -123,11 +129,12 @@ const updateDowelingRequestSwaggerSchema = {
   type: 'object',
   additionalProperties: false,
   required: [
-    'expectedVersion', 'dowelingOrderName', 'dowelingOrderDate', 'paymentStatusId', 'designEngineerId',
-    'productionStatusId', 'operatorId', 'issueDate', 'paymentDate', 'partsCount', 'totalAmount', 'finalAmount',
-    'discount', 'surcharge', 'paidAmount', 'linkCadFile', 'linkPdfFile', 'refKey1c', 'isActive', 'orderIds',
-    'baseOrderIds',
+    'expectedVersion', 'dowelingOrderName', 'dowelingOrderDate', 'designEngineerId',
+    'productionStatusId', 'operatorId', 'issueDate', 'partsCount', 'linkCadFile', 'linkPdfFile', 'refKey1c', 'isActive',
+    'orderIds', 'baseOrderIds',
   ],
+  description: 'Money (paymentStatusId, paymentDate, totalAmount, finalAmount, discount, surcharge, paidAmount) is all or none: '
+    + 'without it the money stays as it is; with it orders.view_financials is required (403 otherwise).',
   properties: {
     expectedVersion: { type: 'integer', minimum: 0 },
     dowelingOrderName: { type: 'string', minLength: 1, maxLength: 200 },

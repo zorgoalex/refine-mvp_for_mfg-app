@@ -23,6 +23,7 @@ import {
 } from '../query/orderPrimaryBootstrap';
 import { canMutateHasuraResource, canQueryHasuraResource, type HasuraWriteOperation } from './resourcePermissions';
 import { getCurrentUserRoleKey } from './resourceVisibility';
+import { financialFieldPath, flattenFinancialRows, flattenFinancials, selectionWithFinancials } from './hasuraFinancials';
 
 type AnyObject = Record<string, any>;
 
@@ -820,7 +821,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "doweling_order_id",
     "delete_flag",
     "version",
-    "doweling_order { doweling_order_id doweling_order_name design_engineer_id operator_id payment_status_id production_status_id doweling_order_date parts_count total_amount final_amount discount paid_amount payment_date issue_date }",
+    "doweling_order { doweling_order_id doweling_order_name design_engineer_id operator_id production_status_id doweling_order_date parts_count issue_date }",
     "created_by",
     "edited_by",
     "created_at",
@@ -1185,10 +1186,20 @@ const filterValidResourceFields = (resource: string, items?: any[]) => {
   });
 };
 
+// A money field (access groups «финансы») is sorted / filtered through the `financials` relationship, or dropped for
+// a user without orders.view_financials (hasuraFinancials.ts).
+const nestFinancial = (resource: string, field: string, inner: string): string | null => {
+  const path = financialFieldPath(resource, field, authSession.getUser());
+  if (path === null) return null;
+  return path ? `{ ${path}: { ${field}: ${inner} } }` : `{ ${field}: ${inner} }`;
+};
+
 const buildOrderBy = (resource: string, sorters?: any[]) => {
   const safeSorters = filterValidResourceFields(resource, sorters);
-  if (safeSorters.length === 0) return "";
-  const parts = safeSorters.map((s) => `{ ${s.field}: ${s.order === "desc" ? "desc" : "asc"} }`);
+  const parts = safeSorters
+    .map((s) => nestFinancial(resource, s.field, s.order === "desc" ? "desc" : "asc"))
+    .filter((part): part is string => part !== null);
+  if (parts.length === 0) return "";
   return `, order_by: [${parts.join(", ")}]`;
 };
 
@@ -1247,8 +1258,9 @@ const buildWhere = (resource: string, filters?: any[]) => {
     if (op === "_in" && Array.isArray(val)) {
       val = val.filter((v) => v !== null && v !== undefined);
     }
-    return `{ ${f.field}: { ${op}: ${escapeValue(val)} } }`;
-  });
+    return nestFinancial(resource, f.field, `{ ${op}: ${escapeValue(val)} }`);
+  }).filter((part): part is string => part !== null);
+  if (andParts.length === 0) return "";
   return `, where: { _and: [${andParts.join(", ")}] }`;
 };
 
@@ -1753,7 +1765,7 @@ const PACKER_RESOURCE_FIELDS: Record<string, string[]> = {
   ],
 };
 
-const fieldsFor = (resource: string) => {
+const fieldsFor = (resource: string, meta?: AnyObject) => {
   const roleKey = getCurrentUserRoleKey(authSession.getUser());
   const fields = roleKey === 'packer'
     ? PACKER_RESOURCE_FIELDS[resource] ?? RESOURCE_FIELDS[resource]
@@ -1766,8 +1778,8 @@ const fieldsFor = (resource: string) => {
   if (!featureFlags.projects) {
     for (const field of PROJECT_SCHEMA_FIELDS[resource] ?? []) hidden.add(field);
   }
-  if (hidden.size === 0) return fields.join(" \n");
-  return fields.filter((f) => !hidden.has(f)).join(" \n");
+  const visible = hidden.size === 0 ? fields : fields.filter((f) => !hidden.has(f));
+  return selectionWithFinancials(resource, visible, authSession.getUser(), meta).join(" \n");
 };
 
 export const dataProvider = (_apiUrl: string) => {
@@ -1835,7 +1847,7 @@ export const dataProvider = (_apiUrl: string) => {
       }
 
       const where = buildWhere(resource, enhancedFilters);
-      const selection = fieldsFor(resource);
+      const selection = fieldsFor(resource, meta);
       // For aggregate, remove leading comma from where clause
       const aggregateWhere = where ? `(${where.replace(/^,\s*/, '')})` : '';
 
@@ -1857,12 +1869,12 @@ export const dataProvider = (_apiUrl: string) => {
       `;
       const data = await gqlRequest(query, undefined, hasuraRequestOptionsFromMeta(meta));
       return {
-        data: data[resource],
+        data: flattenFinancialRows(resource, data[resource]),
         total: data[`${resource}_aggregate`]?.aggregate?.count ?? 0,
       };
     },
 
-    getOne: async ({ resource, id }: AnyObject) => {
+    getOne: async ({ resource, id, meta }: AnyObject) => {
       const backendOrder = await getBackendOrderOneIfEnabled(resource, id);
       if (backendOrder) {
         return backendOrder;
@@ -1882,7 +1894,7 @@ export const dataProvider = (_apiUrl: string) => {
       }
 
       const idCol = ID_COLUMNS[resource] ?? "id";
-      const selection = fieldsFor(resource);
+      const selection = fieldsFor(resource, meta);
       const query = `
         query {
           ${resource}(limit: 1, where: { ${idCol}: { _eq: ${escapeValue(id)} } }) {
@@ -1893,7 +1905,7 @@ export const dataProvider = (_apiUrl: string) => {
       const data = await gqlRequest(query);
       const record = data[resource]?.[0];
       if (!record) throw { message: "Not found", statusCode: 404 };
-      return { data: record };
+      return { data: flattenFinancials(resource, record) };
     },
 
     create: async ({ resource, variables, meta }: AnyObject) => {
@@ -2081,7 +2093,7 @@ export const dataProvider = (_apiUrl: string) => {
     },
 
     // Minimal stubs for unused methods in MVP
-    getMany: async ({ resource, ids }: AnyObject) => {
+    getMany: async ({ resource, ids, meta }: AnyObject) => {
       const backendUsers = await getBackendUsersManyIfEnabled(resource, ids);
       if (backendUsers) {
         return backendUsers;
@@ -2096,7 +2108,7 @@ export const dataProvider = (_apiUrl: string) => {
       }
 
       const idCol = ID_COLUMNS[resource] ?? "id";
-      const selection = fieldsFor(resource);
+      const selection = fieldsFor(resource, meta);
       // Strip null/undefined ids: an `_in: [null]` is rejected by Hasura for non-null
       // typed columns ("unexpected null value for type 'smallint'"). Callers may pass a
       // null id (e.g. a sheet-shadow material's null default_supplier_id/vendor_id).
@@ -2114,7 +2126,7 @@ export const dataProvider = (_apiUrl: string) => {
         }
       `;
       const data = await gqlRequest(query);
-      return { data: data[resource] };
+      return { data: flattenFinancialRows(resource, data[resource]) };
     },
 
     getManyReference: async (params: AnyObject) => {

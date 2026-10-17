@@ -7,7 +7,8 @@
 export interface CreateDowelingOrderRequest {
   dowelingOrderName: string;
   designEngineerId: number;
-  paymentStatusId: number;
+  /** Only with orders.view_financials; absent = «Не оплачен». */
+  paymentStatusId?: number;
   dowelingOrderDate?: string | null;
   productionStatusId?: number | null;
   operatorId?: number | null;
@@ -35,18 +36,19 @@ export interface UpdateDowelingOrderRequest {
   expectedVersion: number;
   dowelingOrderName: string;
   dowelingOrderDate: string;
-  paymentStatusId: number;
+  /** Money (access groups «финансы»): all of these or none; none keeps the money; any needs orders.view_financials. */
+  paymentStatusId?: number;
   designEngineerId: number;
   productionStatusId: number | null;
   operatorId: number | null;
   issueDate: string | null;
-  paymentDate: string | null;
+  paymentDate?: string | null;
   partsCount: number;
-  totalAmount: number | null;
-  finalAmount: number | null;
-  discount: number;
-  surcharge: number;
-  paidAmount: number;
+  totalAmount?: number | null;
+  finalAmount?: number | null;
+  discount?: number;
+  surcharge?: number;
+  paidAmount?: number;
   linkCadFile: string | null;
   linkPdfFile: string | null;
   refKey1c: string | null;
