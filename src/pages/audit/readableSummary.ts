@@ -68,6 +68,7 @@ const STATUS_AUTOMATION_ACTION_LABELS: Record<string, string> = {
   change_order_status: 'Статус заказа',
   change_production_status: 'Производственный статус заказа',
   change_details_production_status: 'Производственный статус деталей',
+  clear_details_production_status: 'Снятый производственный статус деталей',
   map_order_status_to_details_production_status: 'Производственный статус деталей',
   map_production_status_to_order_status: 'Статус заказа',
 };

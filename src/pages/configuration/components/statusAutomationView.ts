@@ -140,6 +140,7 @@ const ACTION_TYPES: StatusAutomationActionType[] = [
   'change_order_status',
   'change_production_status',
   'change_details_production_status',
+  'clear_details_production_status',
   'map_order_status_to_details_production_status',
   'map_production_status_to_order_status',
 ];
@@ -295,6 +296,9 @@ export function describeFormAction(
   }
   if (form.actionType === 'change_details_production_status') {
     return `Установить всем производственным деталям статус «${targetName}»`;
+  }
+  if (form.actionType === 'clear_details_production_status') {
+    return `Снять статус «${targetName}» у деталей, где он стоит`;
   }
   return `Установить заказу производственный статус «${targetName}»`;
 }

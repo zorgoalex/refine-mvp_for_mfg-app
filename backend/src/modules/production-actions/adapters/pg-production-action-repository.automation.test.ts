@@ -6,6 +6,7 @@ import {
   changeDetailsProductionStatusFromAutomationInTransaction,
   changeOrderStatusFromAutomationInTransaction,
   changeProductionStatusFromAutomationInTransaction,
+  clearDetailsProductionStatusFromAutomationInTransaction,
   type AutomationActionContext,
 } from './pg-production-action-repository';
 
@@ -165,6 +166,74 @@ describe('production-action automation in-transaction actions', () => {
     expect(database.outboxCalls).toHaveLength(0);
     expect(database.sql.some((sql) => sql.startsWith('UPDATE orders'))).toBe(false);
     expect(database.sql.some((sql) => sql.startsWith('UPDATE order_details'))).toBe(false);
+  });
+
+  it('clears only details that carry the removed status and re-evaluates composition', async () => {
+    const database = createAutomationTx({
+      detailRows: [
+        { detail_id: 101, production_status_id: 7 },
+        { detail_id: 102, production_status_id: 2 },
+        { detail_id: 103, production_status_id: 7 },
+      ],
+      updatedDetailIds: [101, 103],
+    });
+    const context = { ...automationContext(), eventType: 'order.production_status_changed' };
+
+    await expect(clearDetailsProductionStatusFromAutomationInTransaction(database.tx, 15, 7, context))
+      .resolves.toMatchObject({ status: 'executed', auditId: 42 });
+
+    const orderLockIndex = database.sql.findIndex((sql) => sql.includes('FROM orders') && sql.includes('FOR UPDATE'));
+    const detailLockIndex = database.sql.findIndex((sql) => sql.includes('FROM order_details') && sql.includes('FOR UPDATE'));
+    const update = database.sql.find((sql) => sql.startsWith('UPDATE order_details'));
+    expect(detailLockIndex).toBeGreaterThan(orderLockIndex);
+    expect(update).toContain('SET production_status_id = NULL');
+    expect(update).toContain('AND production_status_id = $3');
+    expect(database.recalcCalls).toEqual([15]);
+    expect(database.auditCalls[0]).toMatchObject({
+      event: 'orders.detail_production_status_batch_change',
+      metadata: expect.objectContaining({
+        action: 'automation_status_clear',
+        productionStatusId: null,
+        clearedProductionStatusId: 7,
+        changedDetailIds: [101, 103],
+        affectedDetailCount: 2,
+      }),
+    });
+    expect(database.outboxCalls[0]).toMatchObject({
+      eventType: 'order.detail_production_status_batch_changed',
+      idempotencyKey: 'source-key-1:automation:21',
+      payload: expect.objectContaining({
+        productionStatusId: null,
+        clearedProductionStatusId: 7,
+        beforeStatusDistribution: { '2': 1, '7': 2 },
+        afterStatusDistribution: { '2': 1, null: 2 },
+      }),
+    });
+    expect(statusAutomationMocks.evaluateProductionCompositionAutomation).toHaveBeenCalledWith(
+      database.tx, expect.objectContaining({ orderId: 15, sourceIdempotencyKey: 'source-key-1:automation:21' }),
+    );
+    expect(database.relatedEntities).toEqual([['order_detail', 101], ['order_detail', 103], ['production_status', 7]]);
+  });
+
+  it('skips clearing without writes when no live detail has the status', async () => {
+    const database = createAutomationTx({
+      detailRows: [{ detail_id: 101, production_status_id: 2 }, { detail_id: 102, production_status_id: null }],
+    });
+
+    await expect(clearDetailsProductionStatusFromAutomationInTransaction(database.tx, 15, 7, automationContext()))
+      .resolves.toEqual({ status: 'skipped', skipReason: 'same_status' });
+
+    expect(database.sql.some((sql) => sql.startsWith('UPDATE'))).toBe(false);
+    expect(database.auditCalls).toHaveLength(0);
+    expect(database.outboxCalls).toHaveLength(0);
+  });
+
+  it('rejects clearing from MDF events before any database access', async () => {
+    const database = createAutomationTx({});
+    await expect(clearDetailsProductionStatusFromAutomationInTransaction(database.tx, 15, 7,
+      { ...automationContext(), eventType: 'mdf.board.completed' }))
+      .resolves.toEqual({ status: 'skipped', skipReason: 'mdf_source_required' });
+    expect(database.sql).toEqual([]);
   });
 
   it('locks the order before details and recalculates in details auto mode', async () => {
@@ -381,6 +450,7 @@ interface AutomationTxState {
     payload: Record<string, unknown>;
   }>;
   recalcCalls: number[];
+  relatedEntities: Array<[unknown, unknown]>;
 }
 
 function createAutomationTx(options: AutomationTxOptions = {}): AutomationTxState {
@@ -388,6 +458,7 @@ function createAutomationTx(options: AutomationTxOptions = {}): AutomationTxStat
   const auditCalls: AutomationTxState['auditCalls'] = [];
   const outboxCalls: AutomationTxState['outboxCalls'] = [];
   const recalcCalls: number[] = [];
+  const relatedEntities: Array<[unknown, unknown]> = [];
   const detailRows = options.detailRows ?? [{ detail_id: 101, production_status_id: 1 }];
 
   const tx = {
@@ -466,6 +537,10 @@ function createAutomationTx(options: AutomationTxOptions = {}): AutomationTxStat
       ) {
         return { rows: (options.mdfLaminatedBathRows ?? []) as T[] };
       }
+      if (normalized.startsWith('INSERT INTO audit_log_related_entity')) {
+        relatedEntities.push([params[1], params[2]]);
+        return { rows: [] as T[] };
+      }
       if (normalized.startsWith('INSERT INTO audit_log')) {
         const metadata = JSON.parse(String(params[22])) as Record<string, unknown>;
         auditCalls.push({ event: params[0], source: params[7], metadata });
@@ -489,6 +564,7 @@ function createAutomationTx(options: AutomationTxOptions = {}): AutomationTxStat
     auditCalls,
     outboxCalls,
     recalcCalls,
+    relatedEntities,
   };
 }
 

@@ -87,6 +87,33 @@ describe('status automation DTO', () => {
       });
     });
 
+    it('parses a clear-status rule on production composition with presence conditions', () => {
+      expect(parseCreateStatusAutomationRuleRequest({
+        name: 'Снять «Распил» после «Переделки»',
+        eventType: 'order.production_status_changed',
+        actionType: 'clear_details_production_status',
+        targetStatusId: 4,
+        conditions: { anyProductionStatusIn: [6], currentOrderStatusIn: [2] },
+      })).toMatchObject({
+        actionType: 'clear_details_production_status',
+        targetStatusId: 4,
+        conditions: { anyProductionStatusIn: [6], currentOrderStatusIn: [2] },
+      });
+    });
+
+    it.each([
+      [{ eventType: 'mdf.board.completed', targetStatusId: 4 }, 'actionType'],
+      [{ eventType: 'order.created', targetStatusId: null }, 'targetStatusId'],
+      [{ eventType: 'order.created', targetStatusId: 4, actionConfig: { detailTransitionMode: 'advance_only' } },
+        'actionConfig.detailTransitionMode'],
+    ] as const)('rejects an invalid clear-status rule (%#)', (overrides, field) => {
+      expect(() => parseCreateStatusAutomationRuleRequest({
+        name: 'Снять статус', actionType: 'clear_details_production_status', ...overrides,
+      })).toThrow(expect.objectContaining({
+        details: expect.objectContaining({ errors: expect.arrayContaining([expect.objectContaining({ field })]) }),
+      }));
+    });
+
     it('parses an order-status detail cascade with previous status and advance-only mode', () => {
       expect(parseCreateStatusAutomationRuleRequest({
         name: 'Выдан → детали выданы',

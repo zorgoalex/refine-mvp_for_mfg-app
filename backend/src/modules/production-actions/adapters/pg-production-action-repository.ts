@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
+import type { AuditRelatedEntity } from '../../../common/audit/related-entities';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import { mdfCutReadinessCtes } from '../../../shared/cnc-material/cut-readiness-sql';
@@ -2410,8 +2411,91 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
       status.sortOrder,
     ],
   );
-  const changedDetailIds = updated.rows.map((row) => toNumber(row.detail_id));
+  return finishDetailsProductionStatusAutomation(tx, order, ctx, {
+    detailIds,
+    changedDetailIds: updated.rows.map((row) => toNumber(row.detail_id)),
+    beforeStatusDistribution,
+    currentById,
+    status,
+    clearedStatus: null,
+  });
+}
+
+// Removes one production status from the order's live details (they become
+// unassigned). Same transaction/idempotency contract as the batch set above.
+export async function clearDetailsProductionStatusFromAutomationInTransaction(
+  tx: TransactionClient,
+  orderId: number,
+  clearedStatusId: number,
+  ctx: AutomationActionContext,
+): Promise<AutomationActionResult> {
+  if (ctx.eventType.startsWith('mdf.') || ctx.mdfBoardScope) {
+    return { status: 'skipped', skipReason: 'mdf_source_required' };
+  }
+  const order = await loadOrderForUpdate(tx, orderId);
+  const clearedStatus = await loadProductionStatus(tx, clearedStatusId);
+  const currentDetails = await loadOrderDetailsForBatch(tx, order.orderId);
+  if (currentDetails.length === 0) {
+    return { status: 'skipped', skipReason: 'no_details' };
+  }
+  if (!currentDetails.some((detail) => detail.productionStatusId === clearedStatusId)) {
+    return { status: 'skipped', skipReason: 'same_status' };
+  }
+
+  const detailIds = currentDetails.map((detail) => detail.detailId);
+  const beforeStatusDistribution = detailStatusDistribution(currentDetails);
+  const currentById = new Map(
+    currentDetails.map((detail) => [detail.detailId, detail.productionStatusId] as const),
+  );
+  const updated = await tx.query<{ detail_id: string | number }>(
+    `
+    UPDATE order_details
+    SET production_status_id = NULL
+    WHERE order_id = $1
+      AND detail_id = ANY($2::bigint[])
+      AND COALESCE(delete_flag, false) = false
+      AND production_status_id = $3
+    RETURNING detail_id
+    `,
+    [order.orderId, detailIds, clearedStatusId],
+  );
+  return finishDetailsProductionStatusAutomation(tx, order, ctx, {
+    detailIds,
+    changedDetailIds: updated.rows.map((row) => toNumber(row.detail_id)),
+    beforeStatusDistribution,
+    currentById,
+    status: null,
+    clearedStatus,
+  });
+}
+
+type AutomationProductionStatus = Awaited<ReturnType<typeof loadProductionStatus>>;
+
+// Shared tail of the automation detail batch actions: order recalc, version,
+// audit, outbox and downstream evaluations. Exactly one of status/clearedStatus.
+async function finishDetailsProductionStatusAutomation(
+  tx: TransactionClient,
+  order: LockedOrder,
+  ctx: AutomationActionContext,
+  change: {
+    detailIds: number[];
+    changedDetailIds: number[];
+    beforeStatusDistribution: Record<string, number>;
+    currentById: ReadonlyMap<number, number | null>;
+    status: AutomationProductionStatus | null;
+    clearedStatus: AutomationProductionStatus | null;
+  },
+): Promise<AutomationActionResult> {
+  const { detailIds, changedDetailIds, beforeStatusDistribution, currentById, status, clearedStatus } = change;
+  const dimensionStatus = status ?? clearedStatus;
+  if (!dimensionStatus) throw new Error('Detail automation requires a target or cleared status');
   const affectedDetailCount = changedDetailIds.length;
+  const productionStatusId = status?.productionStatusId ?? null;
+  const cleared = clearedStatus ? {
+    clearedProductionStatusId: clearedStatus.productionStatusId,
+    clearedProductionStatusCode: clearedStatus.productionStatusCode,
+    clearedProductionStatusName: clearedStatus.productionStatusName,
+  } : {};
 
   await ensureProductionStatusFromDetailsEnabled(tx, order.orderId);
   await runRecalcOrderProductionStatus(tx, order.orderId);
@@ -2439,18 +2523,19 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
     beforeStatusDistribution,
     currentById,
     changedDetailIds,
-    status.productionStatusId,
+    productionStatusId,
   );
   const metadata = automationMetadata(ctx, order.orderId, order.clientId, {
     detailIds,
     changedDetailIds,
     selectedDetailCount: detailIds.length,
     affectedDetailCount,
-    productionStatusId: status.productionStatusId,
-    productionStatusCode: status.productionStatusCode,
-    productionStatusName: status.productionStatusName,
+    productionStatusId,
+    productionStatusCode: status?.productionStatusCode ?? null,
+    productionStatusName: status?.productionStatusName ?? null,
+    ...cleared,
     productionStatusFromDetailsEnabled: true,
-    action: 'automation_status_change',
+    action: clearedStatus ? 'automation_status_clear' : 'automation_status_change',
     statusField: 'productionDetailBatch',
     ...(ctx.mdfBoardScope ? { mdfBoardScope: ctx.mdfBoardScope } : {}),
   });
@@ -2461,9 +2546,11 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
     order,
     source: AUTOMATION_SOURCE,
     statusField: 'productionDetailBatch',
-    statusId: status.productionStatusId,
-    statusName: status.productionStatusName,
-    statusCode: status.productionStatusCode,
+    ...(status ? {
+      statusId: status.productionStatusId,
+      statusName: status.productionStatusName,
+      statusCode: status.productionStatusCode,
+    } : {}),
     beforeJson: {
       orderProductionStatusId: order.productionStatusId,
       productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
@@ -2481,7 +2568,8 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
       changedDetailIds,
       selectedDetailCount: detailIds.length,
       affectedDetailCount,
-      productionStatusId: status.productionStatusId,
+      productionStatusId,
+      ...(clearedStatus ? { clearedProductionStatusId: clearedStatus.productionStatusId } : {}),
       orderProductionStatusId: {
         before: order.productionStatusId,
         after: afterProductionStatusId,
@@ -2492,6 +2580,10 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
       statusDistributionBasis: 'command-start-snapshot',
     },
     metadataJson: metadata,
+    relatedEntities: [
+      ...changedDetailIds.map((entityId) => ({ entityType: 'order_detail', entityId })),
+      { entityType: 'production_status', entityId: dimensionStatus.productionStatusId },
+    ],
   });
 
   await enqueueOutbox(tx, {
@@ -2511,8 +2603,12 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
       changedDetailIds,
       selectedDetailCount: detailIds.length,
       affectedDetailCount,
-      productionStatusId: status.productionStatusId,
-      productionStatusCode: status.productionStatusCode,
+      productionStatusId,
+      productionStatusCode: status?.productionStatusCode ?? null,
+      ...(clearedStatus ? {
+        clearedProductionStatusId: clearedStatus.productionStatusId,
+        clearedProductionStatusCode: clearedStatus.productionStatusCode,
+      } : {}),
       productionStatusFromDetailsEnabled: true,
       orderProductionStatusId: { before: order.productionStatusId, after: afterProductionStatusId },
       orderVersion: { before: order.version, after: newVersion },
@@ -3201,10 +3297,10 @@ function projectDistributionAfterChange(
   before: Record<string, number>,
   currentById: ReadonlyMap<number, number | null>,
   changedDetailIds: readonly number[],
-  newStatusId: number,
+  newStatusId: number | null,
 ): Record<string, number> {
   const distribution: Record<string, number> = { ...before };
-  const newKey = String(newStatusId);
+  const newKey = newStatusId === null ? 'null' : String(newStatusId);
   for (const id of changedDetailIds) {
     const oldStatus = currentById.get(id) ?? null;
     const oldKey = oldStatus === null ? 'null' : String(oldStatus);
@@ -3422,6 +3518,7 @@ async function writeAudit(
     afterJson: Record<string, unknown>;
     diffJson: Record<string, unknown>;
     metadataJson: Record<string, unknown>;
+    relatedEntities?: AuditRelatedEntity[];
   },
 ): Promise<string> {
   return auditService.record(tx, {
@@ -3445,6 +3542,7 @@ async function writeAudit(
     after: input.afterJson,
     diff: input.diffJson,
     metadata: input.metadataJson,
+    ...(input.relatedEntities ? { relatedEntities: input.relatedEntities } : {}),
   });
 }
 

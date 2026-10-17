@@ -5,6 +5,7 @@ import { uniformProductionStatus } from '../../../shared/production-status/produ
 import {
   changeDetailsProductionStatusFromAutomationInTransaction,
   changeOrderStatusFromAutomationInTransaction,
+  clearDetailsProductionStatusFromAutomationInTransaction,
   changeProductionStatusFromAutomationInTransaction,
   type AutomationActionContext,
   type AutomationActionResult,
@@ -53,6 +54,31 @@ const pinnedExecutionModes = new WeakMap<TransactionClient, 'accepted_job' | 'li
 // Live commands can dispatch several sources in one transaction. Freeze their
 // rule selection once, without treating live resolver output as accepted evidence.
 const liveMdfPins = new WeakMap<TransactionClient, readonly MdfAutomationRulePin[]>();
+// Transactions of MDF commands (board, CNC, card return). Detail clearing never runs
+// there: their previews and forward-only contracts cover status advances only.
+const mdfDetailContexts = new WeakMap<TransactionClient, number>();
+// One composition evaluation chain per order: a clear action re-triggers the same
+// event; the nested pass shares applied action types and finishes the evaluation.
+interface CompositionChain { appliedActionTypes: Set<string>; generation: number }
+const compositionChains = new WeakMap<TransactionClient, Map<number, CompositionChain>>();
+// Orders under a manual refresh in this transaction (see evaluateAllStatusAutomationRulesForOrder).
+const manualRefreshOrders = new WeakMap<TransactionClient, Set<number>>();
+
+/** Marks the transaction as an MDF command for everything run inside `run`. */
+export async function withMdfDetailAutomationContext<T>(tx: TransactionClient, run: () => Promise<T>): Promise<T> {
+  mdfDetailContexts.set(tx, (mdfDetailContexts.get(tx) ?? 0) + 1);
+  try {
+    return await run();
+  } finally {
+    const depth = (mdfDetailContexts.get(tx) ?? 1) - 1;
+    if (depth > 0) mdfDetailContexts.set(tx, depth);
+    else mdfDetailContexts.delete(tx);
+  }
+}
+
+function isMdfDetailContext(tx: TransactionClient): boolean {
+  return (mdfDetailContexts.get(tx) ?? 0) > 0 || pinnedRules.has(tx);
+}
 
 /** INTERNAL execution primitive, not an API or complete job handler. Caller owns
  * active-mode cutover lock, durable job claim/pins, verified evidence, actor authorization, demand
@@ -196,24 +222,61 @@ async function evaluateEventRules(tx: TransactionClient, event: StatusAutomation
   if (mdfScope) for (const rule of allRules) {
     if (rule.actionType !== 'change_details_production_status') await recordRuleSkipped(tx, event, rule, 'mdf_detail_action_required');
   }
-  const rules = productionEvent || event.cause === 'derived_from_production_composition'
-    ? compatibleRules.filter(rule => rule.actionType === 'change_order_status' || rule.actionType === 'map_production_status_to_order_status')
+  let rules = productionEvent || event.cause === 'derived_from_production_composition'
+    ? compatibleRules.filter(isProductionOrderAction)
     : event.origin === 'automation'
     ? compatibleRules.filter((rule) =>
       rule.actionType === 'change_details_production_status'
+      || rule.actionType === 'clear_details_production_status'
       || rule.actionType === 'map_order_status_to_details_production_status')
     : compatibleRules;
-  if (rules.length === 0) {
+  if (manualRefreshOrders.get(tx)?.has(event.orderId)) {
+    rules = rules.filter(rule => rule.actionType !== 'clear_details_production_status');
+  }
+  const clearForbidden = isMdfDetailContext(tx);
+  if (clearForbidden) for (const rule of rules) {
+    if (rule.actionType === 'clear_details_production_status') await recordRuleSkipped(tx, event, rule, 'mdf_clear_forbidden');
+  }
+  const runnableRules = clearForbidden ? rules.filter(rule => rule.actionType !== 'clear_details_production_status') : rules;
+  if (runnableRules.length === 0) {
     return;
   }
 
-  const appliedActionTypes = new Set<string>();
+  const chains = compositionChains.get(tx) ?? new Map<number, CompositionChain>();
+  compositionChains.set(tx, chains);
+  const outerChain = productionEvent && !mdfScope ? chains.get(event.orderId) : undefined;
+  const chain = productionEvent && !mdfScope
+    ? outerChain ?? { appliedActionTypes: new Set<string>(), generation: 0 } : undefined;
+  if (chain) {
+    chain.generation += 1;
+    if (!outerChain) chains.set(event.orderId, chain);
+  }
+  const generation = chain?.generation;
+  try {
+    await evaluateRuleList(tx, event, runnableRules, mdfScope, chain, generation);
+  } finally {
+    if (chain && !outerChain) chains.delete(event.orderId);
+  }
+}
+
+async function evaluateRuleList(
+  tx: TransactionClient,
+  event: StatusAutomationEvent,
+  rules: readonly StatusAutomationRule[],
+  mdfScope: MdfBoardDetailScope | undefined,
+  chain: CompositionChain | undefined,
+  generation: number | undefined,
+): Promise<void> {
+  const appliedActionTypes = chain?.appliedActionTypes ?? new Set<string>();
   const visited = executedRules.get(tx) ?? new Set<string>();
   executedRules.set(tx, visited);
   const eligibleDetailIds = mdfScope ? [...new Set(mdfScope.details
     .filter(detail => detail.requiredQuantity > 0 && detail.eligibleQuantity >= detail.requiredQuantity)
     .map(detail => detail.detailId))] : undefined;
   for (const rule of rules) {
+    const visitKey = `${event.orderId}:${rule.id}:${event.signalOccurrenceId ?? (mdfScope ? `${mdfScope.source.kind}:${mdfScope.source.id}` : 'order')}`;
+    // In a composition chain a rule that already ran is settled; do not re-audit it.
+    if (chain && visited.has(visitKey)) continue;
     const state = await loadOrderAutomationState(tx, event.orderId, eligibleDetailIds);
     if (!state) return;
     evaluationStates.set(event, state);
@@ -228,7 +291,6 @@ async function evaluateEventRules(tx: TransactionClient, event: StatusAutomation
       await recordRuleSkipped(tx, event, rule, 'lower_priority_same_target');
       continue;
     }
-    const visitKey = `${event.orderId}:${rule.id}:${event.signalOccurrenceId ?? (mdfScope ? `${mdfScope.source.kind}:${mdfScope.source.id}` : 'order')}`;
     if (visited.has(visitKey)) continue;
     visited.add(visitKey);
     appliedActionTypes.add(rule.actionType);
@@ -259,6 +321,9 @@ async function evaluateEventRules(tx: TransactionClient, event: StatusAutomation
 
     if (result.status === 'executed') {
       await recordRuleApplied(tx, event, rule, result);
+      // The action re-evaluated this composition and that nested pass already
+      // handled the remaining rules against the fresh state.
+      if (chain && chain.generation !== generation) return;
     } else {
       visited.delete(visitKey);
       if (result.skipReason !== undefined && MEANINGFUL_SKIP_REASONS.has(result.skipReason)) {
@@ -266,10 +331,26 @@ async function evaluateEventRules(tx: TransactionClient, event: StatusAutomation
       }
     }
   }
-
 }
 
 export async function evaluateAllStatusAutomationRulesForOrder(
+  tx: TransactionClient,
+  input: ManualStatusAutomationOrderRefreshInput,
+): Promise<StatusAutomationOrderRefreshSummary> {
+  // Clear rules belong to this pass only (global priority order): a composition
+  // re-evaluation that an action triggers must not run them ahead of it.
+  const orders = manualRefreshOrders.get(tx) ?? new Set<number>();
+  manualRefreshOrders.set(tx, orders);
+  const ownMarker = !orders.has(input.orderId);
+  orders.add(input.orderId);
+  try {
+    return await evaluateAllRulesForOrderInPass(tx, input);
+  } finally {
+    if (ownMarker) orders.delete(input.orderId);
+  }
+}
+
+async function evaluateAllRulesForOrderInPass(
   tx: TransactionClient,
   input: ManualStatusAutomationOrderRefreshInput,
 ): Promise<StatusAutomationOrderRefreshSummary> {
@@ -422,6 +503,15 @@ async function executeResolvedMdfEvents(
   resolved: readonly MdfBoardResolvedEvent[],
   rules: readonly StatusAutomationRule[],
 ): Promise<void> {
+  await withMdfDetailAutomationContext(tx, () => executeResolvedMdfEventsInContext(tx, input, resolved, rules));
+}
+
+async function executeResolvedMdfEventsInContext(
+  tx: TransactionClient,
+  input: Pick<MdfBoardEventInput, 'actor' | 'requestId' | 'sourceIdempotencyKey'>,
+  resolved: readonly MdfBoardResolvedEvent[],
+  rules: readonly StatusAutomationRule[],
+): Promise<void> {
   for (const entry of resolved) {
     if (!rules.some(rule => rule.eventType === entry.eventType)) continue;
     const eligible = entry.scope.details.filter(d => d.requiredQuantity > 0 && d.eligibleQuantity >= d.requiredQuantity);
@@ -471,8 +561,12 @@ function manualRefreshEventForRule(
   };
 }
 
+// Actions allowed on order.production_status_changed. Clearing only removes a
+// status, so a composition re-evaluation it triggers cannot re-add it (no cycle);
+// each rule still runs at most once per order per transaction (visited keys).
 function isProductionOrderAction(rule: StatusAutomationRule): boolean {
-  return rule.actionType === 'change_order_status' || rule.actionType === 'map_production_status_to_order_status';
+  return rule.actionType === 'change_order_status' || rule.actionType === 'map_production_status_to_order_status'
+    || rule.actionType === 'clear_details_production_status';
 }
 
 function buildOutboxIdempotencyKey(
@@ -520,6 +614,10 @@ async function runAutomationAction(
           context,
           context.mdfBoardScope ? 'advance_only' : rule.actionConfig?.detailTransitionMode ?? 'set_exact',
         ),
+      );
+    case 'clear_details_production_status':
+      return run(requireTargetStatusId(rule), () =>
+        clearDetailsProductionStatusFromAutomationInTransaction(tx, orderId, requireTargetStatusId(rule), context),
       );
     case 'map_order_status_to_details_production_status': {
       const targetStatusId = resolveMappedStatusId(rule, state.orderStatusId);

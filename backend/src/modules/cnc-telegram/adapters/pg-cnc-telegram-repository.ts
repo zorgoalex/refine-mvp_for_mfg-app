@@ -97,6 +97,7 @@ import {
   evaluateMdfBoardColumnAutomation,
   evaluateMdfOrderMachineFilesPresentAutomation,
   evaluateProductionCompositionAutomation,
+  withMdfDetailAutomationContext,
   type MdfBoardColumnAutomationInput,
 } from '../../status-automation/application/status-automation-runtime';
 import {
@@ -1304,11 +1305,13 @@ export class PgCncTelegramRepository
         wholeOrderIds,
         applied,
       });
-      for (const orderId of applied.changedOrderIds) {
-        await evaluateProductionCompositionAutomation(tx, {
-          orderId, actor: command.currentUser, requestId, sourceIdempotencyKey: command.idempotencyKey,
-        });
-      }
+      await withMdfDetailAutomationContext(tx, async () => {
+        for (const orderId of applied.changedOrderIds) {
+          await evaluateProductionCompositionAutomation(tx, {
+            orderId, actor: command.currentUser, requestId, sourceIdempotencyKey: command.idempotencyKey,
+          });
+        }
+      });
       const response: CncAutoCutStatusConfigureResponseDto = {
         settingEnabled: command.enabled,
         requestId,
@@ -6361,12 +6364,14 @@ async function applyCompletedPacketAutoCutStatus(
       idempotencyKey: input.command.dto.idempotencyKey,
     },
   });
-  for (const orderId of applied.changedOrderIds) {
-    await evaluateProductionCompositionAutomation(tx, {
-      orderId, actor: input.command.currentUser, requestId: input.requestId,
-      sourceIdempotencyKey: input.command.dto.idempotencyKey,
-    });
-  }
+  await withMdfDetailAutomationContext(tx, async () => {
+    for (const orderId of applied.changedOrderIds) {
+      await evaluateProductionCompositionAutomation(tx, {
+        orderId, actor: input.command.currentUser, requestId: input.requestId,
+        sourceIdempotencyKey: input.command.dto.idempotencyKey,
+      });
+    }
+  });
 }
 
 async function lockCncAutoCutStatus(tx: TransactionClient): Promise<void> {
