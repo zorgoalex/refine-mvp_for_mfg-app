@@ -919,3 +919,41 @@ describe('listDealProductRows pagination contract', () => {
     await expect(client(fetchFn).listDealProductRows('8204')).rejects.toThrow();
   });
 });
+
+describe('Bitrix24ApiClient payment cards', () => {
+  it('lists only CRM_PAYMENT cards owned by the payment and reads each card amount', async () => {
+    const requests: Array<{ method: string; body: Record<string, unknown> }> = [];
+    const fetchFn = vi.fn<FetchFn>(async (url, init) => {
+      const method = String(url).split('/').pop()!;
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      requests.push({ method, body });
+      if (method === 'crm.activity.list') {
+        return jsonResponse({ result: [
+          { ID: '8015', OWNER_TYPE_ID: '17', OWNER_ID: '700', PROVIDER_ID: 'CRM_PAYMENT', COMPLETED: 'N' },
+          { ID: '9001', OWNER_TYPE_ID: '17', OWNER_ID: '701', PROVIDER_ID: 'CRM_PAYMENT', COMPLETED: 'N' },
+          { ID: '9002', OWNER_TYPE_ID: '2', OWNER_ID: '700', PROVIDER_ID: 'VOXIMPLANT_CALL', COMPLETED: 'N' },
+          { ID: '9003', OWNER_TYPE_ID: '17', OWNER_ID: '700', PROVIDER_ID: 'CRM_PAYMENT', COMPLETED: 'Y' },
+        ] });
+      }
+      if (method === 'crm.activity.get' && body.id === 8015) {
+        return jsonResponse({ result: { ID: '8015', COMPLETED: 'N', SETTINGS: { FIELDS: { SUM: 68445, CURRENCY: 'KZT' } } } });
+      }
+      if (method === 'crm.activity.get') return jsonResponse({ result: { ID: String(body.id), COMPLETED: 'Y', SETTINGS: [] } });
+      return jsonResponse({ result: true });
+    });
+    const client = new Bitrix24ApiClient('https://portal/rest/1/synthetic', fetchFn, 30000, noWait);
+
+    await expect(client.listPaymentCards('700')).resolves.toEqual([
+      { id: '8015', completed: false, sum: 68445 },
+      { id: '9003', completed: true, sum: null },
+    ]);
+    expect(requests[0]).toEqual({ method: 'crm.activity.list', body: expect.objectContaining({
+      filter: { OWNER_TYPE_ID: 17, OWNER_ID: 700, PROVIDER_ID: 'CRM_PAYMENT' },
+    }) });
+    expect(requests.filter((request) => request.method === 'crm.activity.get').map((request) => request.body.id))
+      .toEqual([8015, 9003]);
+
+    await client.completeActivity('8015');
+    expect(requests.at(-1)).toEqual({ method: 'crm.activity.update', body: { id: 8015, fields: { COMPLETED: 'Y' } } });
+  });
+});

@@ -80,7 +80,7 @@ function memoryStore() {
   const audits: string[] = [];
   const domainEvents: string[] = [];
   let sequence = 0;
-  const store: PaidPaymentOperationStore & { crashAfterComplete?: boolean } = {
+  const store: PaidPaymentOperationStore & { crashAfterComplete?: boolean; failCardAudit?: string } = {
     async findOpen(erpPaymentId) {
       return [...operations.values()].find((op) => op.erpPaymentId === erpPaymentId && op.phase !== 'completed') ?? null;
     },
@@ -145,6 +145,11 @@ function memoryStore() {
         audits.push(`stuck:${op.erpPaymentId}`);
         domainEvents.push(`stuck:${op.operationId}`);
       }
+    },
+    async recordPaymentCards(op, result) {
+      if (store.failCardAudit === result.stage) throw new Error(`audit failure ${result.stage}`);
+      audits.push(`card_${result.stage}:${op.erpPaymentId}:${result.cardIds.join(',')}:${result.cardSums.join(',')}`
+        + `→${result.appliedSum}${result.error === null ? '' : `:${result.error}`}`);
     },
   };
   return { store, operations, audits, domainEvents };
@@ -429,5 +434,164 @@ describe('Bitrix24PaidPaymentGuard — start policy', () => {
     await expect(update(env)).rejects.toThrow();
     await expect(env.guard.recoverDue(async () => { throw new Error('ownership lost'); })).rejects.toThrow('ownership lost');
     expect(env.payments.get('700')!.paid).toBe('N');
+  });
+});
+
+/** Payment cards («Поступила оплата от клиента») as the production portal holds them (17.10). */
+function withCards(
+  env: ReturnType<typeof setup>,
+  cards: Array<{ id: string; completed: boolean; sum: number | null }>,
+  failClose?: Error,
+) {
+  const bitrix = env.bitrix as Bitrix24ApiPort & Record<string, unknown>;
+  const closed: string[] = [];
+  const control: { failList?: Error; failClose?: Error } = {};
+  bitrix.listPaymentCards = async (paymentId: string) => {
+    env.calls.push(`cards:${paymentId}`);
+    if (control.failList) throw control.failList;
+    return cards.map((card) => ({ ...card }));
+  };
+  bitrix.completeActivity = async (id: string) => {
+    env.calls.push(`close:${id}`);
+    if (control.failClose) throw control.failClose;
+    if (failClose) throw failClose;
+    closed.push(id);
+    const card = cards.find((item) => item.id === id);
+    if (card) card.completed = true;
+  };
+  return { cards, closed, control };
+}
+
+describe('Bitrix24PaidPaymentGuard — payment card with the old amount', () => {
+  it('closes the open card that still shows the old amount, audited before and after, then completes', async () => {
+    const env = setup({ remote: { 700: ours('Y', 68445) } });
+    const cards = withCards(env, [{ id: '8015', completed: false, sum: 68445 }]);
+    await expect(update(env)).resolves.toBe('applied');
+    expect(env.payments.get('700')).toMatchObject({ paid: 'Y', sum: 300 });
+    expect(cards.closed).toEqual(['8015']);
+    expect(env.calls.slice(-3)).toEqual(['update:700:Y:300', 'cards:700', 'close:8015']);
+    expect(env.audits).toEqual([
+      'requested:3', 'unpaid:3', 'card_requested:3:8015:68445→300', 'card_closed:3:8015:68445→300', 'completed:3:applied',
+    ]);
+  });
+
+  it('leaves closed cards, cards with the current amount and cards without an amount', async () => {
+    const env = setup({ remote: { 700: ours('Y', 68445) } });
+    const cards = withCards(env, [
+      { id: '1', completed: true, sum: 68445 },
+      { id: '2', completed: false, sum: 300 },
+      { id: '3', completed: false, sum: null },
+    ]);
+    await update(env);
+    expect(cards.closed).toEqual([]);
+    expect(env.audits).toEqual(['requested:3', 'unpaid:3', 'completed:3:applied']);
+  });
+
+  it('audits a refused close and still completes the applied payment', async () => {
+    const env = setup({ remote: { 700: ours('Y', 68445) } });
+    withCards(env, [{ id: '8015', completed: false, sum: 68445 }],
+      new Bitrix24ApiError('crm.activity.update', 'ACCESS_DENIED', 403, 'Access denied'));
+    await expect(update(env)).resolves.toBe('applied');
+    expect(env.payments.get('700')).toMatchObject({ paid: 'Y', sum: 300 });
+    expect(env.audits.slice(-3)).toEqual([
+      'card_requested:3:8015:68445→300',
+      'card_failed:3::68445→300:Bitrix24 crm.activity.update failed: 403 ACCESS_DENIED Access denied',
+      'completed:3:applied',
+    ]);
+    expect([...env.operations.values()][0]).toMatchObject({ phase: 'completed', attempts: 0 });
+  });
+
+  it('touches no card when the update needed no paid reset or the payment was deleted', async () => {
+    const plain = setup({ remote: { 700: ours('N', 142000) } });
+    withCards(plain, [{ id: '8015', completed: false, sum: 142000 }]);
+    await update(plain);
+    expect(plain.calls.filter((call) => call.startsWith('cards:'))).toEqual([]);
+
+    const removed = setup({ remote: { 700: ours('Y', 68445) } });
+    withCards(removed, [{ id: '8015', completed: false, sum: 68445 }]);
+    await remove(removed);
+    expect(removed.calls.filter((call) => call.startsWith('cards:') || call.startsWith('close:'))).toEqual([]);
+  });
+
+  it('keeps the operation open when the close audit cannot be written; recovery records it and completes', async () => {
+    const env = setup({ remote: { 700: ours('Y', 68445) } });
+    const cards = withCards(env, [{ id: '8015', completed: false, sum: 68445 }]);
+    env.store.failCardAudit = 'closed';
+    await expect(update(env)).rejects.toThrow('audit failure closed');
+    expect([...env.operations.values()][0]).toMatchObject({ phase: 'unpaid', attempts: 1 });
+    expect(cards.closed).toEqual(['8015']);
+
+    // The card was closed before the failed write: recovery no longer lists it as open; nothing is closed twice.
+    env.store.failCardAudit = undefined;
+    await expect(env.guard.recoverDue(async () => undefined)).resolves.toEqual({ completed: 1, failed: 0 });
+    expect(cards.closed).toEqual(['8015']);
+    expect([...env.operations.values()][0]).toMatchObject({ phase: 'completed', outcome: 'applied' });
+  });
+
+  it('retries the close when the requested audit cannot be written (Bitrix24 untouched)', async () => {
+    const env = setup({ remote: { 700: ours('Y', 68445) } });
+    const cards = withCards(env, [{ id: '8015', completed: false, sum: 68445 }]);
+    env.store.failCardAudit = 'requested';
+    await expect(update(env)).rejects.toThrow('audit failure requested');
+    expect(cards.closed).toEqual([]);
+    env.store.failCardAudit = undefined;
+    await env.guard.recoverDue(async () => undefined);
+    expect(cards.closed).toEqual(['8015']);
+    expect(env.audits.filter((audit) => audit.startsWith('card_'))).toEqual([
+      'card_requested:3:8015:68445→300', 'card_closed:3:8015:68445→300',
+    ]);
+  });
+
+  it.each(['list', 'close'] as const)(
+    'keeps the operation open when writer ownership is lost before the card %s; a fresh owner finishes it',
+    async (at) => {
+      const env = setup({ remote: { 700: ours('Y', 68445) } });
+      const cards = withCards(env, [{ id: '8015', completed: false, sum: 68445 }]);
+      const lost = Object.assign(new Error('CRM sync relay lost live-writer ownership'), { name: 'OwnershipLost' });
+      if (at === 'list') cards.control.failList = lost; else cards.control.failClose = lost;
+      await expect(update(env)).rejects.toThrow('lost live-writer ownership');
+      expect([...env.operations.values()][0]).toMatchObject({ phase: 'unpaid', attempts: 1 });
+      expect(env.audits.filter((audit) => audit.startsWith('completed:') || audit.startsWith('card_failed'))).toEqual([]);
+      expect(env.domainEvents).toEqual([]);
+
+      cards.control.failList = undefined;
+      cards.control.failClose = undefined;
+      await expect(env.guard.recoverDue(async () => undefined)).resolves.toEqual({ completed: 1, failed: 0 });
+      expect(cards.closed).toEqual(['8015']);
+      expect(env.audits.at(-1)).toBe('completed:3:applied');
+    },
+  );
+
+  it('closes no card once the flag is off or the order is outside the allowlist, also for a started operation', async () => {
+    const env = setup({ remote: { 700: ours('Y', 68445) } });
+    const cards = withCards(env, [{ id: '8015', completed: false, sum: 68445 }]);
+    env.failures.push({ match: (call) => call === 'update:700:Y:300' && env.payments.get('700')!.paid === 'N' });
+    await expect(update(env)).rejects.toThrow('fetch failed');
+    env.policy.enabled = false;
+    await env.guard.recoverDue(async () => undefined);
+    expect(env.payments.get('700')).toMatchObject({ paid: 'Y', sum: 300 });
+    expect(cards.closed).toEqual([]);
+    expect(env.calls.filter((call) => call.startsWith('cards:'))).toEqual([]);
+
+    const other = setup({ remote: { 700: ours('Y', 68445) }, policy: { orderIds: new Set(['2']) } });
+    const otherCards = withCards(other, [{ id: '8015', completed: false, sum: 68445 }]);
+    other.failures.push({ match: (call) => call === 'update:700:Y:300' && other.payments.get('700')!.paid === 'N' });
+    await expect(update(other)).rejects.toThrow('fetch failed');
+    other.policy.orderIds = new Set(['99']);
+    await other.guard.recoverDue(async () => undefined);
+    expect(otherCards.closed).toEqual([]);
+  });
+
+  it('records the amount actually applied when ERP changed again before recovery', async () => {
+    const env = setup({ remote: { 700: ours('Y', 68445) } });
+    withCards(env, [{ id: '8015', completed: false, sum: 68445 }]);
+    env.failures.push({ match: (call) => call === 'update:700:Y:300' && env.payments.get('700')!.paid === 'N' });
+    await expect(update(env)).rejects.toThrow('fetch failed');
+    env.erp.set('3', payment({ amount: 450 }));
+    await env.guard.recoverDue(async () => undefined);
+    expect(env.payments.get('700')).toMatchObject({ paid: 'Y', sum: 450 });
+    expect(env.audits.filter((audit) => audit.startsWith('card_'))).toEqual([
+      'card_requested:3:8015:68445→450', 'card_closed:3:8015:68445→450',
+    ]);
   });
 });

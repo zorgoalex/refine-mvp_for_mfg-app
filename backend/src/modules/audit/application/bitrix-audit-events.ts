@@ -95,6 +95,9 @@ export const BITRIX_EVENT_CATALOG: BitrixEventDefinition[] = [
   definition('crm_sync.payment_paid_reset_action_changed','Изменение оплаты Bitrix заменено удалением','forward','payment','started'),
   definition('crm_sync.payment_paid_reset_completed','Оплата «Оплачено» изменена в Bitrix','forward','payment','success'),
   definition('crm_sync.payment_paid_reset_stuck','Не удаётся завершить изменение оплаты в Bitrix','forward','payment','error'),
+  definition('crm_sync.payment_card_close_requested','Запрошено закрытие карточки оплаты Bitrix со старой суммой','forward','payment','started'),
+  definition('crm_sync.payment_card_closed','Закрыта карточка оплаты Bitrix со старой суммой','forward','payment','success'),
+  definition('crm_sync.payment_card_close_failed','Не удалось закрыть карточку оплаты Bitrix со старой суммой','forward','payment','error'),
   definition(
     'bitrix24_reverse.client_upsert',
     'Клиент получен из Bitrix',

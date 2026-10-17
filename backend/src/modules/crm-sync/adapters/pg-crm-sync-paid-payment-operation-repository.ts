@@ -3,6 +3,13 @@ import type { AuditService } from '../../../common/audit/audit.service';
 import type { AuditEvent } from '../../../common/audit/audit-event.types';
 import type { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient } from '../../../database/database.types';
+import type { PaymentCardsResult } from '../application/bitrix24-paid-payment-guard';
+
+const PAYMENT_CARD_EVENTS: Record<PaymentCardsResult['stage'], string> = {
+  requested: 'crm_sync.payment_card_close_requested',
+  closed: 'crm_sync.payment_card_closed',
+  failed: 'crm_sync.payment_card_close_failed',
+};
 
 export type PaidPaymentAction = 'update' | 'delete';
 export type PaidPaymentPhase = 'requested' | 'unpaid' | 'completed';
@@ -284,6 +291,21 @@ export class PgCrmSyncPaidPaymentOperationRepository {
           },
         });
       }
+    });
+  }
+
+  async recordPaymentCards(
+    operation: PaidPaymentOperation,
+    result: PaymentCardsResult,
+    requestId: string,
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await this.audit.record(tx, this.auditEvent(operation, PAYMENT_CARD_EVENTS[result.stage], {
+        requestId,
+        before: { cardSums: result.cardSums },
+        after: { sum: result.appliedSum, cardIds: result.cardIds },
+        metadata: result.error === null ? {} : { error: result.error.slice(0, 1000) },
+      }));
     });
   }
 

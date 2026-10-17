@@ -32,6 +32,20 @@ export interface Bitrix24ApiPort {
   createDealPayment(dealId: string): Promise<string>;
   updatePayment(id: string, fields: Record<string, unknown>): Promise<void>;
   deletePayment(id: string): Promise<void>;
+  /** Payment cards («Поступила оплата от клиента»): absent in dry-run and unconfigured clients. */
+  listPaymentCards?(paymentId: string): Promise<Bitrix24PaymentCard[]>;
+  completeActivity?(id: string): Promise<void>;
+}
+
+/**
+ * The timeline card Bitrix24 creates when a payment is marked paid: activity of provider CRM_PAYMENT
+ * owned by the payment itself (owner type 17), holding the amount AT THAT MOMENT in
+ * SETTINGS.FIELDS.SUM — it is never updated with the payment.
+ */
+export interface Bitrix24PaymentCard {
+  id: string;
+  completed: boolean;
+  sum: number | null;
 }
 
 export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
@@ -89,6 +103,9 @@ interface BitrixEnvelope<T> {
   time?: BitrixTime;
 }
 
+/** CCrmOwnerType::OrderPayment — the owner of a payment card. */
+const PAYMENT_OWNER_TYPE_ID = 17;
+
 // Create methods are intentionally absent: a lost response can hide a successful
 // create, so repeating crm.item.add or crm.item.payment.add could create a duplicate.
 const NETWORK_RETRY_SAFE_METHODS = new Set([
@@ -104,6 +121,10 @@ const NETWORK_RETRY_SAFE_METHODS = new Set([
   'sale.payment.update',
   'crm.item.payment.list',
   'crm.item.payment.delete',
+  'crm.activity.list',
+  'crm.activity.get',
+  // Only ever sent with COMPLETED=Y: repeating it changes nothing.
+  'crm.activity.update',
 ]);
 
 export class Bitrix24ApiError extends Error {
@@ -482,6 +503,44 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
       throw this.unexpected('sale.payment.get', result);
     }
     return result.payment;
+  }
+
+  async listPaymentCards(paymentId: string): Promise<Bitrix24PaymentCard[]> {
+    const rows = await this.call<Array<Record<string, unknown>>>('crm.activity.list', {
+      filter: { OWNER_TYPE_ID: PAYMENT_OWNER_TYPE_ID, OWNER_ID: Number(paymentId), PROVIDER_ID: 'CRM_PAYMENT' },
+      select: ['ID', 'OWNER_TYPE_ID', 'OWNER_ID', 'PROVIDER_ID', 'COMPLETED'],
+      order: { ID: 'ASC' },
+      start: 0,
+    });
+    if (!Array.isArray(rows)) throw this.unexpected('crm.activity.list', rows);
+    const cards: Bitrix24PaymentCard[] = [];
+    for (const row of rows) {
+      // The filter is Bitrix24's; the card is only taken when the row itself proves it.
+      if (
+        String(row.OWNER_TYPE_ID) !== String(PAYMENT_OWNER_TYPE_ID) ||
+        String(row.OWNER_ID) !== String(paymentId) ||
+        row.PROVIDER_ID !== 'CRM_PAYMENT'
+      ) {
+        continue;
+      }
+      const id = String(row.ID ?? '');
+      if (!/^[1-9][0-9]*$/.test(id)) continue;
+      // crm.activity.list does not return SETTINGS; the card's amount is read per card.
+      const card = await this.call<Record<string, unknown>>('crm.activity.get', { id: Number(id) });
+      const settings = card?.SETTINGS as { FIELDS?: { SUM?: unknown } } | undefined;
+      cards.push({
+        id,
+        completed: String(card?.COMPLETED ?? row.COMPLETED) === 'Y',
+        sum: settings?.FIELDS?.SUM == null || settings.FIELDS.SUM === ''
+          ? null
+          : finiteNumberOrNull(settings.FIELDS.SUM),
+      });
+    }
+    return cards;
+  }
+
+  async completeActivity(id: string): Promise<void> {
+    await this.call('crm.activity.update', { id: Number(id), fields: { COMPLETED: 'Y' } });
   }
 
   async deletePayment(id: string): Promise<void> {
