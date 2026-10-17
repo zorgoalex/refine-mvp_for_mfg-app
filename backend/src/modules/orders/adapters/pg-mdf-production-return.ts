@@ -9,6 +9,7 @@ import {
   evaluateProductionCompositionAutomation,
   isStatusAutomationEnabled,
   withIsolatedStatusAutomationVisits,
+  withMdfDetailAutomationContext,
 } from "../../status-automation/application/status-automation-runtime";
 import type { CurrentUser } from "../../../permissions/current-user";
 import { OrderAccessPolicy } from "../../../permissions/policies/order-access.policy";
@@ -590,11 +591,13 @@ async function applyReturnFacts(
     [source.kind, source.id, p.targetColumn, Number(user.id)]
   );
   // Order status is owned by status automation only (never by the board).
-  for (const orderId of changedOrderIds)
-    await evaluateProductionCompositionAutomation(tx, {
-      orderId,
-      actor: user,
-      requestId: automation.requestId,
-      sourceIdempotencyKey: `${automation.sourceIdempotencyKey}:order-${orderId}`,
-    });
+  await withMdfDetailAutomationContext(tx, async () => {
+    for (const orderId of changedOrderIds)
+      await evaluateProductionCompositionAutomation(tx, {
+        orderId,
+        actor: user,
+        requestId: automation.requestId,
+        sourceIdempotencyKey: `${automation.sourceIdempotencyKey}:order-${orderId}`,
+      });
+  });
 }

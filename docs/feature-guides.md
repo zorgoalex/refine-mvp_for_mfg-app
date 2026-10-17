@@ -651,7 +651,22 @@ RETURNING id, name;
 - `change_details_production_status` с режимом деталей `set_exact` или
   `advance_only`;
 - `map_order_status_to_details_production_status` для события `order.status_changed`;
-- `map_production_status_to_order_status` для события `order.production_status_changed`.
+- `map_production_status_to_order_status` для события `order.production_status_changed`;
+- `clear_details_production_status` — снять производственный статус: у активных
+  деталей заказа, где стоит выбранный статус (`targetStatusId`), статус
+  становится пустым, остальные детали не меняются. Доступно для тех же событий,
+  что и изменение статуса деталей (кроме МДФ-событий), и для
+  `order.production_status_changed`. Условие «уже проставлен другой статус»
+  задаётся обычными условиями: «Есть деталь со статусом» и «Статус заказа».
+  Снятие не может вернуть статус обратно, поэтому повторный пересчёт состава не
+  зацикливается; каждое правило срабатывает не более одного раза за команду.
+  Перед откатом backend ниже версии с этим действием выключить такие правила:
+
+  ```sql
+  UPDATE status_automation_rules SET is_enabled=false, version=version+1, updated_at=now()
+  WHERE is_enabled AND action_type = 'clear_details_production_status'
+  RETURNING id, name;
+  ```
 
 МДФ-доска сама статус заказа не меняет: при возврате карточки меняются только
 статусы её деталей, после чего в той же транзакции вычисляются правила

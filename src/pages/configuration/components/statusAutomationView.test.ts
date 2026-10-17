@@ -510,6 +510,17 @@ describe('statusAutomationView', () => {
     ]);
   });
 
+  it('describes and builds a clear-production-status action', () => {
+    const form = { ...baseForm, eventType: 'order.production_status_changed', actionType: 'clear_details_production_status' as const,
+      targetStatusId: 4, anyProductionStatusIn: [5] };
+    expect(describeFormAction(form, catalogs)).toBe('Снять статус «В работе» у деталей, где он стоит');
+    expect(describeAction({ ...rule, actionType: 'clear_details_production_status', targetStatusId: 4 }, catalogs))
+      .toBe('В работе');
+    const payload = buildCreatePayload(form);
+    expect(payload).toMatchObject({ actionType: 'clear_details_production_status', targetStatusId: 4 });
+    expect(payload).not.toHaveProperty('actionConfig');
+  });
+
   it('builds and describes many-to-one mapping actions', () => {
     const mappingRule: StatusAutomationRuleDto = {
       ...rule,

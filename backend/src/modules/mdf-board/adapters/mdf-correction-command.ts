@@ -19,7 +19,7 @@ import { mdfCorrectionComposition, discoverMdfCorrectionClosure, discoverMdfHist
 import { mdfSourceKey } from './mdf-execution-snapshot';
 import { mdfPlacement, parseMdfPlacementInputs } from '../domain/mdf-placement';
 import { evaluateProductionCompositionAutomation, isStatusAutomationEnabled,
-  withIsolatedStatusAutomationVisits } from '../../status-automation/application/status-automation-runtime';
+  withIsolatedStatusAutomationVisits, withMdfDetailAutomationContext } from '../../status-automation/application/status-automation-runtime';
 import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
 import { planMdfCorrection, type MdfCorrectionDetail, type MdfCorrectionInput, type MdfCorrectionPlan,
   type MdfCorrectionSource, type MdfCorrectionSourceLine, type MdfCorrectionSourceReplacement } from '../domain/mdf-correction-plan';
@@ -715,8 +715,10 @@ async function applyDetailStatusEffects(tx:TransactionClient,actorId:number,snap
 }
 
 async function dispatchOrderAutomation(tx:TransactionClient,user:CurrentUser,orderIds:readonly number[],requestId:string,keyBase:string) {
-  for (const orderId of orderIds) await evaluateProductionCompositionAutomation(tx,{orderId,actor:user,requestId,
-    sourceIdempotencyKey:`${keyBase}:order-${orderId}`});
+  await withMdfDetailAutomationContext(tx,async()=>{
+    for (const orderId of orderIds) await evaluateProductionCompositionAutomation(tx,{orderId,actor:user,requestId,
+      sourceIdempotencyKey:`${keyBase}:order-${orderId}`});
+  });
 }
 
 async function readOrderStatuses(tx:TransactionClient,orderIds:readonly number[]) {

@@ -20,6 +20,7 @@ export type StatusAutomationActionType =
   | 'change_order_status'
   | 'change_production_status'
   | 'change_details_production_status'
+  | 'clear_details_production_status'
   | 'map_order_status_to_details_production_status'
   | 'map_production_status_to_order_status';
 

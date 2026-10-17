@@ -105,6 +105,7 @@ const ACTION_LABELS: Record<StatusAutomationActionType, string> = {
   change_order_status: 'Изменить статус заказа',
   change_production_status: 'Изменить общий статус производства заказа',
   change_details_production_status: 'Изменить статус всех производственных деталей',
+  clear_details_production_status: 'Снять производственный статус у деталей',
   map_order_status_to_details_production_status: 'Менять статус деталей по статусу заказа',
   map_production_status_to_order_status: 'Менять статус заказа по статусу производства',
 };
@@ -506,7 +507,9 @@ export function StatusAutomationConfig() {
         ? form.eventType.startsWith('mdf.')
           ? 'Какой статус установить позициям исходной карточки после выполнения полного количества?'
           : 'Какой статус установить всем деталям?'
-        : 'Какой общий статус производства установить?';
+        : form.actionType === 'clear_details_production_status'
+          ? 'Какой производственный статус снять?'
+          : 'Какой общий статус производства установить?';
   const availableConditionOptions = STATUS_AUTOMATION_CONDITION_KEYS
     .filter((key) => allowedConditionSet.has(key) && !activeConditionKeys.includes(key))
     .map((key) => ({ value: key, label: CONDITION_LABELS[key] }));
@@ -1551,7 +1554,9 @@ export function StatusAutomationConfig() {
                   label={targetStatusQuestion}
                   required
                   style={{ marginBottom: 0 }}
-                  extra="Этот статус будет установлен, когда событие произойдёт и все условия совпадут."
+                  extra={form.actionType === 'clear_details_production_status'
+                    ? 'У деталей с этим статусом статус станет пустым, остальные детали не изменятся. Что уже должно быть проставлено, задайте в условиях («Есть деталь со статусом», «Статус заказа»).'
+                    : 'Этот статус будет установлен, когда событие произойдёт и все условия совпадут.'}
                 >
                   <Select<number>
                     aria-label={targetStatusQuestion}
