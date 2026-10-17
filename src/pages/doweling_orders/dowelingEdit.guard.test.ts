@@ -15,6 +15,11 @@ describe('doweling order full edit form', () => {
     expect(editSource).toContain('order_ids: linkedOrderIds');
   });
 
+  it('picks orders from orders_view (Hasura `orders` is ERP-admin-only since 0Б)', () => {
+    expect(editSource).toMatch(/useSelect\(\{\s*resource: "orders_view",\s*optionLabel: "order_name"/);
+    expect(editSource).not.toMatch(/resource: ["']orders["']/);
+  });
+
   it('saves through the backend command with the loaded version, never through Hasura', () => {
     expect(editSource).toContain('dowelingApi.update(dowelingOrderId, request)');
     expect(editSource).toContain('expectedVersion: Number(record.version ?? 0)');
