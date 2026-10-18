@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-18", title: "Bitrix: карточка оплаты не возвращается после повторного изменения суммы",
+    services: ["ERP", "CRM"], repositories: ["repo_erp"],
+    fixed: [
+      "Если сумму оплаты с отметкой «Оплачено» меняли дважды и она вернулась к прежней, Bitrix снова открывал карточку «Поступила оплата от клиента» в «Что нужно сделать». Теперь после исправления оплаты ERP закрывает любую открытую карточку этой оплаты, какую бы сумму она ни показывала.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-17", title: "Права: суммы заказов, деталей и присадки — только с правом на финансы",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [
