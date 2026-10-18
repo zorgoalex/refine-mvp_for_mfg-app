@@ -32,7 +32,7 @@ export interface PaidPaymentOperationStore {
   ): Promise<boolean>;
   recordFailure(operation: PaidPaymentOperation, error: string, requestId: string): Promise<void>;
   /**
-   * Audit of closing the payment cards with an old amount: `requested` (written BEFORE Bitrix24 is
+   * Audit of closing the open payment cards after a paid reset: `requested` (written BEFORE Bitrix24 is
    * called), then `closed` or `failed`. A failure to write throws, so the operation is not completed
    * and recovery repeats the step.
    */
@@ -43,8 +43,8 @@ export interface PaymentCardsResult {
   stage: 'requested' | 'closed' | 'failed';
   /** Bitrix24 activity ids of the cards (to close, or closed). */
   cardIds: string[];
-  /** Amount each card shows, as Bitrix24 kept it. */
-  cardSums: number[];
+  /** Amount each card shows, as Bitrix24 kept it (null: the card has none). */
+  cardSums: Array<number | null>;
   /** Amount applied to the payment by this step. */
   appliedSum: number;
   error: string | null;
@@ -284,7 +284,7 @@ export class Bitrix24PaidPaymentGuard {
       await this.deps.bitrix.updatePayment(id, fields);
       // Before completion: a crash or an audit failure leaves the operation open, and recovery
       // repeats this step (the payment update is idempotent, a closed card is not listed again).
-      await this.closeStaleCards(operation, targetSum, requestId);
+      await this.closeOpenCards(operation, targetSum, requestId);
       await this.deps.store.complete(operation, 'applied', {
         requestId,
         reproject,
@@ -303,15 +303,17 @@ export class Bitrix24PaidPaymentGuard {
   }
 
   /**
-   * Closes the open «Поступила оплата от клиента» card of the payment when it still shows another
-   * amount (the old one): Bitrix24 keeps the amount of the moment the payment was first marked paid
-   * and does not create a new card when the flag is set back. Same as the «Обработано» button.
+   * Closes every open «Поступила оплата от клиента» card of the payment after the paid reset, same as
+   * the «Обработано» button. Bitrix24 keeps one card per payment with the amount of the moment it was
+   * first marked paid; setting the flag back reopens that card (production, 18.10: a closed card came
+   * back when the amount returned to the old one), so an open card here is an effect of ERP's own
+   * unpaid → paid switch, whatever amount it shows, not a new payment from the client.
    * Runs after the payment carries the new amount and before the operation completes. Only a
    * Bitrix24 error is audited as a failed close and does not stop the payment; any other error (lost
    * writer ownership from the request guard, an audit write) propagates, the operation stays open and
-   * recovery repeats the step. A card with the current amount or without an amount is left as is.
+   * recovery repeats the step. Closed cards are left as they are.
    */
-  private async closeStaleCards(
+  private async closeOpenCards(
     operation: PaidPaymentOperation,
     appliedSum: number,
     requestId: string,
@@ -320,10 +322,10 @@ export class Bitrix24PaidPaymentGuard {
     if (!bitrix.listPaymentCards || !bitrix.completeActivity) return;
     // The paid-reset flag and order allowlist also stop closing for operations already started.
     if (!this.canStart(operation.erpOrderId)) return;
-    let stale: Bitrix24PaymentCard[];
+    let open: Bitrix24PaymentCard[];
     try {
-      stale = (await bitrix.listPaymentCards(operation.bitrixPaymentId))
-        .filter((card) => !card.completed && card.sum !== null && !sameAmount(card.sum, appliedSum));
+      open = (await bitrix.listPaymentCards(operation.bitrixPaymentId))
+        .filter((card) => !card.completed);
     } catch (error) {
       if (!(error instanceof Bitrix24ApiError)) throw error;
       await store.recordPaymentCards(operation, {
@@ -331,13 +333,13 @@ export class Bitrix24PaidPaymentGuard {
       }, requestId);
       return;
     }
-    if (stale.length === 0) return;
-    const cardIds = stale.map((card) => card.id);
-    const cardSums = stale.map((card) => card.sum as number);
+    if (open.length === 0) return;
+    const cardIds = open.map((card) => card.id);
+    const cardSums = open.map((card) => card.sum);
     await store.recordPaymentCards(operation, { stage: 'requested', cardIds, cardSums, appliedSum, error: null }, requestId);
     const closed: string[] = [];
     try {
-      for (const card of stale) {
+      for (const card of open) {
         await bitrix.completeActivity(card.id);
         closed.push(card.id);
       }

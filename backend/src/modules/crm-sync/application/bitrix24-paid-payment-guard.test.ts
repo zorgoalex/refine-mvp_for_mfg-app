@@ -475,7 +475,7 @@ describe('Bitrix24PaidPaymentGuard — payment card with the old amount', () => 
     ]);
   });
 
-  it('leaves closed cards, cards with the current amount and cards without an amount', async () => {
+  it('closes every open card, also one with the current amount or without an amount; leaves closed cards', async () => {
     const env = setup({ remote: { 700: ours('Y', 68445) } });
     const cards = withCards(env, [
       { id: '1', completed: true, sum: 68445 },
@@ -483,8 +483,36 @@ describe('Bitrix24PaidPaymentGuard — payment card with the old amount', () => 
       { id: '3', completed: false, sum: null },
     ]);
     await update(env);
-    expect(cards.closed).toEqual([]);
-    expect(env.audits).toEqual(['requested:3', 'unpaid:3', 'completed:3:applied']);
+    expect(cards.closed).toEqual(['2', '3']);
+    expect(env.audits).toEqual([
+      'requested:3', 'unpaid:3', 'card_requested:3:2,3:300,→300', 'card_closed:3:2,3:300,→300', 'completed:3:applied',
+    ]);
+  });
+
+  it('closes the card Bitrix24 reopens when the amount returns to the old one (production 18.10, order 1258тест)', async () => {
+    const env = setup({ remote: { 700: ours('Y', 142717) }, erpPayments: [payment({ amount: 142716 })] });
+    const cards = withCards(env, [{ id: '7942', completed: false, sum: 142717 }]);
+    // The portal keeps one card per payment and reopens it whenever the payment is marked paid again.
+    const bitrix = env.bitrix as Bitrix24ApiPort & Record<string, unknown>;
+    const updatePayment = bitrix.updatePayment as (id: string, fields: Record<string, unknown>) => Promise<void>;
+    bitrix.updatePayment = async (id: string, fields: Record<string, unknown>) => {
+      const wasPaid = env.payments.get(id)?.paid;
+      await updatePayment(id, fields);
+      if (wasPaid === 'N' && fields.paid === 'Y') for (const card of cards.cards) card.completed = false;
+    };
+
+    await expect(update(env, payment({ amount: 142716 }))).resolves.toBe('applied');
+    expect(cards.closed).toEqual(['7942']);
+
+    env.erp.set('3', payment({ amount: 142717 }));
+    await expect(update(env, payment({ amount: 142717 }))).resolves.toBe('applied');
+    expect(env.payments.get('700')).toMatchObject({ paid: 'Y', sum: 142717 });
+    expect(cards.closed).toEqual(['7942', '7942']);
+    expect(cards.cards[0].completed).toBe(true);
+    expect(env.audits.filter((audit) => audit.startsWith('card_'))).toEqual([
+      'card_requested:3:7942:142717→142716', 'card_closed:3:7942:142717→142716',
+      'card_requested:3:7942:142717→142717', 'card_closed:3:7942:142717→142717',
+    ]);
   });
 
   it('audits a refused close and still completes the applied payment', async () => {
