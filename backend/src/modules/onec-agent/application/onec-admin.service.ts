@@ -345,10 +345,7 @@ export class OnecAdminService {
         },
         { agentId, sourceId: agent.sourceId, certId },
       );
-      await tx.query(
-        `UPDATE onec_alerts SET state = 'resolved', resolved_at = now() WHERE cert_id = $1 AND state <> 'resolved'`,
-        [certId],
-      );
+      await this.repository.resolveAlertsForCertificate(tx, certId);
       return revoked;
     });
     return certificateView(row);

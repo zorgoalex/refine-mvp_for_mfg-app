@@ -53,6 +53,22 @@ describe('TelegramNotificationDeliveryService', () => {
     expect(unknownRepository.rescheduleRateLimited).not.toHaveBeenCalled();
   });
 
+  it('skips a delivery the send gate refuses (expired or no longer permitted) without calling Telegram', async () => {
+    const repository = fakeRepository({ destination: '123' });
+    (repository.markSendStarted as unknown as { mockResolvedValueOnce: (value: unknown) => void }).mockResolvedValueOnce({
+      kind: 'skip',
+      code: 'PERMISSION_MISSING',
+      message: 'Recipient no longer has the required permission',
+    });
+    const botApi = { sendMessage: vi.fn() };
+    const service = createService(repository, botApi);
+
+    await expect(service.processBatchOnce()).resolves.toMatchObject({ claimed: 1, skipped: 1, delivered: 0 });
+    expect(botApi.sendMessage).not.toHaveBeenCalled();
+    expect(repository.markSkipped).toHaveBeenCalledWith('delivery-1', 'PERMISSION_MISSING', expect.any(String));
+    expect(repository.markUnknown).not.toHaveBeenCalled();
+  });
+
   it('retries failures before send without calling Telegram', async () => {
     const repository = fakeRepository({ destination: '123' });
     repository.findDestination.mockRejectedValueOnce(new Error('database unavailable'));
@@ -143,7 +159,7 @@ function fakeRepository(input: { destination: string | null }) {
       },
     ]),
     findDestination: vi.fn(async () => input.destination),
-    markSendStarted: vi.fn(async () => true),
+    markSendStarted: vi.fn(async () => ({ kind: 'started' as const })),
     markDelivered: vi.fn(async () => undefined),
     markSkipped: vi.fn(async () => undefined),
     markFailed: vi.fn(async () => undefined),

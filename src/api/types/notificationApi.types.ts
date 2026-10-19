@@ -12,8 +12,10 @@ export interface BackendNotificationDto {
   sourceId: string | null;
   readAt: string | null;
   createdAt: string;
-  /** Балун на момент записи; нет (старый backend) или null — без балуна. */
-  balloonMode?: 'auto' | 'persistent' | null;
+  /** Балун на момент записи; нет (старый backend) или null — без балуна; `mandatory` — обязательный (только крестиком). */
+  balloonMode?: 'auto' | 'persistent' | 'mandatory' | null;
+  /** Обязательный балун ещё не показан — удалить строку нельзя (backend ответит 409). Нет у старого backend. */
+  balloonPending?: boolean;
 }
 
 export interface ClaimBalloonsResponse {

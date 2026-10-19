@@ -1,5 +1,8 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 
+/** Балун уведомления: `mandatory` — обязательный (только крестиком, без срока; выдаётся заявившим его клиентам). */
+export type NotificationBalloonMode = 'auto' | 'persistent' | 'mandatory';
+
 export type NotificationLevel = 'info' | 'warning' | 'error';
 
 export interface NotificationDto {
@@ -14,8 +17,13 @@ export interface NotificationDto {
   sourceId: string | null;
   readAt: string | null;
   createdAt: string;
-  /** Балун на момент записи: NULL — без балуна, `auto` — исчезает через 15 с, `persistent` — только крестиком. */
-  balloonMode: 'auto' | 'persistent' | null;
+  /**
+   * Балун на момент записи: NULL — без балуна, `auto` — исчезает через 15 с, `persistent` — только крестиком,
+   * `mandatory` — обязательный (только крестиком, клик по телу не закрывает, без срока выдачи).
+   */
+  balloonMode: NotificationBalloonMode | null;
+  /** Обязательный балун ещё не показан: строку нельзя удалить (409), колокольчик прячет удаление. */
+  balloonPending: boolean;
 }
 
 export interface NotificationListQuery {
@@ -59,9 +67,13 @@ export interface NotificationRepositoryPort {
     viewer: NotificationViewer;
   }): Promise<NotificationDto | null>;
   markAllReadForUser(viewer: NotificationViewer): Promise<number>;
-  deleteForUser(input: { notificationId: string; viewer: NotificationViewer }): Promise<boolean>;
-  /** Аренда непоказанных балунов вкладкой (план 2026-10-03 §3.2): свои незавершённые — первыми. */
-  claimBalloonsForUser(input: { viewer: NotificationViewer; token: string; limit: number }): Promise<NotificationDto[]>;
+  /** `balloon_pending` — обязательный балун строки ещё не показан, строка не удалена. */
+  deleteForUser(input: { notificationId: string; viewer: NotificationViewer }): Promise<'deleted' | 'not_found' | 'balloon_pending'>;
+  /**
+   * Аренда непоказанных балунов вкладкой (план 2026-10-03 §3.2): свои незавершённые — первыми. Обязательные
+   * (`mandatory`) — только клиенту, заявившему эту возможность (`mandatory: true`), без срока и независимо от прочтения.
+   */
+  claimBalloonsForUser(input: { viewer: NotificationViewer; token: string; limit: number; mandatory: boolean }): Promise<NotificationDto[]>;
   /** Подтверждение показа своих арендованных балунов; повтор — no-op. */
   ackBalloonsForUser(input: { viewer: NotificationViewer; token: string; notificationIds: string[] }): Promise<number>;
 }

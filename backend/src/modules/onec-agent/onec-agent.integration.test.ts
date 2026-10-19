@@ -90,7 +90,7 @@ suite('1C agent E1 — isolated PostgreSQL', () => {
       CREATE TABLE audit_log(LIKE public.audit_log INCLUDING ALL);
       CREATE TABLE audit_log_related_entity(LIKE public.audit_log_related_entity INCLUDING ALL);`);
     for (const file of ['193_onec_agent_foundation.sql', '196_onec_agent_commands.sql', '198_onec_etl.sql', '200_onec_etl_snapshots_revocation.sql',
-      '247_onec_agent_expected_silence.sql', '250_onec_stock_snapshots.sql']) {
+      '247_onec_agent_expected_silence.sql', '250_onec_stock_snapshots.sql', '262_onec_alert_episodes.sql']) {
       await pool.query(readFileSync(new URL(`../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     const values: Partial<BackendEnv> = { DATABASE_URL: url.toString(), DATABASE_QUERY_TIMEOUT_MS: 10000, DATABASE_POOL_MIN: 0, DATABASE_POOL_MAX: 4, DATABASE_SSL: false };
@@ -120,7 +120,7 @@ suite('1C agent E1 — isolated PostgreSQL', () => {
   });
 
   beforeEach(async () => {
-    await pool.query(`TRUNCATE onec_alerts, onec_outbox_events, onec_audit_links, onec_agent_incidents,
+    await pool.query(`TRUNCATE onec_alerts, onec_alert_episodes, onec_outbox_events, onec_audit_links, onec_agent_incidents,
       onec_agent_config_drafts, onec_agent_status_history, onec_agent_status, onec_agent_sessions,
       onec_agent_certificates, onec_agents, onec_sources RESTART IDENTITY CASCADE;
       ALTER TABLE onec_agent_config_versions DISABLE TRIGGER onec_agent_config_version_immutable;
@@ -590,6 +590,153 @@ suite('1C agent E1 — isolated PostgreSQL', () => {
     }
     const status = await pool.query(`SELECT state FROM onec_agent_status WHERE agent_id = 'agent-a'`);
     expect(status.rows[0].state).toBe('healthy');
+  });
+  // ------------------------------------------------------------------ alert episodes (notifications, plan 2026-10-19 §2.2)
+
+  const episodes = async () =>
+    (await pool.query(`SELECT alert_id, opened_at, kind, severity_at_open, severity_max, acknowledged_at, resolved_at, status, reconciled
+                         FROM onec_alert_episodes ORDER BY episode_id`)).rows;
+  const alertRow = async (dedupeKey: string) =>
+    (await pool.query(`SELECT alert_id, state, opened_at, acknowledged_at, acknowledged_by FROM onec_alerts WHERE dedupe_key = $1`, [dedupeKey])).rows[0];
+  const upsert = (dedupeKey: string, severity: 'info' | 'warning' | 'critical' = 'warning', extra: { oneShot?: boolean; certId?: number | null } = {}) =>
+    repo.upsertAlert(db, { kind: 'agent_state', agentId: null, sourceId: null, certId: extra.certId ?? null, severity, dedupeKey, details: {}, oneShot: extra.oneShot });
+
+  it('writes an episode with every change of an alert: open, repeat, more severe, acknowledge, resolve, reopen', async () => {
+    await upsert('ep-1', 'warning');
+    await upsert('ep-1', 'warning');
+    expect(await episodes()).toHaveLength(1);
+    await upsert('ep-1', 'critical');
+    await upsert('ep-1', 'warning');
+    let [first] = await episodes();
+    expect(first).toMatchObject({ kind: 'agent_state', severity_at_open: 'warning', severity_max: 'critical', resolved_at: null, status: 'pending' });
+
+    const alert = await alertRow('ep-1');
+    await repo.acknowledgeAlert(db, Number(alert.alert_id), 1);
+    [first] = await episodes();
+    expect(first.acknowledged_at).not.toBeNull();
+
+    expect(await repo.resolveAlertByDedupeKey(db, 'ep-1')).toBe(1);
+    [first] = await episodes();
+    expect(first.resolved_at).not.toBeNull();
+
+    // The condition returns: a new episode; the acknowledgement of the old one is cleared on the alert too.
+    await upsert('ep-1', 'warning');
+    const reopened = await alertRow('ep-1');
+    expect(reopened).toMatchObject({ state: 'open', acknowledged_at: null, acknowledged_by: null });
+    const all = await episodes();
+    expect(all).toHaveLength(2);
+    expect(all[1]).toMatchObject({ resolved_at: null, acknowledged_at: null, severity_at_open: 'warning' });
+    expect(new Date(all[1].opened_at).getTime()).toBe(new Date(reopened.opened_at).getTime());
+  });
+
+  it('two concurrent first inserts of one alert merge into one episode that keeps the highest severity', async () => {
+    const first = await pool.connect();
+    const second = await pool.connect();
+    try {
+      await first.query('BEGIN');
+      await repo.upsertAlert(first, { kind: 'agent_state', agentId: null, sourceId: null, certId: null, severity: 'warning', dedupeKey: 'race-1', details: {} });
+      await second.query('BEGIN');
+      // Waits on the unique index until the first commits; its snapshot never saw the first alert or episode.
+      const critical = repo.upsertAlert(second, { kind: 'agent_state', agentId: null, sourceId: null, certId: null, severity: 'critical', dedupeKey: 'race-1', details: {} });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await first.query('COMMIT');
+      await critical;
+      await second.query('COMMIT');
+    } finally {
+      first.release();
+      second.release();
+    }
+    // The condition calms down and clears before any reconciliation: the peak must already be in the episode.
+    await upsert('race-1', 'warning');
+    await repo.resolveAlertByDedupeKey(db, 'race-1');
+    const rows = await episodes();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ severity_at_open: 'warning', severity_max: 'critical' });
+    expect(rows[0].resolved_at).not.toBeNull();
+  });
+
+  it('a one-shot alert has one episode; every resolve path closes its episode', async () => {
+    await upsert('shot-1', 'warning', { oneShot: true });
+    await upsert('shot-1', 'critical', { oneShot: true });
+    expect(await episodes()).toHaveLength(1);
+    expect((await episodes())[0].severity_max).toBe('warning');
+
+    const shot = await alertRow('shot-1');
+    expect(await repo.resolveAlert(db, Number(shot.alert_id), ['agent_state'])).toMatchObject({ state: 'resolved' });
+    await registerAgent();
+    await repo.upsertAlert(db, { kind: 'agent_state', agentId: 'agent-a', sourceId: null, certId: null, severity: 'warning', dedupeKey: 'by-agent', details: {} });
+    expect(await repo.resolveAlerts(db, 'agent-a', ['agent_state'])).toBe(1);
+    const open = await pool.query(`SELECT count(*)::int AS n FROM onec_alert_episodes e JOIN onec_alerts a USING (alert_id)
+                                    WHERE a.state = 'resolved' AND e.resolved_at IS NULL`);
+    expect(open.rows[0].n).toBe(0);
+    expect((await episodes()).every((episode) => episode.resolved_at !== null)).toBe(true);
+  });
+
+  it('a revoked certificate closes its alerts and their episodes in the revocation transaction', async () => {
+    const { cert } = await registerAgent();
+    await repo.upsertAlert(db, { kind: 'certificate_expiring', agentId: 'agent-a', sourceId: null, certId: cert.certId,
+      severity: 'warning', dedupeKey: `certificate_expiring:${cert.certId}`, details: {} });
+    await admin.revokeCertificate('agent-a', cert.certId, actor, ctx('e2e-revoke'));
+    const [episode] = await episodes();
+    expect(episode.resolved_at).not.toBeNull();
+    expect((await alertRow(`certificate_expiring:${cert.certId}`)).state).toBe('resolved');
+  });
+
+  it('reconciliation repairs the journal after changes made without it (a rollback below the release)', async () => {
+    await upsert('rc-closed', 'warning');
+    await upsert('rc-reopened', 'warning');
+    await upsert('rc-ack', 'warning');
+    await upsert('rc-sev', 'warning');
+    // An older image changes onec_alerts directly: resolves one, resolves + reopens another (keeping its old
+    // acknowledgement), acknowledges and raises the others, and opens an alert with no episode at all.
+    await pool.query(`UPDATE onec_alerts SET state = 'resolved', resolved_at = now() WHERE dedupe_key = 'rc-closed'`);
+    await pool.query(`UPDATE onec_alerts SET acknowledged_at = now() - interval '1 hour', acknowledged_by = 1,
+                        opened_at = now(), state = 'open' WHERE dedupe_key = 'rc-reopened'`);
+    await pool.query(`UPDATE onec_alerts SET state = 'acknowledged', acknowledged_at = now(), acknowledged_by = 1 WHERE dedupe_key = 'rc-ack'`);
+    await pool.query(`UPDATE onec_alerts SET severity = 'critical' WHERE dedupe_key = 'rc-sev'`);
+    await pool.query(`INSERT INTO onec_alerts (kind, severity, dedupe_key, details) VALUES ('agent_state', 'warning', 'rc-new', '{}'::jsonb)`);
+
+    const result = await repo.reconcileAlertEpisodes(db);
+    expect(result).toEqual({ closed: 2, created: 2, acknowledged: 1, escalated: 1 });
+    const byKey = async (key: string) =>
+      (await pool.query(`SELECT e.* FROM onec_alert_episodes e JOIN onec_alerts a USING (alert_id) WHERE a.dedupe_key = $1 ORDER BY e.episode_id`, [key])).rows;
+    expect((await byKey('rc-closed'))[0].resolved_at).not.toBeNull();
+    const reopened = await byKey('rc-reopened');
+    expect(reopened).toHaveLength(2);
+    expect(reopened[0]).toMatchObject({ reconciled: true });
+    expect(reopened[0].resolved_at).not.toBeNull();
+    // The acknowledgement predates the new episode: it is not carried over (reminders must go on).
+    expect(reopened[1]).toMatchObject({ acknowledged_at: null, resolved_at: null, reconciled: true });
+    expect((await byKey('rc-ack'))[0].acknowledged_at).not.toBeNull();
+    expect((await byKey('rc-sev'))[0].severity_max).toBe('critical');
+    expect(await byKey('rc-new')).toHaveLength(1);
+    // Idempotent.
+    expect(await repo.reconcileAlertEpisodes(db)).toEqual({ closed: 0, created: 0, acknowledged: 0, escalated: 0 });
+  });
+
+  it('writers and reconciliation run concurrently without deadlocks or lost episodes', async () => {
+    const keys = Array.from({ length: 6 }, (_, i) => `cc-${i}`);
+    for (const key of keys) await upsert(key, 'warning');
+    await Promise.all([
+      ...keys.map(async (key, i) => {
+        await upsert(key, i % 2 ? 'critical' : 'warning');
+        await repo.resolveAlertByDedupeKey(db, key);
+        await upsert(key, 'warning');
+      }),
+      repo.reconcileAlertEpisodes(db),
+      repo.reconcileAlertEpisodes(db),
+    ]);
+    await repo.reconcileAlertEpisodes(db);
+    const mismatch = await pool.query(`
+      SELECT count(*)::int AS n FROM onec_alerts a
+       WHERE a.state <> 'resolved'
+         AND NOT EXISTS (SELECT 1 FROM onec_alert_episodes e WHERE e.alert_id = a.alert_id AND e.opened_at = a.opened_at AND e.resolved_at IS NULL)`);
+    expect(mismatch.rows[0].n).toBe(0);
+    const stale = await pool.query(`
+      SELECT count(*)::int AS n FROM onec_alert_episodes e
+       WHERE e.resolved_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM onec_alerts a WHERE a.alert_id = e.alert_id AND a.opened_at = e.opened_at AND a.state <> 'resolved')`);
+    expect(stale.rows[0].n).toBe(0);
   });
 });
 

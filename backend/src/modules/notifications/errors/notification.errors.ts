@@ -8,6 +8,11 @@ export function invalidNotificationId(): ApiError {
   return new ApiError(400, 'INVALID_NOTIFICATION_ID', 'Invalid notificationId');
 }
 
+/** Обязательный балун ещё не показан — уведомление удалить нельзя (план 2026-10-19 §2.7). */
+export function notificationBalloonPending(): ApiError {
+  return new ApiError(409, 'NOTIFICATION_BALLOON_PENDING', 'Уведомление можно удалить после показа его обязательного балуна');
+}
+
 export function notificationNotFound(): ApiError {
   return new ApiError(404, 'NOTIFICATION_NOT_FOUND', 'Notification not found');
 }

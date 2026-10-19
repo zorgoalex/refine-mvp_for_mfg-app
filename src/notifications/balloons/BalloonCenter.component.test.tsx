@@ -151,6 +151,23 @@ describe('BalloonCenterProvider (code review R1)', () => {
     expect(mocks.destroyed).toContain(`notification-${ID(5)}`);
   });
 
+  it('mandatory (1C alerts): no timer, a body click opens the 1C screen but does not close it; only the cross closes it', async () => {
+    mocks.claim.mockResolvedValueOnce({ items: [item(ID(6), { balloonMode: 'mandatory', level: 'error', entityType: 'onec_alert_dispatch', entityId: '17' })] })
+      .mockResolvedValue({ items: [] });
+    await mount();
+    expect(mocks.opened[0]).toMatchObject({ kind: 'error', duration: 0 });
+    expect((mocks.opened[0] as unknown as { className: string }).className).toBe('app-balloon app-balloon--critical');
+    await act(async () => { mocks.opened[0].onClick!(); });
+    await flush();
+    expect(mocks.navigate).toHaveBeenCalledWith('/onec');
+    expect(mocks.destroyed).not.toContain(`notification-${ID(6)}`);
+    const claimsBeforeClose = mocks.claim.mock.calls.length;
+    await act(async () => { mocks.opened[0].onClose!(); });
+    await flush();
+    // The cross frees the slot: the center asks the server for more.
+    expect(mocks.claim.mock.calls.length).toBeGreaterThan(claimsBeforeClose);
+  });
+
   it('local balloons: accepted keys returned; storage failure falls back to memory and still shows', async () => {
     mocks.claim.mockResolvedValue({ items: [] });
     await mount();

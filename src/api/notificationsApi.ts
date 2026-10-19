@@ -1,3 +1,4 @@
+import { BALLOON_CAPABILITIES, BALLOON_CAPABILITIES_HEADER } from '../notifications/balloons/balloonCenterModel';
 import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
@@ -22,9 +23,14 @@ export const notificationsApi = {
     );
   },
 
-  /** Аренда непоказанных балунов вкладкой (план 2026-10-03 §3.2). */
+  /**
+   * Аренда непоказанных балунов вкладкой (план 2026-10-03 §3.2). Заголовок заявляет поддержку обязательных балунов
+   * (план 2026-10-19 §2.7): только такой вкладке backend их выдаёт; тело запроса прежнее — старый backend не ломается.
+   */
   claimBalloons(body: { token: string; limit: number }): Promise<ClaimBalloonsResponse> {
-    return httpClient.post<ClaimBalloonsResponse>(apiRoutes.notifications.balloonsClaim, body);
+    return httpClient.post<ClaimBalloonsResponse>(apiRoutes.notifications.balloonsClaim, body, {
+      headers: { [BALLOON_CAPABILITIES_HEADER]: BALLOON_CAPABILITIES },
+    });
   },
 
   /** Подтверждение показа арендованных балунов. */

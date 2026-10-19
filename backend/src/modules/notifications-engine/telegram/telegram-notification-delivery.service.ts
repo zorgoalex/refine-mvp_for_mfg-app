@@ -69,7 +69,14 @@ export class TelegramNotificationDeliveryService {
           continue;
         }
 
-        sendStarted = await this.repository.markSendStarted(delivery.deliveryId);
+        const start = await this.repository.markSendStarted(delivery.deliveryId);
+        if (start.kind === 'skip') {
+          // Срок годности истёк или получатель больше не вправе (план 2026-10-19 §2.9) — без вызова Telegram.
+          await this.repository.markSkipped(delivery.deliveryId, start.code, start.message);
+          summary.skipped += 1;
+          continue;
+        }
+        sendStarted = start.kind === 'started';
         if (!sendStarted) {
           throw new Error('Delivery claim was lost before Telegram send');
         }

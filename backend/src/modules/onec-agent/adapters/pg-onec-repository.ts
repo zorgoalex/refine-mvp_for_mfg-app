@@ -106,6 +106,9 @@ export interface AlertUpsert {
 }
 
 const num = (value: unknown): number => Number(value);
+/** Order of alert severities for «the episode got more severe». */
+const severityRankSql = (column: string): string =>
+  `(CASE ${column} WHEN 'critical' THEN 3 WHEN 'warning' THEN 2 ELSE 1 END)`;
 const numOrNull = (value: unknown): number | null => (value === null || value === undefined ? null : Number(value));
 
 function toAgent(row: QueryResultRow): AgentRecord {
@@ -612,26 +615,50 @@ export class PgOnecRepository {
     return rows[0] ?? null;
   }
 
+  /*
+   * Every change of an alert's state writes its episode (onec_alert_episodes) in the SAME statement: an opening or a
+   * reopening inserts the episode, a resolution or an acknowledgement updates it. The notification dispatcher reads
+   * the episodes, so a transition between two of its ticks is never lost (plan 2026-10-19 §2.2). Only these methods
+   * write onec_alerts (guard: onec-alert-writers.guard.test.ts).
+   */
   async upsertAlert(client: DatabaseClient, alert: AlertUpsert): Promise<void> {
+    const params = [alert.kind, alert.agentId, alert.sourceId, alert.certId, alert.severity, alert.dedupeKey, JSON.stringify(alert.details)];
     if (alert.oneShot) {
       // One alert per fact (e.g. one command): a replayed event never reopens or rewrites it.
       await client.query(
-        `INSERT INTO onec_alerts (kind, agent_id, source_id, cert_id, severity, dedupe_key, details)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb) ON CONFLICT (dedupe_key) DO NOTHING`,
-        [alert.kind, alert.agentId, alert.sourceId, alert.certId, alert.severity, alert.dedupeKey, JSON.stringify(alert.details)],
+        `WITH up AS (
+           INSERT INTO onec_alerts (kind, agent_id, source_id, cert_id, severity, dedupe_key, details)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb) ON CONFLICT (dedupe_key) DO NOTHING
+           RETURNING alert_id, kind, opened_at, severity)
+         INSERT INTO onec_alert_episodes (alert_id, opened_at, kind, severity_at_open, severity_max)
+         SELECT alert_id, opened_at, kind, severity, severity FROM up
+         ON CONFLICT (alert_id, opened_at) DO NOTHING`,
+        params,
       );
       return;
     }
     await client.query(
-      `INSERT INTO onec_alerts (kind, agent_id, source_id, cert_id, severity, dedupe_key, details)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
-       ON CONFLICT (dedupe_key) DO UPDATE SET last_seen_at = now(), details = EXCLUDED.details,
-         severity = EXCLUDED.severity,
-         -- A condition that returns reopens its alert (acknowledged stays acknowledged).
-         state = CASE WHEN onec_alerts.state = 'resolved' THEN 'open' ELSE onec_alerts.state END,
-         opened_at = CASE WHEN onec_alerts.state = 'resolved' THEN now() ELSE onec_alerts.opened_at END,
-         resolved_at = CASE WHEN onec_alerts.state = 'resolved' THEN NULL ELSE onec_alerts.resolved_at END`,
-      [alert.kind, alert.agentId, alert.sourceId, alert.certId, alert.severity, alert.dedupeKey, JSON.stringify(alert.details)],
+      `WITH up AS (
+         INSERT INTO onec_alerts (kind, agent_id, source_id, cert_id, severity, dedupe_key, details)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+         ON CONFLICT (dedupe_key) DO UPDATE SET last_seen_at = now(), details = EXCLUDED.details,
+           severity = EXCLUDED.severity,
+           -- A condition that returns reopens its alert as a new episode: the acknowledgement belonged to the old one.
+           state = CASE WHEN onec_alerts.state = 'resolved' THEN 'open' ELSE onec_alerts.state END,
+           opened_at = CASE WHEN onec_alerts.state = 'resolved' THEN now() ELSE onec_alerts.opened_at END,
+           resolved_at = CASE WHEN onec_alerts.state = 'resolved' THEN NULL ELSE onec_alerts.resolved_at END,
+           acknowledged_at = CASE WHEN onec_alerts.state = 'resolved' THEN NULL ELSE onec_alerts.acknowledged_at END,
+           acknowledged_by = CASE WHEN onec_alerts.state = 'resolved' THEN NULL ELSE onec_alerts.acknowledged_by END
+         RETURNING alert_id, kind, opened_at, severity
+       )
+       -- One upsert of the episode (alert_id, opened_at), resolved by the unique index against the latest committed
+       -- row — not by this statement's snapshot: a concurrent first insert of the same alert merges into the same
+       -- episode, and the episode keeps its highest severity (info < warning < critical).
+       INSERT INTO onec_alert_episodes (alert_id, opened_at, kind, severity_at_open, severity_max)
+       SELECT alert_id, opened_at, kind, severity, severity FROM up
+       ON CONFLICT (alert_id, opened_at) DO UPDATE SET severity_max = EXCLUDED.severity_max, updated_at = now()
+        WHERE ${severityRankSql('EXCLUDED.severity_max')} > ${severityRankSql('onec_alert_episodes.severity_max')}`,
+      params,
     );
   }
 
@@ -648,32 +675,44 @@ export class PgOnecRepository {
   }
 
   async resolveAlertByDedupeKey(client: DatabaseClient, dedupeKey: string): Promise<number> {
-    const { rowCount } = await client.query(
-      `UPDATE onec_alerts SET state = 'resolved', resolved_at = now() WHERE dedupe_key = $1 AND state <> 'resolved'`,
-      [dedupeKey],
-    );
-    return rowCount ?? 0;
+    return (await this.resolveAlertsWhere(client, 'dedupe_key = $1', [dedupeKey])).length;
   }
 
   /** Operator closes a one-shot alert (the fact was handled); only resolvable kinds, never state-projected ones. */
   async resolveAlert(client: DatabaseClient, alertId: number, kinds: readonly string[]): Promise<QueryResultRow | null> {
-    const { rows } = await client.query(
-      `UPDATE onec_alerts SET state = 'resolved', resolved_at = now()
-        WHERE alert_id = $1 AND kind = ANY($2::text[]) AND state <> 'resolved' RETURNING *`,
-      [alertId, kinds],
-    );
-    return rows[0] ?? null;
+    return (await this.resolveAlertsWhere(client, 'alert_id = $1 AND kind = ANY($2::text[])', [alertId, kinds]))[0] ?? null;
   }
 
   /** Resolves open alerts of the given kinds for an agent (the condition cleared), except `keepDedupeKey`. */
   async resolveAlerts(client: DatabaseClient, agentId: string, kinds: readonly string[], keepDedupeKey: string | null = null): Promise<number> {
-    const { rowCount } = await client.query(
-      `UPDATE onec_alerts SET state = 'resolved', resolved_at = now()
-        WHERE agent_id = $1 AND kind = ANY($2::text[]) AND state <> 'resolved'
-          AND ($3::text IS NULL OR dedupe_key <> $3)`,
-      [agentId, kinds, keepDedupeKey],
+    return (
+      await this.resolveAlertsWhere(
+        client,
+        'agent_id = $1 AND kind = ANY($2::text[]) AND ($3::text IS NULL OR dedupe_key <> $3)',
+        [agentId, kinds, keepDedupeKey],
+      )
+    ).length;
+  }
+
+  /** A revoked certificate closes its alerts (inside the revocation transaction). */
+  async resolveAlertsForCertificate(client: DatabaseClient, certId: number): Promise<number> {
+    return (await this.resolveAlertsWhere(client, 'cert_id = $1', [certId])).length;
+  }
+
+  private async resolveAlertsWhere(client: DatabaseClient, whereSql: string, params: unknown[]): Promise<QueryResultRow[]> {
+    const { rows } = await client.query(
+      `WITH resolved AS (
+         UPDATE onec_alerts SET state = 'resolved', resolved_at = now()
+          WHERE ${whereSql} AND state <> 'resolved' RETURNING *
+       ), episodes AS (
+         UPDATE onec_alert_episodes e SET resolved_at = r.resolved_at, updated_at = now()
+           FROM resolved r
+          WHERE e.alert_id = r.alert_id AND e.opened_at = r.opened_at AND e.resolved_at IS NULL
+       )
+       SELECT * FROM resolved`,
+      params,
     );
-    return rowCount ?? 0;
+    return rows;
   }
 
   async listAlerts(filter: { agentId?: string; state?: string; limit: number }): Promise<QueryResultRow[]> {
@@ -691,11 +730,65 @@ export class PgOnecRepository {
 
   async acknowledgeAlert(client: DatabaseClient, alertId: number, actorId: number): Promise<QueryResultRow | null> {
     const { rows } = await client.query(
-      `UPDATE onec_alerts SET state = 'acknowledged', acknowledged_at = now(), acknowledged_by = $2
-        WHERE alert_id = $1 AND state = 'open' RETURNING *`,
+      `WITH acknowledged AS (
+         UPDATE onec_alerts SET state = 'acknowledged', acknowledged_at = now(), acknowledged_by = $2
+          WHERE alert_id = $1 AND state = 'open' RETURNING *
+       ), episodes AS (
+         UPDATE onec_alert_episodes e SET acknowledged_at = a.acknowledged_at, updated_at = now()
+           FROM acknowledged a
+          WHERE e.alert_id = a.alert_id AND e.opened_at = a.opened_at AND e.acknowledged_at IS NULL
+       )
+       SELECT * FROM acknowledged`,
       [alertId, actorId],
     );
     return rows[0] ?? null;
+  }
+
+  /**
+   * Brings the episode journal in line with onec_alerts (plan §2.2): after any period when alerts changed without it
+   * (a rollback below the release that writes episodes, a manual SQL fix). Closes episodes whose alert is resolved or
+   * was reopened as another episode, creates missing episodes of open alerts, and carries over the acknowledgement
+   * of THAT episode (not an older one kept by an image that did not clear it) and a higher severity. Transitions
+   * inside such a period collapse into the current state (`reconciled = true`). Locks only episodes, never
+   * onec_alerts, so it cannot deadlock with the writers (they lock onec_alerts first, then episodes).
+   */
+  async reconcileAlertEpisodes(client: DatabaseClient): Promise<{ closed: number; created: number; acknowledged: number; escalated: number }> {
+    const closed = await client.query(
+      `UPDATE onec_alert_episodes e
+          SET resolved_at = COALESCE((SELECT a.resolved_at FROM onec_alerts a
+                                       WHERE a.alert_id = e.alert_id AND a.opened_at = e.opened_at AND a.state = 'resolved'), now()),
+              reconciled = true, updated_at = now()
+        WHERE e.resolved_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM onec_alerts a
+                           WHERE a.alert_id = e.alert_id AND a.opened_at = e.opened_at AND a.state <> 'resolved')`,
+    );
+    const created = await client.query(
+      `INSERT INTO onec_alert_episodes (alert_id, opened_at, kind, severity_at_open, severity_max, acknowledged_at, reconciled)
+       SELECT a.alert_id, a.opened_at, a.kind, a.severity, a.severity,
+              CASE WHEN a.acknowledged_at >= a.opened_at THEN a.acknowledged_at END, true
+         FROM onec_alerts a
+        WHERE a.state <> 'resolved'
+          AND NOT EXISTS (SELECT 1 FROM onec_alert_episodes e WHERE e.alert_id = a.alert_id AND e.opened_at = a.opened_at)
+       ON CONFLICT (alert_id, opened_at) DO NOTHING`,
+    );
+    const acknowledged = await client.query(
+      `UPDATE onec_alert_episodes e SET acknowledged_at = a.acknowledged_at, reconciled = true, updated_at = now()
+         FROM onec_alerts a
+        WHERE a.alert_id = e.alert_id AND a.opened_at = e.opened_at AND e.resolved_at IS NULL
+          AND e.acknowledged_at IS NULL AND a.acknowledged_at IS NOT NULL AND a.acknowledged_at >= e.opened_at`,
+    );
+    const escalated = await client.query(
+      `UPDATE onec_alert_episodes e SET severity_max = a.severity, reconciled = true, updated_at = now()
+         FROM onec_alerts a
+        WHERE a.alert_id = e.alert_id AND a.opened_at = e.opened_at AND e.resolved_at IS NULL
+          AND ${severityRankSql('a.severity')} > ${severityRankSql('e.severity_max')}`,
+    );
+    return {
+      closed: closed.rowCount ?? 0,
+      created: created.rowCount ?? 0,
+      acknowledged: acknowledged.rowCount ?? 0,
+      escalated: escalated.rowCount ?? 0,
+    };
   }
 
   async countOpenAlerts(): Promise<number> {

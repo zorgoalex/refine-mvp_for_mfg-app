@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { PgNotificationRepository } from './pg-notification-repository';
+import { compareClaimed, PgNotificationRepository } from './pg-notification-repository';
 
 const viewer: CurrentUser = { id: '42', username: 'u', role: 'manager', roleId: 10, permissions: ['orders.view'] };
 const SOURCES = ['procurement_order_event', 'procurement_digest'];
+const ONEC = 'onec_alert';
 
 describe('PgNotificationRepository', () => {
   it('lists current-user notifications with unread filter and unread count', async () => {
@@ -54,6 +55,7 @@ describe('PgNotificationRepository', () => {
           readAt: null,
           createdAt: '2026-05-23T09:00:00.000Z',
           balloonMode: null,
+          balloonPending: false,
         },
       ],
       total: 1,
@@ -62,12 +64,12 @@ describe('PgNotificationRepository', () => {
     expect(database.query).toHaveBeenNthCalledWith(
       1,
       expect.stringContaining('count(*) FILTER (WHERE ($2::boolean = false OR is_read = false))'),
-      ['42', true, SOURCES],
+      ['42', true, SOURCES, ONEC],
     );
     expect(database.query).toHaveBeenNthCalledWith(
       2,
       expect.stringContaining('AND ($2::boolean = false OR is_read = false)'),
-      ['42', true, 10, 10, SOURCES],
+      ['42', true, 10, 10, SOURCES, ONEC],
     );
   });
 
@@ -105,7 +107,7 @@ describe('PgNotificationRepository', () => {
     expect(sql).toContain('SET is_read = true, read_at = COALESCE(read_at, now())');
     expect(database.query).toHaveBeenCalledWith(
       expect.stringContaining('UPDATE notifications'),
-      ['11111111-1111-4111-8111-111111111111', '42', SOURCES],
+      ['11111111-1111-4111-8111-111111111111', '42', SOURCES, ONEC],
     );
   });
 
@@ -139,11 +141,11 @@ describe('PgNotificationRepository', () => {
     const sql = queriedSql(database, 1);
     expect(sql).toContain('SET is_read = true, read_at = COALESCE(read_at, now())');
     expect(sql).toContain('AND is_read = false');
-    expect(database.query).toHaveBeenCalledWith(expect.stringContaining('is_read = false'), ['42', SOURCES]);
+    expect(database.query).toHaveBeenCalledWith(expect.stringContaining('is_read = false'), ['42', SOURCES, ONEC]);
   });
 
   it('deletes only current-user notification rows', async () => {
-    const database = databaseClient([{ rowCount: 1, rows: [] }]);
+    const database = databaseClient([{ rowCount: 1, rows: [{ deleted: true, pending: false }] }]);
     const repository = new PgNotificationRepository(database);
 
     await expect(
@@ -151,17 +153,17 @@ describe('PgNotificationRepository', () => {
         notificationId: '11111111-1111-4111-8111-111111111111',
         viewer,
       }),
-    ).resolves.toBe(true);
+    ).resolves.toBe('deleted');
     expect(database.query).toHaveBeenCalledWith(
       expect.stringContaining('DELETE FROM notifications'),
-      ['11111111-1111-4111-8111-111111111111', '42', SOURCES],
+      ['11111111-1111-4111-8111-111111111111', '42', SOURCES, ONEC],
     );
   });
 
   it('procurement notifications: hidden without literal procurement.view; with it — only orders in the current scope', async () => {
     const without = databaseClient([{ rows: [{ updated_count: '0' }] }]);
     await new PgNotificationRepository(without).markAllReadForUser(viewer);
-    expect(queriedSql(without, 1)).toContain('AND n.source_type <> ALL($2::text[])');
+    expect(queriedSql(without, 1)).toContain('AND (n.source_type <> ALL($2::text[])) AND n.source_type IS DISTINCT FROM $3');
     expect(queriedSql(without, 1)).not.toContain('EXISTS');
 
     const procurementViewer: CurrentUser = { ...viewer, permissions: ['orders.view', 'procurement.view'] };
@@ -171,6 +173,55 @@ describe('PgNotificationRepository', () => {
     expect(sql).toContain("n.source_type <> ALL($2::text[]) OR n.entity_type IS DISTINCT FROM 'order' OR EXISTS");
     expect(sql).toContain('o.delete_flag = false');
     expect(sql).toContain('o.order_id::text = n.entity_id');
+  });
+});
+
+describe('1C alert notifications (plan 2026-10-19 §2.7–2.8)', () => {
+  it('are visible only with literal onec.view at read time', async () => {
+    const without = databaseClient([{ rows: [{ updated_count: '0' }] }]);
+    await new PgNotificationRepository(without).markAllReadForUser(viewer);
+    expect(queriedSql(without, 1)).toContain('AND n.source_type IS DISTINCT FROM $3');
+    expect(vi.mocked(without.query).mock.calls[0]?.[1]).toEqual(['42', SOURCES, ONEC]);
+
+    const onecViewer: CurrentUser = { ...viewer, permissions: ['orders.view', 'onec.view'] };
+    const withView = databaseClient([{ rows: [{ updated_count: '1' }] }]);
+    await new PgNotificationRepository(withView).markAllReadForUser(onecViewer);
+    expect(queriedSql(withView, 1)).not.toContain('IS DISTINCT FROM $3');
+    expect(vi.mocked(withView.query).mock.calls[0]?.[1]).toEqual(['42', SOURCES]);
+  });
+
+  it('refuses to delete a row whose mandatory balloon was not shown yet', async () => {
+    const database = databaseClient([{ rows: [{ deleted: false, pending: true }] }]);
+    await expect(
+      new PgNotificationRepository(database).deleteForUser({ notificationId: '11111111-1111-4111-8111-111111111111', viewer }),
+    ).resolves.toBe('balloon_pending');
+    expect(queriedSql(database, 1)).toContain("((n.balloon_mode = 'mandatory') IS TRUE AND n.balloon_shown_at IS NULL) AS pending");
+    const missing = databaseClient([{ rows: [{ deleted: false, pending: false }] }]);
+    await expect(
+      new PgNotificationRepository(missing).deleteForUser({ notificationId: '11111111-1111-4111-8111-111111111111', viewer }),
+    ).resolves.toBe('not_found');
+  });
+
+  it('claims mandatory balloons only for a client that declared them, with no age or read limit', async () => {
+    const database = databaseClient([{ rows: [] }]);
+    await new PgNotificationRepository(database).claimBalloonsForUser({ viewer, token: '33333333-3333-4333-8333-333333333333', limit: 5, mandatory: true });
+    const sql = queriedSql(database, 1);
+    expect(sql).toContain("CASE WHEN n.balloon_mode = 'mandatory' THEN $4::boolean ELSE n.is_read = false AND n.created_at > now() - interval '24 hours' END");
+    expect(sql).toContain("(CASE WHEN n.balloon_mode = 'mandatory' THEN 1 ELSE 0 END) DESC, (CASE n.level WHEN 'error' THEN 3 WHEN 'warning' THEN 2 ELSE 1 END) DESC, n.created_at, n.notification_id");
+    expect(vi.mocked(database.query).mock.calls[0]?.[1]?.[3]).toBe(true);
+  });
+
+  it('orders a claimed batch the same way as the SQL: own lease, mandatory, level, time', () => {
+    const row = (id: string, extra: Record<string, unknown>) =>
+      ({ ...notificationRow({ notification_id: id }), balloon_mode: 'auto', own: false, ...extra }) as never;
+    const rows = [
+      row('a', { level: 'info', created_at: '2026-10-19T08:00:00Z' }),
+      row('b', { level: 'error', created_at: '2026-10-19T09:00:00Z' }),
+      row('c', { level: 'warning', balloon_mode: 'mandatory', created_at: '2026-10-19T10:00:00Z' }),
+      row('d', { level: 'info', own: true, created_at: '2026-10-19T11:00:00Z' }),
+      row('e', { level: 'error', balloon_mode: 'mandatory', created_at: new Date('2026-10-19T12:00:00Z') }),
+    ];
+    expect([...rows].sort(compareClaimed).map((r: { notification_id: string }) => r.notification_id)).toEqual(['d', 'e', 'c', 'b', 'a']);
   });
 });
 

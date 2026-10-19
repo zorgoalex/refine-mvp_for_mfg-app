@@ -87,7 +87,7 @@ suite('1C agent E3a ETL — isolated PostgreSQL + real spool', () => {
       CREATE TABLE audit_log(LIKE public.audit_log INCLUDING ALL);
       CREATE TABLE audit_log_related_entity(LIKE public.audit_log_related_entity INCLUDING ALL);`);
     for (const file of ['193_onec_agent_foundation.sql', '196_onec_agent_commands.sql', '198_onec_etl.sql', '200_onec_etl_snapshots_revocation.sql',
-      '247_onec_agent_expected_silence.sql', '250_onec_stock_snapshots.sql']) {
+      '247_onec_agent_expected_silence.sql', '250_onec_stock_snapshots.sql', '262_onec_alert_episodes.sql']) {
       await pool.query(readFileSync(new URL(`../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     const values: Partial<BackendEnv> = { DATABASE_URL: url.toString(), DATABASE_QUERY_TIMEOUT_MS: 20000, DATABASE_POOL_MIN: 0, DATABASE_POOL_MAX: 6, DATABASE_SSL: false };
@@ -124,7 +124,7 @@ suite('1C agent E3a ETL — isolated PostgreSQL + real spool', () => {
   let sessionA = '';
   beforeEach(async () => {
     await pool.query(`TRUNCATE onec_etl_staging_rows, onec_etl_mirror_rows, onec_etl_entity_state, onec_etl_batches, onec_etl_runs,
-      onec_agent_commands, onec_alerts, onec_outbox_events, onec_audit_links, onec_agent_incidents,
+      onec_agent_commands, onec_alerts, onec_alert_episodes, onec_outbox_events, onec_audit_links, onec_agent_incidents,
       onec_agent_sessions, onec_agent_certificates, onec_agents, onec_sources RESTART IDENTITY CASCADE;
       DELETE FROM audit_log_related_entity; DELETE FROM audit_log;
       INSERT INTO onec_sources (code, display_name, identity, identity_status)

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
@@ -72,14 +72,23 @@ export class NotificationsController {
     return this.notifications.markAllRead({ currentUser: request.user });
   }
 
-  @ApiResponse({ status: 200, description: 'Leased (2 min) unshown balloons of the current user; own unfinished lease first' })
+  @ApiResponse({ status: 200, description: 'Leased (2 min) unshown balloons of the current user; own unfinished lease first; mandatory balloons only with header X-Balloon-Capabilities: mandatory' })
   @ApiResponse({ status: 422, description: 'Invalid token or limit' })
   @ApiOperation({ operationId: 'claimNotificationBalloons', summary: 'Claim notification balloons for a browser tab' })
   @Post('balloons/claim')
   @HttpCode(200)
-  async claimBalloons(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
+  async claimBalloons(
+    @Req() request: RequestWithCurrentUser,
+    @Body() body: unknown,
+    @Headers('x-balloon-capabilities') capabilities?: string | string[],
+  ) {
     const input = parseBody(claimBalloonsSchema, body);
-    return this.notifications.claimBalloons({ currentUser: request.user, token: input.token, limit: input.limit });
+    return this.notifications.claimBalloons({
+      currentUser: request.user,
+      token: input.token,
+      limit: input.limit,
+      capabilities: parseBalloonCapabilities(capabilities),
+    });
   }
 
   @ApiResponse({ status: 200, description: 'Acknowledged shown balloons of the caller lease' })
@@ -95,6 +104,7 @@ export class NotificationsController {
   @ApiParam({ name: 'notificationId', type: String, description: 'Notification UUID' })
   @ApiResponse({ status: 200, description: 'Deleted notification' })
   @ApiResponse({ status: 404, description: 'Notification not found' })
+  @ApiResponse({ status: 409, description: 'Its mandatory balloon has not been shown yet' })
   @ApiOperation({ operationId: 'deleteNotification', summary: 'Delete a current-user notification' })
   @Delete(':notificationId')
   @HttpCode(200)
@@ -136,6 +146,12 @@ function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid notification balloons request', { issues: result.error.issues });
   }
   return result.data;
+}
+
+/** `X-Balloon-Capabilities: mandatory, …` → список; неизвестные значения игнорируются. */
+export function parseBalloonCapabilities(value: string | string[] | undefined): string[] {
+  const raw = Array.isArray(value) ? value.join(',') : value ?? '';
+  return raw.split(',').map((item) => item.trim().toLowerCase()).filter((item) => item.length > 0 && item.length <= 32).slice(0, 8);
 }
 
 function firstQueryValue(value: string | string[] | undefined): string | undefined {
