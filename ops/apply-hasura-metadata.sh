@@ -47,10 +47,10 @@ done
 [[ -f "$ENV_FILE" ]] || fail "Env file not found: $ENV_FILE"
 [[ -e "$METADATA_PATH" ]] || fail "Metadata path not found: $METADATA_PATH"
 
-set -a
-# shellcheck disable=SC1090
-source "$ENV_FILE"
-set +a
+# Literal .env reading (no shell expansion): see lib/env-file.sh.
+# shellcheck source=lib/env-file.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env-file.sh"
+load_env_file "$ENV_FILE" || fail "Cannot parse env file: $ENV_FILE"
 
 [[ -n "${HASURA_FQDN:-}" ]] || fail "HASURA_FQDN is required in .env"
 [[ -n "${HASURA_ADMIN_SECRET:-}" ]] || fail "HASURA_ADMIN_SECRET is required in .env"

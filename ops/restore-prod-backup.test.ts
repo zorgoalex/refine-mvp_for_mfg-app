@@ -50,6 +50,14 @@ describe('restore-prod-backup safety contract', () => {
     expect(source).toContain('Restore failed; database writers remain stopped');
   });
 
+  it('reads .env through the literal loader before any destructive step', () => {
+    const load = source.indexOf('load_env_file "$ENV_FILE" || fail');
+    expect(load).toBeGreaterThan(-1);
+    expect(source).not.toMatch(/^\s*(source|\.)\s+"\$ENV_FILE"/m);
+    expect(load).toBeLessThan(source.indexOf('Pass --confirm-db'));
+    expect(load).toBeLessThan(source.indexOf('\nRESTORE_STARTED=1\n'));
+  });
+
   it('keeps setup-vps compatible arguments', () => {
     for (const argument of [
       '--project-dir',
