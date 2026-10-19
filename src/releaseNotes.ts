@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-19", title: "Базис: название проекта без «.xml»",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "Импорт XML из Базиса: если в файле не указан номер заказа, новый Базис-проект называется по имени файла без расширения — «1690», а не «1690.xml». Уже созданные проекты можно переименовать в карточке проекта.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-19", title: "Bitrix: уведомление менеджеру об изменении оплат в ERP",
     services: ["ERP", "CRM"], repositories: ["repo_erp"],
     added: [
