@@ -10,6 +10,8 @@ export type AuditLogScope = 'all' | 'business' | 'bitrix24';
 
 export interface AuditLogFilters {
   excludeBitrix24?: boolean;
+  /** Set by the service (never from the query): hide payment/financial facts from a user without the rights. */
+  hideFinancial?: boolean;
   bitrixDirection?: 'forward' | 'reverse' | 'widget' | 'settings' | 'other';
   bitrixCategory?: 'client' | 'order' | 'payment' | 'settings' | 'processing' | 'other';
   bitrixOutcome?: 'success' | 'error' | 'conflict' | 'attention' | 'started' | 'skipped' | 'unknown';
@@ -49,6 +51,7 @@ export interface ListAuditCommand {
 
 export interface AuditFilterOptionsCommand {
   excludeBitrix24?: boolean;
+  hideFinancial?: boolean;
   currentUser: CurrentUser | undefined;
   requestId: string;
   scope?: AuditLogScope;

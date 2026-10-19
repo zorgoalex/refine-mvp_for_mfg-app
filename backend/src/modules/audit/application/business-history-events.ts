@@ -93,3 +93,33 @@ function sqlLikePatternToRegExp(pattern: string): RegExp {
   const regex = `^${escaped.replace(/%/g, '.*').replace(/_/g, '.')}$`;
   return new RegExp(regex);
 }
+
+/**
+ * Bitrix24-owned events that are business facts about a payment: shown in «История бизнеса» although
+ * the rest of the Bitrix24 audit is hidden there. Intermediate steps (requested, unpaid, close_requested)
+ * and the scheduled payment reconcile stay in the Bitrix24 tab only.
+ */
+export const BUSINESS_HISTORY_BITRIX_PAYMENT_EVENTS = [
+  'crm_sync.payment_paid_reset_completed',
+  'crm_sync.payment_paid_reset_stuck',
+  'crm_sync.payment_card_closed',
+  'crm_sync.payment_card_close_failed',
+] as const;
+
+/** Payment facts for «История бизнеса»: every ERP payment change plus the Bitrix24 payment effects. */
+export const PAYMENT_HISTORY_PREDICATE =
+  "(starts_with(COALESCE(audit_log.event, ''), 'payments.')" +
+  ` OR audit_log.event IN (${BUSINESS_HISTORY_BITRIX_PAYMENT_EVENTS.map((event) => `'${event}'`).join(', ')})` +
+  " OR (audit_log.event IN ('crm_sync.upsert', 'crm_sync.delete') AND audit_log.entity_type = 'payment'))";
+
+/**
+ * Financial audit facts: visible only with orders.view_financials AND payments.view (same rule as the
+ * order history). Applies to every audit tab: rows, counts and filter options.
+ */
+export const FINANCIAL_AUDIT_PREDICATE =
+  `(${PAYMENT_HISTORY_PREDICATE}` +
+  " OR audit_log.event = 'orders.payment_status_change'" +
+  " OR starts_with(COALESCE(audit_log.event, ''), 'crm_sync.payment_')" +
+  // Bitrix24 payment imports, reconciles and widget commands carry amounts (e.g. activePaymentAmount).
+  " OR ((starts_with(COALESCE(audit_log.event, ''), 'bitrix24.') OR starts_with(COALESCE(audit_log.event, ''), 'bitrix24_reverse.'))" +
+  " AND audit_log.event LIKE '%payment%'))";

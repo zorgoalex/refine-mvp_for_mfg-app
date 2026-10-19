@@ -1,3 +1,4 @@
+import { beginPaymentAuditCapture, recordCapturedPaymentChanges } from '../../payments/application/payment-change-audit';
 import { humanName } from '../../../shared/human-name-schema';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
@@ -445,7 +446,16 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
           snapshot,
           command.referenceMappings ?? [],
         );
+        // Payment audit: capture the payments this import writes (created or updated order; migration 259).
+        await beginPaymentAuditCapture(tx);
         const result = await importSnapshotInTransaction(tx, remappedSnapshot, payloadHash, runId, command, this.database);
+        await recordCapturedPaymentChanges(tx, {
+          actor: { id: command.currentUser.id, username: command.currentUser.username, role: command.currentUser.role },
+          source: 'orders-snapshot-import',
+          requestId: command.requestId ?? runId,
+          origin: 'snapshot_import',
+          requestRef: { importRunId: runId },
+        });
         await finishImportRun(tx, runId, result.status, result.orderId, result.summary);
         await writeAudit(
           tx,

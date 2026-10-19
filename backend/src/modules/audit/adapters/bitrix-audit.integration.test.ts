@@ -175,4 +175,44 @@ describe.skipIf(!url)('Bitrix journal real PostgreSQL, rollback-only', () => {
       await client.query('BEGIN');
     }
   });
+  it('business history shows payment facts with Bitrix payment effects, hides them without financial rights, sanitizes', async () => {
+    const row = async (event: string, source: string | null, entityType: string, after: Record<string, unknown> | null = null) =>
+      (await client.query(`INSERT INTO audit_log(event,source,entity_type,entity_id,request_id,after_json) VALUES($1,$2,$3,'11697',$4,$5) RETURNING audit_id`, [event, source, entityType, prefix, after ? JSON.stringify(after) : null])).rows[0].audit_id as string;
+    const visible = {
+      paymentUpdate: await row('payments.update', 'backend-orders-command', 'payment'),
+      resetCompleted: await row('crm_sync.payment_paid_reset_completed', 'crm-sync', 'payment'),
+      cardClosed: await row('crm_sync.payment_card_closed', 'crm-sync', 'payment'),
+      cardFailed: await row('crm_sync.payment_card_close_failed', 'crm-sync', 'payment', { error: 'POST https://x.bitrix24.kz/rest/1/abcdef0123456789abcd/crm.activity.update failed' }),
+      paymentUpsert: await row('crm_sync.upsert', 'crm-sync', 'payment'),
+      statusChange: await row('orders.payment_status_change', 'backend-orders-command', 'order'),
+      orderUpdate: await row('orders.update', 'backend-orders-command', 'order'),
+    };
+    for (const [event, entityType] of [['crm_sync.payment_paid_reset_unpaid', 'payment'], ['crm_sync.payment_card_close_requested', 'payment'], ['crm_sync.upsert', 'order'], ['bitrix24_reverse.order_payments_reconcile', 'order']]) {
+      await row(event!, 'crm-sync', entityType!);
+    }
+    const business = await list({ scope: 'business', excludeBitrix24: true });
+    expect(business.data.map((r) => r.auditId).sort()).toEqual(Object.values(visible).sort());
+    expect(business.pagination.total).toBe(7);
+    const failed = business.data.find((r) => r.auditId === visible.cardFailed)!;
+    expect(JSON.stringify(failed.after)).not.toContain('abcdef0123456789abcd');
+
+    const hidden = await list({ scope: 'business', excludeBitrix24: true, hideFinancial: true });
+    expect(hidden.data.map((r) => r.auditId)).toEqual([visible.orderUpdate]);
+    const technical = await list({ hideFinancial: true });
+    expect(technical.data.some((r) => /^(payments\.|crm_sync\.payment_)/.test(r.event) || r.event === 'orders.payment_status_change')).toBe(false);
+    for (const event of ['bitrix24_reverse.order_payments_reconcile', 'bitrix24_reverse.request_payments_reconcile', 'bitrix24_reverse.payments_materialize', 'bitrix24.widget_payment.materialized', 'bitrix24.payment.materialized']) {
+      await row(event, 'bitrix24', 'order', { activePaymentAmount: 142717 });
+    }
+    for (const scope of [undefined, 'bitrix24'] as const) {
+      const rows = await list({ scope, hideFinancial: true });
+      expect(rows.data.some((r) => JSON.stringify(r.after ?? {}).includes('142717'))).toBe(false);
+      expect(rows.data.every((r) => !/payment/.test(r.event) || r.event === 'bitrix24_reverse.payment_type_mapping_upsert')).toBe(true);
+    }
+    expect((await list({ scope: 'bitrix24' })).data.filter((r) => JSON.stringify(r.after ?? {}).includes('142717'))).toHaveLength(5);
+    const noteRow = await row('payments.update', 'backend-payments-command', 'payment', { notes: 'https://x.bitrix24.kz/rest/1/abcdef0123456789abcd/' });
+    const note = (await list({ scope: 'business', excludeBitrix24: true })).data.find((r) => r.auditId === noteRow)!;
+    expect(JSON.stringify(note.after)).not.toContain('abcdef0123456789abcd');
+    const options = await repository.filterOptions({ currentUser: actor, requestId: prefix, scope: 'business', excludeBitrix24: true, hideFinancial: true });
+    expect(JSON.stringify(options)).not.toContain('crm_sync.payment_card_closed');
+  });
 });

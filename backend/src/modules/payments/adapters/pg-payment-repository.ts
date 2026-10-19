@@ -19,6 +19,7 @@ import type {
   UpdatePaymentCommand,
 } from '../application/payment-command.types';
 import { buildPaymentDeniedEvent } from '../application/payments-audit';
+import { beginPaymentAuditCapture, recordCapturedPaymentChanges } from '../application/payment-change-audit';
 import type {
   DeletePaymentResponseDto,
   PaymentDto,
@@ -71,6 +72,7 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
       const order = requireLockedOrder(orders, command.dto.orderId);
       assertPaymentReadyProductionOrder(order);
       await this.assertPaymentScope(command.currentUser, 'create', 0, order, command.requestId ?? 'payment-command');
+      await beginPaymentAuditCapture(tx);
       const inserted = await tx.query<PaymentRow>(
         `
         INSERT INTO payments (order_id, amount, payment_date, type_paid_id, notes, ref_key_1c)
@@ -90,14 +92,7 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
       );
       const payment = mapPaymentRow(inserted.rows[0]);
       const orderSummary = await recalculateOrderPaymentState(tx, order);
-      await writeAudit(tx, {
-        action: 'payments.create',
-        paymentId: payment.paymentId,
-        orderId: payment.orderId,
-        currentUser: command.currentUser,
-        requestId: command.requestId,
-        after: { ...payment },
-      });
+      await writeAudit(tx, command.currentUser, command.requestId);
       const paymentsCountResult = await tx.query<{ payments_count: string | number }>(
         'SELECT COUNT(*) AS payments_count FROM payments WHERE order_id = $1 AND delete_flag = false',
         [payment.orderId],
@@ -147,6 +142,7 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
       if (nextOrderId !== previousOrderId) {
         await this.assertPaymentScope(command.currentUser, 'create', command.paymentId, nextOrder, command.requestId ?? 'payment-command');
       }
+      await beginPaymentAuditCapture(tx);
       const update = buildUpdateAssignments(command.dto);
       const updated = await tx.query<PaymentRow>(
         `
@@ -181,16 +177,7 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
         }
       }
 
-      await writeAudit(tx, {
-        action: 'payments.update',
-        paymentId: payment.paymentId,
-        orderId: payment.orderId,
-        previousOrderId,
-        currentUser: command.currentUser,
-        requestId: command.requestId,
-        before: { ...mapPaymentRow(existing) },
-        after: { ...payment },
-      });
+      await writeAudit(tx, command.currentUser, command.requestId);
       const requestId = command.requestId ?? `payment-${payment.paymentId}`;
       for (const change of paymentStatusChanges) {
         await evaluateStatusAutomation(tx, {
@@ -221,16 +208,10 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
       const order = requireLockedOrder(orders, orderId);
       assertPaymentReadyProductionOrder(order);
       await this.assertPaymentScope(command.currentUser, 'delete', command.paymentId, order, command.requestId ?? 'payment-command');
+      await beginPaymentAuditCapture(tx);
       await tx.query('DELETE FROM payments WHERE payment_id = $1', [command.paymentId]);
       const orderSummary = await recalculateOrderPaymentState(tx, order);
-      await writeAudit(tx, {
-        action: 'payments.delete',
-        paymentId: command.paymentId,
-        orderId,
-        currentUser: command.currentUser,
-        requestId: command.requestId,
-        before: { ...mapPaymentRow(existing) },
-      });
+      await writeAudit(tx, command.currentUser, command.requestId);
       if (orderSummary.paymentStatusId !== order.paymentStatusId) {
         await evaluateStatusAutomation(tx, {
           eventType: 'order.payment_status_changed',
@@ -409,33 +390,17 @@ async function recalculateOrderPaymentState(
   };
 }
 
+/** One `payments.*` event per changed payment, with the field diff and the order totals (after recalculation). */
 async function writeAudit(
   tx: TransactionClient,
-  event: {
-    action: 'payments.create' | 'payments.update' | 'payments.delete';
-    paymentId: number;
-    orderId: number;
-    previousOrderId?: number;
-    currentUser: CurrentUser;
-    requestId?: string;
-    before?: Record<string, unknown> | null;
-    after?: Record<string, unknown> | null;
-  },
+  currentUser: CurrentUser,
+  requestId: string | undefined,
 ): Promise<void> {
-  await auditService.record(tx, {
-    event: event.action,
-    entityType: 'payment',
-    entityId: event.paymentId,
-    actorUserId: event.currentUser.id,
-    actorUsername: event.currentUser.username,
-    actorRole: event.currentUser.role,
-    requestId: event.requestId ?? 'payment-command',
+  await recordCapturedPaymentChanges(tx, {
+    actor: { id: currentUser.id, username: currentUser.username, role: currentUser.role },
     source: 'backend-payments-command',
-    relatedOrderId: event.orderId,
-    relatedPaymentId: event.paymentId,
-    before: event.before ?? null,
-    after: event.after ?? null,
-    metadata: { previousOrderId: event.previousOrderId ?? null },
+    requestId: requestId ?? 'payment-command',
+    origin: 'payment_command',
   });
 }
 

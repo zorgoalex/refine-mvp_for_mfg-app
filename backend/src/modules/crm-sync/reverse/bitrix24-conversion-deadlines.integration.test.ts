@@ -24,6 +24,7 @@ const Repository = process.env.ERP_CONVERSION_TEST_USE_DIST === 'true'
   : PgBitrix24ReverseRepository;
 class FixtureDatabase extends DatabaseService {
   failDeadline = false;
+  failPaymentAudit = false;
   readonly tx: TransactionClient;
   constructor(readonly client: PoolClient) {
     super(new ConfigService<BackendEnv, true>({ DATABASE_QUERY_TIMEOUT_MS: 10000 }), {} as never);
@@ -31,6 +32,9 @@ class FixtureDatabase extends DatabaseService {
   }
   override async query<T extends QueryResultRow = QueryResultRow>(sql: string, params: readonly unknown[] = []) {
     if (this.failDeadline && sql.includes('INSERT INTO deadline_events')) {
+      await this.client.query('SELECT 1 / 0');
+    }
+    if (this.failPaymentAudit && sql.includes('INSERT INTO audit_log') && String(params[0]).startsWith('payments.')) {
       await this.client.query('SELECT 1 / 0');
     }
     return this.client.query<T>(sql, [...params]);
@@ -134,6 +138,12 @@ describe.skipIf(!url)('CRM conversion deadlines on real PostgreSQL (rollback-onl
       actorUserId: String(actorId), auditRequestId: input.requestId, scope: { mode: 'all' } });
   }
 
+  async function paymentAudits() {
+    return (await client.query(`SELECT event, user_id::text, username::text, metadata_json->>'origin' AS origin,
+        (after_json->>'amount')::numeric::text AS amount FROM audit_log
+       WHERE event LIKE 'payments.%' AND related_order_id=$1 ORDER BY created_at, event`, [orderId])).rows;
+  }
+
   async function autoInput(dealId: string) {
     const service = (await client.query(`INSERT INTO users(username,email,password_hash,role_id,is_service_account)
       SELECT $1::text,$1::text || '@example.invalid','E2E-NO-LOGIN',role_id,true FROM roles WHERE role_code='integration_service' RETURNING user_id`,
@@ -154,6 +164,9 @@ describe.skipIf(!url)('CRM conversion deadlines on real PostgreSQL (rollback-onl
     const after = await conversionState();
     expect(await repository.autoConvertPaidCrmRequest(auto)).toMatchObject({ status: 'unchanged' });
     expect(await conversionState()).toEqual(after);
+    expect(await paymentAudits()).toEqual([
+      expect.objectContaining({ event: 'payments.create', user_id: String(auto.actorUserId), origin: 'bitrix24_reverse_auto', amount: '500' }),
+    ]);
     expect((await client.query('SELECT erp_payment_id FROM bitrix24_incoming_request_payment WHERE bitrix_payment_id=$1', [payment.bitrixPaymentId])).rows[0].erp_payment_id).not.toBeNull();
     const transition = (await client.query("SELECT payload_json FROM outbox_events WHERE event_type='bitrix24.request_auto_conversion.completed' AND aggregate_id=$1", [String(orderId)])).rows;
     expect(transition).toHaveLength(1);
@@ -223,6 +236,37 @@ describe.skipIf(!url)('CRM conversion deadlines on real PostgreSQL (rollback-onl
     expect((await repository.autoConvertPaidCrmRequest(auto)).status).toBe('converted');
   });
 
+  it('rolls automatic conversion and its payment back when the payment audit cannot be written', async () => {
+    const { dealId } = await seedPayment();
+    const auto = await autoInput(dealId);
+    const before = await conversionState();
+    db.failPaymentAudit = true;
+    await expect(repository.autoConvertPaidCrmRequest(auto)).rejects.toThrow();
+    expect(await conversionState()).toEqual(before);
+    expect((await client.query('SELECT count(*)::int AS n FROM payments WHERE order_id=$1', [orderId])).rows[0].n).toBe(0);
+    db.failPaymentAudit = false;
+    expect((await repository.autoConvertPaidCrmRequest(auto)).status).toBe('converted');
+    expect(await paymentAudits()).toHaveLength(1);
+  });
+
+  it('rolls a manual payment import back (payment, totals, receipts, outbox) when the payment audit fails', async () => {
+    const { payment, dealId } = await seedPayment();
+    await repository.convertCrmRequestToProduction(input);
+    await repository.replaceMappedOrderPaymentSnapshots(orderId, [payment], input.requestId, undefined, dealId, await repository.getPaymentSyncFence(dealId));
+    const snapshot = async () => (await client.query(`SELECT o.version, o.paid_amount,
+        (SELECT count(*)::int FROM payments p WHERE p.order_id=o.order_id) AS payments,
+        (SELECT erp_payment_id FROM bitrix24_incoming_request_payment WHERE bitrix_payment_id=$2) AS linked,
+        (SELECT count(*)::int FROM audit_log a WHERE a.related_order_id=o.order_id) AS audits,
+        (SELECT count(*)::int FROM outbox_events e WHERE e.payload_json->>'orderId'=o.order_id::text) AS outbox
+       FROM orders o WHERE o.order_id=$1`, [orderId, payment.bitrixPaymentId])).rows[0];
+    const before = await snapshot();
+    db.failPaymentAudit = true;
+    await expect(importPayment(payment.bitrixPaymentId)).rejects.toThrow();
+    expect(await snapshot()).toEqual(before);
+    db.failPaymentAudit = false;
+    expect(await importPayment(payment.bitrixPaymentId)).toMatchObject({ changedPaymentCount: 1 });
+  });
+
   async function widgetAutoInput() {
     const { dealId, requestId, payment } = await seedPayment();
     const auto = await autoInput(dealId);
@@ -248,6 +292,9 @@ describe.skipIf(!url)('CRM conversion deadlines on real PostgreSQL (rollback-onl
     expect(await repository.autoConvertPaidCrmRequest(auto)).toMatchObject({ status: 'converted' });
     expect((await client.query('SELECT created_by FROM payments WHERE order_id=$1', [orderId])).rows).toEqual([{ created_by: String(actorId) }]);
     expect((await client.query('SELECT status FROM bitrix24_manual_payment_command WHERE command_id=$1', [auto.widget.commandId])).rows[0].status).toBe('completed');
+    expect(await paymentAudits()).toEqual([
+      expect.objectContaining({ event: 'payments.create', user_id: String(actorId), origin: 'bitrix24_widget' }),
+    ]);
   });
 
   it('never bypasses widget ownership or revoked human permission', async () => {
@@ -295,6 +342,10 @@ describe.skipIf(!url)('CRM conversion deadlines on real PostgreSQL (rollback-onl
     await repository.replaceRequestPaymentSnapshots(requestId, [payment], input.requestId);
     await repository.replaceMappedOrderPaymentSnapshots(orderId, [payment], input.requestId, undefined, dealId);
     expect(await importPayment(payment.bitrixPaymentId)).toMatchObject({ changedPaymentCount: 0 });
+    expect(await paymentAudits()).toEqual([
+      expect.objectContaining({ event: 'payments.create', user_id: String(actorId), origin: 'bitrix24_reverse_manual', amount: '500' }),
+    ]);
+    expect((await paymentAudits())[0].username).toBeTruthy();
     const erp = (await client.query('SELECT amount,payment_date::text,created_by FROM payments WHERE order_id=$1', [orderId])).rows;
     expect(erp).toEqual([{ amount: '500.00', payment_date: '2026-09-09', created_by: String(actorId) }]);
     expect((await client.query('SELECT paid_amount FROM orders WHERE order_id=$1', [orderId])).rows[0].paid_amount).toBe('500.00');
@@ -413,6 +464,9 @@ describe.skipIf(!url)('CRM conversion deadlines on real PostgreSQL (rollback-onl
       actorUserId: editor, auditRequestId: input.requestId, scope: { mode: 'all' } });
     expect((await client.query('SELECT payment_id,created_by,edited_by,amount FROM payments WHERE order_id=$1', [orderId])).rows).toEqual([{ ...before, edited_by: editor, amount: '600.00' }]);
     expect((await repository.getMappedOrderPayments(orderId, { mode: 'all' })).payments).toEqual([expect.objectContaining({ erpPaymentId: Number(before.payment_id), amount: 600 })]);
+    expect((await paymentAudits()).filter((row) => row.event === 'payments.update')).toEqual([
+      expect.objectContaining({ user_id: editor, username: name, origin: 'bitrix24_reverse_manual', amount: '600' }),
+    ]);
   });
 
   it('registers deadline, audit and outbox before success; replay creates nothing twice', async () => {
