@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   changeOrderStatusFromAutomationInTransaction: vi.fn(),
   changeProductionStatusFromAutomationInTransaction: vi.fn(),
   changeDetailsProductionStatusFromAutomationInTransaction: vi.fn(),
+  clearDetailsProductionStatusFromAutomationInTransaction: vi.fn(),
   record: vi.fn(),
   loadMdfBoardEvents: vi.fn(),
 }));
@@ -30,6 +31,7 @@ vi.mock('../../production-actions/adapters/pg-production-action-repository', () 
   changeOrderStatusFromAutomationInTransaction: mocks.changeOrderStatusFromAutomationInTransaction,
   changeProductionStatusFromAutomationInTransaction: mocks.changeProductionStatusFromAutomationInTransaction,
   changeDetailsProductionStatusFromAutomationInTransaction: mocks.changeDetailsProductionStatusFromAutomationInTransaction,
+  clearDetailsProductionStatusFromAutomationInTransaction: mocks.clearDetailsProductionStatusFromAutomationInTransaction,
 }));
 
 vi.mock('../../../common/audit/audit.service', () => ({
@@ -43,6 +45,7 @@ import {
   evaluateStatusAutomation,
   dispatchMdfBoardEvent,
   evaluateProductionCompositionAutomation,
+  withMdfDetailAutomationContext,
 } from './status-automation-runtime';
 
 describe('evaluateStatusAutomation', () => {
@@ -120,6 +123,195 @@ describe('evaluateStatusAutomation', () => {
         productionScope: 'ordinary_order_details', productionConditionMode: 'uniform_equality',
         cause: 'derived_from_production_composition' }),
     }));
+  });
+
+  it('clears a status on mixed composition when another status is already present', async () => {
+    const rule = makeRule({ id: 30, eventType: 'order.production_status_changed', actionType: 'clear_details_production_status',
+      targetStatusId: 4, conditions: { anyProductionStatusIn: [6], currentOrderStatusIn: [1] } });
+    mocks.listEnabledRulesForEvent.mockResolvedValue([rule]);
+    mocks.loadOrderAutomationState.mockResolvedValue(makeState({
+      productionSummary: { detailCount: 3, unassignedCount: 0, statusIds: [4, 6] },
+    }));
+    mocks.clearDetailsProductionStatusFromAutomationInTransaction.mockResolvedValue({ status: 'executed', auditId: 'clear-audit' });
+    const transaction = tx();
+    await evaluateProductionCompositionAutomation(transaction, event());
+    expect(mocks.clearDetailsProductionStatusFromAutomationInTransaction).toHaveBeenCalledOnce();
+    expect(mocks.clearDetailsProductionStatusFromAutomationInTransaction).toHaveBeenCalledWith(transaction, 100, 4,
+      expect.objectContaining({ ruleId: 30, eventType: 'order.production_status_changed',
+        cause: 'derived_from_production_composition' }));
+    expect(mocks.record).toHaveBeenCalledWith(transaction, expect.objectContaining({
+      event: 'status_automation.rule_applied',
+      metadata: expect.objectContaining({ actionType: 'clear_details_production_status', targetStatusId: 4,
+        statusCommandAuditId: 'clear-audit', productionConditionMode: 'any_status_presence' }),
+    }));
+  });
+
+  it('does not clear when the required other status is absent', async () => {
+    mocks.listEnabledRulesForEvent.mockResolvedValue([makeRule({ eventType: 'order.production_status_changed',
+      actionType: 'clear_details_production_status', targetStatusId: 4, conditions: { anyProductionStatusIn: [6] } })]);
+    mocks.loadOrderAutomationState.mockResolvedValue(makeState({
+      productionSummary: { detailCount: 2, unassignedCount: 0, statusIds: [4] },
+    }));
+    await evaluateProductionCompositionAutomation(tx(), event());
+    expect(mocks.clearDetailsProductionStatusFromAutomationInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('runs a clear rule once even when its own change re-triggers composition evaluation', async () => {
+    const rule = makeRule({ eventType: 'order.production_status_changed', actionType: 'clear_details_production_status',
+      targetStatusId: 4 });
+    mocks.listEnabledRulesForEvent.mockResolvedValue([rule]);
+    const transaction = tx();
+    mocks.clearDetailsProductionStatusFromAutomationInTransaction.mockImplementation(async () => {
+      await evaluateProductionCompositionAutomation(transaction, event());
+      return { status: 'executed' };
+    });
+    await evaluateProductionCompositionAutomation(transaction, event());
+    expect(mocks.clearDetailsProductionStatusFromAutomationInTransaction).toHaveBeenCalledOnce();
+  });
+
+  it('applies only the higher-priority clear rule when its change re-triggers the composition', async () => {
+    const first = makeRule({ id: 31, priority: 10, eventType: 'order.production_status_changed',
+      actionType: 'clear_details_production_status', targetStatusId: 4, conditions: { anyProductionStatusIn: [6] } });
+    const second = makeRule({ id: 32, priority: 20, eventType: 'order.production_status_changed',
+      actionType: 'clear_details_production_status', targetStatusId: 5, conditions: { anyProductionStatusIn: [6] } });
+    const orderRule = makeRule({ id: 33, priority: 30, eventType: 'order.production_status_changed',
+      conditions: { anyProductionStatusIn: [6] } });
+    mocks.listEnabledRulesForEvent.mockResolvedValue([first, second, orderRule]);
+    mocks.loadOrderAutomationState.mockResolvedValue(makeState({
+      productionSummary: { detailCount: 3, unassignedCount: 0, statusIds: [4, 5, 6] },
+    }));
+    mocks.changeOrderStatusFromAutomationInTransaction.mockResolvedValue({ status: 'executed' });
+    const transaction = tx();
+    mocks.clearDetailsProductionStatusFromAutomationInTransaction.mockImplementation(async () => {
+      await evaluateProductionCompositionAutomation(transaction, event());
+      return { status: 'executed' };
+    });
+
+    await evaluateProductionCompositionAutomation(transaction, event());
+
+    expect(mocks.clearDetailsProductionStatusFromAutomationInTransaction).toHaveBeenCalledOnce();
+    expect(mocks.clearDetailsProductionStatusFromAutomationInTransaction).toHaveBeenCalledWith(transaction, 100, 4, expect.anything());
+    expect(mocks.changeOrderStatusFromAutomationInTransaction).toHaveBeenCalledOnce();
+    const audits = mocks.record.mock.calls.map(([, audit]) => [audit.entityId, audit.event, audit.metadata.reason ?? null]);
+    expect(audits).toEqual([
+      [32, 'status_automation.rule_skipped', 'lower_priority_same_target'],
+      [33, 'status_automation.rule_applied', null],
+      [31, 'status_automation.rule_applied', null],
+    ]);
+  });
+
+  it('keeps clear-rule priorities in a manual refresh whose clear re-triggers the composition', async () => {
+    const first = makeRule({ id: 41, priority: 10, eventType: 'order.production_status_changed',
+      actionType: 'clear_details_production_status', targetStatusId: 4, conditions: { anyProductionStatusIn: [6] } });
+    const second = makeRule({ id: 42, priority: 20, eventType: 'order.production_status_changed',
+      actionType: 'clear_details_production_status', targetStatusId: 5, conditions: { anyProductionStatusIn: [6] } });
+    mocks.listEnabledRulesForManualRefresh.mockResolvedValue([first, second]);
+    mocks.listEnabledRulesForEvent.mockResolvedValue([first, second]);
+    mocks.loadOrderAutomationState.mockResolvedValue(makeState({
+      productionSummary: { detailCount: 3, unassignedCount: 0, statusIds: [4, 5, 6] },
+    }));
+    const transaction = tx();
+    mocks.clearDetailsProductionStatusFromAutomationInTransaction.mockImplementation(async () => {
+      await evaluateProductionCompositionAutomation(transaction, event());
+      return { status: 'executed' };
+    });
+
+    const summary = await evaluateAllStatusAutomationRulesForOrder(transaction, {
+      orderId: 100, actor: currentUser(), requestId: 'refresh', sourceIdempotencyKey: 'refresh',
+    });
+
+    expect(mocks.clearDetailsProductionStatusFromAutomationInTransaction).toHaveBeenCalledOnce();
+    expect(mocks.clearDetailsProductionStatusFromAutomationInTransaction).toHaveBeenCalledWith(transaction, 100, 4, expect.anything());
+    const audits = mocks.record.mock.calls.map(([, audit]) => [audit.entityId, audit.event, audit.metadata.reason ?? null]);
+    expect(audits).toEqual([
+      [41, 'status_automation.rule_applied', null],
+      [42, 'status_automation.rule_skipped', 'lower_priority_same_target'],
+    ]);
+    expect(summary).toMatchObject({ evaluatedRuleCount: 2, matchedRuleCount: 1, executedActionCount: 1, skippedRuleCount: 1 });
+  });
+
+  it('lets only the manual pass clear statuses when an order status rule re-triggers events', async () => {
+    const orderRule = makeRule({ id: 61, priority: 10, eventType: 'order.created', targetStatusId: 2 });
+    const clearX = makeRule({ id: 62, priority: 20, eventType: 'order.production_status_changed',
+      actionType: 'clear_details_production_status', targetStatusId: 4, conditions: { anyProductionStatusIn: [6] } });
+    const clearY = makeRule({ id: 63, priority: 30, eventType: 'order.status_changed',
+      actionType: 'clear_details_production_status', targetStatusId: 5, conditions: { anyProductionStatusIn: [6] } });
+    mocks.listEnabledRulesForManualRefresh.mockResolvedValue([orderRule, clearX, clearY]);
+    mocks.listEnabledRulesForEvent.mockImplementation(async (_tx, type) => [clearX, clearY].filter(rule => rule.eventType === type));
+    mocks.loadOrderAutomationState.mockResolvedValue(makeState({
+      productionSummary: { detailCount: 3, unassignedCount: 0, statusIds: [4, 5, 6] },
+    }));
+    const transaction = tx();
+    mocks.changeOrderStatusFromAutomationInTransaction.mockImplementation(async () => {
+      await evaluateStatusAutomation(transaction, event({ eventType: 'order.status_changed', origin: 'automation' }));
+      return { status: 'executed' };
+    });
+    mocks.clearDetailsProductionStatusFromAutomationInTransaction.mockResolvedValue({ status: 'executed' });
+
+    const summary = await evaluateAllStatusAutomationRulesForOrder(transaction, {
+      orderId: 100, actor: currentUser(), requestId: 'refresh', sourceIdempotencyKey: 'refresh',
+    });
+
+    expect(mocks.clearDetailsProductionStatusFromAutomationInTransaction).toHaveBeenCalledOnce();
+    expect(mocks.clearDetailsProductionStatusFromAutomationInTransaction).toHaveBeenCalledWith(transaction, 100, 4, expect.anything());
+    const audits = mocks.record.mock.calls.map(([, audit]) => [audit.entityId, audit.event, audit.metadata.reason ?? null]);
+    expect(audits).toEqual([
+      [61, 'status_automation.rule_applied', null],
+      [62, 'status_automation.rule_applied', null],
+      [63, 'status_automation.rule_skipped', 'lower_priority_same_target'],
+    ]);
+    expect(summary).toMatchObject({ matchedRuleCount: 2, executedActionCount: 2, skippedRuleCount: 1 });
+  });
+
+  it('keeps the global priority order of a manual refresh for non-clear rules', async () => {
+    const details = makeRule({ id: 51, priority: 10, eventType: 'order.created', actionType: 'change_details_production_status', targetStatusId: 7 });
+    const paymentRule = makeRule({ id: 52, priority: 20, eventType: 'payment.created', targetStatusId: 8 });
+    const productionRule = makeRule({ id: 53, priority: 30, eventType: 'order.production_status_changed', targetStatusId: 9,
+      conditions: { anyProductionStatusIn: [3] } });
+    mocks.listEnabledRulesForManualRefresh.mockResolvedValue([details, paymentRule, productionRule]);
+    mocks.listEnabledRulesForEvent.mockImplementation(async (_tx, type) => type === productionRule.eventType ? [productionRule] : []);
+    const transaction = tx();
+    mocks.changeDetailsProductionStatusFromAutomationInTransaction.mockImplementation(async () => {
+      await evaluateProductionCompositionAutomation(transaction, event());
+      return { status: 'executed' };
+    });
+    mocks.changeOrderStatusFromAutomationInTransaction.mockResolvedValue({ status: 'executed' });
+
+    await evaluateAllStatusAutomationRulesForOrder(transaction, {
+      orderId: 100, actor: currentUser(), requestId: 'refresh', sourceIdempotencyKey: 'refresh',
+    });
+
+    // Unchanged base behaviour: the payment rule is not displaced by the nested composition pass.
+    expect(mocks.changeOrderStatusFromAutomationInTransaction.mock.calls.map(([, , statusId]) => statusId)).toEqual([9, 8]);
+  });
+
+  it('never clears statuses inside an MDF command transaction but keeps order rules', async () => {
+    const clearRule = makeRule({ id: 34, eventType: 'order.production_status_changed',
+      actionType: 'clear_details_production_status', targetStatusId: 4 });
+    const orderRule = makeRule({ id: 35, priority: 20, eventType: 'order.production_status_changed' });
+    mocks.listEnabledRulesForEvent.mockResolvedValue([clearRule, orderRule]);
+    mocks.changeOrderStatusFromAutomationInTransaction.mockResolvedValue({ status: 'executed' });
+    const transaction = tx();
+
+    await withMdfDetailAutomationContext(transaction, () => evaluateProductionCompositionAutomation(transaction, event()));
+
+    expect(mocks.clearDetailsProductionStatusFromAutomationInTransaction).not.toHaveBeenCalled();
+    expect(mocks.changeOrderStatusFromAutomationInTransaction).toHaveBeenCalledOnce();
+    expect(mocks.record).toHaveBeenCalledWith(transaction, expect.objectContaining({
+      entityId: 34, event: 'status_automation.rule_skipped', metadata: expect.objectContaining({ reason: 'mdf_clear_forbidden' }),
+    }));
+
+    mocks.clearDetailsProductionStatusFromAutomationInTransaction.mockResolvedValue({ status: 'executed' });
+    await evaluateProductionCompositionAutomation(tx(), event());
+    expect(mocks.clearDetailsProductionStatusFromAutomationInTransaction).toHaveBeenCalledOnce();
+  });
+
+  it('allows a clear rule as a detail cascade of an automation-origin order status event', async () => {
+    mocks.listEnabledRulesForEvent.mockResolvedValue([makeRule({ eventType: 'order.status_changed',
+      actionType: 'clear_details_production_status', targetStatusId: 4 })]);
+    mocks.clearDetailsProductionStatusFromAutomationInTransaction.mockResolvedValue({ status: 'executed' });
+    await evaluateStatusAutomation(tx(), event({ eventType: 'order.status_changed', origin: 'automation' }));
+    expect(mocks.clearDetailsProductionStatusFromAutomationInTransaction).toHaveBeenCalledOnce();
   });
 
   it('rejects mixed composition during manual refresh even when the header matches', async () => {

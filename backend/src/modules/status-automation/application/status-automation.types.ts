@@ -20,6 +20,7 @@ export type StatusAutomationActionType =
   | 'change_order_status'
   | 'change_production_status'
   | 'change_details_production_status'
+  | 'clear_details_production_status'
   | 'map_order_status_to_details_production_status'
   | 'map_production_status_to_order_status';
 
@@ -40,6 +41,8 @@ export interface StatusAutomationConditions {
   currentPaymentStatusNotIn?: number[];
   currentProductionStatusIn?: number[];
   currentProductionStatusNotIn?: number[];
+  /** At least one counted detail has a status from the list (partial remakes). */
+  anyProductionStatusIn?: number[];
   paidShareGte?: number; // 0..100
   orderSourceIn?: Array<'manual' | 'bazis' | 'import'>;
   firstPaymentOnly?: boolean; // только payment.created

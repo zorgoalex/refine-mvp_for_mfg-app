@@ -20,6 +20,7 @@ const BASE_CONDITIONS: ReadonlyArray<keyof StatusAutomationConditions> = [
   'currentPaymentStatusNotIn',
   'currentProductionStatusIn',
   'currentProductionStatusNotIn',
+  'anyProductionStatusIn',
   'paidShareGte',
   'orderSourceIn',
 ];
@@ -28,6 +29,7 @@ const ALLOWED_ACTIONS: ReadonlyArray<StatusAutomationActionType> = [
   'change_order_status',
   'change_production_status',
   'change_details_production_status',
+  'clear_details_production_status',
 ];
 const MDF_ACTIONS: ReadonlyArray<StatusAutomationActionType> = ['change_details_production_status'];
 
@@ -39,6 +41,7 @@ const ORDER_STATUS_CHANGED_ACTIONS: ReadonlyArray<StatusAutomationActionType> = 
 const PRODUCTION_STATUS_CHANGED_ACTIONS: ReadonlyArray<StatusAutomationActionType> = [
   'change_order_status',
   'map_production_status_to_order_status',
+  'clear_details_production_status',
 ];
 
 export const STATUS_AUTOMATION_EVENTS: ReadonlyArray<StatusAutomationEventDescriptor> = [

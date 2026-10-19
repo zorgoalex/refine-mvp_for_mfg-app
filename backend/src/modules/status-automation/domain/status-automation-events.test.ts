@@ -27,6 +27,7 @@ const baseConditions = [
   'currentPaymentStatusNotIn',
   'currentProductionStatusIn',
   'currentProductionStatusNotIn',
+  'anyProductionStatusIn',
   'paidShareGte',
   'orderSourceIn',
 ] as const;
@@ -91,13 +92,13 @@ describe('status automation event catalog', () => {
       expect(descriptor.allowedActions).toEqual(expect.arrayContaining(
         descriptor.eventType.startsWith('mdf.') ? ['change_details_production_status']
           : descriptor.eventType === 'order.production_status_changed'
-            ? ['change_order_status', 'map_production_status_to_order_status'] : actionTypes,
+            ? ['change_order_status', 'map_production_status_to_order_status', 'clear_details_production_status'] : actionTypes,
       ));
       if (descriptor.eventType.startsWith('mdf.')) {
         expect(descriptor.allowedActions).toEqual(['change_details_production_status']);
       }
     }
-    expect(getEventDescriptor('payment.created')?.allowedActions).toHaveLength(3);
+    expect(getEventDescriptor('payment.created')?.allowedActions).toHaveLength(4);
     expect(getEventDescriptor('order.status_changed')?.allowedActions).toContain(
       'map_order_status_to_details_production_status',
     );
@@ -105,7 +106,7 @@ describe('status automation event catalog', () => {
       'map_production_status_to_order_status',
     );
     expect(getEventDescriptor('order.production_status_changed')?.allowedActions).toEqual([
-      'change_order_status', 'map_production_status_to_order_status',
+      'change_order_status', 'map_production_status_to_order_status', 'clear_details_production_status',
     ]);
   });
 

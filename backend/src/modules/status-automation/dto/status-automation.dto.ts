@@ -20,6 +20,7 @@ const actionTypeSchema = z.enum([
   'change_order_status',
   'change_production_status',
   'change_details_production_status',
+  'clear_details_production_status',
   'map_order_status_to_details_production_status',
   'map_production_status_to_order_status',
 ]);
@@ -51,6 +52,7 @@ const conditionSchema = z
     currentPaymentStatusNotIn: z.array(z.number().int().positive()).optional(),
     currentProductionStatusIn: z.array(z.number().int().positive()).optional(),
     currentProductionStatusNotIn: z.array(z.number().int().positive()).optional(),
+    anyProductionStatusIn: z.array(z.number().int().positive()).optional(),
     paidShareGte: z.number().min(0).max(100).optional(),
     orderSourceIn: z.array(z.enum(['manual', 'bazis', 'import'])).optional(),
     firstPaymentOnly: z.boolean().optional(),
@@ -273,6 +275,9 @@ function normalizeConditions(value: z.infer<typeof conditionSchema>): StatusAuto
     value.currentProductionStatusNotIn.length > 0
   ) {
     conditions.currentProductionStatusNotIn = value.currentProductionStatusNotIn;
+  }
+  if (value.anyProductionStatusIn !== undefined && value.anyProductionStatusIn.length > 0) {
+    conditions.anyProductionStatusIn = value.anyProductionStatusIn;
   }
   if (value.paidShareGte !== undefined) conditions.paidShareGte = value.paidShareGte;
   if (value.orderSourceIn !== undefined && value.orderSourceIn.length > 0) {

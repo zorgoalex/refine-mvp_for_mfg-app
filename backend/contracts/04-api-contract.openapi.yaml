@@ -27689,6 +27689,7 @@ components:
             - change_order_status
             - change_production_status
             - change_details_production_status
+            - clear_details_production_status
             - map_order_status_to_details_production_status
             - map_production_status_to_order_status
         targetStatusId:
@@ -27745,6 +27746,11 @@ components:
             type: integer
             minimum: 1
         currentProductionStatusNotIn:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+        anyProductionStatusIn:
           type: array
           items:
             type: integer
@@ -27815,6 +27821,7 @@ components:
               - currentPaymentStatusNotIn
               - currentProductionStatusIn
               - currentProductionStatusNotIn
+              - anyProductionStatusIn
               - paidShareGte
               - orderSourceIn
               - firstPaymentOnly
@@ -27827,6 +27834,7 @@ components:
               - change_order_status
               - change_production_status
               - change_details_production_status
+              - clear_details_production_status
               - map_order_status_to_details_production_status
               - map_production_status_to_order_status
 
@@ -28004,6 +28012,7 @@ components:
             - change_order_status
             - change_production_status
             - change_details_production_status
+            - clear_details_production_status
             - map_order_status_to_details_production_status
             - map_production_status_to_order_status
         targetStatusId:
@@ -28052,6 +28061,7 @@ components:
             - change_order_status
             - change_production_status
             - change_details_production_status
+            - clear_details_production_status
             - map_order_status_to_details_production_status
             - map_production_status_to_order_status
         targetStatusId:

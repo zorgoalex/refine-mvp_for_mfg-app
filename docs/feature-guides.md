@@ -508,6 +508,32 @@ outbox (`order.deleted`, `order.restored`).
 `previousOrderStatusIn`, `paidShareGte`, источник заказа
 `manual|bazis|import`, `firstPaymentOnly`.
 
+Условия по производственным статусам деталей:
+
+- `currentProductionStatusIn` — все учитываемые детали в одном статусе из списка;
+- `currentProductionStatusNotIn` — ни одна учитываемая деталь не в статусах из списка;
+- `anyProductionStatusIn` — хотя бы одна учитываемая деталь в статусе из списка.
+  Подходит для частичной переделки. Правило `change_order_status` с этим
+  условием может сработать на событии `order.production_status_changed` и при
+  неоднородном составе деталей. Mapping-действиям однородность по-прежнему нужна.
+
+Пример: часть деталей выданного заказа вернули на переделку. Переоткрыть такой
+заказ может правило `order.production_status_changed` → `change_order_status`
+«В производстве» с условиями `currentOrderStatusIn` (Готов к выдаче, Выдан) и
+`anyProductionStatusIn` (этапы до распила).
+
+Откат backend. Версии до появления `anyProductionStatusIn` не знают это условие
+и молча его игнорируют. Правило из примера на старой версии станет
+«Готов к выдаче/Выдан → В производстве» и будет переоткрывать выданные заказы.
+Поэтому перед откатом backend на такую версию выключите правила с этим условием и
+включите их снова только после возврата на новую версию:
+
+```sql
+UPDATE status_automation_rules SET is_enabled=false, version=version+1, updated_at=now()
+WHERE is_enabled AND conditions_json ? 'anyProductionStatusIn'
+RETURNING id, name;
+```
+
 Действия:
 
 - `change_order_status`;
@@ -515,7 +541,22 @@ outbox (`order.deleted`, `order.restored`).
 - `change_details_production_status` с режимом деталей `set_exact` или
   `advance_only`;
 - `map_order_status_to_details_production_status` для события `order.status_changed`;
-- `map_production_status_to_order_status` для события `order.production_status_changed`.
+- `map_production_status_to_order_status` для события `order.production_status_changed`;
+- `clear_details_production_status` — снять производственный статус: у активных
+  деталей заказа, где стоит выбранный статус (`targetStatusId`), статус
+  становится пустым, остальные детали не меняются. Доступно для тех же событий,
+  что и изменение статуса деталей (кроме МДФ-событий), и для
+  `order.production_status_changed`. Условие «уже проставлен другой статус»
+  задаётся обычными условиями: «Есть деталь со статусом» и «Статус заказа».
+  Снятие не может вернуть статус обратно, поэтому повторный пересчёт состава не
+  зацикливается; каждое правило срабатывает не более одного раза за команду.
+  Перед откатом backend ниже версии с этим действием выключить такие правила:
+
+  ```sql
+  UPDATE status_automation_rules SET is_enabled=false, version=version+1, updated_at=now()
+  WHERE is_enabled AND action_type = 'clear_details_production_status'
+  RETURNING id, name;
+  ```
 
 Mapping-действия задают несколько исходных статусов для одного целевого.
 Например, несколько производственных статусов деталей могут соответствовать
