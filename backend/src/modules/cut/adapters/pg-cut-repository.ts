@@ -3564,19 +3564,38 @@ export class PgCutRepository implements CutRepositoryPort {
     // cutJobId yields 404 CUT_GROUP_NOT_FOUND, not a 409 recalc block (a missing
     // job makes checkRequiresRecalc conservatively true). This also resolves the
     // variant (manual-unavailable → 409) on the validated group.
-    const frozenContext = query.resultNo !== undefined && query.cutJobId !== undefined
+    let frozenContext = query.resultNo !== undefined && query.cutJobId !== undefined
       ? await this.loadFrozenRenderContext({
           currentUser: query.currentUser,
           cutJobId: query.cutJobId,
           resultNo: query.resultNo,
           cutGroupId: query.cutGroupId,
           variant,
-          rotate90: query.rotate90,
+          rotate90: false,
           originTopLeft: query.originTopLeft,
           axisOrigin: query.axisOrigin,
           refreshPdfDynamicFields: true,
         })
       : null;
+    // PDF pages are always landscape, like the current-result and job PDFs: the
+    // rotation follows the stored sheet geometry, not the on-screen orientation
+    // flag (a portrait-stored bath sheet must not stay portrait in the PDF).
+    const frozenFirstSheet = frozenContext?.sheets[0]?.placements;
+    const frozenRotate90 = frozenFirstSheet !== undefined
+      && frozenFirstSheet.sheet_height_mm > frozenFirstSheet.sheet_width_mm;
+    if (frozenContext && frozenRotate90) {
+      frozenContext = await this.loadFrozenRenderContext({
+        currentUser: query.currentUser,
+        cutJobId: query.cutJobId!,
+        resultNo: query.resultNo!,
+        cutGroupId: query.cutGroupId,
+        variant,
+        rotate90: true,
+        originTopLeft: query.originTopLeft,
+        axisOrigin: query.axisOrigin,
+        refreshPdfDynamicFields: true,
+      });
+    }
     const currentContext = frozenContext === null
       ? await this.loadGroupPdfLandscapeRenderContext(
           query.cutGroupId, variant, query.cutJobId, query.originTopLeft, query.axisOrigin,
@@ -3592,7 +3611,7 @@ export class PgCutRepository implements CutRepositoryPort {
       ? await this.loadPdfTemplateLayout(pdfTemplate)
       : null;
     const sheets = frozenContext?.sheets ?? currentContext!.sheets;
-    const rotate90 = frozenContext ? (query.rotate90 ?? false) : currentContext!.rotate90;
+    const rotate90 = frozenContext ? frozenRotate90 : currentContext!.rotate90;
     // Rule 5: group PDF is blocked while the job requires recalculation.
     // PNG/SVG are NOT blocked; only PDF/print surfaces enforce this.
     if (query.cutJobId !== undefined && query.resultNo === undefined) {

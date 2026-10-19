@@ -1666,6 +1666,16 @@ html {
   vertical-align: middle;
 }
 
+/* «Дата» in the cut-job list: one line, a smaller font than the rest of the row. */
+.cut-jobs-table .ant-table-tbody > tr > td.cut-jobs-date-cell {
+  white-space: nowrap;
+}
+
+.cut-jobs-table .cut-jobs-date-value {
+  font-size: 88%;
+  white-space: nowrap;
+}
+
 .cut-jobs-table .ant-table-tbody > tr > td.cut-jobs-name-cell,
 .cut-jobs-table .ant-table-thead > tr > th.cut-jobs-name-cell {
   text-align: left !important;
