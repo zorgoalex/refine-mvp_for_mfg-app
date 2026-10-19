@@ -232,6 +232,11 @@ export const AUDIT_EVENT_TITLES: Record<string, string> = {
   'crm_sync.failed': 'Ошибка синхронизации CRM',
   'crm_sync.upsert': 'Синхронизирована запись CRM',
   'crm_sync.delete': 'Удалена синхронизированная запись CRM',
+  'crm_sync.payment_paid_reset_completed': 'Bitrix: оплата обновлена',
+  'crm_sync.payment_paid_reset_stuck': 'Bitrix: не удалось обновить оплату',
+  'crm_sync.payment_card_closed': 'Bitrix: закрыта карточка «Поступила оплата»',
+  'crm_sync.payment_card_close_failed': 'Bitrix: не удалось закрыть карточку оплаты',
+  'crm_sync.payment_card_close_requested': 'Bitrix: запрошено закрытие карточки оплаты',
   'crm_sync.remote_deleted_skipped': 'Пропущена удалённая запись CRM',
   'detail_labels.generated': 'Сформированы бирки деталей',
   'order_labels.generated': 'Сформированы бирки заказа',
@@ -296,6 +301,7 @@ export const AUDIT_EVENT_TITLES: Record<string, string> = {
   'payments.onec_denied': 'Отказано в доступе к поступлениям 1С',
   'payments.update': 'Изменён платёж',
   'payments.delete': 'Удалён платёж',
+  'payments.restore': 'Восстановлен платёж',
   'client_phones.create': 'Добавлен телефон клиента',
   'client_phones.update': 'Изменён телефон клиента',
   'client_phones.delete': 'Удалён телефон клиента',
@@ -315,7 +321,15 @@ export const AUDIT_EVENT_TITLES: Record<string, string> = {
   'status_automation.rule_skipped': 'Правило автостатусов не применено',
 };
 
-export function auditEventTitle(event: string): string {
+const PAYMENT_CRM_SYNC_TITLES: Record<string, string> = {
+  'crm_sync.upsert': 'Оплата отправлена в Bitrix',
+  'crm_sync.delete': 'Оплата удалена в Bitrix',
+};
+
+export function auditEventTitle(event: string, entityType?: string | null): string {
+  if (entityType === 'payment' && Object.prototype.hasOwnProperty.call(PAYMENT_CRM_SYNC_TITLES, event)) {
+    return PAYMENT_CRM_SYNC_TITLES[event];
+  }
   return Object.prototype.hasOwnProperty.call(AUDIT_EVENT_TITLES, event)
     ? AUDIT_EVENT_TITLES[event]
     : `Событие ERP: ${event}`;

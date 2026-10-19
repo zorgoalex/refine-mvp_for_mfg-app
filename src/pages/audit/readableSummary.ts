@@ -157,19 +157,23 @@ export function buildAuditReadableSummary(record: AuditLogEventDto): AuditReadab
   const changes: AuditReadableChange[] = [];
   const notes: string[] = [];
 
+  const paymentHandled = addPaymentSummary(record, before, after, diff, metadata, changes, notes);
+  const bitrixHandled = addBitrixPaymentEffectSummary(record, before, after, metadata, changes, notes);
   addDetailTransferSummary(record, metadata, changes, notes);
   addStatusAutomationSummary(record, metadata, changes, notes);
   addStatusChange(record, before, after, diff, metadata, changes);
   addProductionModeChange(record, diff, before, after, changes);
   addManualSvgFileUploadSummary(record, metadata, changes, notes);
-  addGenericChanges(diff, changes);
+  if (!paymentHandled && !bitrixHandled) addGenericChanges(diff, changes);
   addDetailNotes(record, diff, metadata, notes);
   addSourceNote(record, metadata, notes);
   if (record.entityType === 'cut_job' && metadata.cutJobIdentitySource === 'current_record') {
     notes.push('Номер и название получены из сохранённого задания');
   }
 
-  if (changes.length === 0) {
+  if (changes.length === 0 && record.event === 'orders.update') {
+    notes.push('Изменены строки заказа');
+  } else if (changes.length === 0) {
     changes.push({
       label: 'Изменение',
       before: readableFallbackValue(record.before),
@@ -178,13 +182,186 @@ export function buildAuditReadableSummary(record: AuditLogEventDto): AuditReadab
   }
 
   return {
-    title: auditEventTitle(record.event),
+    title: auditEventTitle(record.event, record.entityType),
     actor: auditActor(record, metadata),
     object: auditObject(record, metadata),
-    changes: dedupeChanges(changes).slice(0, 6),
+    changes: dedupeChanges(changes).slice(0, paymentHandled ? 12 : 6),
     notes: dedupeStrings(notes).slice(0, 5),
     related: auditRelated(record),
   };
+}
+
+const PAYMENT_EVENTS = new Set(['payments.create', 'payments.update', 'payments.delete', 'payments.restore']);
+
+const PAYMENT_ORIGIN_LABELS: Record<string, string> = {
+  order_form: 'форма заказа',
+  payment_command: 'раздел «Платежи»',
+  snapshot_import: 'импорт',
+  bitrix24_reverse_manual: 'Bitrix24 (вручную)',
+  bitrix24_reverse_auto: 'Bitrix24 (автоматически)',
+  bitrix24_widget: 'виджет Bitrix24',
+};
+
+type PaymentFieldKind = 'money' | 'date' | 'text' | 'order';
+
+const PAYMENT_FIELDS: Array<{ field: string; label: string; kind: PaymentFieldKind }> = [
+  { field: 'amount', label: 'Сумма', kind: 'money' },
+  { field: 'paymentDate', label: 'Дата оплаты', kind: 'date' },
+  { field: 'typePaidName', label: 'Тип оплаты', kind: 'text' },
+  { field: 'notes', label: 'Примечание', kind: 'text' },
+  { field: 'refKey1c', label: 'Ссылка 1С', kind: 'text' },
+  { field: 'orderId', label: 'Заказ', kind: 'order' },
+  { field: 'orderPaidAmount', label: 'Оплачено по заказу', kind: 'money' },
+  { field: 'orderPaymentStatusName', label: 'Статус оплаты', kind: 'text' },
+];
+
+function addPaymentSummary(
+  record: AuditLogEventDto,
+  before: JsonObject,
+  after: JsonObject,
+  diff: JsonObject,
+  metadata: JsonObject,
+  changes: AuditReadableChange[],
+  notes: string[],
+): boolean {
+  if (!PAYMENT_EVENTS.has(record.event)) return false;
+
+  const hasDiff = Object.values(diff).some((value) => paymentPair(value) !== null);
+  const pairFor = (field: string): { before: unknown; after: unknown } | null => {
+    if (hasDiff) return paymentPair(diff[field]);
+    const b = before[field];
+    const a = after[field];
+    if (b === undefined && a === undefined) return null;
+    if (paymentValueKey(b) === paymentValueKey(a)) return null;
+    return { before: b, after: a };
+  };
+
+  const isDelete = record.event === 'payments.delete';
+  const isRestore = record.event === 'payments.restore';
+
+  if (isRestore) notes.push('Платёж восстановлен');
+
+  for (const { field, label, kind } of PAYMENT_FIELDS) {
+    let pair = pairFor(field);
+    if (field === 'orderId' && !pair) {
+      const previousOrderId = numberValue(metadata.previousOrderId);
+      const currentOrderId = numberValue(after.orderId);
+      if (previousOrderId != null && currentOrderId != null && previousOrderId !== currentOrderId) {
+        pair = { before: previousOrderId, after: currentOrderId };
+      }
+    }
+    if (field === 'typePaidName' && !pair) {
+      // Old records may only carry the type id.
+      const idPair = pairFor('typePaidId');
+      if (idPair && after.typePaidName === undefined && before.typePaidName === undefined) pair = idPair;
+    }
+
+    if (field === 'amount') {
+      if (isDelete) {
+        const prior = pair ? pair.before : before.amount ?? after.amount;
+        changes.push({ label, before: formatPaymentValue('money', prior), after: 'удалена' });
+        continue;
+      }
+      if (isRestore && !pair) {
+        const current = after.amount ?? before.amount;
+        if (current !== undefined) changes.push({ label, before: 'удалена', after: formatPaymentValue('money', current) });
+        continue;
+      }
+    } else if (isDelete && (field === 'orderId' || !field.startsWith('order'))) {
+      continue;
+    }
+
+    if (!pair) continue;
+    changes.push({
+      label,
+      before: formatPaymentValue(kind, pair.before),
+      after: formatPaymentValue(kind, pair.after),
+    });
+  }
+
+  const origin = stringValue(metadata.origin);
+  if (origin && PAYMENT_ORIGIN_LABELS[origin]) notes.push(`Источник: ${PAYMENT_ORIGIN_LABELS[origin]}`);
+  return true;
+}
+
+function paymentPair(value: unknown): { before: unknown; after: unknown } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const object = value as JsonObject;
+  if ('before' in object || 'after' in object) return { before: object.before, after: object.after };
+  if ('from' in object || 'to' in object) return { before: object.from, after: object.to };
+  return null;
+}
+
+function paymentValueKey(value: unknown): string {
+  return value === null || value === undefined ? '' : String(value);
+}
+
+function formatPaymentValue(kind: PaymentFieldKind, value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  if (kind === 'money') {
+    const amount = numberValue(value);
+    return amount == null ? String(value) : formatMoney(amount);
+  }
+  if (kind === 'order') return `#${String(value)}`;
+  if (kind === 'date' && typeof value === 'string') {
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+    if (match) return `${match[3]}.${match[2]}.${match[1]}`;
+  }
+  return typeof value === 'string' ? value.trim() || '—' : formatAuditValue(value);
+}
+
+function formatMoney(amount: number): string {
+  const [integer, fraction] = Math.abs(amount).toFixed(2).split('.');
+  const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  const sign = amount < 0 ? '-' : '';
+  return fraction === '00' ? `${sign}${grouped}` : `${sign}${grouped},${fraction}`;
+}
+
+function addBitrixPaymentEffectSummary(
+  record: AuditLogEventDto,
+  before: JsonObject,
+  after: JsonObject,
+  metadata: JsonObject,
+  changes: AuditReadableChange[],
+  notes: string[],
+): boolean {
+  const error = stringValue(metadata.error);
+  switch (record.event) {
+    case 'crm_sync.payment_paid_reset_completed': {
+      const outcome = stringValue(after.outcome) ?? stringValue(after.action);
+      if (outcome === 'applied' || outcome === 'update') {
+        const from = formatPaymentValue('money', before.bitrixSum ?? before.bitrixSumBefore);
+        const to = formatPaymentValue('money', after.bitrixSum ?? after.targetSum);
+        changes.push({ label: 'Сумма оплаты в Bitrix', before: from, after: to });
+        notes.push(`Bitrix: сумма оплаты исправлена ${from} → ${to}`);
+      } else if (outcome === 'deleted' || outcome === 'delete') {
+        changes.push({ label: 'Оплата в Bitrix', before: 'была', after: 'удалена' });
+        notes.push('Bitrix: оплата удалена');
+      } else if (outcome === 'remote_missing') {
+        changes.push({ label: 'Оплата в Bitrix', before: 'отсутствовала', after: 'отсутствует' });
+        notes.push('Bitrix: оплата уже отсутствовала');
+      } else {
+        notes.push('Bitrix: оплата обновлена');
+      }
+      return true;
+    }
+    case 'crm_sync.payment_paid_reset_stuck':
+      if (error) notes.push(`Ошибка: ${error}`);
+      return true;
+    case 'crm_sync.payment_card_closed':
+      changes.push({ label: 'Карточка «Поступила оплата»', before: 'открыта', after: 'закрыта' });
+      notes.push('Bitrix: закрыта карточка «Поступила оплата»');
+      return true;
+    case 'crm_sync.payment_card_close_failed':
+      notes.push('Bitrix: не удалось закрыть карточку оплаты');
+      if (error) notes.push(`Ошибка: ${error}`);
+      return true;
+    case 'crm_sync.payment_card_close_requested':
+      notes.push('Bitrix: запрошено закрытие карточки оплаты');
+      return true;
+    default:
+      return false;
+  }
 }
 
 function addStatusAutomationSummary(
@@ -287,6 +464,7 @@ export function auditActor(record: AuditLogEventDto, metadata?: JsonObject): str
   const systemLabel = stringValue(systemActor.actorLabel) ?? stringValue(meta.actorLabel);
   if (systemLabel) return systemLabel;
 
+  if (record.event.startsWith('crm_sync.')) return 'Синхронизация с Bitrix (автоматически)';
   if (record.source?.includes('automation')) return 'Автоматизация';
   if (record.source?.includes('deadline')) return 'Система дедлайнов';
   return 'Система';

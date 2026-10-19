@@ -43,6 +43,7 @@ export const ORDER_HISTORY_FINANCIAL_EVENTS = [
   'payments.create',
   'payments.update',
   'payments.delete',
+  'payments.restore',
   'orders.payment_status_change',
 ] as const;
 

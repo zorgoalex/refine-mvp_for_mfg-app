@@ -52,6 +52,7 @@ import type {
   ReconcileBazisPanelOrderLinksInput,
 } from './order-transaction.types';
 import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
+import type { CapturedPaymentChangesInput, PaymentAuditState, RecordPaymentChangesInput } from '../../payments/application/payment-change-audit';
 import { collectChildReferences, OrderTransactionService } from './order-transaction.service';
 
 interface FakeProjectRecord {
@@ -94,6 +95,7 @@ interface FakeState {
   nextDowelingLinkId: number;
   orders: Map<number, FakeOrderRecord>;
   projects: Map<number, FakeProjectRecord>;
+  paymentAudits: RecordPaymentChangesInput[];
   auditEvents: Array<
     | OrderSaveAuditEvent
     | OrderStatusAuditEvent
@@ -135,6 +137,7 @@ class FakeOrderTransactions implements OrderTransactionManagerPort {
     nextDowelingLinkId: 5000,
     orders: new Map(),
     projects: new Map(),
+    paymentAudits: [],
     auditEvents: [],
     outboxEvents: [],
     deniedRestoreAudits: [],
@@ -613,6 +616,43 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     this.call('upsertPayments');
     const order = this.getOrder(orderId);
     order.payments = upsertRows(order.payments, payments, () => this.state.nextPaymentId++);
+  }
+
+  private paymentCaptureStart: PaymentAuditState | null = null;
+
+  /** Emulates the migration 259 capture: the state of every order when the capture starts. */
+  async beginPaymentAuditCapture(): Promise<void> {
+    if (this.paymentCaptureStart) throw new Error('capture already running');
+    this.paymentCaptureStart = this.paymentState();
+  }
+
+  async recordCapturedPaymentChanges(input: CapturedPaymentChangesInput): Promise<number> {
+    const before = this.paymentCaptureStart ?? this.paymentState();
+    this.paymentCaptureStart = null;
+    const after = this.paymentState();
+    // An order created during the capture starts from a zero baseline (order INSERT sentinel).
+    for (const orderId of after.orders.keys()) {
+      if (!before.orders.has(orderId)) before.orders.set(orderId, { paidAmount: 0, paymentStatusId: null, paymentStatusName: null });
+    }
+    this.state.paymentAudits.push({ ...input, before, after });
+    return 0;
+  }
+
+  private paymentState(): PaymentAuditState {
+    const state: PaymentAuditState = { payments: new Map(), orders: new Map() };
+    for (const [orderId, order] of this.state.orders) {
+      for (const payment of order.payments) {
+        state.payments.set(payment.id as number, {
+          paymentId: payment.id as number, orderId, typePaidId: payment.typePaidId, typePaidName: null,
+          amount: payment.amount, paymentDate: payment.paymentDate, notes: payment.notes ?? null,
+          refKey1c: payment.refKey1c ?? null, createdBy: null, editedBy: null, createdAt: '', updatedAt: null,
+          deleted: false,
+        });
+      }
+      const paidAmount = order.payments.reduce((sum, payment) => sum + payment.amount, 0);
+      state.orders.set(orderId, { paidAmount, paymentStatusId: null, paymentStatusName: null });
+    }
+    return state;
   }
 
   async deletePayments(orderId: number, ids: readonly number[]): Promise<void> {
@@ -3698,6 +3738,55 @@ describe('OrderTransactionService', () => {
     expect(transactions.state.orders.get(42)?.payments).toHaveLength(1);
     expect(transactions.state.auditEvents).toEqual([]);
     expect(transactions.calls).toEqual(['begin', 'setSessionUser', 'rollback']);
+  });
+
+  it('records the payment changes of an order save with the author, before the writes and after the totals', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      payments: [payment({ id: 21, amount: 1000 }), payment({ id: 22, amount: 500 })],
+    });
+
+    await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      requestId: 'req-payment-audit',
+      dto: createSaveDto({
+        payments: [payment({ id: 21, amount: 999 })],
+        deleted: { paymentIds: [22] },
+        version: 3,
+      }),
+    });
+
+    expect(transactions.state.paymentAudits).toHaveLength(1);
+    const [audit] = transactions.state.paymentAudits;
+    expect(audit).toMatchObject({
+      origin: 'order_form',
+      source: 'backend-orders-command',
+      requestId: 'req-payment-audit',
+      actor: { id: currentUser('manager').id, username: currentUser('manager').username, role: 'manager' },
+    });
+    expect([...audit.before.payments.values()].map((p) => [p.paymentId, p.amount])).toEqual([[21, 1000], [22, 500]]);
+    expect(audit.before.orders.get(42)?.paidAmount).toBe(1500);
+    expect([...audit.after.payments.values()].map((p) => [p.paymentId, p.amount])).toEqual([[21, 999]]);
+    expect(audit.after.orders.get(42)?.paidAmount).toBe(999);
+  });
+
+  it('records the payments of a created order against an empty state', async () => {
+    const transactions = new FakeOrderTransactions();
+    await new OrderTransactionService({ transactions }).create({
+      currentUser: currentUser('manager'),
+      requestId: 'req-create-payment-audit',
+      dto: createSaveDto({ payments: [payment({ id: undefined, amount: 700 })] }),
+    });
+
+    expect(transactions.state.paymentAudits).toHaveLength(1);
+    const [audit] = transactions.state.paymentAudits;
+    expect(audit.before.payments.size).toBe(0);
+    expect([...audit.before.orders.values()].map((o) => o.paidAmount)).toEqual([0]);
+    expect([...audit.after.payments.values()].map((p) => p.amount)).toEqual([700]);
+    expect(audit).toMatchObject({ origin: 'order_form', requestId: 'req-create-payment-audit' });
   });
 
   it('allows manager nested order-save payment deletion in own order', async () => {

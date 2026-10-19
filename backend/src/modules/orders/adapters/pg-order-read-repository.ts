@@ -27,6 +27,7 @@ import type {
 } from '../application/order-query.types';
 import type { OrderHistoryVisibility } from '../application/order-history-events';
 import { formatCutJobNumber } from '../../cut/application/cut-numbering';
+import { sanitizeBitrixAudit } from '../../audit/application/bitrix-audit-sanitization';
 
 const SORT_COLUMNS: Record<OrderListSortBy, string> = {
   orderId: 'o.order_id',
@@ -1622,6 +1623,9 @@ function mapUnitLookup(row: UnitLookupRow) {
 }
 
 function mapAuditEvent(row: AuditLogRow): OrderAuditEventDto {
+  // Payment notes are free text: a pasted Bitrix24 webhook URL or token is masked, also in old records.
+  const safe = (value: Record<string, unknown> | null) =>
+    row.event?.startsWith('payments.') ? sanitizeBitrixAudit(value) as Record<string, unknown> | null : value;
   return {
     auditId: row.audit_id,
     entityType: row.entity_type,
@@ -1630,9 +1634,9 @@ function mapAuditEvent(row: AuditLogRow): OrderAuditEventDto {
     userId: toNullableNumber(row.user_id),
     username: row.username,
     role: row.role,
-    before: row.before_json,
-    after: row.after_json,
-    diff: row.diff_json,
+    before: safe(row.before_json),
+    after: safe(row.after_json),
+    diff: safe(row.diff_json),
     requestId: row.request_id,
     ip: row.ip_address,
     userAgent: row.user_agent,

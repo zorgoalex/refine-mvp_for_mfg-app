@@ -1,5 +1,5 @@
 import type { QueryResultRow } from 'pg';
-import { BITRIX_AUDIT_PREDICATE, BITRIX_RECONCILE_EVENTS, bitrixClassificationSql, bitrixEventDefinition } from '../application/bitrix-audit-events';
+import { BITRIX_AUDIT_PREDICATE, BITRIX_RECONCILE_EVENTS, bitrixClassificationSql, bitrixEventDefinition, isBitrixAuditEvent } from '../application/bitrix-audit-events';
 import { BITRIX_OBJECT_IDS_SQL, BITRIX_REFS_SQL, BITRIX_REQUEST_ORDER_SQL } from '../application/bitrix-audit-identities';
 import { sanitizeBitrixAudit } from '../application/bitrix-audit-sanitization';
 import type { DatabaseClient } from '../../../database/database.types';
@@ -27,6 +27,8 @@ import type {
 import {
   BUSINESS_HISTORY_EVENT_LIKE_PATTERNS,
   BUSINESS_HISTORY_EXCLUDED_EVENT_LIKE_PATTERNS,
+  FINANCIAL_AUDIT_PREDICATE,
+  PAYMENT_HISTORY_PREDICATE,
 } from '../application/business-history-events';
 
 const FILTER_OPTIONS_RECENT_LIMIT = 5000;
@@ -295,7 +297,13 @@ function buildWhere(filters: AuditLogFilters): {
     return params.length;
   };
   if (filters.scope === 'bitrix24') clauses.push(BITRIX_AUDIT_PREDICATE);
-  if (filters.excludeBitrix24) clauses.push(`NOT ${BITRIX_AUDIT_PREDICATE}`);
+  if (filters.excludeBitrix24) {
+    // «История бизнеса» hides the Bitrix24 audit except the payment facts (who/what changed a payment).
+    clauses.push(filters.scope === 'business'
+      ? `(NOT ${BITRIX_AUDIT_PREDICATE} OR ${PAYMENT_HISTORY_PREDICATE})`
+      : `NOT ${BITRIX_AUDIT_PREDICATE}`);
+  }
+  if (filters.hideFinancial) clauses.push(`NOT ${FINANCIAL_AUDIT_PREDICATE}`);
   if (filters.bitrixDirection) add(bitrixClassificationSql('direction'), '=', filters.bitrixDirection);
   if (filters.bitrixCategory) add(bitrixClassificationSql('category'), '=', filters.bitrixCategory);
   if (filters.bitrixOutcome === 'attention') clauses.push(`${bitrixClassificationSql('outcome')} IN ('error','conflict')`);
@@ -751,6 +759,10 @@ export class PgAuditLogRepository implements AuditLogRepositoryPort {
         if (command.filters.scope === 'bitrix24') {
           const semantic = bitrixEventDefinition(row.event, row.entity_type);
           mapped.bitrix = { ...semantic, refs: row.bitrix_refs ?? [], currentRequestOrderId: num(row.bitrix_current_order_id ?? null) };
+        }
+        // Bitrix24-owned rows are sanitized in every tab (they now also appear in «История бизнеса»); payment
+        // rows too, since their free-text notes may hold a pasted webhook URL (also in historical records).
+        if (command.filters.scope === 'bitrix24' || isBitrixAuditEvent(row.event, row.source) || row.event?.startsWith('payments.')) {
           mapped.before = sanitizeBitrixAudit(mapped.before);
           mapped.after = sanitizeBitrixAudit(mapped.after);
           mapped.diff = sanitizeBitrixAudit(mapped.diff);
@@ -769,7 +781,11 @@ export class PgAuditLogRepository implements AuditLogRepositoryPort {
   }
 
   async filterOptions(command: AuditFilterOptionsCommand): Promise<AuditFilterOptionsResponseDto> {
-    const { where, params } = buildWhere({ scope: command.scope, excludeBitrix24: command.excludeBitrix24 });
+    const { where, params } = buildWhere({
+      scope: command.scope,
+      excludeBitrix24: command.excludeBitrix24,
+      hideFinancial: command.hideFinancial,
+    });
     const recentLimitParam = params.length + 1;
     const optionLimitParam = params.length + 2;
     const result = await this.database.query<AuditFilterOptionsRow>(filterOptionsSql(where, recentLimitParam, optionLimitParam), [

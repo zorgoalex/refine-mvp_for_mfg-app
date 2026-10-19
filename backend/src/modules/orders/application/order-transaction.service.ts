@@ -279,6 +279,8 @@ export class OrderTransactionService {
       });
       // Каталог плёнок: дубль → канон под FOR SHARE, после блокировки проекта (§3.3 плана).
       await this.canonicalizeFilmReferences(unitOfWork, null, prepared);
+      // Payment audit: capture what this save writes, from the order insert on (migration 259).
+      await unitOfWork.beginPaymentAuditCapture();
       const orderId = await unitOfWork.createOrderHeader({
         header: prepared.order.header,
         totals: prepared.totals,
@@ -301,6 +303,8 @@ export class OrderTransactionService {
         previousVersion: null,
         currentUser: command.currentUser,
       });
+      // A new order had no payments: every saved payment is a payments.create of this user.
+      await this.recordOrderFormPayments(unitOfWork, command.currentUser, command.requestId ?? 'orders-create');
       await unitOfWork.recordCatalogLinesChange(orderId, catalogPlan, command.currentUser, command.requestId ?? 'orders-create');
       const bazisPanelLinks = await this.reconcilePdfImportedBazisPanels(unitOfWork, {
         orderId,
@@ -615,6 +619,8 @@ export class OrderTransactionService {
         collectChildReferences(prepared.order),
       );
       assertOrderHasPositions(prepared.details.length, catalogPlan.after.length);
+      // Payment audit: capture what this save writes, before its first write (migration 259).
+      await unitOfWork.beginPaymentAuditCapture();
       if (command.prePersistHook) {
         await command.prePersistHook(unitOfWork, lockedOrder);
       }
@@ -640,6 +646,7 @@ export class OrderTransactionService {
         previousVersion: lockedOrder.version,
         currentUser: command.currentUser,
       });
+      await this.recordOrderFormPayments(unitOfWork, command.currentUser, command.requestId ?? 'orders-update');
       await unitOfWork.recordCatalogLinesChange(command.orderId, catalogPlan, command.currentUser, command.requestId ?? 'orders-update');
       const bazisPanelLinks = await this.reconcilePdfImportedBazisPanels(unitOfWork, {
         orderId: command.orderId,
@@ -1001,6 +1008,20 @@ export class OrderTransactionService {
         burnError,
       );
     }
+  }
+
+  /** Payments saved with the order form: one payments.* event per changed payment, after the totals are written. */
+  private async recordOrderFormPayments(
+    unitOfWork: OrderWriteUnitOfWork,
+    currentUser: CurrentUser,
+    requestId: string,
+  ): Promise<void> {
+    await unitOfWork.recordCapturedPaymentChanges({
+      actor: { id: currentUser.id, username: currentUser.username, role: currentUser.role },
+      source: 'backend-orders-command',
+      requestId,
+      origin: 'order_form',
+    });
   }
 
   private async persistChildren(

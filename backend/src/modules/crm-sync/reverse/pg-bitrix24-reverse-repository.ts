@@ -1,3 +1,4 @@
+import { beginPaymentAuditCapture, recordCapturedPaymentChanges } from '../../payments/application/payment-change-audit';
 import { assertOrderReadable } from '../../../permissions/policies/order-read-visibility';
 import { createHash, randomUUID } from 'node:crypto';
 import { resolveFilmReferencesForWrite } from '../../orders/adapters/pg-film-reference-resolver';
@@ -3205,8 +3206,17 @@ export class PgBitrix24ReverseRepository {
           const command = await input.widget.materialize(tx, input.widget.commandId);
           if (command.status !== 'completed') throw conflict(command.status === 'awaiting_overpayment_confirmation' ? 'PAYMENT_REQUIRES_CONFIRMATION' : 'CONVERSION_BLOCKED', 'Payment is not ready');
         } else {
+          await beginPaymentAuditCapture(tx);
           await materializeActivePayments(tx, Number(request.request_id), orderId, [payment.bitrix_payment_id]);
           await recalculatePaymentState(tx, orderId);
+          // The widget branch writes its own payment audit inside its materialization (no duplicate here).
+          await recordCapturedPaymentChanges(tx, {
+            actor: { id: input.actorUserId, username: actor.username, role: 'integration_service' },
+            source: 'backend-bitrix24',
+            requestId: input.requestId,
+            origin: 'bitrix24_reverse_auto',
+            requestRef: { incomingRequestId: Number(request.request_id), bitrixDealId: input.dealId },
+          });
         }
         await tx.query("SELECT set_config('app.user_id',$1,true)", [String(input.actorUserId)]);
         // The conversion receipt must reflect the version AFTER payment totals.
@@ -3360,6 +3370,7 @@ export class PgBitrix24ReverseRepository {
           'Convert the CRM request to a production order before materializing payments',
         );
       }
+      await beginPaymentAuditCapture(tx);
       const deleted = await tx.query(
         `UPDATE payments erp
             SET delete_flag=true, updated_at=now()
@@ -3384,8 +3395,16 @@ export class PgBitrix24ReverseRepository {
         true,
       );
       const deletedCount = deleted.rowCount ?? 0;
+      if (count > 0 || deletedCount > 0) await recalculatePaymentState(tx, orderId);
+      // Always finish the capture (no change → no event).
+      await recordCapturedPaymentChanges(tx, {
+        actor: { id: input.actorUserId, username: null, role: null },
+        source: 'backend-bitrix24',
+        requestId: input.auditRequestId,
+        origin: 'bitrix24_reverse_manual',
+        requestRef: { incomingRequestId: input.requestId, bitrixDealId: discovered.bitrix_deal_id },
+      });
       if (count > 0 || deletedCount > 0) {
-        await recalculatePaymentState(tx, orderId);
         await this.audit.record(tx, {
           event: 'bitrix24_reverse.payments_materialize',
           entityType: 'bitrix24_incoming_request',
@@ -3595,6 +3614,7 @@ export class PgBitrix24ReverseRepository {
         throw conflict('BITRIX24_DEAL_MAPPING_CHANGED', 'Bitrix24 Deal mapping changed');
       }
       const paymentOwner = await resolveMappedPaymentOwner(tx, input.orderId, discovered.bitrix_deal_id, true);
+      await beginPaymentAuditCapture(tx);
       const deleted = await tx.query(
         `UPDATE payments erp
             SET delete_flag=true, updated_at=now()
@@ -3616,8 +3636,16 @@ export class PgBitrix24ReverseRepository {
         ? await materializeMappedOrderPaymentRows(tx, input.orderId, activePaymentIds)
         : await materializeActivePayments(tx, paymentOwner.requestId, input.orderId, activePaymentIds);
       deletedPaymentCount = deleted.rowCount ?? 0;
+      if (changedPaymentCount > 0 || deletedPaymentCount > 0) await recalculatePaymentState(tx, input.orderId);
+      // Always finish the capture (no change → no event).
+      await recordCapturedPaymentChanges(tx, {
+        actor: { id: input.actorUserId, username: null, role: null },
+        source: 'backend-bitrix24',
+        requestId: input.auditRequestId,
+        origin: 'bitrix24_reverse_manual',
+        requestRef: { bitrixDealId: discovered.bitrix_deal_id },
+      });
       if (changedPaymentCount > 0 || deletedPaymentCount > 0) {
-        await recalculatePaymentState(tx, input.orderId);
         await this.audit.record(tx, {
           event: 'bitrix24_reverse.mapped_order_payments_materialize',
           entityType: 'order',
