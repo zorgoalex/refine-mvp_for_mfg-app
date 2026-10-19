@@ -1,3 +1,4 @@
+import { beginPaymentAuditCapture, recordCapturedPaymentChanges } from '../../payments/application/payment-change-audit';
 import { createHash, randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import type { AuditService } from '../../../common/audit/audit.service';
@@ -1497,6 +1498,7 @@ export class Bitrix24PaymentWidgetRepository {
         return command;
       }
       let erpPaymentId = existingErpPaymentId;
+      await beginPaymentAuditCapture(tx);
       const notes = `Платёж из Bitrix24 #${command.bitrixPaymentId}`;
       if (erpPaymentId === null) {
         const inserted = await tx.query<{ payment_id: string | number }>(
@@ -1556,6 +1558,14 @@ export class Bitrix24PaymentWidgetRepository {
           WHERE order_id=$1`,
         [target.orderId, paidAmount, toDateOnly(totals.rows[0]?.payment_date ?? null), paymentStatusId],
       );
+      // Written here, also when called from the auto-conversion (which writes no payment audit itself).
+      await recordCapturedPaymentChanges(tx, {
+        actor: { id: command.erpActorUserId, username: null, role: null },
+        source: 'bitrix24-widget',
+        requestId: command.originatingRequestId,
+        origin: 'bitrix24_widget',
+        requestRef: { bitrixDealId: command.bitrixDealId, bitrixPaymentId: command.bitrixPaymentId ?? '' },
+      });
       const response = commandResponse(command, 'completed', target.orderId, erpPaymentId);
       const completed = await tx.query<CommandRow>(
         `UPDATE bitrix24_manual_payment_command

@@ -7,7 +7,7 @@ import { PgPaymentRepository } from './pg-payment-repository';
 
 describe('PgPaymentRepository', () => {
   it('creates a payment, recalculates parent order, and writes audit in one transaction', async () => {
-    const database = createDatabase();
+    const database = createDatabase({ existingPayment: false });
     const repository = new PgPaymentRepository(database.service);
 
     const result = await repository.createPayment({
@@ -149,7 +149,7 @@ describe('PgPaymentRepository', () => {
   });
 
   it('createPayment writes a query-ready audit row with related_payment_id and event', async () => {
-    const database = createDatabase();
+    const database = createDatabase({ existingPayment: false });
     const repository = new PgPaymentRepository(database.service);
 
     await repository.createPayment({
@@ -195,6 +195,41 @@ describe('PgPaymentRepository', () => {
     expect(beforeJson).not.toBeNull();
     const before = JSON.parse(beforeJson);
     expect(before).toHaveProperty('amount'); // before snapshot carries prior payment fields
+    expect(before).toMatchObject({ amount: 250, typePaidName: 'Наличные', orderPaidAmount: 0 });
+    expect(JSON.parse(audit!.params[20] as string)).toMatchObject({ amount: 200, orderPaidAmount: 250 });
+    const diff = JSON.parse(audit!.params[21] as string);
+    expect(Object.keys(diff).sort()).toEqual(['amount', 'orderPaidAmount']);
+    expect(JSON.parse(audit!.params[22] as string)).toMatchObject({ origin: 'payment_command' });
+    expect(audit!.params[3]).toBe('1');
+    expect(audit!.params[4]).toBe('admin');
+  });
+
+  it('writes no payment event when an update changes nothing', async () => {
+    const database = createDatabase({ paymentOrderId: 15 });
+    const repository = new PgPaymentRepository(database.service);
+
+    await repository.updatePayment({
+      currentUser: currentUser(),
+      requestId: 'req_noop',
+      paymentId: 30,
+      dto: { amount: 250 },
+    });
+
+    expect(database.queries.filter((q) => JSON.stringify(q.params).includes('payments.update'))).toHaveLength(0);
+  });
+
+  it('records a delete with the order totals after it', async () => {
+    const database = createDatabase({ paymentOrderId: 15, orderTotals: { 15: { paidAmount: 0, paymentDate: null } } });
+    const repository = new PgPaymentRepository(database.service);
+
+    await repository.deletePayment({ currentUser: currentUser(), paymentId: 30, requestId: 'req_del' });
+
+    const audit = database.queries.find(
+      (q) => /INSERT INTO audit_log/i.test(q.text) && q.params[0] === 'payments.delete',
+    );
+    expect(audit).toBeDefined();
+    expect(JSON.parse(audit!.params[20] as string)).toMatchObject({ deleted: true, orderPaidAmount: 0 });
+    expect(JSON.parse(audit!.params[19] as string)).toMatchObject({ paymentId: 30, amount: 250 });
   });
 
   it('denied scope: writes one denied audit row with relatedOrderId to the pool (not tx)', async () => {
@@ -310,8 +345,24 @@ function createDatabase(options: {
   orderCreatedByUserId?: number;
   orderManagerUserId?: number | null;
   orderTotals?: Record<number, { paidAmount: number; paymentDate: string | null }>;
+  /** Payment 30 already exists (update/delete); false for create. */
+  existingPayment?: boolean;
 } = {}) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+  // Current rows, so the payment audit sees the state before and after the write.
+  const stored = new Map<number, Record<string, unknown>>();
+  if (options.existingPayment !== false) stored.set(30, paymentRow({ order_id: options.paymentOrderId ?? 15 }));
+  const paidAmounts = new Map<number, number>();
+  // Emulates the migration 259 capture triggers: first images of the rows written while capture is on.
+  let capturing = false;
+  const capturedPayments = new Map<number, Record<string, unknown> | null>();
+  const capturedOrders = new Map<number, number>();
+  const capturePayment = (id: number) => {
+    if (capturing && !capturedPayments.has(id)) {
+      const row = stored.get(id);
+      capturedPayments.set(id, row ? { ...row, delete_flag: false } : null);
+    }
+  };
   // Pool-level queries (used by denied audit path — must survive tx rollback)
   const poolQueries: Array<{ text: string; params: readonly unknown[] }> = [];
 
@@ -344,14 +395,73 @@ function createDatabase(options: {
       };
     }
 
+    if (normalized.startsWith("SELECT current_setting('app.payment_audit_capture'")) {
+      return { rows: [{ on: capturing ? 'on' : null }], rowCount: 1 };
+    }
+    if (normalized.startsWith("SELECT set_config('app.payment_audit_capture'")) {
+      capturing = normalized.includes("'on'");
+      return { rows: [], rowCount: 1 };
+    }
+    if (normalized.startsWith('SELECT kind, id, image FROM pg_temp.payment_audit_capture')) {
+      const rows = [
+        ...[...capturedOrders].map(([id, paid]) => ({ kind: 'order', id, image: { paid_amount: paid, payment_status_id: 1, created: false } })),
+        ...[...capturedPayments].map(([id, image]) => ({ kind: 'payment', id, image })),
+      ];
+      return { rows, rowCount: rows.length };
+    }
+    if (normalized.startsWith('DELETE FROM pg_temp.payment_audit_capture')) {
+      capturedPayments.clear();
+      capturedOrders.clear();
+      return { rows: [], rowCount: 0 };
+    }
+    if (normalized.startsWith('SELECT p.payment_id, p.order_id, p.type_paid_id, pt.type_paid_name')) {
+      const paymentIds = (params[0] as number[]).map(Number);
+      const rows = [...stored.values()]
+        .filter((row) => paymentIds.includes(Number(row.payment_id)))
+        .map((row) => ({ ...row, type_paid_name: 'Наличные', delete_flag: false }));
+      return { rows, rowCount: rows.length };
+    }
+    if (normalized.startsWith('SELECT type_paid_id, type_paid_name FROM payment_types')) {
+      return { rows: (params[0] as number[]).map((id) => ({ type_paid_id: id, type_paid_name: 'Наличные' })), rowCount: 1 };
+    }
+    if (normalized.startsWith('SELECT order_id, paid_amount, payment_status_id FROM orders')) {
+      const rows = (params[0] as number[]).map((orderId) => ({
+        order_id: orderId,
+        paid_amount: paidAmounts.get(Number(orderId)) ?? 0,
+        payment_status_id: 1,
+      }));
+      return { rows, rowCount: rows.length };
+    }
+    if (normalized.startsWith('SELECT payment_status_id, payment_status_name FROM payment_statuses')) {
+      return { rows: (params[0] as number[]).map((id) => ({ payment_status_id: id, payment_status_name: 'Не оплачен' })), rowCount: 1 };
+    }
+
     if (normalized.startsWith('INSERT INTO payments')) {
-      return { rows: [paymentRow({ order_id: params[0], amount: params[1] })], rowCount: 1 };
+      const row = paymentRow({ order_id: params[0], amount: params[1] });
+      capturePayment(30);
+      stored.set(30, row);
+      return { rows: [row], rowCount: 1 };
     }
 
     if (normalized.startsWith('UPDATE payments')) {
-      const orderId = params.includes(16) ? 16 : options.paymentOrderId ?? 15;
-      const amount = params.includes(400) ? 400 : 250;
-      return { rows: [paymentRow({ order_id: orderId, amount })], rowCount: 1 };
+      capturePayment(30);
+      const row = { ...(stored.get(30) ?? paymentRow({ order_id: options.paymentOrderId ?? 15 })) };
+      for (const [, column, index] of normalized.matchAll(/(\w+) = \$(\d+)/g)) {
+        if (column in row) row[column] = params[Number(index) - 1];
+      }
+      stored.set(30, row);
+      return { rows: [row], rowCount: 1 };
+    }
+
+    if (normalized.startsWith('DELETE FROM payments')) {
+      capturePayment(Number(params[0]));
+      stored.delete(Number(params[0]));
+      return { rows: [], rowCount: 1 };
+    }
+
+    if (normalized.startsWith('UPDATE orders SET paid_amount')) {
+      if (capturing && !capturedOrders.has(Number(params[0]))) capturedOrders.set(Number(params[0]), paidAmounts.get(Number(params[0])) ?? 0);
+      paidAmounts.set(Number(params[0]), Number(params[1]));
     }
 
     if (normalized.startsWith('SELECT COALESCE(SUM(amount), 0)')) {

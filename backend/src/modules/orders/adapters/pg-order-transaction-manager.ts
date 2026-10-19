@@ -1,3 +1,8 @@
+import {
+  beginPaymentAuditCapture,
+  recordCapturedPaymentChanges,
+  type CapturedPaymentChangesInput,
+} from '../../payments/application/payment-change-audit';
 import { createHash } from 'crypto';
 import type { FilmReferenceResolution, FilmReferenceWriteInput } from '../domain/film-reference-resolution';
 import { resolveFilmReferencesForWrite } from './pg-film-reference-resolver';
@@ -1328,6 +1333,14 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         );
       }
     }
+  }
+
+  beginPaymentAuditCapture(): Promise<void> {
+    return beginPaymentAuditCapture(this.tx);
+  }
+
+  recordCapturedPaymentChanges(input: CapturedPaymentChangesInput): Promise<number> {
+    return recordCapturedPaymentChanges(this.tx, input);
   }
 
   async deletePayments(orderId: number, ids: readonly number[]): Promise<void> {

@@ -81,7 +81,7 @@ describe('AuditQueryService.filterOptions', () => {
     const repository = repo();
     const service = new AuditQueryService({ repository });
     await service.filterOptions({ currentUser: user('admin'), requestId: 'rq' });
-    expect(repository.filterOptions).toHaveBeenCalledWith({ currentUser: user('admin'), requestId: 'rq' });
+    expect(repository.filterOptions).toHaveBeenCalledWith({ currentUser: user('admin'), requestId: 'rq', hideFinancial: false });
   });
 });
 

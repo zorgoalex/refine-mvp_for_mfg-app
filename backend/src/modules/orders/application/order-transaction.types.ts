@@ -1,3 +1,4 @@
+import type { CapturedPaymentChangesInput } from '../../payments/application/payment-change-audit';
 import type { FilmReferenceResolution, FilmReferenceWriteInput } from '../domain/film-reference-resolution';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
@@ -432,6 +433,10 @@ export interface OrderWriteUnitOfWork {
   }): Promise<OrderHdfReconcileResult>;
   recalcOrderProductionStatus(orderId: number): Promise<void>;
   upsertPayments(orderId: number, payments: readonly NormalizedSaveOrderPaymentDto[]): Promise<void>;
+  /** Starts capturing the payment rows this transaction writes (see payment-change-audit.ts, migration 259). */
+  beginPaymentAuditCapture(): Promise<void>;
+  /** Finishes the capture: one `payments.*` audit event per payment this transaction changed. */
+  recordCapturedPaymentChanges(input: CapturedPaymentChangesInput): Promise<number>;
   deletePayments(orderId: number, ids: readonly number[]): Promise<void>;
   upsertWorkshops(
     orderId: number,
