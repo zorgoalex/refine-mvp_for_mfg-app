@@ -153,10 +153,10 @@
 
 /* встроенные блоки SSO и Telegram — без своей рамки */
 :root[data-ui-variant="workbench"] .wb-profile__embed > .ant-card {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 :root[data-ui-variant="workbench"] .wb-profile__embed > .ant-card > .ant-card-head {
@@ -213,6 +213,10 @@
   line-height: 1.4;
 }
 
+:root[data-ui-variant="workbench"] .wb-profile__block > .ant-segmented {
+  align-self: flex-start;
+}
+
 :root[data-ui-variant="workbench"] .wb-profile__seg {
   display: inline-flex;
   align-items: center;
@@ -225,7 +229,7 @@
 }
 
 :root[data-ui-variant="workbench"] .wb-profile__opts--variant {
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 :root[data-ui-variant="workbench"] .wb-profile__opts--density {
@@ -560,6 +564,12 @@
 
 :root[data-ui-variant="workbench"] .wb-profile__switch-row .wb-profile__hint {
   margin-top: 4px;
+}
+
+@media (max-width: 1240px) {
+  :root[data-ui-variant="workbench"] .wb-profile__opts--variant {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 900px) {

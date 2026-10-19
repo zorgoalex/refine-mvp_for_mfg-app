@@ -52,6 +52,7 @@ export const RESOURCE_LABELS: Record<string, string> = {
   bazis: 'Базис-проекты',
   'bazis-cut-sets': 'Базис-раскрой',
   scan: 'Сканер бирок',
+  profile: 'Профиль',
 };
 
 // First path segment → resource key for list routes.
