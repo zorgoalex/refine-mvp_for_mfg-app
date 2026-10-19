@@ -117,6 +117,8 @@ export const ONEC_ALERT_KIND_LABELS: Record<string, string> = {
   onec_documents_load_failed: 'Документы 1С не загружены',
   onec_document_conflict: 'Документ 1С изменился — конфликт с распределениями',
   onec_nightly_full_sync_missed: 'Ночная полная выгрузка не прошла',
+  inventory_onec_projection_failed: 'Остатки 1С не перенесены в склад ERP',
+  onec_alert_notification_no_recipients: 'Оповещения 1С некому доставить',
 };
 
 /** Alerts about one past command/run: nothing re-derives them, the operator closes them once handled. */

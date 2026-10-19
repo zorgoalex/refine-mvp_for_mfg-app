@@ -8,6 +8,9 @@ import { PgOnecRepository } from './adapters/pg-onec-repository';
 import { OnecAdminService } from './application/onec-admin.service';
 import { OnecAgentProtocolService } from './application/onec-agent-protocol.service';
 import { OnecAlertProjector } from './application/onec-alert-projector';
+import { OnecAlertNotifier } from './application/onec-alert-notifier';
+import { OnecAlertNotificationSettingsService } from './application/onec-alert-notification-settings.service';
+import { PgOnecAlertNotificationsRepository } from './adapters/pg-onec-alert-notifications-repository';
 import { OnecAlertsPort } from './application/onec-alerts-port';
 import { OnecAuditWriter } from './application/onec-audit';
 import { OnecCommandWakeups } from './application/onec-command-wakeups';
@@ -48,6 +51,9 @@ import { ONEC_STOCK_SNAPSHOTS } from './onec-stock-snapshots.port';
     OnecAgentProtocolService,
     OnecAdminService,
     OnecAlertProjector,
+    PgOnecAlertNotificationsRepository,
+    OnecAlertNotifier,
+    OnecAlertNotificationSettingsService,
     OnecAlertsPort,
     OnecMonitorService,
     OnecNightlyFullSyncService,

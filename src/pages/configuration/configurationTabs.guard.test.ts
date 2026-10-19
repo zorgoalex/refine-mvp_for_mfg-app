@@ -56,6 +56,16 @@ describe('configuration tabs layout', () => {
     ]);
   });
 
+  it('registers the 1C alert notifications tab behind the 1C integration gate', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
+    expect(source).toContain("key: 'onec-alert-notifications'");
+    expect(source).toContain('<OnecAlertNotificationsConfig />');
+    expect(source).toContain("featureFlags.useBackendOnec && (can('onec.view') || can('onec.manage') || can('onec.commands.send'))");
+    const items = [{ key: 'orders' }, { key: 'onec-alert-notifications' }];
+    expect(filterConfigurationTabItems(items, true, false, false, false, false, false, false)).toEqual([{ key: 'orders' }]);
+    expect(filterConfigurationTabItems(items, false, false, false, false, false, false, true)).toEqual([{ key: 'onec-alert-notifications' }]);
+  });
+
   it('does not register journals inside the configuration screen', () => {
     const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
     expect(source).not.toContain("key: 'history-journal'");

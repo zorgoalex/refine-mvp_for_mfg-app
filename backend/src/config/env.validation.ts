@@ -477,6 +477,12 @@ export const envSchema = z
      */
     BACKEND_ONEC_STOCK_SNAPSHOTS: booleanFromEnv.default(false),
     /**
+     * Delivery of 1C alerts into the bell with a mandatory balloon (plan 2026-10-19-onec-alert-notifications): the
+     * dispatcher in the 1C monitor tick. Switching on is the cutoff — earlier alerts get one digest per group, not one
+     * notification each. Off — no new stages. Needs the monitor owner process. Default off.
+     */
+    BACKEND_ONEC_ALERT_NOTIFICATIONS: booleanFromEnv.default(false),
+    /**
      * 1C incoming payments (plan 2026-10-04-onec-incoming-payments): the «Поступления 1С» tab and its read API, and
      * refunds reducing «Оплачено» of a 1C order through the refunded receipt. Read-only; default off.
      */

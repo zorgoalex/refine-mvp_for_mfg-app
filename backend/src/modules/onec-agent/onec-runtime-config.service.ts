@@ -18,6 +18,8 @@ export interface OnecRuntimeConfig {
   nightlyFullSyncHourUtc: number | null;
   /** Stock snapshots at a date may be requested; off — the queue only finishes what was started. */
   stockSnapshots: boolean;
+  /** Delivery of 1C alerts into the bell/balloon (BACKEND_ONEC_ALERT_NOTIFICATIONS). */
+  alertNotifications: boolean;
   etlWorkerOwner: 'none' | 'in_process';
   etlSpoolDir: string;
   etlSpoolMinFreeBytes: number;
@@ -46,6 +48,7 @@ export class OnecRuntimeConfigService {
       monitorIntervalMs: this.config.get('BACKEND_ONEC_MONITOR_INTERVAL_MS', { infer: true }),
       nightlyFullSyncHourUtc: nightlyHour(this.config.get('BACKEND_ONEC_NIGHTLY_FULL_SYNC_HOUR_UTC', { infer: true })),
       stockSnapshots: this.config.get('BACKEND_ONEC_STOCK_SNAPSHOTS', { infer: true }),
+      alertNotifications: this.config.get('BACKEND_ONEC_ALERT_NOTIFICATIONS', { infer: true }),
       etlWorkerOwner: this.config.get('BACKEND_ONEC_ETL_WORKER_OWNER', { infer: true }),
       etlSpoolDir: this.config.get('ONEC_ETL_SPOOL_DIR', { infer: true }),
       etlSpoolMinFreeBytes: this.config.get('ONEC_ETL_SPOOL_MIN_FREE_BYTES', { infer: true }),

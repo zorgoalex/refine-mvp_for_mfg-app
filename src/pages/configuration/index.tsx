@@ -56,6 +56,7 @@ import { Segmented } from '../../ui/Segmented';
 import { ExportTemplatesConfigTab } from './components/ExportTemplatesConfigTab';
 import { ProductionThresholdsConfigTab } from './components/ProductionThresholdsConfigTab';
 import { ProcurementSettingsTab } from './components/ProcurementSettingsTab';
+import { OnecAlertNotificationsConfig } from './components/OnecAlertNotificationsConfig';
 import { ClientScreenSettingsTab } from './components/ClientScreenSettingsTab';
 import {
   RolesPermissionsMatrixTab,
@@ -122,8 +123,10 @@ export const filterConfigurationTabItems = <T extends { key: string }>(
   messageProcessingVisible = false,
   dailyDigestVisible = false,
   procurementSettingsVisible = false,
+  onecAlertNotificationsVisible = false,
 ): T[] =>
   items.filter((item) => {
+    if (item.key === 'onec-alert-notifications') return onecAlertNotificationsVisible;
     if (item.key === 'message-processing') return messageProcessingVisible;
     if (item.key === 'daily-order-digest') return dailyDigestVisible;
     if (item.key === 'whatsapp-connection' || item.key === 'whatsapp-automation' || item.key === 'whatsapp-technical-logs') {
@@ -687,6 +690,9 @@ export const ConfigurationPage: React.FC = () => {
   const dailyDigestVisible = dailyDigestTabVisible(authSession.getUser()?.permissions);
   const procurementSettingsVisible =
     !featureFlags.useBackendPermissions || can('settings.manage') || can('procurement.view');
+  // Same gate as the «Интеграция 1С» screen: the backend checks onec.view (implied by onec.manage/onec.commands.send).
+  const onecAlertNotificationsVisible =
+    featureFlags.useBackendOnec && (can('onec.view') || can('onec.manage') || can('onec.commands.send'));
 
   const allTabItems = [
     ...(can('message_signals.manage_config') ? [{ key: 'message-processing', label: 'Обработка сообщений', children: <MessageProcessingConfig /> }] : []),
@@ -791,6 +797,16 @@ export const ConfigurationPage: React.FC = () => {
         </span>
       ),
       children: <NotificationRulesConfig />,
+    },
+    {
+      key: 'onec-alert-notifications',
+      label: (
+        <span>
+          <BellOutlined />
+          Оповещения 1С
+        </span>
+      ),
+      children: <OnecAlertNotificationsConfig />,
     },
     {
       key: 'org-structure',
@@ -917,6 +933,7 @@ export const ConfigurationPage: React.FC = () => {
     can('message_signals.manage_config'),
     dailyDigestVisible,
     procurementSettingsVisible,
+    onecAlertNotificationsVisible,
   );
 
   const availableTabKeys = tabItems.map((item) => item.key);
