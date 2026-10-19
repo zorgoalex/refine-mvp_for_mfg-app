@@ -465,7 +465,7 @@ export const BazisPage: React.FC = () => {
                   className="wb-bz-list__search"
                   allowClear
                   prefix={<SearchOutlined />}
-                  placeholder="Название, заказ, ERP-проект или конструктор"
+                  placeholder="Проект, заказ или конструктор"
                   aria-label="Поиск по Базис-проектам"
                   value={listQuery}
                   onChange={(event) => {

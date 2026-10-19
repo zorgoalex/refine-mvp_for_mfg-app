@@ -154,6 +154,16 @@
   color: var(--evo-text-secondary);
 }
 
+/* подпись колонки действий — только для экранного чтеца */
+:root[data-ui-variant="workbench"] .wb-bz-list .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 /* ревизии внутри раскрытой строки — на приглушённом фоне */
 :root[data-ui-variant="workbench"] .wb-bz-list .ant-table-expanded-row > td {
   background: var(--evo-surface-muted);
