@@ -2712,6 +2712,15 @@ probe_file() {
       "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_notifications_balloon_mode' AND conrelid = 'public.notifications'::regclass AND convalidated AND pg_get_constraintdef(oid) LIKE '%mandatory%');" \
       "$(q_col notification_channel_deliveries required_permission)" \
       "$(q_col notification_channel_deliveries expires_at)" ;;
+    # 264: delivery of 1C alerts — policies by alert group, dispatches, their members and recipients, dispatcher state.
+    264_onec_alert_notifications*) probe_all \
+      "$(q_tbl onec_alert_notification_policies)" \
+      "SELECT (SELECT count(*) FROM onec_alert_notification_policies) >= 8;" \
+      "SELECT EXISTS (SELECT 1 FROM onec_alert_notification_state WHERE id);" \
+      "$(q_tbl onec_alert_dispatches)" \
+      "$(q_idx uq_onec_alert_dispatch_members_stage)" \
+      "$(q_idx uq_onec_alert_recipients_user)" \
+      "$(q_con_on onec_alert_dispatch_recipients chk_onec_alert_recipients_address)" ;;
     # 253: quick add of references from the order form behind its own permission (access groups 0Б).
     253_references_quick_create_permission*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM permissions_catalog WHERE permission_name = 'references.quick_create' AND is_active);" \

@@ -68,6 +68,10 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
     'whatsapp.view',
     'whatsapp.manage',
     'message_signals.manage_config',
+    // «Оповещения 1С» (plan 2026-10-19 §3): the tab is gated on the 1C integration permissions.
+    'onec.view',
+    'onec.manage',
+    'onec.commands.send',
   ],
   audit: ['audit.view'],
   onec: ['onec.view', 'onec.manage', 'onec.commands.send'],

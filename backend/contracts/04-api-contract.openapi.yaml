@@ -17303,6 +17303,103 @@ paths:
         '401': {description: Authentication required}
         '403': {description: Permission denied}
         '503': {description: 1C integration is disabled}
+  /api/v1/onec/alert-notification-policies:
+    get:
+      tags:
+        - 1C integration
+      operationId: getOnecAlertNotificationPolicies
+      summary: "Delivery of 1C alerts: policies by alert group, current recipients, dispatcher state"
+      description: >-
+        Eight alert groups with their policy (importance, recipients, external channels, delay, repeat, quiet hours,
+        version), the users who would receive a stage now with the fallback level (1 — configured, 2 — onec.manage,
+        3 — superadmins; all need the literal onec.view), configured users filtered out, the flag
+        BACKEND_ONEC_ALERT_NOTIFICATIONS, the dispatcher state (active, enabledAt, lastTickAt) and recipient options.
+        The bell and the mandatory balloon are always on (mandatoryChannels).
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      responses:
+        '200': {description: "{flagEnabled, monitorOwner, active, enabledAt, lastTickAt, lastTickError, mandatoryChannels, externalChannelsAvailable, groups[], recipientOptions{roles, users}}"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+  /api/v1/onec/alert-notification-policies/{group}:
+    patch:
+      tags:
+        - 1C integration
+      operationId: updateOnecAlertNotificationPolicy
+      summary: "Change the delivery policy of a 1C alert group (If-Match: policy version)"
+      description: >-
+        Replaces the editable fields of the policy; audited as onec.alert_notification_policy.updated. The bell and the
+        mandatory balloon cannot be switched off (inApp/balloon/channels in the body → 422
+        ONEC_ALERT_MANDATORY_CHANNELS); an external channel that is not available yet → 422
+        ONEC_ALERT_CHANNEL_UNAVAILABLE.
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: group, in: path, required: true, schema: {type: string, enum: [agent_offline, agent_state, sync, commands, config_source, certificate, stock_snapshots, other]}}
+        - {name: If-Match, in: header, required: true, schema: {type: string}, description: Current policy version}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [importance, recipientRoleCodes, recipientUserIds, externalChannels, delayMinutes, repeatMinutes, notifyResolved, quietHours, criticalIgnoresQuietHours]
+              properties:
+                importance: {type: string, enum: [auto, critical, important, info]}
+                recipientRoleCodes: {type: array, maxItems: 50, items: {type: string}}
+                recipientUserIds: {type: array, maxItems: 200, items: {type: integer, minimum: 1}}
+                externalChannels: {type: array, maxItems: 2, items: {type: string, enum: [telegram, whatsapp]}}
+                delayMinutes: {type: integer, minimum: 0, maximum: 120}
+                repeatMinutes: {type: integer, minimum: 30, maximum: 1440, nullable: true}
+                notifyResolved: {type: boolean}
+                quietHours: {type: string, nullable: true, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]-([01][0-9]|2[0-3]):[0-5][0-9]$"}
+                criticalIgnoresQuietHours: {type: boolean}
+      responses:
+        '200': {description: "{policy}"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {description: Unknown group}
+        '409': {description: "Version conflict (ONEC_ALERT_POLICY_VERSION_CONFLICT, details.current)"}
+        '422': {description: Validation failed, mandatory channels, unavailable channel or unknown recipient}
+        '428': {description: If-Match required}
+  /api/v1/onec/alert-notification-policies/{group}/test:
+    post:
+      tags:
+        - 1C integration
+      operationId: testOnecAlertNotification
+      summary: "Send a test 1C alert notification of a group to the caller"
+      description: >-
+        One bell row with the mandatory balloon to the caller; audited as onec.alert_notification.test_sent. At most
+        one per minute per caller and group. visibleInBell=false when the caller lacks the literal onec.view.
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: group, in: path, required: true, schema: {type: string, enum: [agent_offline, agent_state, sync, commands, config_source, certificate, stock_snapshots, other]}}
+      responses:
+        '200': {description: "{notificationId, channels, visibleInBell}"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {description: Unknown group}
+        '429': {description: "Repeated within a minute (ONEC_ALERT_TEST_RATE_LIMITED)"}
+  /api/v1/onec/alert-notifications/recent:
+    get:
+      tags:
+        - 1C integration
+      operationId: listRecentOnecAlertNotifications
+      summary: "Recent dispatches of 1C alert notifications with their recipients"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view
+      parameters:
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        '200': {description: "{data[]}: dispatchId, groupCode, groupLabel, stage, importance, sourceId, fallbackLevel, createdAt, members, kinds, kindLabels, recipients[{userId, username, shown, read}]"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
   /api/v1/onec/alerts/{alertId}/acknowledge:
     post:
       tags:
