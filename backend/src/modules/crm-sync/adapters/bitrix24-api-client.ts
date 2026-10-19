@@ -34,7 +34,20 @@ export interface Bitrix24ApiPort {
   /** Payment cards («Поступила оплата от клиента»): absent in dry-run and unconfigured clients. */
   listPaymentCards?(paymentId: string): Promise<Bitrix24PaymentCard[]>;
   completeActivity?(id: string): Promise<void>;
+  /** Payment notifications: absent in dry-run and unconfigured clients. Creates are never retried on a lost answer. */
+  addDealComment?(dealId: string, comment: string): Promise<string>;
+  listDealComments?(dealId: string, createdFrom: Date): Promise<Bitrix24CommentPage>;
+  notifyUser?(userId: string, message: string): Promise<void>;
 }
+
+/** Comments of a deal created since a moment; `complete` is false when not every page could be read. */
+export interface Bitrix24CommentPage {
+  comments: Array<{ id: string; comment: string }>;
+  complete: boolean;
+}
+
+/** Most comments a reconciliation reads (20 pages of 50). */
+export const DEAL_COMMENT_PAGE_LIMIT = 20;
 
 /**
  * The timeline card Bitrix24 creates when a payment is marked paid: activity of provider CRM_PAYMENT
@@ -123,6 +136,7 @@ const NETWORK_RETRY_SAFE_METHODS = new Set([
   'crm.activity.get',
   // Only ever sent with COMPLETED=Y: repeating it changes nothing.
   'crm.activity.update',
+  'crm.timeline.comment.list',
 ]);
 
 export class Bitrix24ApiError extends Error {
@@ -448,6 +462,49 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
     await this.call('crm.activity.update', { id: Number(id), fields: { COMPLETED: 'Y' } });
   }
 
+  async addDealComment(dealId: string, comment: string): Promise<string> {
+    // A lost answer may hide a created comment: never repeated here (networkRetry=false).
+    const id = await this.call<number | string>('crm.timeline.comment.add', {
+      fields: { ENTITY_ID: Number(dealId), ENTITY_TYPE: 'deal', COMMENT: comment },
+    }, false);
+    if ((typeof id !== 'number' && typeof id !== 'string') || !/^[1-9][0-9]*$/.test(String(id))) {
+      throw this.unexpected('crm.timeline.comment.add', id);
+    }
+    return String(id);
+  }
+
+  async listDealComments(dealId: string, createdFrom: Date): Promise<Bitrix24CommentPage> {
+    const comments: Array<{ id: string; comment: string }> = [];
+    const seen = new Set<string>();
+    let start = 0;
+    for (let page = 0; page < DEAL_COMMENT_PAGE_LIMIT; page += 1) {
+      const { result, next } = await this.callPage<Array<Record<string, unknown>>>('crm.timeline.comment.list', {
+        filter: { ENTITY_ID: Number(dealId), ENTITY_TYPE: 'deal', '>=CREATED': createdFrom.toISOString() },
+        select: ['ID', 'ENTITY_ID', 'ENTITY_TYPE', 'CREATED', 'COMMENT'],
+        order: { ID: 'ASC' },
+        start,
+      });
+      if (!Array.isArray(result)) return { comments, complete: false };
+      for (const row of result) {
+        const id = String(row?.ID ?? '');
+        if (!/^[1-9][0-9]*$/.test(id) || String(row.ENTITY_ID) !== String(Number(dealId))) continue;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        comments.push({ id, comment: typeof row.COMMENT === 'string' ? row.COMMENT : '' });
+      }
+      if (next === undefined || next === null) return { comments, complete: true };
+      if (typeof next !== 'number' || !Number.isSafeInteger(next) || next <= start) return { comments, complete: false };
+      start = next;
+    }
+    return { comments, complete: false };
+  }
+
+  async notifyUser(userId: string, message: string): Promise<void> {
+    // Not idempotent and no TAG: a lost answer is given up, never repeated (networkRetry=false).
+    const id = await this.call<unknown>('im.notify.system.add', { USER_ID: Number(userId), MESSAGE: message }, false);
+    if (id === false || id === null || id === undefined) throw this.unexpected('im.notify.system.add', id);
+  }
+
   async deletePayment(id: string): Promise<void> {
     try {
       await this.call('crm.item.payment.delete', { id: Number(id) });
@@ -458,6 +515,14 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
   }
 
   private async call<T = unknown>(method: string, params: Record<string, unknown>, networkRetry = true): Promise<T> {
+    return (await this.callPage<T>(method, params, networkRetry)).result;
+  }
+
+  private async callPage<T = unknown>(
+    method: string,
+    params: Record<string, unknown>,
+    networkRetry = true,
+  ): Promise<{ result: T; next: unknown; total: unknown }> {
     let authRefreshAttempted = false;
     let limitAttempt = 0;
     let networkAttempt = 0;
@@ -538,7 +603,7 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
   private async callOnce<T>(
     method: string,
     params: Record<string, unknown>,
-  ): Promise<T> {
+  ): Promise<{ result: T; next: unknown; total: unknown }> {
     await this.awaitAdmission(method);
     // Keep the ownership proof adjacent to every actual external REST attempt,
     // including attempts made after a limiter or retry wait.
@@ -590,6 +655,10 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
       );
     }
 
+    // `null`, a number or an array is not a Bitrix24 answer: a typed error, never a TypeError further down.
+    if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) {
+      throw this.unexpected(method, envelope);
+    }
     const operatingResetAt = finiteNumberOrNull(envelope.time?.operating_reset_at);
     if (operatingResetAt !== null) {
       this.admissionState.operatingResetAtByMethod.set(method, operatingResetAt);
@@ -607,7 +676,15 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
     if (!Object.prototype.hasOwnProperty.call(envelope, 'result')) {
       throw this.unexpected(method, envelope);
     }
-    return envelope.result as T;
+    // Keep raw pagination metadata: callers that paginate must validate a
+    // PRESENT value themselves; silently normalizing a malformed `next`/`total`
+    // to null would turn a broken page into an accepted truncated list.
+    const paged = envelope as BitrixEnvelope<T> & { next?: unknown; total?: unknown };
+    return {
+      result: envelope.result as T,
+      next: paged.next,
+      total: paged.total,
+    };
   }
 
   private async awaitAdmission(method: string): Promise<void> {

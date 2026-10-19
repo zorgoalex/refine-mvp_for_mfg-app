@@ -104,6 +104,9 @@ export const BUSINESS_HISTORY_BITRIX_PAYMENT_EVENTS = [
   'crm_sync.payment_paid_reset_stuck',
   'crm_sync.payment_card_closed',
   'crm_sync.payment_card_close_failed',
+  'crm_sync.payment_notification_sent',
+  'crm_sync.payment_notification_failed',
+  'crm_sync.payment_notification_skipped',
 ] as const;
 
 /** Payment facts for «История бизнеса»: every ERP payment change plus the Bitrix24 payment effects. */

@@ -317,6 +317,21 @@ function formatMoney(amount: number): string {
   return fraction === '00' ? `${sign}${grouped}` : `${sign}${grouped},${fraction}`;
 }
 
+const NOTIFICATION_COMMENT_TEXT: Record<string, string> = {
+  created: 'добавлен',
+  resolved: 'добавлен',
+  unknown: 'не удалось подтвердить',
+  failed: 'не добавлен',
+};
+
+const NOTIFICATION_NOTIFY_TEXT: Record<string, string> = {
+  sent: 'отправлено',
+  unknown: 'не удалось подтвердить',
+  no_scope: 'нет права «Чат и уведомления» у вебхука',
+  no_recipient: 'у сделки нет ответственного',
+  failed: 'не отправлено',
+};
+
 function addBitrixPaymentEffectSummary(
   record: AuditLogEventDto,
   before: JsonObject,
@@ -359,6 +374,22 @@ function addBitrixPaymentEffectSummary(
     case 'crm_sync.payment_card_close_requested':
       notes.push('Bitrix: запрошено закрытие карточки оплаты');
       return true;
+    case 'crm_sync.payment_notification_sent':
+    case 'crm_sync.payment_notification_failed':
+    case 'crm_sync.payment_notification_skipped': {
+      const comment = NOTIFICATION_COMMENT_TEXT[String(after.commentState ?? '')];
+      const notify = NOTIFICATION_NOTIFY_TEXT[String(metadata.notifyOutcome ?? after.notifyState ?? '')];
+      if (record.event === 'crm_sync.payment_notification_skipped') {
+        notes.push(metadata.skipReason === 'no_deal'
+          ? 'Bitrix: у заказа нет сделки — уведомление не отправлено'
+          : 'Bitrix: уведомление устарело и не отправлено');
+        return true;
+      }
+      if (comment) notes.push(`Комментарий в сделке: ${comment}`);
+      if (notify) notes.push(`Уведомление ответственному: ${notify}`);
+      if (metadata.syncIncomplete === true) notes.push('Оплата в Bitrix к этому моменту ещё не была обновлена');
+      return true;
+    }
     default:
       return false;
   }

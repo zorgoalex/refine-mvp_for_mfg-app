@@ -2676,6 +2676,16 @@ probe_file() {
     # 257: status automation action «clear production status of details» (action_type CHECK widened).
     257_status_automation_clear_details_action*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'status_automation_rules_action_type_check' AND conrelid = 'public.status_automation_rules'::regclass AND pg_get_constraintdef(oid) LIKE '%clear_details_production_status%');" ;;
+    # 260: notifications to the Bitrix24 deal owner about ERP payment changes (table, indexes, capture trigger).
+    260_crm_sync_payment_notifications*) probe_all \
+      "$(q_tbl crm_sync_payment_notification)" \
+      "$(q_idx idx_crm_sync_payment_notification_due)" \
+      "$(q_idx idx_crm_sync_payment_notification_order)" \
+      "$(q_con_on crm_sync_payment_notification chk_crm_sync_payment_notification_completed)" \
+      "$(q_con_on crm_sync_payment_notification chk_crm_sync_payment_notification_skip)" \
+      "$(q_con_on crm_sync_payment_notification chk_crm_sync_payment_notification_comment_id)" \
+      "SELECT to_regprocedure('public.payment_notification_capture_sync_event()') IS NOT NULL;" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_crm_sync_outbox_notification_capture' AND tgrelid = 'public.crm_sync_outbox'::regclass AND NOT tgisinternal);" ;;
     # 253: quick add of references from the order form behind its own permission (access groups 0Б).
     253_references_quick_create_permission*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM permissions_catalog WHERE permission_name = 'references.quick_create' AND is_active);" \
@@ -2872,7 +2882,7 @@ verify_applied_effect() {
     193_onec_agent_foundation*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|245_onec_operator_role*|247_onec_agent_expected_silence*|244_client_onec_permissions*|248_authorization_snapshot*|249_role_checks_to_permissions*|251_whatsapp_calendar_send_permission*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|255_crm_sync_paid_payment_operations*|253_references_quick_create_permission*|256_doweling_order_version_triggers*|257_status_automation_clear_details_action*|259_payment_audit_capture*)
+    231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|245_onec_operator_role*|247_onec_agent_expected_silence*|244_client_onec_permissions*|248_authorization_snapshot*|249_role_checks_to_permissions*|251_whatsapp_calendar_send_permission*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|255_crm_sync_paid_payment_operations*|253_references_quick_create_permission*|256_doweling_order_version_triggers*|257_status_automation_clear_details_action*|259_payment_audit_capture*|260_crm_sync_payment_notifications*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

@@ -143,6 +143,7 @@ function makeRelay(
     logger?: unknown;
     stageLane?: {runLocked(prove:()=>Promise<void>):Promise<void>};
     paidPaymentRecovery?: {recoverDue(guard:()=>Promise<void>):Promise<{completed:number;failed:number}>};
+    paymentNotifications?: {runDue(guard:()=>Promise<void>):Promise<{processed:number}>};
   } = {},
 ) {
   const config = opts.config ?? makeConfig();
@@ -157,6 +158,7 @@ function makeRelay(
     config: config as never,
     stageLane: opts.stageLane,
     paidPaymentRecovery: opts.paidPaymentRecovery,
+    paymentNotifications: opts.paymentNotifications,
     logger: (opts.logger as never) ?? { log: vi.fn(), error: vi.fn() },
   });
 }
@@ -186,6 +188,19 @@ describe('CrmSyncRelayService', () => {
     await makeRelay({outboxRepo,consumer,paidPaymentRecovery}).runTick();
     expect(order).toEqual(['recovery','event']);
     expect(outboxRepo.heartbeatWriterLock).toHaveBeenCalled();
+  });
+  it('delivers payment notifications under the writer after the batch, and survives their failure',async()=>{
+    const order:string[]=[];
+    const outboxRepo=makeOutboxRepo({claimBatch:vi.fn().mockResolvedValue([makeClaimedEvent()]),markProcessed:vi.fn().mockResolvedValue(1)});
+    const consumer=makeConsumer([clientIntent()]);
+    vi.mocked(consumer.sync).mockImplementation(async()=>{order.push('event');return [clientIntent()];});
+    const paymentNotifications={runDue:vi.fn(async(guard:()=>Promise<void>)=>{await guard();order.push('notifications');return {processed:1};})};
+    await makeRelay({outboxRepo,consumer,paymentNotifications}).runTick();
+    expect(order).toEqual(['event','notifications']);
+    const failing={runDue:vi.fn().mockRejectedValue(new Error('Bitrix down'))};
+    const outboxRepo2=makeOutboxRepo({claimBatch:vi.fn().mockResolvedValue([makeClaimedEvent()]),markProcessed:vi.fn().mockResolvedValue(1)});
+    const result=await makeRelay({outboxRepo:outboxRepo2,consumer:makeConsumer([clientIntent()]),paymentNotifications:failing}).runTick();
+    expect(result.processed).toBe(1);expect(outboxRepo2.releaseWriterLock).toHaveBeenCalledOnce();
   });
   it('a recovery failure does not block normal CRM delivery',async()=>{
     const outboxRepo=makeOutboxRepo({claimBatch:vi.fn().mockResolvedValue([makeClaimedEvent()]),markProcessed:vi.fn().mockResolvedValue(1)});
