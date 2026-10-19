@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Drawer, Empty, Input, List, Modal, Space, Tag, Typography } from 'antd';
-import { PictureOutlined, SettingOutlined } from '@ant-design/icons';
+import { EditOutlined, PictureOutlined, SettingOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { decodeQrFromFile, startQrScanner } from './qrScanner';
 import { getScanAction, setScanAction } from './scanPrefs';
@@ -9,6 +9,8 @@ import { labelsApi } from '../../api/labelsApi';
 import { ApiError } from '../../api/httpClient';
 import type { ScanCandidate, ScanResolveResult } from '../../api/types/labelsApi.types';
 import { authSession } from '../../api/authSession';
+import { useOptionalUiVariant } from '../../ui-variant/UiVariantProvider';
+import { loadScanRecent, rememberScan } from './scanRecent';
 
 const { Text, Title } = Typography;
 
@@ -73,6 +75,10 @@ export const ScanPage: React.FC = () => {
   const stopScannerRef = useRef<(() => void) | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const userId = authSession.getUser()?.id ?? 'anon';
+  const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
+  const manualInputRef = useRef<HTMLDivElement | null>(null);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [recent, setRecent] = useState<ScanCandidate[]>(() => loadScanRecent(userId));
 
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [manualValue, setManualValue] = useState('');
@@ -92,13 +98,14 @@ export const ScanPage: React.FC = () => {
 
   const applyAction = useCallback(
     (candidate: ScanCandidate, action: ScanAction) => {
+      setRecent(rememberScan(userId, candidate));
       if (action === 'open-order') {
         navigate(`/orders/show/${candidate.orderId}?highlightDetail=${candidate.detailId}`);
       } else {
         setInfoCandidate(candidate);
       }
     },
-    [navigate],
+    [navigate, userId],
   );
 
   // Shared candidate-selection path for BOTH the single-candidate auto-flow
@@ -191,6 +198,7 @@ export const ScanPage: React.FC = () => {
           return;
         }
         stopScannerRef.current = stop;
+        setCameraActive(true);
       } catch (err) {
         const name = (err as { name?: string } | null)?.name;
         if (name === 'NotAllowedError') {
@@ -204,6 +212,7 @@ export const ScanPage: React.FC = () => {
     })();
     return () => {
       cancelled = true;
+      setCameraActive(false);
       stopScannerRef.current?.();
       stopScannerRef.current = null;
     };
@@ -288,19 +297,49 @@ export const ScanPage: React.FC = () => {
 
   const actionModalOpen = !!actionCandidate || settingsOpen;
 
-  return (
-    <div style={{ padding: 16, maxWidth: 480, margin: '0 auto' }}>
-      <Space align="center" style={{ width: '100%', justifyContent: 'space-between', marginBottom: 12 }}>
-        <Title level={4} style={{ margin: 0 }}>Сканер бирок</Title>
-        <Button
-          icon={<SettingOutlined />}
-          aria-label="Настройки сканера"
-          onClick={() => setSettingsOpen(true)}
-        />
-      </Space>
+  const cameraPill = cameraError
+    ? <span className="wb-pill" data-tone="warning">Камера недоступна</span>
+    : cameraActive
+      ? <span className="wb-pill" data-tone="ready">Камера активна</span>
+      : <span className="wb-pill">Камера запускается</span>;
 
+  return (
+    <div className={isWorkbench ? 'wb-scan' : undefined} style={isWorkbench ? undefined : { padding: 16, maxWidth: 480, margin: '0 auto' }}>
+      {isWorkbench ? (
+        <header className="wb-scan__head">
+          <div className="wb-scan__titles">
+            <h1>Сканер бирок</h1>
+            <p>Наведите камеру на QR-код бирки детали — откроется заказ или карточка детали.</p>
+          </div>
+          <Button
+            icon={<SettingOutlined />}
+            aria-label="Настройки сканера"
+            onClick={() => setSettingsOpen(true)}
+          >
+            Что делать при находке
+          </Button>
+        </header>
+      ) : (
+        <Space align="center" style={{ width: '100%', justifyContent: 'space-between', marginBottom: 12 }}>
+          <Title level={4} style={{ margin: 0 }}>Сканер бирок</Title>
+          <Button
+            icon={<SettingOutlined />}
+            aria-label="Настройки сканера"
+            onClick={() => setSettingsOpen(true)}
+          />
+        </Space>
+      )}
+
+      <div className={isWorkbench ? 'wb-scan__column' : undefined}>
+      {isWorkbench ? (
+        <div className="wb-scan__status">
+          <span className="wb-scan__status-title">Сканирование</span>
+          {cameraPill}
+        </div>
+      ) : null}
       <div
-        style={{
+        className={isWorkbench ? 'wb-scan__viewfinder' : undefined}
+        style={isWorkbench ? undefined : {
           position: 'relative',
           width: '100%',
           // −15% по высоте против квадрата: результат/текст под сканером
@@ -313,9 +352,13 @@ export const ScanPage: React.FC = () => {
         }}
       >
         <video ref={videoRef} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        {isWorkbench ? (
+          <div className="wb-scan__aim" aria-hidden="true"><i /><i /><i /><i /></div>
+        ) : null}
         {!cameraError && (
           <div
-            style={{
+            className={isWorkbench ? 'wb-scan__caption' : undefined}
+            style={isWorkbench ? undefined : {
               position: 'absolute',
               bottom: 8,
               left: 0,
@@ -326,9 +369,12 @@ export const ScanPage: React.FC = () => {
               pointerEvents: 'none',
             }}
           >
-            Наведите на QR бирки
+            {isWorkbench ? 'Наведите на QR-код бирки' : 'Наведите на QR бирки'}
           </div>
         )}
+        {isWorkbench && cameraError ? (
+          <div className="wb-scan__caption">Камера не запущена — введите номер или выберите фото бирки</div>
+        ) : null}
       </div>
 
       {cameraError && <Alert type="warning" showIcon message={cameraError} style={{ marginBottom: 16 }} />}
@@ -367,7 +413,11 @@ export const ScanPage: React.FC = () => {
         />
       )}
 
+      <div ref={manualInputRef} className={isWorkbench ? 'wb-scan__manual' : undefined}>
+      {isWorkbench ? <label className="wb-scan__label" htmlFor="wb-scan-manual">Номер заказа, детали или строка QR</label> : null}
       <Input.Search
+        id={isWorkbench ? 'wb-scan-manual' : undefined}
+        size={isWorkbench ? 'large' : undefined}
         placeholder="Строка QR / № или имя заказа"
         enterButton="Найти"
         value={manualValue}
@@ -376,6 +426,7 @@ export const ScanPage: React.FC = () => {
         loading={resolving}
         style={{ marginBottom: 8 }}
       />
+      </div>
 
       <input
         ref={fileInputRef}
@@ -387,6 +438,7 @@ export const ScanPage: React.FC = () => {
       />
       <Button
         block
+        size={isWorkbench ? 'large' : undefined}
         icon={<PictureOutlined />}
         loading={resolving}
         onClick={() => fileInputRef.current?.click()}
@@ -394,9 +446,22 @@ export const ScanPage: React.FC = () => {
       >
         Скан из фото
       </Button>
+      {isWorkbench && cameraError ? (
+        <Button
+          block
+          size="large"
+          icon={<EditOutlined />}
+          className="wb-scan__focus-manual"
+          onClick={() => manualInputRef.current?.querySelector('input')?.focus()}
+        >
+          Ввести номер вручную
+        </Button>
+      ) : null}
 
       {result && result.candidates.length > 1 && (
         <List
+          className={isWorkbench ? 'wb-scan__candidates' : undefined}
+          header={isWorkbench ? `Найдено деталей: ${result.candidates.length} — выберите нужную` : undefined}
           dataSource={result.candidates}
           renderItem={(candidate) => (
             <List.Item
@@ -430,6 +495,24 @@ export const ScanPage: React.FC = () => {
         </Empty>
       )}
 
+      {isWorkbench && recent.length > 0 ? (
+        <section className="wb-scan__recent" aria-label="Последние сканы">
+          <h2>Последние сканы</h2>
+          {recent.map((candidate) => (
+            <button
+              key={candidate.detailId}
+              type="button"
+              className="wb-scan__recent-item"
+              onClick={() => handleCandidateSelect(candidate)}
+            >
+              <span className="wb-scan__recent-name">{candidateTitle(candidate)}</span>
+              <span className="wb-scan__recent-size">{candidateSize(candidate)}</span>
+            </button>
+          ))}
+        </section>
+      ) : null}
+      </div>
+
       <Modal
         title="Что делать при находке?"
         open={actionModalOpen}
@@ -453,13 +536,29 @@ export const ScanPage: React.FC = () => {
         title={infoCandidate ? candidateTitle(infoCandidate) : ''}
       >
         {infoCandidate && (
-          <Space direction="vertical" style={{ width: '100%' }}>
-            <div>Размер: {candidateSize(infoCandidate)}</div>
-            <div>Материал: {infoCandidate.materialName ?? '—'}</div>
-            <div>Статус: {infoCandidate.productionStatusName ?? '—'}</div>
+          <Space direction="vertical" style={{ width: '100%' }} className={isWorkbench ? 'wb-scan__info' : undefined}>
+            {isWorkbench ? (
+              <>
+                <div className="wb-scan__info-size">
+                  {infoCandidate.width && infoCandidate.height ? <>{`${infoCandidate.width} × ${infoCandidate.height}`}<small>мм</small></> : '—'}
+                </div>
+                <dl className="wb-scan__info-list">
+                  <dt>Количество</dt><dd>{infoCandidate.quantity ? `${infoCandidate.quantity} шт` : '—'}</dd>
+                  <dt>Материал</dt><dd>{infoCandidate.materialName ?? '—'}</dd>
+                  <dt>Этап сейчас</dt><dd>{infoCandidate.productionStatusName ? <span className="wb-pill" data-tone="active">{infoCandidate.productionStatusName}</span> : '—'}</dd>
+                </dl>
+              </>
+            ) : (
+              <>
+                <div>Размер: {candidateSize(infoCandidate)}</div>
+                <div>Материал: {infoCandidate.materialName ?? '—'}</div>
+                <div>Статус: {infoCandidate.productionStatusName ?? '—'}</div>
+              </>
+            )}
             <Button
               type="primary"
               block
+              size={isWorkbench ? 'large' : undefined}
               onClick={() =>
                 navigate(`/orders/show/${infoCandidate.orderId}?highlightDetail=${infoCandidate.detailId}`)
               }
