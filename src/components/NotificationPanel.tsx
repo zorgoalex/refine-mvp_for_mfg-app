@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, List, Checkbox, Button, Empty, Space, Typography, Divider } from 'antd';
+import { Alert, List, Checkbox, Button, Empty, Space, Typography, Divider, message } from 'antd';
 import {
   InfoCircleOutlined,
   WarningOutlined,
@@ -70,7 +70,13 @@ export const NotificationPanel: React.FC<{
 
   const handleDelete = async () => {
     if (selectedIds.length > 0) {
-      await deleteNotification(selectedIds);
+      // Обязательные оповещения (1С) удаляются только после показа их всплывающего окна (план 2026-10-19 §2.7).
+      const pending = new Set(notifications.filter((n) => n.deletable === false).map((n) => n.id));
+      const removable = selectedIds.filter((id) => !pending.has(id));
+      if (removable.length > 0) await deleteNotification(removable);
+      if (removable.length < selectedIds.length) {
+        void message.info('Обязательное оповещение можно удалить после того, как будет показано его всплывающее окно');
+      }
       setSelectedIds([]);
     }
   };

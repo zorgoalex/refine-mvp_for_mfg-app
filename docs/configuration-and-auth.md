@@ -412,6 +412,18 @@ Backend: `BACKEND_ENABLE_ONEC_AGENT` (по умолчанию `false`), `ONEC_AG
 `none` | `in_process`) хранит принятые пакеты выгрузки до разбора; `ONEC_ETL_SPOOL_MIN_FREE_BYTES` — порог свободного
 места, ниже которого приём пакета отклоняется с повторяемой ошибкой.
 
+Обязательный балун `mandatory` (миграция `263_mandatory_balloons_delivery_checks.sql`) — у оповещений интеграции 1С
+(`source_type = 'onec_alert'`); правила его не выбирают. Не исчезает; клик по телу открывает экран «Интеграция 1С», но
+балун не закрывает — только крестик; критичный — с красной полосой. Выдаётся без ограничения возраста и независимо от
+прочтения строки, пока не показан, и только вкладке, заявившей поддержку заголовком
+`X-Balloon-Capabilities: mandatory` (тело claim прежнее; старая вкладка таких балунов не получает, старый backend
+заголовок игнорирует). До показа строку нельзя удалить: `DELETE /api/v1/notifications/:id` → `409
+NOTIFICATION_BALLOON_PENDING`, в колокольчике такие строки при удалении пропускаются (`balloonPending` в ответе).
+Оповещения 1С видны в колокольчике только с буквальным правом `onec.view` на момент чтения. Строки внешней доставки
+(`notification_channel_deliveries`) могут нести `required_permission` и `expires_at`: воркер Telegram перед
+отправкой, в одной транзакции (`permissions_state` → `users` → строка), пропускает просроченные (`EXPIRED`) и строки
+получателя, который отключён (`USER_INACTIVE`) или лишился права (`PERMISSION_MISSING`), не вызывая Telegram.
+
 ## JSON snapshot заказов
 
 Snapshot export/import работает через NestJS, когда

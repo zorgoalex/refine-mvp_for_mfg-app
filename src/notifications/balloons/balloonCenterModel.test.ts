@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  BalloonSlots, LOCAL_LEASE_MS, MAX_QUEUE_ITEMS, confirmShown, durationFor, enqueue, leaseForDisplay, pendingCount, tabToken, withBalloonLock,
+  BalloonSlots, LOCAL_LEASE_MS, MAX_QUEUE_ITEMS, closesOnBodyClick, confirmShown, durationFor, enqueue, leaseForDisplay, pendingCount, tabToken, withBalloonLock,
   type LocalBalloon, type LockManagerLike, type StorageLike,
 } from './balloonCenterModel';
 
@@ -48,6 +48,11 @@ describe('balloon slots (R1-1, R3-2)', () => {
   it('durations: auto 15 s, persistent 0 (only the cross)', () => {
     expect(durationFor('auto')).toBe(15);
     expect(durationFor('persistent')).toBe(0);
+    // Обязательный (оповещения 1С): без таймера, клик по телу не закрывает — только крестик.
+    expect(durationFor('mandatory')).toBe(0);
+    expect(closesOnBodyClick('mandatory')).toBe(false);
+    expect(closesOnBodyClick('persistent')).toBe(true);
+    expect(closesOnBodyClick('auto')).toBe(true);
   });
 });
 

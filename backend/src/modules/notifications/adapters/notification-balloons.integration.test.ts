@@ -32,11 +32,14 @@ describe.skipIf(!url)('Notification balloons (plan 2026-10-03) — real PostgreS
   let viewer: CurrentUser;
   const write = new PgNotificationWriteAdapter();
 
-  const insert = async (mode: 'auto' | 'persistent' | null, extra: { ageHours?: number; read?: boolean } = {}) => {
+  const insert = async (
+    mode: 'auto' | 'persistent' | 'mandatory' | null,
+    extra: { ageHours?: number; read?: boolean; level?: 'info' | 'warning' | 'error'; sourceType?: string } = {},
+  ) => {
     const key = `${tag}:${randomUUID()}`;
     const { notificationId } = await write.insertIfAbsent(conn, {
-      userId, level: 'info', title: tag, message: 'тест', entityType: null, entityId: null,
-      sourceType: 'e2e', sourceId: null, idempotencyKey: key, balloonMode: mode,
+      userId, level: extra.level ?? 'info', title: tag, message: 'тест', entityType: null, entityId: null,
+      sourceType: extra.sourceType ?? 'e2e', sourceId: null, idempotencyKey: key, balloonMode: mode,
     });
     if (extra.ageHours) await conn.query(`UPDATE notifications SET created_at = now() - make_interval(hours => $2) WHERE notification_id = $1`, [notificationId, extra.ageHours]);
     if (extra.read) await conn.query('UPDATE notifications SET is_read = true, read_at = now() WHERE notification_id = $1', [notificationId]);
@@ -75,7 +78,7 @@ describe.skipIf(!url)('Notification balloons (plan 2026-10-03) — real PostgreS
     await insert('auto', { ageHours: 25 });
     await insert('auto', { read: true });
     const token = randomUUID();
-    const items = await repoOn(conn).claimBalloonsForUser({ viewer, token, limit: 5 });
+    const items = await repoOn(conn).claimBalloonsForUser({ viewer, token, limit: 5, mandatory: false });
     expect(items.map((item) => item.notificationId)).toEqual([fresh]);
     expect(items[0].balloonMode).toBe('persistent');
   });
@@ -86,21 +89,21 @@ describe.skipIf(!url)('Notification balloons (plan 2026-10-03) — real PostgreS
     const b = await insert('auto');
     const tabA = randomUUID();
     const tabB = randomUUID();
-    const first = await repoOn(conn).claimBalloonsForUser({ viewer, token: tabA, limit: 1 });
+    const first = await repoOn(conn).claimBalloonsForUser({ viewer, token: tabA, limit: 1, mandatory: false });
     expect(first.map((i) => i.notificationId)).toEqual([a]);
     // Ответ потерян: та же вкладка повторяет — сначала своя аренда.
-    const retry = await repoOn(conn).claimBalloonsForUser({ viewer, token: tabA, limit: 1 });
+    const retry = await repoOn(conn).claimBalloonsForUser({ viewer, token: tabA, limit: 1, mandatory: false });
     expect(retry.map((i) => i.notificationId)).toEqual([a]);
     // Другая вкладка аренду A не получает, получает B.
-    const otherTab = await repoOn(other).claimBalloonsForUser({ viewer, token: tabB, limit: 5 });
+    const otherTab = await repoOn(other).claimBalloonsForUser({ viewer, token: tabB, limit: 5, mandatory: false });
     expect(otherTab.map((i) => i.notificationId)).toEqual([b]);
     // Чужой ack — no-op; свой — фиксирует показ.
     expect(await repoOn(conn).ackBalloonsForUser({ viewer, token: tabB, notificationIds: [a] })).toBe(0);
     expect(await repoOn(conn).ackBalloonsForUser({ viewer, token: tabA, notificationIds: [a] })).toBe(1);
-    expect(await repoOn(conn).claimBalloonsForUser({ viewer, token: tabA, limit: 5 })).toEqual([]);
+    expect(await repoOn(conn).claimBalloonsForUser({ viewer, token: tabA, limit: 5, mandatory: false })).toEqual([]);
     // Аренда B истекла (не подтверждена) — другая вкладка получает её снова (повтор допустим, потеря — нет).
     await conn.query(`UPDATE notifications SET balloon_leased_at = now() - interval '3 minutes' WHERE notification_id = $1`, [b]);
-    expect((await repoOn(conn).claimBalloonsForUser({ viewer, token: tabA, limit: 5 })).map((i) => i.notificationId)).toEqual([b]);
+    expect((await repoOn(conn).claimBalloonsForUser({ viewer, token: tabA, limit: 5, mandatory: false })).map((i) => i.notificationId)).toEqual([b]);
   });
 
   it('two tabs claiming at once never get the same row (SKIP LOCKED); more than 5 come in portions', async () => {
@@ -108,8 +111,8 @@ describe.skipIf(!url)('Notification balloons (plan 2026-10-03) — real PostgreS
     const ids: string[] = [];
     for (let i = 0; i < 7; i += 1) ids.push(await insert('auto'));
     const [x, y] = await Promise.all([
-      repoOn(conn).claimBalloonsForUser({ viewer, token: randomUUID(), limit: 5 }),
-      repoOn(other).claimBalloonsForUser({ viewer, token: randomUUID(), limit: 5 }),
+      repoOn(conn).claimBalloonsForUser({ viewer, token: randomUUID(), limit: 5, mandatory: false }),
+      repoOn(other).claimBalloonsForUser({ viewer, token: randomUUID(), limit: 5, mandatory: false }),
     ]);
     const all = [...x, ...y].map((i) => i.notificationId);
     expect(new Set(all).size).toBe(all.length);
@@ -125,10 +128,10 @@ describe.skipIf(!url)('Notification balloons (plan 2026-10-03) — real PostgreS
       userId, level: 'info', title: tag, message: 'поздний', entityType: null, entityId: null,
       sourceType: 'e2e', sourceId: null, idempotencyKey: `${tag}:late:${randomUUID()}`, balloonMode: 'auto',
     })).notificationId;
-    expect(await repoOn(conn).claimBalloonsForUser({ viewer, token, limit: 5 })).toEqual([]);
+    expect(await repoOn(conn).claimBalloonsForUser({ viewer, token, limit: 5, mandatory: false })).toEqual([]);
     await other.query("SELECT pg_sleep(0.2)");
     await other.query('COMMIT');
-    expect((await repoOn(conn).claimBalloonsForUser({ viewer, token, limit: 5 })).map((i) => i.notificationId)).toEqual([late]);
+    expect((await repoOn(conn).claimBalloonsForUser({ viewer, token, limit: 5, mandatory: false })).map((i) => i.notificationId)).toEqual([late]);
   });
 
   it('procurement writer reads the balloon from the rule row under FOR SHARE: a PATCH removing balloon before the write wins', async () => {
@@ -206,7 +209,7 @@ describe.skipIf(!url)('Notification balloons (plan 2026-10-03) — real PostgreS
       // Балун не уходит во внешнюю доставку.
       expect(Number((await conn.query('SELECT count(*) AS c FROM notification_channel_deliveries WHERE user_id = $1', [adminId])).rows[0].c)).toBe(0);
       // Вкладка пользователя получает его балуном «не исчезает».
-      const claimed = await repoOn(conn).claimBalloonsForUser({ viewer: admin, token: randomUUID(), limit: 5 });
+      const claimed = await repoOn(conn).claimBalloonsForUser({ viewer: admin, token: randomUUID(), limit: 5, mandatory: false });
       expect(claimed.map((item) => ({ id: item.notificationId, mode: item.balloonMode, entity: `${item.entityType}:${item.entityId}` })))
         .toEqual([{ id: String(rows[0].notification_id), mode: 'persistent', entity: `order:${orderId}` }]);
     } finally {
@@ -214,5 +217,52 @@ describe.skipIf(!url)('Notification balloons (plan 2026-10-03) — real PostgreS
       await conn.query('DELETE FROM outbox_events WHERE idempotency_key = $1', [key]);
       await conn.query('DELETE FROM notification_rules WHERE rule_code = $1', [ruleCode]);
     }
+  });
+  // -------------------------------------------------- mandatory balloons of 1C alerts (plan 2026-10-19 §2.7–2.8)
+
+  it('mandatory: only for a client that declared it, with no age or read limit; ordered first', async () => {
+    await conn.query('DELETE FROM notifications WHERE user_id = $1', [userId]);
+    const plain = await insert('persistent', { level: 'error' });
+    const oldRead = await insert('mandatory', { ageHours: 24 * 31, read: true, level: 'warning' });
+    const critical = await insert('mandatory', { level: 'error' });
+    const legacy = await repoOn(conn).claimBalloonsForUser({ viewer, token: randomUUID(), limit: 5, mandatory: false });
+    expect(legacy.map((item) => item.notificationId)).toEqual([plain]);
+    await conn.query('UPDATE notifications SET balloon_lease_token = NULL, balloon_leased_at = NULL WHERE user_id = $1', [userId]);
+    const items = await repoOn(conn).claimBalloonsForUser({ viewer, token: randomUUID(), limit: 5, mandatory: true });
+    expect(items.map((item) => item.notificationId)).toEqual([critical, oldRead, plain]);
+    expect(items[0]).toMatchObject({ balloonMode: 'mandatory', balloonPending: true });
+  });
+
+  it('mandatory: «read all» does not cancel the balloon; delete is refused until it is shown', async () => {
+    await conn.query('DELETE FROM notifications WHERE user_id = $1', [userId]);
+    const id = await insert('mandatory');
+    await repoOn(conn).markAllReadForUser(viewer);
+    expect(await repoOn(conn).deleteForUser({ notificationId: id, viewer })).toBe('balloon_pending');
+    const token = randomUUID();
+    const claimed = await repoOn(conn).claimBalloonsForUser({ viewer, token, limit: 5, mandatory: true });
+    expect(claimed.map((item) => item.notificationId)).toEqual([id]);
+    await repoOn(conn).ackBalloonsForUser({ viewer, token, notificationIds: [id] });
+    expect(await repoOn(conn).deleteForUser({ notificationId: id, viewer })).toBe('deleted');
+    expect(await repoOn(conn).deleteForUser({ notificationId: id, viewer })).toBe('not_found');
+  });
+
+  it('rows without a balloon or with a shown/ordinary balloon are deleted as before', async () => {
+    await conn.query('DELETE FROM notifications WHERE user_id = $1', [userId]);
+    for (const mode of [null, 'auto', 'persistent'] as const) {
+      const id = await insert(mode);
+      expect(await repoOn(conn).deleteForUser({ notificationId: id, viewer })).toBe('deleted');
+    }
+  });
+
+  it('1C alert rows are visible (list, claim, read, delete) only with literal onec.view at read time', async () => {
+    await conn.query('DELETE FROM notifications WHERE user_id = $1', [userId]);
+    const id = await insert('mandatory', { sourceType: 'onec_alert' });
+    const withView: CurrentUser = { ...viewer, permissions: ['onec.view'] };
+    expect((await repoOn(conn).listForUser({ viewer, unreadOnly: false, page: 1, pageSize: 50 })).total).toBe(0);
+    expect(await repoOn(conn).claimBalloonsForUser({ viewer, token: randomUUID(), limit: 5, mandatory: true })).toEqual([]);
+    expect(await repoOn(conn).markReadForUser({ notificationId: id, viewer })).toBeNull();
+    expect(await repoOn(conn).deleteForUser({ notificationId: id, viewer })).toBe('not_found');
+    expect((await repoOn(conn).listForUser({ viewer: withView, unreadOnly: false, page: 1, pageSize: 50 })).total).toBe(1);
+    expect((await repoOn(conn).claimBalloonsForUser({ viewer: withView, token: randomUUID(), limit: 5, mandatory: true })).map((i) => i.notificationId)).toEqual([id]);
   });
 });

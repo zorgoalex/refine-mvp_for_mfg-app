@@ -164,7 +164,10 @@ describe('useBackendNotifications helpers', () => {
       title: 'Deadline warning',
       sourceType: 'deadline',
       sourceId: '22222222-2222-4222-8222-222222222222',
+      deletable: true,
     });
+    // Обязательный балун ещё не показан — строку нельзя удалить (план 2026-10-19 §2.7).
+    expect(toPanelNotification({ ...createBackendNotification(), balloonMode: 'mandatory', balloonPending: true }).deletable).toBe(false);
   });
 
   it('replaces a notification after mark-read mutation', () => {

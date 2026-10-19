@@ -2,6 +2,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import {
   authRequired,
   invalidNotificationId,
+  notificationBalloonPending,
   notificationNotFound,
 } from '../errors/notification.errors';
 import type {
@@ -12,6 +13,11 @@ import type {
 
 /** Мест на экране балунов вкладки (план 2026-10-03 §2.2): за один claim — не больше. */
 export const MAX_BALLOONS_PER_CLAIM = 5;
+/**
+ * Возможность клиента показывать обязательные балуны (план 2026-10-19 §2.7): заявляется заголовком
+ * `X-Balloon-Capabilities`, а не телом claim — старый backend со строгой схемой тела заголовок просто игнорирует.
+ */
+export const MANDATORY_BALLOON_CAPABILITY = 'mandatory';
 
 const uuidRegex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -66,11 +72,12 @@ export class NotificationService {
     return { updatedCount };
   }
 
-  async claimBalloons(input: { currentUser: CurrentUser | undefined; token: string; limit: number }) {
+  async claimBalloons(input: { currentUser: CurrentUser | undefined; token: string; limit: number; capabilities?: readonly string[] }) {
     const currentUser = requireCurrentUser(input.currentUser);
     const token = parseNotificationId(input.token);
     const limit = Math.min(Math.max(Math.trunc(input.limit), 1), MAX_BALLOONS_PER_CLAIM);
-    const items = await this.deps.repository.claimBalloonsForUser({ viewer: currentUser, token, limit });
+    const mandatory = (input.capabilities ?? []).includes(MANDATORY_BALLOON_CAPABILITY);
+    const items = await this.deps.repository.claimBalloonsForUser({ viewer: currentUser, token, limit, mandatory });
     return { items };
   }
 
@@ -88,12 +95,15 @@ export class NotificationService {
   }): Promise<{ notificationId: string; deleted: true }> {
     const currentUser = requireCurrentUser(input.currentUser);
     const notificationId = parseNotificationId(input.notificationId);
-    const deleted = await this.deps.repository.deleteForUser({
+    const result = await this.deps.repository.deleteForUser({
       notificationId,
       viewer: currentUser,
     });
 
-    if (!deleted) {
+    if (result === 'balloon_pending') {
+      throw notificationBalloonPending();
+    }
+    if (result !== 'deleted') {
       throw notificationNotFound();
     }
 

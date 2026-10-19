@@ -75,6 +75,7 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
         await this.recoverEtl(now);
         await this.revocation.cleanupAll();
         await this.relayOutbox();
+        await this.reconcileAlertEpisodes();
         if (now.getTime() - this.lastRetentionAt >= RETENTION_EVERY_MS) {
           const removed = {
             ...(await this.repository.applyRetention()),
@@ -89,6 +90,18 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`1C monitor tick failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       this.running = false;
+    }
+  }
+
+  /** Episode journal ↔ onec_alerts (plan 2026-10-19 §2.2); a failure is logged and does not stop the tick. */
+  async reconcileAlertEpisodes(): Promise<void> {
+    try {
+      const result = await this.repository.reconcileAlertEpisodes(this.database);
+      if (result.closed + result.created + result.acknowledged + result.escalated > 0) {
+        this.logger.log(`1C alert episodes reconciled: ${JSON.stringify(result)}`);
+      }
+    } catch (error) {
+      this.logger.error(`1C alert episodes reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

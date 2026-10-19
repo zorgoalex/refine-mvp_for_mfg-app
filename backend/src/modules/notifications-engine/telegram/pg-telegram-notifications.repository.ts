@@ -43,6 +43,9 @@ interface StaleRecoveryRow extends QueryResultRow {
   unknown: string | number;
 }
 
+/** Итог намерения отправки: начата / строка больше не наша / пропуск без вызова Telegram. */
+export type SendStartResult = { kind: 'started' } | { kind: 'lost' } | { kind: 'skip'; code: string; message: string };
+
 export class PgTelegramNotificationsRepository {
   constructor(private readonly database: DatabaseClient) {}
 
@@ -307,20 +310,67 @@ export class PgTelegramNotificationsRepository {
     return (await findBinding(this.database, userId))?.destination ?? null;
   }
 
-  async markSendStarted(deliveryId: string): Promise<boolean> {
-    const result = await this.database.query(
-      `
-      UPDATE notification_channel_deliveries
-      SET send_started_at = now(),
-          updated_at = now()
-      WHERE notification_channel_delivery_id = $1
-        AND status = 'processing'
-        AND send_started_at IS NULL
-      RETURNING notification_channel_delivery_id
-      `,
-      [deliveryId],
-    );
-    return Boolean(result.rows[0]);
+  /**
+   * Намерение отправки (план 2026-10-19 §2.9). Строке со сроком годности (`expires_at`) или требуемым правом
+   * (`required_permission`) отправка начинается только после перепроверки в одной транзакции, в общем порядке
+   * блокировок прав: `permissions_state FOR SHARE → users FOR SHARE → строка доставки`. Отзыв права или отключение
+   * пользователя, зафиксированные до этой транзакции, останавливают отправку без вызова Telegram. Строки без этих
+   * полей (прежние источники) — как раньше.
+   */
+  async markSendStarted(deliveryId: string): Promise<SendStartResult> {
+    return this.inTransaction(async (client) => {
+      await client.query(`SELECT 1 FROM permissions_state WHERE id = true FOR SHARE`);
+      const target = await client.query<{ user_id: string; required_permission: string | null; expired: boolean }>(
+        `
+        SELECT user_id, required_permission, (expires_at IS NOT NULL AND expires_at <= now()) AS expired
+        FROM notification_channel_deliveries
+        WHERE notification_channel_delivery_id = $1
+          AND status = 'processing'
+          AND send_started_at IS NULL
+        `,
+        [deliveryId],
+      );
+      const row = target.rows[0];
+      if (!row) return { kind: 'lost' };
+      if (row.expired) return { kind: 'skip', code: 'EXPIRED', message: 'Delivery expired before it was sent' };
+      if (row.required_permission) {
+        const recipient = await client.query<{ is_active: boolean; allowed: boolean }>(
+          `
+          SELECT u.is_active,
+                 EXISTS (SELECT 1 FROM user_effective_permissions p
+                          WHERE p.user_id = u.user_id AND p.permission_name = $2) AS allowed
+          FROM users u
+          WHERE u.user_id = $1
+          FOR SHARE OF u
+          `,
+          [row.user_id, row.required_permission],
+        );
+        const user = recipient.rows[0];
+        if (!user?.is_active) return { kind: 'skip', code: 'USER_INACTIVE', message: 'Recipient is not active' };
+        if (!user.allowed) {
+          return { kind: 'skip', code: 'PERMISSION_MISSING', message: 'Recipient no longer has the required permission' };
+        }
+      }
+      const started = await client.query(
+        `
+        UPDATE notification_channel_deliveries
+        SET send_started_at = now(),
+            updated_at = now()
+        WHERE notification_channel_delivery_id = $1
+          AND status = 'processing'
+          AND send_started_at IS NULL
+        RETURNING notification_channel_delivery_id
+        `,
+        [deliveryId],
+      );
+      return started.rows[0] ? { kind: 'started' } : { kind: 'lost' };
+    });
+  }
+
+  private inTransaction<T>(handler: (client: DatabaseClient) => Promise<T>): Promise<T> {
+    const database = this.database as DatabaseClient & { transaction?: (h: (c: TransactionClient) => Promise<T>) => Promise<T> };
+    // Под DatabaseService — своя транзакция; под уже открытой (TransactionClient в тестах и сервисных путях) — в ней.
+    return typeof database.transaction === 'function' ? database.transaction(handler) : handler(this.database);
   }
 
   async markDelivered(deliveryId: string, externalMessageId: string): Promise<void> {

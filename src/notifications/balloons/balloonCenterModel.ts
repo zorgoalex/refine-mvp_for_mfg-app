@@ -12,7 +12,14 @@ const QUEUE_KEY = 'balloons.queue.v1';
 const SHOWN_TTL_MS = 24 * 60 * 60_000;
 const MAX_QUEUE = 100;
 
-export type BalloonMode = 'auto' | 'persistent';
+/**
+ * Режим балуна: `auto` — 15 с, `persistent` — до крестика, `mandatory` — обязательный (оповещения 1С, план 2026-10-19
+ * §2.7): до крестика, клик по телу открывает раздел, но балун не закрывает. `mandatory` бывает только у серверных.
+ */
+export type BalloonMode = 'auto' | 'persistent' | 'mandatory';
+/** Заголовок, которым вкладка заявляет, что умеет показывать обязательные балуны (старый backend его игнорирует). */
+export const BALLOON_CAPABILITIES_HEADER = 'X-Balloon-Capabilities';
+export const BALLOON_CAPABILITIES = 'mandatory';
 export type BalloonKind = 'info' | 'success' | 'warning' | 'error';
 
 export interface LocalBalloon {
@@ -180,9 +187,14 @@ export async function withBalloonLock<T>(userId: string, fn: () => T | Promise<T
   return locks.request(`balloons.${userId}`, () => fn());
 }
 
-/** Длительность antd-балуна: auto — 15 с, persistent — 0 (только крестик). */
+/** Длительность antd-балуна: auto — 15 с, persistent и mandatory — 0 (только крестик). */
 export function durationFor(mode: BalloonMode): number {
-  return mode === 'persistent' ? 0 : AUTO_SECONDS;
+  return mode === 'persistent' || mode === 'mandatory' ? 0 : AUTO_SECONDS;
+}
+
+/** Закрывает ли клик по телу балун: обязательный закрывается только крестиком. */
+export function closesOnBodyClick(mode: BalloonMode): boolean {
+  return mode !== 'mandatory';
 }
 
 /** Токен вкладки для аренды серверных балунов: переживает перезагрузку вкладки (sessionStorage), свой на пользователя. */

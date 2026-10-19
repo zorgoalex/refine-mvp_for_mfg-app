@@ -22,6 +22,7 @@ describe('navbar notifications helpers', () => {
       title: null,
       sourceType: 'frontend-warning',
       sourceId: null,
+      deletable: true,
     });
   });
 
@@ -46,5 +47,6 @@ function panel(id: string, timestamp: number): PanelNotification {
     title: null,
     sourceType: null,
     sourceId: null,
+    deletable: true,
   };
 }

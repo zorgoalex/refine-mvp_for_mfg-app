@@ -29,6 +29,17 @@ describe('notificationsApi', () => {
     );
   });
 
+  it('claims balloons declaring mandatory-balloon support in a header, with the body unchanged (old backends ignore it)', async () => {
+    const fetchMock = mockFetch({ items: [] });
+
+    await notificationsApi.claimBalloons({ token: notificationId, limit: 3 });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/v1/notifications/balloons/claim');
+    expect(new Headers(init.headers).get('X-Balloon-Capabilities')).toBe('mandatory');
+    expect(JSON.parse(String(init.body))).toEqual({ token: notificationId, limit: 3 });
+  });
+
   it('marks one notification as read', async () => {
     const fetchMock = mockFetch({
       notification: createNotification({ readAt: '2026-05-23T10:00:00.000Z' }),
