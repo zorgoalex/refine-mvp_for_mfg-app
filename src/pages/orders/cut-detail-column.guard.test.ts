@@ -149,7 +149,7 @@ describe('cut detail column', () => {
     }
     // jobItemColumns useMemo must depend on isArchivedJob so the remove button
     // re-renders disabled when the open job is archived.
-    expect(src).toMatch(/\[busy, canManage, isArchivedJob, jobBathCutJobByDetailId, openJob, removeJobItem, show\]/);
+    expect(src).toMatch(/\[busy, canManage, isArchivedJob, isBathDetailsView, jobBathCutJobByDetailId, openJob, removeJobItem, show\]/);
     expect(src).toContain('<CutJobVersionLines job={ref} />');
 
     // Deep-link must read the /cut tab path REACTIVELY from the tab store (not
