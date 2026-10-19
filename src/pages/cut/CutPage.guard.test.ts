@@ -266,6 +266,15 @@ describe('CutPage source guards', () => {
     expect(source).toContain('totalFilmUsageMeters(a.totals.filmUsage) - totalFilmUsageMeters(b.totals.filmUsage)');
   });
 
+  it('keeps the cut-job date on one line in a doubled column with a smaller font', () => {
+    const dateColumn = source.slice(source.indexOf("title: 'Дата',"), source.indexOf("title: 'Название',"));
+    expect(dateColumn).toContain('width: 168');
+    expect(dateColumn).toContain("className: 'cut-jobs-date-cell'");
+    expect(dateColumn).toContain('cut-jobs-date-value');
+    expect(appCss).toContain('td.cut-jobs-date-cell {\n  white-space: nowrap;');
+    expect(appCss).toContain('.cut-jobs-table .cut-jobs-date-value {\n  font-size: 88%;\n  white-space: nowrap;');
+  });
+
   it('keeps cut-detail selection collapsed until the existing header button opens it', () => {
     expect(source).toContain('const [criteriaOpen, setCriteriaOpen] = useState(false)');
     expect(source).toContain('onClick={() => setCriteriaOpen((open) => !open)}');
