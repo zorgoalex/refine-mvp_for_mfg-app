@@ -32,6 +32,7 @@ describe('migration 259: payment audit capture triggers', () => {
 
   it('has an end-state probe in the migration runner', () => {
     expect(runner).toContain('259_payment_audit_capture*) probe_all');
-    expect(runner).toContain('|259_payment_audit_capture*)');
+    // In the verify list of the runner; later migrations may follow it there.
+    expect(runner).toMatch(/\|259_payment_audit_capture\*[|)]/);
   });
 });
