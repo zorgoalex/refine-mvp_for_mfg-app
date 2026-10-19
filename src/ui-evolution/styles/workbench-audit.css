@@ -224,7 +224,7 @@
 :root[data-ui-variant="workbench"] .wb-audit-table__chip,
 :root[data-ui-variant="workbench"] .wb-audit-table__source {
   display: inline-block;
-  max-width: 320px;
+  max-width: 280px;
   padding: 1px 8px;
   overflow: hidden;
   border-radius: 6px;
@@ -237,6 +237,7 @@
 }
 
 :root[data-ui-variant="workbench"] .wb-audit-table__source {
+  max-width: 120px;
   border: 1px solid var(--evo-border);
   background: transparent;
 }

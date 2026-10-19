@@ -1264,7 +1264,7 @@ const WorkbenchReadableTable: React.FC<WorkbenchReadableTableProps> = ({ data, l
       />
       <Table.Column<AuditLogEventDto>
         title="Кто"
-        width={200}
+        width={180}
         render={(_, record) => (
           <span className="wb-audit-table__who">
             <span className="wb-avatar" aria-hidden="true">{auditActorInitials(record.username) || '·'}</span>
@@ -1274,7 +1274,7 @@ const WorkbenchReadableTable: React.FC<WorkbenchReadableTableProps> = ({ data, l
       />
       <Table.Column<AuditLogEventDto>
         title="Событие"
-        width={260}
+        width={220}
         render={(_, record) => (
           <button type="button" className="wb-audit-table__event" onClick={() => onOpen(record)}>
             {summaryOf(record).title}
@@ -1283,12 +1283,12 @@ const WorkbenchReadableTable: React.FC<WorkbenchReadableTableProps> = ({ data, l
       />
       <Table.Column<AuditLogEventDto>
         title="Объект"
-        width={240}
+        width={210}
         render={(_, record) => <span className="wb-audit-table__object">{summaryOf(record).object}</span>}
       />
       <Table.Column<AuditLogEventDto>
         title="Изменения"
-        width={360}
+        width={300}
         render={(_, record) => {
           const summary = summaryOf(record);
           const { chips, more } = auditChangeChips(summary.changes);
@@ -1307,12 +1307,23 @@ const WorkbenchReadableTable: React.FC<WorkbenchReadableTableProps> = ({ data, l
       <Table.Column<AuditLogEventDto>
         dataIndex="source"
         title="Источник"
-        width={150}
-        render={(value: string | null) => value ? <span className="wb-audit-table__source">{value}</span> : <span className="wb-list__muted">—</span>}
+        width={130}
+        render={(value: string | null) => value ? <span className="wb-audit-table__source" title={value}>{value}</span> : <span className="wb-list__muted">—</span>}
       />
     </Table>
   );
 };
+
+function hasRelatedIds(record: AuditLogEventDto): boolean {
+  return [
+    record.relatedOrderId,
+    record.relatedClientId,
+    record.relatedPaymentId,
+    record.relatedDeadlineId,
+    record.relatedProductionEventId,
+    record.relatedUserId,
+  ].some((id) => id != null) || (Array.isArray(record.relatedEntities) && record.relatedEntities.length > 0);
+}
 
 /** «NewLine»: событие целиком — изменения, сведения о запросе, связанные объекты и исходные данные. */
 const AuditEntryDrawer: React.FC<{ record: AuditLogEventDto | null; onClose: () => void }> = ({ record, onClose }) => {
@@ -1379,7 +1390,7 @@ const AuditEntryDrawer: React.FC<{ record: AuditLogEventDto | null; onClose: () 
           <section>
             <h3>Связанные объекты</h3>
             <div className="wb-audit-entry__related"><RelatedIds record={record} /></div>
-            {summary.related.length > 0 ? (
+            {summary.related.length > 0 && !hasRelatedIds(record) ? (
               <Space size={[4, 4]} wrap style={{ marginTop: 6 }}>
                 {summary.related.map((item) => <Tag key={`related-${item}`} color="blue">{item}</Tag>)}
               </Space>
