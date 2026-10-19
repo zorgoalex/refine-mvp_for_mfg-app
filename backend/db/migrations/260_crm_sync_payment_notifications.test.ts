@@ -32,6 +32,7 @@ describe('migration 260: Bitrix24 payment notifications', () => {
 
   it('has an end-state probe in the migration runner', () => {
     expect(runner).toContain('260_crm_sync_payment_notifications*) probe_all');
-    expect(runner).toContain('|260_crm_sync_payment_notifications*)');
+    // In the verify list of the runner; later migrations may follow it there.
+    expect(runner).toMatch(/\|260_crm_sync_payment_notifications\*[|)]/);
   });
 });
