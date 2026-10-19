@@ -1,0 +1,366 @@
+/* «NewLine»: «Журналы». Заголовок страницы, вкладки журналов, каждый журнал — одна панель:
+   строка с быстрым периодом и кнопками, фильтры, таблица; событие открывается сбоку. Только оформление. */
+
+:root[data-ui-variant="workbench"] .wb-audit__head {
+  margin-bottom: 8px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit__head h1 {
+  margin: 0;
+  color: var(--evo-text);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit__head p {
+  margin: 2px 0 0;
+  color: var(--evo-text-secondary);
+  font-size: 13.5px;
+  line-height: 20px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit .journals-top-tabs > .ant-tabs-nav {
+  margin-bottom: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit .journals-top-tabs > .ant-tabs-nav .ant-tabs-tab {
+  min-height: 40px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* журнал — панель */
+:root[data-ui-variant="workbench"] .wb-audit-journal {
+  overflow: hidden;
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-journal__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-audit__period {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit__period-label {
+  margin-right: 6px;
+  color: var(--evo-text);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit__chip {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--evo-border);
+  border-radius: 999px;
+  background: var(--evo-surface);
+  color: var(--evo-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] button.wb-audit__chip:hover {
+  border-color: var(--evo-primary);
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-audit__chip[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--evo-primary) 35%, transparent);
+  background: var(--evo-primary-soft);
+  color: var(--evo-primary);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit__chip:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: 1px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit__chip--custom {
+  border-style: dashed;
+  color: var(--evo-text-secondary);
+  cursor: default;
+}
+
+/* фильтры — без отдельной карточки, полосой под строкой */
+:root[data-ui-variant="workbench"] .wb-audit-journal__filters.ant-card {
+  margin: 0 !important;
+  border: 0;
+  border-bottom: 1px solid var(--evo-border);
+  border-radius: 0;
+  background: var(--evo-surface-muted);
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-journal__filters > .ant-card-body {
+  padding: 10px 16px 4px !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-journal > .ant-alert {
+  margin: 12px 16px !important;
+}
+
+/* таблица */
+:root[data-ui-variant="workbench"] .wb-audit-journal .ant-table-wrapper .ant-table {
+  border-radius: 0;
+  background: transparent;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-journal .ant-table-thead > tr > th {
+  background: transparent;
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-journal .ant-table-thead > tr > th:first-child,
+:root[data-ui-variant="workbench"] .wb-audit-journal .ant-table-tbody > tr > td:first-child {
+  padding-left: 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-journal .ant-table-pagination.ant-pagination {
+  margin: 0;
+  padding: 12px 16px;
+  border-top: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-journal .ant-pagination-total-text {
+  margin-right: auto;
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-table .ant-table-tbody > tr.ant-table-row {
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-table .ant-table-tbody > tr.ant-table-row > td {
+  height: 48px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  font-size: 13.5px;
+  vertical-align: middle;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-table__when {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-table__when small {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-table__who {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-table__who .wb-avatar {
+  width: 26px;
+  height: 26px;
+  font-size: 11px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-table__who-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-table__event {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--evo-text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-table__event:hover {
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-table__event:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-table__object {
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-table__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-table__chip,
+:root[data-ui-variant="workbench"] .wb-audit-table__source {
+  display: inline-block;
+  max-width: 320px;
+  padding: 1px 8px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--evo-surface-muted);
+  color: var(--evo-text);
+  font-size: 12px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-table__source {
+  border: 1px solid var(--evo-border);
+  background: transparent;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-table__chip--more,
+:root[data-ui-variant="workbench"] .wb-audit-table__chip--note {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-journal .wb-list__muted,
+:root[data-ui-variant="workbench"] .wb-audit-entry .wb-list__muted {
+  color: var(--evo-text-secondary);
+}
+
+/* событие сбоку */
+:root[data-ui-variant="workbench"] .wb-audit-entry__title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__title small {
+  color: var(--evo-text-secondary);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__body h3 {
+  margin: 0 0 8px;
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__diff {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__diff th {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--evo-border);
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__diff td {
+  padding: 8px;
+  border-bottom: 1px solid var(--evo-border);
+  vertical-align: top;
+  word-break: break-word;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__diff tr:last-child td {
+  border-bottom: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__diff td:first-child {
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__old {
+  color: var(--evo-text-secondary);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__new {
+  color: var(--evo-text);
+  font-weight: 550;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 0;
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__facts dt {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__facts dd {
+  min-width: 0;
+  margin: 0;
+  word-break: break-word;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__related .ant-tag {
+  margin-bottom: 4px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__raw summary {
+  color: var(--evo-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__raw > div {
+  margin-top: 8px;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-entry__footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+@media (max-width: 760px) {
+  :root[data-ui-variant="workbench"] .wb-audit-journal__bar {
+    padding: 10px 12px;
+  }
+}
