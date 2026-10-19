@@ -24,6 +24,7 @@ describe('migration 263: mandatory balloons, permission and expiry of external d
 
   it('has an end-state probe in the migration runner', () => {
     expect(runner).toContain('263_mandatory_balloons_delivery_checks*) probe_all');
-    expect(runner).toContain('|263_mandatory_balloons_delivery_checks*)');
+    // Position in the runner list does not matter (a later migration may follow it).
+    expect(runner).toMatch(/\|263_mandatory_balloons_delivery_checks\*[|)]/);
   });
 });
