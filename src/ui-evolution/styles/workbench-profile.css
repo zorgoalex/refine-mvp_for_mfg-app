@@ -260,6 +260,7 @@
 }
 
 :root[data-ui-variant="workbench"] .wb-profile__opt-box {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -315,10 +316,13 @@
   display: none;
   flex: none;
   place-items: center;
+  position: absolute;
+  top: 16px;
+  right: 16px;
   width: 18px;
   height: 18px;
-  margin-left: auto;
   border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--evo-surface);
   background: var(--evo-primary);
   color: #fff;
   font-size: 10px;
