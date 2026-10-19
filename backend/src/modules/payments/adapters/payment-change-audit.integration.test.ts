@@ -296,5 +296,5 @@ describe.skipIf(!url)('payment change audit / real PostgreSQL, rolled back', () 
     expect(written).toBe(2000);
     expect(total).toBeLessThan(30000);
     expect(heapMb).toBeLessThan(256);
-  });
+  }, 120_000);
 });
