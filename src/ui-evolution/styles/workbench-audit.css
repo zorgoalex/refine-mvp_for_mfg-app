@@ -213,6 +213,11 @@
 
 :root[data-ui-variant="workbench"] .wb-audit-table__object {
   color: var(--evo-text);
+  overflow-wrap: anywhere;
+}
+
+:root[data-ui-variant="workbench"] .wb-audit-table__chip {
+  max-width: 100%;
 }
 
 :root[data-ui-variant="workbench"] .wb-audit-table__chips {
@@ -237,7 +242,7 @@
 }
 
 :root[data-ui-variant="workbench"] .wb-audit-table__source {
-  max-width: 120px;
+  max-width: 100%;
   border: 1px solid var(--evo-border);
   background: transparent;
 }

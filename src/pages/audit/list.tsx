@@ -1230,7 +1230,9 @@ const WorkbenchReadableTable: React.FC<WorkbenchReadableTableProps> = ({ data, l
       dataSource={data}
       size="small"
       sticky
-      scroll={{ x: 'max-content' }}
+      // ширины колонок держатся: длинный текст переносится, а не раздвигает соседей
+      tableLayout="fixed"
+      scroll={{ x: 1090 }}
       pagination={{
         current: pagination.page,
         pageSize: pagination.pageSize,
@@ -1251,7 +1253,7 @@ const WorkbenchReadableTable: React.FC<WorkbenchReadableTableProps> = ({ data, l
       <Table.Column<AuditLogEventDto>
         dataIndex="createdAt"
         title="Время"
-        width={104}
+        width={100}
         render={(value: string) => {
           const when = auditWhen(value);
           return (
@@ -1264,7 +1266,7 @@ const WorkbenchReadableTable: React.FC<WorkbenchReadableTableProps> = ({ data, l
       />
       <Table.Column<AuditLogEventDto>
         title="Кто"
-        width={180}
+        width={170}
         render={(_, record) => (
           <span className="wb-audit-table__who">
             <span className="wb-avatar" aria-hidden="true">{auditActorInitials(record.username) || '·'}</span>
@@ -1274,7 +1276,7 @@ const WorkbenchReadableTable: React.FC<WorkbenchReadableTableProps> = ({ data, l
       />
       <Table.Column<AuditLogEventDto>
         title="Событие"
-        width={220}
+        width={210}
         render={(_, record) => (
           <button type="button" className="wb-audit-table__event" onClick={() => onOpen(record)}>
             {summaryOf(record).title}
@@ -1283,12 +1285,12 @@ const WorkbenchReadableTable: React.FC<WorkbenchReadableTableProps> = ({ data, l
       />
       <Table.Column<AuditLogEventDto>
         title="Объект"
-        width={210}
+        width={200}
         render={(_, record) => <span className="wb-audit-table__object">{summaryOf(record).object}</span>}
       />
       <Table.Column<AuditLogEventDto>
         title="Изменения"
-        width={300}
+        width={290}
         render={(_, record) => {
           const summary = summaryOf(record);
           const { chips, more } = auditChangeChips(summary.changes);
@@ -1307,7 +1309,7 @@ const WorkbenchReadableTable: React.FC<WorkbenchReadableTableProps> = ({ data, l
       <Table.Column<AuditLogEventDto>
         dataIndex="source"
         title="Источник"
-        width={130}
+        width={120}
         render={(value: string | null) => value ? <span className="wb-audit-table__source" title={value}>{value}</span> : <span className="wb-list__muted">—</span>}
       />
     </Table>
