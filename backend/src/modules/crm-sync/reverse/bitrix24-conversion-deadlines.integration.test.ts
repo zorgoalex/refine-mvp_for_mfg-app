@@ -252,7 +252,7 @@ describe.skipIf(!url)('CRM conversion deadlines on real PostgreSQL (rollback-onl
   it('rolls a manual payment import back (payment, totals, receipts, outbox) when the payment audit fails', async () => {
     const { payment, dealId } = await seedPayment();
     await repository.convertCrmRequestToProduction(input);
-    await repository.replaceMappedOrderPaymentSnapshots(orderId, [payment], input.requestId, undefined, dealId, await repository.getPaymentSyncFence(dealId));
+    await repository.replaceMappedOrderPaymentSnapshots(orderId, [payment], input.requestId, undefined, dealId);
     const snapshot = async () => (await client.query(`SELECT o.version, o.paid_amount,
         (SELECT count(*)::int FROM payments p WHERE p.order_id=o.order_id) AS payments,
         (SELECT erp_payment_id FROM bitrix24_incoming_request_payment WHERE bitrix_payment_id=$2) AS linked,
