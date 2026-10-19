@@ -52,6 +52,7 @@ const conditionSchema = z
     currentPaymentStatusNotIn: z.array(z.number().int().positive()).optional(),
     currentProductionStatusIn: z.array(z.number().int().positive()).optional(),
     currentProductionStatusNotIn: z.array(z.number().int().positive()).optional(),
+    anyProductionStatusIn: z.array(z.number().int().positive()).optional(),
     paidShareGte: z.number().min(0).max(100).optional(),
     orderSourceIn: z.array(z.enum(['manual', 'bazis', 'import'])).optional(),
     firstPaymentOnly: z.boolean().optional(),
@@ -274,6 +275,9 @@ function normalizeConditions(value: z.infer<typeof conditionSchema>): StatusAuto
     value.currentProductionStatusNotIn.length > 0
   ) {
     conditions.currentProductionStatusNotIn = value.currentProductionStatusNotIn;
+  }
+  if (value.anyProductionStatusIn !== undefined && value.anyProductionStatusIn.length > 0) {
+    conditions.anyProductionStatusIn = value.anyProductionStatusIn;
   }
   if (value.paidShareGte !== undefined) conditions.paidShareGte = value.paidShareGte;
   if (value.orderSourceIn !== undefined && value.orderSourceIn.length > 0) {

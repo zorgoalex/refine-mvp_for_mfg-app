@@ -497,7 +497,11 @@ async function validateConditionStatusReferences(
   await validateStatusIds(
     tx,
     'production',
-    [...(conditions.currentProductionStatusIn ?? []), ...(conditions.currentProductionStatusNotIn ?? [])],
+    [
+      ...(conditions.currentProductionStatusIn ?? []),
+      ...(conditions.currentProductionStatusNotIn ?? []),
+      ...(conditions.anyProductionStatusIn ?? []),
+    ],
     'conditions',
   );
 }

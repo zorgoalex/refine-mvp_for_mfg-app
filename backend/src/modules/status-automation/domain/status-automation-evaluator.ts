@@ -97,8 +97,22 @@ export function evaluateRuleConditions(
     return failed('production_status_excluded');
   }
 
+  if (
+    conditions.anyProductionStatusIn !== undefined &&
+    conditions.anyProductionStatusIn.length > 0 &&
+    (!state.productionSummary || !state.productionSummary.statusIds.some(
+      (statusId) => conditions.anyProductionStatusIn!.includes(statusId),
+    ))
+  ) {
+    return failed('production_status_absent');
+  }
+
+  // A rule with an explicit presence condition opts into partial composition
+  // (e.g. a remake of some details); mapping still needs one uniform status.
+  const explicitPresence = rule.actionType === 'change_order_status'
+    && (conditions.anyProductionStatusIn?.length ?? 0) > 0;
   if ((rule.actionType === 'map_production_status_to_order_status'
-    || (event.eventType === 'order.production_status_changed' && rule.actionType === 'change_order_status'))
+    || (event.eventType === 'order.production_status_changed' && rule.actionType === 'change_order_status' && !explicitPresence))
     && commonProductionStatus === null) {
     return failed('production_composition_not_uniform');
   }

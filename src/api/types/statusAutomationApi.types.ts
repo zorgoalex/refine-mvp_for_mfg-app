@@ -44,6 +44,7 @@ export interface StatusAutomationConditionsDto {
   currentPaymentStatusNotIn?: number[];
   currentProductionStatusIn?: number[];
   currentProductionStatusNotIn?: number[];
+  anyProductionStatusIn?: number[];
   paidShareGte?: number;
   orderSourceIn?: StatusAutomationOrderSource[];
   firstPaymentOnly?: boolean;

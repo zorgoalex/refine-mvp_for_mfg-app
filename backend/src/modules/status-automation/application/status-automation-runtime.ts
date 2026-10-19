@@ -166,6 +166,7 @@ const MEANINGFUL_SKIP_REASONS = new Set([
   'mapping_source_status_missing',
   'production_status_not_in_list',
   'production_status_excluded',
+  'production_status_absent',
   'production_composition_not_uniform',
 ]);
 
@@ -740,7 +741,8 @@ function productionEvaluationAudit(event: StatusAutomationEvent, rule: StatusAut
       ? 'derived_from_production_composition' : null),
     productionSummary: evaluationStates.get(event)?.productionSummary ?? null,
     productionScope: mdfScopes.has(event) ? 'mdf_eligible_details' : 'ordinary_order_details',
-    productionConditionMode: rule.conditions.currentProductionStatusIn?.length
+    productionConditionMode: rule.conditions.anyProductionStatusIn?.length ? 'any_status_presence'
+      : rule.conditions.currentProductionStatusIn?.length
       || rule.actionType === 'map_production_status_to_order_status'
       || event.eventType === 'order.production_status_changed'
       ? 'uniform_equality' : rule.conditions.currentProductionStatusNotIn?.length ? 'forbidden_status_absence' : null,

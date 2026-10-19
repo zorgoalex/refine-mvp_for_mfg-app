@@ -137,6 +137,7 @@ const CONDITION_LABELS: Record<ConditionKey, string> = {
   currentPaymentStatusNotIn: 'Статус оплаты — не входит в',
   currentProductionStatusIn: 'Все учитываемые детали имеют одинаковый статус — один из',
   currentProductionStatusNotIn: 'Ни одна учитываемая деталь не имеет статус из списка',
+  anyProductionStatusIn: 'Хотя бы одна учитываемая деталь имеет статус из списка',
   paidShareGte: 'Оплачено не менее',
   orderSourceIn: 'Источник заказа — один из',
   signalCodeIn: 'Входящий сигнал — один из',
@@ -158,6 +159,7 @@ function emptyForm(eventType: StatusAutomationEventType = 'order.created'): Stat
     currentPaymentStatusNotIn: [],
     currentProductionStatusIn: [],
     currentProductionStatusNotIn: [],
+    anyProductionStatusIn: [],
     paidShareGte: undefined,
     orderSourceIn: [],
     signalCodeIn: [],
@@ -186,6 +188,9 @@ function formFromRule(rule: StatusAutomationRuleDto): StatusAutomationFormValues
     currentProductionStatusIn: [...(rule.conditions.currentProductionStatusIn ?? [])],
     currentProductionStatusNotIn: [
       ...(rule.conditions.currentProductionStatusNotIn ?? []),
+    ],
+    anyProductionStatusIn: [
+      ...(rule.conditions.anyProductionStatusIn ?? []),
     ],
     paidShareGte: rule.conditions.paidShareGte,
     orderSourceIn: [...(rule.conditions.orderSourceIn ?? [])],
@@ -1371,12 +1376,15 @@ export function StatusAutomationConfig() {
                   );
                 } else if (
                   key === 'currentProductionStatusIn' ||
-                  key === 'currentProductionStatusNotIn'
+                  key === 'currentProductionStatusNotIn' ||
+                  key === 'anyProductionStatusIn'
                 ) {
                   const value =
                     key === 'currentProductionStatusIn'
                       ? form.currentProductionStatusIn
-                      : form.currentProductionStatusNotIn;
+                      : key === 'currentProductionStatusNotIn'
+                        ? form.currentProductionStatusNotIn
+                        : form.anyProductionStatusIn;
                   control = (
                     <Select<number[]>
                       aria-label={CONDITION_LABELS[key]}

@@ -508,6 +508,32 @@ outbox (`order.deleted`, `order.restored`).
 `previousOrderStatusIn`, `paidShareGte`, источник заказа
 `manual|bazis|import`, `firstPaymentOnly`.
 
+Условия по производственным статусам деталей:
+
+- `currentProductionStatusIn` — все учитываемые детали в одном статусе из списка;
+- `currentProductionStatusNotIn` — ни одна учитываемая деталь не в статусах из списка;
+- `anyProductionStatusIn` — хотя бы одна учитываемая деталь в статусе из списка.
+  Подходит для частичной переделки. Правило `change_order_status` с этим
+  условием может сработать на событии `order.production_status_changed` и при
+  неоднородном составе деталей. Mapping-действиям однородность по-прежнему нужна.
+
+Пример: часть деталей выданного заказа вернули на переделку. Переоткрыть такой
+заказ может правило `order.production_status_changed` → `change_order_status`
+«В производстве» с условиями `currentOrderStatusIn` (Готов к выдаче, Выдан) и
+`anyProductionStatusIn` (этапы до распила).
+
+Откат backend. Версии до появления `anyProductionStatusIn` не знают это условие
+и молча его игнорируют. Правило из примера на старой версии станет
+«Готов к выдаче/Выдан → В производстве» и будет переоткрывать выданные заказы.
+Поэтому перед откатом backend на такую версию выключите правила с этим условием и
+включите их снова только после возврата на новую версию:
+
+```sql
+UPDATE status_automation_rules SET is_enabled=false, version=version+1, updated_at=now()
+WHERE is_enabled AND conditions_json ? 'anyProductionStatusIn'
+RETURNING id, name;
+```
+
 Действия:
 
 - `change_order_status`;

@@ -27,6 +27,7 @@ const baseConditions = [
   'currentPaymentStatusNotIn',
   'currentProductionStatusIn',
   'currentProductionStatusNotIn',
+  'anyProductionStatusIn',
   'paidShareGte',
   'orderSourceIn',
 ] as const;
