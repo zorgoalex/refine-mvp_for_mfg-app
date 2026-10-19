@@ -172,10 +172,11 @@
 }
 
 :root[data-ui-variant="workbench"] .wb-audit-table__who {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  max-width: 100%;
 }
 
 :root[data-ui-variant="workbench"] .wb-audit-table__who .wb-avatar {
