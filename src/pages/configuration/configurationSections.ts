@@ -11,7 +11,7 @@ export interface ConfigurationSectionGroup {
 export const CONFIGURATION_SECTION_GROUPS: readonly ConfigurationSectionGroup[] = [
   { label: 'Общие', keys: ['orders', 'finance', 'org-structure', 'client-screen'] },
   { label: 'Производство', keys: ['production', 'production-thresholds', 'cut'] },
-  { label: 'Автоматизация', keys: ['status-automation', 'deadline-rules', 'notification-rules', 'onec-alert-notifications'] },
+  { label: 'Автоматизация', keys: ['status-automation', 'deadline-rules', 'notification-rules'] },
   {
     label: 'Сообщения',
     keys: ['message-processing', 'whatsapp-connection', 'whatsapp-automation', 'whatsapp-technical-logs', 'daily-order-digest'],
@@ -36,7 +36,6 @@ export const CONFIGURATION_SECTION_LABELS: Record<string, string> = {
   'status-automation': 'Автостатусы',
   'deadline-rules': 'Дедлайн-правила',
   'notification-rules': 'Уведомления',
-  'onec-alert-notifications': 'Оповещения 1С',
   'message-processing': 'Обработка сообщений',
   'whatsapp-connection': 'WhatsApp',
   'whatsapp-automation': 'WhatsApp-правила',
@@ -58,8 +57,7 @@ export const CONFIGURATION_SECTION_DESCRIPTIONS: Record<string, string> = {
   production: 'Этапы деталей, их порядок на экранах и плановые сроки.',
   'status-automation': 'Правила, которые сами меняют статусы по событиям в цехе и в оплате.',
   'deadline-rules': 'Что происходит при переходе заказа между этапами со сроками.',
-  'notification-rules': 'Кому и о чём система сообщает сама.',
-  'onec-alert-notifications': 'Кому и как приходят оповещения интеграции с 1С.',
+  'notification-rules': 'Кому и о чём система сообщает сама: правила, оповещения 1С, канал WhatsApp.',
   'whatsapp-connection': 'Подключение WhatsApp для сообщений клиентам.',
   'whatsapp-automation': 'Когда и что отправляется в WhatsApp автоматически.',
   'whatsapp-technical-logs': 'Технические события подключения и отправки.',
