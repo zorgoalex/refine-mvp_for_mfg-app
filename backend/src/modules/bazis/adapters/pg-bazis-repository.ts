@@ -434,7 +434,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
         if (projectId == null) {
           throw new BazisReferenceNotFoundError('projectId');
         }
-        bazisProjectName = bazisOrderNo ?? command.fileName;
+        bazisProjectName = bazisOrderNo ?? projectNameFromFileName(command.fileName);
         const inserted = await tx.query<{ bazis_project_id: number | string }>(
           `
           INSERT INTO bazis_projects
@@ -3320,6 +3320,11 @@ async function setSessionUser(tx: TransactionClient, userId: string): Promise<vo
 
 function requestIdOrFallback(requestId: string | undefined, fallback: string): string {
   return requestId && requestId.length > 0 ? requestId : fallback;
+}
+
+/** Имя файла без `.xml`: «1690.xml» → «1690». */
+function projectNameFromFileName(fileName: string): string {
+  return fileName.replace(/\.xml$/i, '').trim() || fileName;
 }
 
 function firstRootProductOrderNo(nodes: ParsedBazisNode[]): string | null {
