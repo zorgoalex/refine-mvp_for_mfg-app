@@ -32,6 +32,9 @@ import { OrderSendWorker } from './order-send/order-send-worker.service';
 import { SupplierSendController } from './order-send/supplier-send.controller';
 import { SupplierSendRepository } from './order-send/supplier-send.repository';
 import { SupplierSendService } from './order-send/supplier-send.service';
+import { WhatsAppNotificationPort } from './notifications/whatsapp-notification.port';
+import { WhatsAppNotificationRepository } from './notifications/whatsapp-notification.repository';
+import { WhatsAppNotificationWorker } from './notifications/whatsapp-notification-worker.service';
 
 @Module({
   imports: [DatabaseModule, PermissionsModule, InboundSignalsModule],
@@ -59,10 +62,15 @@ import { SupplierSendService } from './order-send/supplier-send.service';
     SupplierSendRepository,
     SupplierSendService,
     MySendsRepository,
+    WhatsAppNotificationRepository,
+    WhatsAppNotificationPort,
+    WhatsAppNotificationWorker,
     DailyDigestOrderReader,
     DailyDigestRenderer,
     { provide: DAILY_DIGEST_ORDER_READER, useExisting: DailyDigestOrderReader },
     { provide: DAILY_DIGEST_RENDERER, useExisting: DailyDigestRenderer },
   ],
+  // The notification channel for other backend modules (first consumer — 1C alerts). This module never imports 1C modules.
+  exports: [WhatsAppNotificationPort],
 })
 export class WhatsAppModule {}
