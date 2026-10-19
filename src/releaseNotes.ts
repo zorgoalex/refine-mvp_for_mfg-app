@@ -29,6 +29,17 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-19", title: "NewLine: профиль",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "Вариант интерфейса NewLine, «Профиль и настройки»: слева оглавление разделов «Профиль / Вход и безопасность / Уведомления / Интерфейс», текущий раздел подсвечивается при прокрутке.",
+      "Вариант оформления и плотность выбираются карточками с миниатюрой; тема — переключателем «Светлая / Тёмная», планшетный вид — тумблером.",
+    ],
+    changed: [
+      "Входы через SSO и Telegram в NewLine показаны внутри своих разделов; привязка, отвязка с паролем и ссылка подключения Telegram работают как прежде. В остальных вариантах интерфейса профиль не менялся.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-19", title: "Оповещения 1С в колокольчике и окне «только крестиком»",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

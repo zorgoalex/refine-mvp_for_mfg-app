@@ -46,6 +46,7 @@ import '../styles/workbench-config.css';
 import '../styles/workbench-bazis.css';
 import '../styles/workbench-scan.css';
 import '../styles/workbench-audit.css';
+import '../styles/workbench-profile.css';
 
 const EvolutionRouteSkeleton: React.FC = () => (
   <div

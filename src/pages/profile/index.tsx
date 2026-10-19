@@ -1,5 +1,5 @@
 import React from "react";
-import { Button, Card, Checkbox, Descriptions, Radio, Space, Typography, notification } from "antd";
+import { Button, Card, Checkbox, Descriptions, Radio, Space, Typography } from "antd";
 import { TabletOutlined } from "@ant-design/icons";
 import { useGetIdentity } from "@refinedev/core";
 import type { UserIdentity } from "../../types/auth";
@@ -8,23 +8,15 @@ import { featureFlags } from "../../config/featureFlags";
 import { WorkosLinkCard } from "./WorkosLinkCard";
 import { useUiVariantPreference } from "../../ui-variant/useUiVariantPreference";
 import { isModernUiVariant, type UiVariant } from "../../ui-variant/uiVariant";
-import { hasAnyDirty, useTabStore } from "../../stores/tabStore";
+import { useOptionalUiVariant } from "../../ui-variant/UiVariantProvider";
 import { TelegramNotificationsCard } from "./TelegramNotificationsCard";
 import {
   OperationalPageHeader,
   useOperationalUi,
 } from "../../ui-operational/OperationalPrimitives";
-
-const roleNames: Record<string, string> = {
-  admin: "Администратор",
-  manager: "Менеджер",
-  top_manager: "Топ-менеджер",
-  operator: "Оператор",
-  worker: "Работник",
-  packer: "Упаковщик",
-  viewer: "Наблюдатель",
-  onec_operator: "Оператор интеграции 1С",
-};
+import { profileRoleName } from "./profileOptions";
+import { useTabletModeToggle } from "./useTabletModeToggle";
+import { ProfileWorkbench } from "./ProfileWorkbench";
 
 const uiVariantOptions: Array<{ label: string; value: UiVariant }> = [
   { label: "Классический", value: "legacy" },
@@ -36,38 +28,22 @@ const uiVariantOptions: Array<{ label: string; value: UiVariant }> = [
 ];
 
 export const ProfilePage: React.FC = () => {
+  const isWorkbench = useOptionalUiVariant()?.variant === "workbench";
+  return isWorkbench ? <ProfileWorkbench /> : <ProfileClassic />;
+};
+
+const ProfileClassic: React.FC = () => {
   const isOperational = useOperationalUi();
   const { data: identity } = useGetIdentity<UserIdentity>();
-  const { mode, setMode, uiSize, setUiSize, tabletMode, setTabletMode } = useAppTheme();
-  const [isTabletModeSaving, setIsTabletModeSaving] = React.useState(false);
+  const { mode, setMode, uiSize, setUiSize } = useAppTheme();
+  const { tabletMode, isTabletModeSaving, toggleTabletMode } = useTabletModeToggle();
   const {
     variant,
     modernUiAvailable,
     isSaving: isVariantSaving,
     setVariant,
   } = useUiVariantPreference();
-  const roleName = identity?.role ? roleNames[identity.role] ?? identity.role : "—";
-  const toggleTabletMode = async () => {
-    if (hasAnyDirty(useTabStore.getState().tabs)) {
-      notification.warning({
-        message: "Есть несохранённые изменения",
-        description: "Сохраните или отмените изменения во вкладках, затем переключите вид.",
-      });
-      return;
-    }
-
-    setIsTabletModeSaving(true);
-    try {
-      await setTabletMode(!tabletMode);
-    } catch {
-      notification.error({
-        message: "Не удалось переключить планшетный вид",
-        description: "Настройка не изменена. Попробуйте ещё раз.",
-      });
-    } finally {
-      setIsTabletModeSaving(false);
-    }
-  };
+  const roleName = profileRoleName(identity?.role);
 
   return (
     <Space
