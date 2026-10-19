@@ -1,12 +1,18 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { DatabaseClient } from '../../../database/database.types';
 import { PgNotificationWriteAdapter } from '../../notifications-engine/adapters/pg-notification-write';
 import { ONEC_ALERT_NOTIFICATION_SOURCE } from '../../notifications-engine/domain/notification-event-registry';
+import { WhatsAppNotificationPort } from '../../whatsapp/notifications/whatsapp-notification.port';
+import type { WhatsAppNotificationRecipient } from '../../whatsapp/notifications/whatsapp-notification.types';
 import {
   PgOnecAlertNotificationsRepository,
   type EpisodeCandidate,
+  type ExternalRecipientRow,
+  type LockedDispatch,
+  type OnecAlertExternalState,
   type OnecAlertPolicy,
   type RecipientCandidate,
+  type RecipientRowInput,
 } from '../adapters/pg-onec-alert-notifications-repository';
 import { PgOnecRepository } from '../adapters/pg-onec-repository';
 import {
@@ -18,6 +24,7 @@ import {
   maxImportance,
   onecAlertGroup,
   onecAlertGroupOf,
+  quietHoursEnd,
   type OnecAlertGroupCode,
   type OnecAlertImportance,
   type OnecAlertStage,
@@ -39,6 +46,75 @@ const NO_RECIPIENTS_DEDUPE_KEY = NO_RECIPIENTS_ALERT_KIND;
 export const ONEC_ALERT_DISPATCH_LIMITS = { membersPerDispatch: 200, dispatchesPerTick: 5, attemptsPerTick: 20, maxReminders: 12 } as const;
 /** A dispatcher silent this long while active is treated as switched off: the next tick cuts off again (R1-4). */
 export const ONEC_ALERT_DISPATCHER_GAP_MINUTES = 30;
+
+/**
+ * External part of dispatches (plan §2.5, §5). Per tick: delayed dispatches released, closed alarm dispatches
+ * cancelled, watched channel rows polled. A delivery the channel cancelled for `delivery_gap` (backend restarted)
+ * or `expired` gets a new attempt of the same recipient row, at most 3 attempts; only while the dispatch is still
+ * relevant (an alarm stage — some member open; `resolved` — within its 6 h lifetime).
+ */
+export const ONEC_ALERT_EXTERNAL_LIMITS = {
+  releasesPerTick: 20,
+  cancelsPerTick: 20,
+  watchedPerTick: 200,
+  maxAttempts: 3,
+  alarmLifetimeMs: 2 * 60 * 60_000,
+  resolvedLifetimeMs: 6 * 60 * 60_000,
+} as const;
+const REDELIVER_REASONS = new Set(['delivery_gap', 'expired']);
+const FINAL_CHANNEL_STATES = new Set(['sent', 'failed', 'unknown', 'cancelled', 'skipped']);
+/** Every recipient of a 1C alert must still have it when the channel sends (it is re-checked there). */
+const WHATSAPP_REQUIRED_PERMISSION = 'onec.view' as const;
+
+export type OnecAlertWhatsAppTarget = { userId: number } | { chatId: string };
+
+/** WhatsApp targets of a policy: each recipient personally (`whatsapp`) and/or the policy's chat (`whatsapp_chat`). */
+export function whatsappTargets(policy: Pick<OnecAlertPolicy, 'externalChannels' | 'whatsappChatId'>, userIds: readonly number[]): OnecAlertWhatsAppTarget[] {
+  const targets: OnecAlertWhatsAppTarget[] = [];
+  if (policy.externalChannels.includes('whatsapp')) for (const userId of userIds) targets.push({ userId });
+  if (policy.externalChannels.includes('whatsapp_chat') && policy.whatsappChatId) targets.push({ chatId: policy.whatsappChatId });
+  return targets;
+}
+
+/** Idempotency key of one WhatsApp delivery (plan §5): `onec-alert:{dispatch}:whatsapp:{user:<id>|chat:<id>}:attempt{n}`. */
+export function whatsappKey(dispatchId: number, target: OnecAlertWhatsAppTarget, attempt: number): string {
+  const who = 'userId' in target ? `user:${target.userId}` : `chat:${target.chatId}`;
+  return `onec-alert:${dispatchId}:whatsapp:${who}:attempt${attempt}`;
+}
+
+/**
+ * Send window of an external delivery (plan §2.9, §5): not before the end of the quiet hours (critical alerts ignore
+ * them when the policy says so; recovery notices never do), lifetime 2 h (6 h for `resolved`) from the later of now
+ * and that start — so it always ends after the start.
+ */
+export function externalWindow(
+  input: { stage: OnecAlertStage; importance: OnecAlertImportance; policy: Pick<OnecAlertPolicy, 'quietHours' | 'criticalIgnoresQuietHours'> },
+  now: Date,
+): { notBefore: Date | null; expiresAt: Date } {
+  const bypass = input.stage !== 'resolved' && input.importance === 'critical' && input.policy.criticalIgnoresQuietHours;
+  const notBefore = bypass ? null : quietHoursEnd(input.policy.quietHours, now);
+  const start = Math.max(now.getTime(), notBefore?.getTime() ?? 0);
+  const lifetime = input.stage === 'resolved' ? ONEC_ALERT_EXTERNAL_LIMITS.resolvedLifetimeMs : ONEC_ALERT_EXTERNAL_LIMITS.alarmLifetimeMs;
+  return { notBefore, expiresAt: new Date(start + lifetime) };
+}
+
+/**
+ * Whether a dispatch still deserves its external delivery (redeliver, delay release). An alarm — while some member is
+ * open. A recovery notice — until the lifetime its first attempt got (`expiresAt`, which already counts the quiet
+ * hours, R1-2); without it, 6 h from the dispatch.
+ */
+export function externalStillRelevant(
+  dispatch: Pick<LockedDispatch, 'stage' | 'createdAt'>,
+  members: readonly Pick<EpisodeCandidate, 'resolvedAt'>[],
+  now: Date,
+  firstExpiresAt: Date | null = null,
+): boolean {
+  if (dispatch.stage === 'resolved') {
+    const until = firstExpiresAt?.getTime() ?? dispatch.createdAt.getTime() + ONEC_ALERT_EXTERNAL_LIMITS.resolvedLifetimeMs;
+    return now.getTime() < until;
+  }
+  return members.some((member) => member.resolvedAt === null);
+}
 
 export const planKey = (plan: Pick<PlannedDispatch, 'stage' | 'group' | 'sourceId'>) => `${plan.stage}|${plan.group}|${plan.sourceId ?? ''}`;
 
@@ -152,7 +228,8 @@ export interface NotifierTickResult {
  * dispatch, all its members, the bell rows with the mandatory balloon, the recipient journal, the episode status and
  * the audit event commit or roll back together; a failed dispatch is retried whole on the next tick. Bell row key
  * `onec_alert:{dispatch_id}:{user_id}` — the dispatch id exists only after commit, so a retry never duplicates.
- * External channels (Telegram, WhatsApp) come in later slices.
+ * WhatsApp (plan §5) goes through the channel's port in the same transaction, each call behind a SAVEPOINT: a failing
+ * channel never takes the mandatory minimum with it. Telegram comes later.
  */
 @Injectable()
 export class OnecAlertNotifier {
@@ -167,6 +244,7 @@ export class OnecAlertNotifier {
     @Inject(PgOnecRepository) private readonly alerts: PgOnecRepository,
     @Inject(OnecAuditWriter) private readonly audit: OnecAuditWriter,
     @Inject(OnecRuntimeConfigService) private readonly runtime: OnecRuntimeConfigService,
+    @Optional() @Inject(WhatsAppNotificationPort) private readonly whatsapp?: WhatsAppNotificationPort,
   ) {}
 
   async tick(now = new Date()): Promise<NotifierTickResult> {
@@ -205,6 +283,12 @@ export class OnecAlertNotifier {
       // Forget plans that no longer exist (their episodes were sent or closed meanwhile).
       const live = new Set(planned.map(planKey));
       for (const key of [...this.failedAt.keys()]) if (!live.has(key)) this.failedAt.delete(key);
+      try {
+        await this.maintainExternal(requestId);
+      } catch (error) {
+        failure = describe(error);
+        this.logger.error(`1C alert external deliveries: ${failure}`);
+      }
       await this.reportNoRecipients([...policies.values()]);
     } catch (error) {
       failure = describe(error);
@@ -226,6 +310,15 @@ export class OnecAlertNotifier {
       if (!chosen) return { kind: 'no_recipients', group: plan.group };
 
       const importance = maxImportance(members.map((episode) => effectiveImportance(policy.importance, episode.severityMax)));
+      const now = new Date();
+      const targets = this.whatsapp ? whatsappTargets(policy, chosen.users.map((user) => user.userId)) : [];
+      // An alarm whose members all closed before this tick (opened and resolved between two ticks) still gets the bell
+      // and the balloon, but no phone message: decided here, under the episode locks (R3-1). `resolved` is a notice.
+      const allClosed = plan.stage !== 'resolved' && members.every((episode) => episode.resolvedAt !== null);
+      // The delay holds back only the external part of an opening (plan §2.5); other stages go out with the minimum.
+      const delayed = targets.length > 0 && !allClosed && plan.stage === 'opened' && policy.delayMinutes > 0;
+      const externalState: OnecAlertExternalState =
+        targets.length === 0 ? 'none' : allClosed ? 'suppressed' : delayed ? 'pending_delay' : 'queued';
       const dispatchId = await this.repository.insertDispatch(tx, {
         sourceId: plan.sourceId,
         group: plan.group,
@@ -233,6 +326,8 @@ export class OnecAlertNotifier {
         importance,
         fallbackLevel: chosen.level,
         requestId,
+        externalState,
+        externalDueAt: delayed ? new Date(now.getTime() + policy.delayMinutes * 60_000) : null,
       });
       await this.repository.insertMembers(
         tx,
@@ -246,8 +341,8 @@ export class OnecAlertNotifier {
         importance,
         members: members.map((episode) => ({ ...episode, severity: episode.severityMax })),
       });
-      const level = plan.stage === 'resolved' ? 'info' : levelForImportance(importance);
-      const rows: { channel: 'in_app' | 'balloon'; userId: number; fallbackLevel: number; notificationId: string }[] = [];
+      const level = levelOf(plan.stage, importance);
+      const rows: RecipientRowInput[] = [];
       for (const user of chosen.users) {
         const { notificationId } = await this.write.insertIfAbsent(tx, {
           userId: user.userId,
@@ -261,14 +356,43 @@ export class OnecAlertNotifier {
           idempotencyKey: `${ONEC_ALERT_NOTIFICATION_SOURCE}:${dispatchId}:${user.userId}`,
           balloonMode: 'mandatory',
         });
-        rows.push({ channel: 'in_app', userId: user.userId, fallbackLevel: chosen.level, notificationId });
-        rows.push({ channel: 'balloon', userId: user.userId, fallbackLevel: chosen.level, notificationId });
+        rows.push({ channel: 'in_app', userId: user.userId, fallbackLevel: chosen.level, status: 'written', notificationId });
+        rows.push({ channel: 'balloon', userId: user.userId, fallbackLevel: chosen.level, status: 'written', notificationId });
+      }
+      if (externalState === 'suppressed') {
+        rows.push(...targets.map((target) => skippedRow(target, 'RESOLVED_BEFORE_SEND')));
+      }
+      if (externalState === 'queued') {
+        rows.push(
+          ...(await this.enqueueWhatsApp(tx, {
+            dispatchId,
+            stage: plan.stage,
+            importance,
+            policy,
+            text,
+            level,
+            targets,
+            attempt: 1,
+            fallbackLevel: chosen.level,
+            correlationId: requestId,
+            now,
+          })),
+        );
       }
       await this.repository.insertRecipientRows(tx, dispatchId, rows);
       if (plan.stage === 'opened' || plan.stage === 'digest') {
         await this.repository.markNotified(tx, members.map((episode) => episode.episodeId));
       }
-      await this.recordDispatched(tx, requestId, { dispatchId, plan, importance, members, recipients: chosen.users.length, fallbackLevel: chosen.level });
+      await this.recordDispatched(tx, requestId, {
+        dispatchId,
+        plan,
+        importance,
+        members,
+        recipients: chosen.users.length,
+        fallbackLevel: chosen.level,
+        whatsapp: externalCounts(rows),
+        externalState,
+      });
       return { kind: 'sent', dispatchId, recipients: chosen.users.length, fallbackLevel: chosen.level };
     });
   }
@@ -276,7 +400,16 @@ export class OnecAlertNotifier {
   private async recordDispatched(
     tx: DatabaseClient,
     requestId: string,
-    input: { dispatchId: number; plan: PlannedDispatch; importance: OnecAlertImportance; members: EpisodeCandidate[]; recipients: number; fallbackLevel: number },
+    input: {
+      dispatchId: number;
+      plan: PlannedDispatch;
+      importance: OnecAlertImportance;
+      members: EpisodeCandidate[];
+      recipients: number;
+      fallbackLevel: number;
+      whatsapp: ExternalCounts;
+      externalState: OnecAlertExternalState;
+    },
   ): Promise<void> {
     const agents = [...new Set(input.members.map((episode) => episode.agentId).filter((id): id is string => Boolean(id)))];
     // Texts and addresses are not audited: only codes, counts and the normalized alert ids.
@@ -295,12 +428,265 @@ export class OnecAlertNotifier {
           importance: input.importance,
           members: input.members.length,
           kinds: [...new Set(input.members.map((episode) => episode.kind))].sort(),
-          recipients: { in_app: input.recipients, balloon: input.recipients },
+          recipients: { in_app: input.recipients, balloon: input.recipients, whatsapp: input.whatsapp },
           fallbackLevel: input.fallbackLevel,
+          externalState: input.externalState,
         },
         relatedEntities: input.members.map((episode) => ({ entityType: 'onec_alert', entityId: episode.alertId })),
       },
       { sourceId: input.plan.sourceId, agentId: agents.length === 1 ? agents[0] : null, correlationId: requestId },
+    );
+  }
+
+  /**
+   * One WhatsApp delivery per target through the channel's port, in the caller's transaction (plan §5). Each call is
+   * isolated by a SAVEPOINT: an error rolls back only that call and is recorded as `skipped/ENQUEUE_FAILED`.
+   */
+  private async enqueueWhatsApp(
+    tx: DatabaseClient,
+    input: {
+      dispatchId: number;
+      stage: OnecAlertStage;
+      importance: OnecAlertImportance;
+      policy: Pick<OnecAlertPolicy, 'quietHours' | 'criticalIgnoresQuietHours'>;
+      text: { title: string; message: string };
+      level: 'info' | 'warning' | 'error';
+      targets: readonly OnecAlertWhatsAppTarget[];
+      attempt: number;
+      fallbackLevel: number | null;
+      correlationId: string;
+      now: Date;
+      /** A redelivered recovery notice keeps the lifetime of its first attempt (R1-2). */
+      expiresAtCap?: Date | null;
+    },
+  ): Promise<RecipientRowInput[]> {
+    const port = this.whatsapp;
+    if (!port) return [];
+    const computed = externalWindow({ stage: input.stage, importance: input.importance, policy: input.policy }, input.now);
+    const window = input.expiresAtCap && input.expiresAtCap.getTime() < computed.expiresAt.getTime() ? { ...computed, expiresAt: input.expiresAtCap } : computed;
+    const rows: RecipientRowInput[] = [];
+    for (const target of input.targets) {
+      const address = 'userId' in target ? { userId: target.userId, chatId: null } : { userId: null, chatId: target.chatId };
+      const base = { channel: 'whatsapp' as const, ...address, attempt: input.attempt, fallbackLevel: 'userId' in target ? input.fallbackLevel : null, expiresAt: window.expiresAt };
+      await tx.query('SAVEPOINT onec_alert_whatsapp');
+      try {
+        const recipient: WhatsAppNotificationRecipient = 'userId' in target ? { userId: target.userId } : { chatId: target.chatId };
+        const result = await port.enqueue(tx, {
+          idempotencyKey: whatsappKey(input.dispatchId, target, input.attempt),
+          recipient,
+          title: input.text.title,
+          text: input.text.message,
+          level: input.level,
+          sourceType: ONEC_ALERT_NOTIFICATION_SOURCE,
+          sourceId: input.dispatchId,
+          correlationId: input.correlationId,
+          notBefore: window.notBefore,
+          expiresAt: window.expiresAt,
+          requiredPermission: 'userId' in target ? WHATSAPP_REQUIRED_PERMISSION : null,
+        });
+        await tx.query('RELEASE SAVEPOINT onec_alert_whatsapp');
+        const final = FINAL_CHANNEL_STATES.has(result.state);
+        rows.push({
+          ...base,
+          status: result.state === 'skipped' ? 'skipped' : 'queued',
+          skipReason: result.state === 'skipped' ? result.reason : null,
+          channelDeliveryRef: result.deliveryId,
+          channelState: final ? result.state : null,
+          channelReason: final ? result.reason : null,
+        });
+      } catch (error) {
+        await tx.query('ROLLBACK TO SAVEPOINT onec_alert_whatsapp');
+        this.logger.error(`1C alert dispatch ${input.dispatchId}: WhatsApp enqueue failed: ${describe(error)}`);
+        rows.push({ ...base, status: 'skipped', skipReason: 'ENQUEUE_FAILED' });
+      }
+    }
+    return rows;
+  }
+
+  /** Delay release, cancellation on closing, watching and redelivery of the external part (plan §2.5). */
+  private async maintainExternal(requestId: string): Promise<void> {
+    if (!this.whatsapp) return;
+    const limits = ONEC_ALERT_EXTERNAL_LIMITS;
+    for (const dispatchId of await this.repository.dueDelayedDispatches(limits.releasesPerTick)) {
+      await this.releaseDelayed(dispatchId, requestId);
+    }
+    for (const dispatchId of await this.repository.closedQueuedDispatches(limits.cancelsPerTick)) {
+      await this.cancelClosed(dispatchId, requestId);
+    }
+    const watched = await this.repository.watchedExternalRows(limits.watchedPerTick);
+    if (watched.length === 0) return;
+    const statuses = new Map(
+      (await this.whatsapp.statuses(this.repository.db, watched.map((row) => row.deliveryId as string))).map((status) => [status.deliveryId, status] as const),
+    );
+    const inFlight: number[] = [];
+    for (const row of watched) {
+      const status = statuses.get(row.deliveryId as string);
+      if (!status || !FINAL_CHANNEL_STATES.has(status.state)) {
+        inFlight.push(row.recipientRowId);
+        continue;
+      }
+      if (status.state === 'cancelled' && status.reason !== null && REDELIVER_REASONS.has(status.reason) && row.attempt < limits.maxAttempts) {
+        await this.redeliver(row, status.state, status.reason, requestId);
+      } else {
+        await this.repository.recordChannelState(this.repository.db, row.recipientRowId, status.state, status.reason);
+      }
+    }
+    await this.repository.touchWatched(this.repository.db, inFlight);
+  }
+
+  /**
+   * Lock order of the external part (plan §2.2, R1-1): policy FOR SHARE → member episodes FOR UPDATE (SKIP LOCKED —
+   * a writer closing one right now defers this to the next tick) → dispatch FOR UPDATE. The decision then sees every
+   * closing that committed, and a later one waits for this transaction (its cancellation follows on the next tick).
+   */
+  private async lockExternal(tx: DatabaseClient, dispatchId: number): Promise<{ dispatch: LockedDispatch; policy: OnecAlertPolicy | null } | null> {
+    const group = await this.repository.dispatchGroup(tx, dispatchId);
+    if (!group) return null;
+    const policy = await this.repository.lockPolicyShared(tx, group);
+    if (!(await this.repository.lockDispatchMembers(tx, dispatchId))) return null;
+    const dispatch = await this.repository.lockDispatch(tx, dispatchId);
+    return dispatch ? { dispatch, policy } : null;
+  }
+
+  private async releaseDelayed(dispatchId: number, requestId: string): Promise<void> {
+    await this.repository.transaction(async (tx) => {
+      const locked = await this.lockExternal(tx, dispatchId);
+      if (!locked || locked.dispatch.externalState !== 'pending_delay') return;
+      const { dispatch, policy } = locked;
+      const members = await this.repository.dispatchMembers(tx, dispatchId);
+      const users = await this.repository.inAppRecipients(tx, dispatchId);
+      const targets = policy ? whatsappTargets(policy, users.map((user) => user.userId)) : [];
+      const now = new Date();
+      let rows: RecipientRowInput[];
+      let state: OnecAlertExternalState;
+      if (targets.length === 0 || !policy) {
+        rows = [];
+        state = 'suppressed';
+      } else if (!externalStillRelevant(dispatch, members, now)) {
+        // Everything closed before the delay was over: the bell and balloon stay, the phones are spared.
+        state = 'suppressed';
+        rows = targets.map((target) => skippedRow(target, 'RESOLVED_BEFORE_DELAY'));
+      } else {
+        state = 'queued';
+        rows = await this.enqueueWhatsApp(tx, {
+          dispatchId,
+          stage: dispatch.stage,
+          importance: dispatch.importance,
+          policy,
+          text: this.textOf(dispatch, members),
+          level: levelOf(dispatch.stage, dispatch.importance),
+          targets,
+          attempt: 1,
+          fallbackLevel: users[0]?.fallbackLevel ?? null,
+          correlationId: requestId,
+          now,
+        });
+      }
+      await this.repository.insertRecipientRows(tx, dispatchId, rows);
+      await this.repository.setExternalState(tx, dispatchId, state);
+      await this.recordExternal(tx, requestId, dispatch, 'onec.alert_notification.external_released', { externalState: state, whatsapp: externalCounts(rows) });
+    });
+  }
+
+  private async cancelClosed(dispatchId: number, requestId: string): Promise<void> {
+    const port = this.whatsapp;
+    if (!port) return;
+    await this.repository.transaction(async (tx) => {
+      const dispatch = await this.repository.lockDispatch(tx, dispatchId);
+      if (!dispatch || dispatch.externalState !== 'queued' || dispatch.stage === 'resolved') return;
+      const members = await this.repository.dispatchMembers(tx, dispatchId);
+      if (members.some((member) => member.resolvedAt === null)) return;
+      let cancelled = 0;
+      for (const row of await this.repository.queuedExternalRows(tx, dispatchId)) {
+        if (!row.deliveryId) continue;
+        const result = await port.cancel(tx, { deliveryId: row.deliveryId });
+        // Only our own cancellation is recorded here; a delivery that had already finished keeps being watched, so
+        // the poller records the channel's state with its reason (R2-2).
+        if (result?.cancelled) {
+          cancelled += 1;
+          await this.repository.recordChannelState(tx, row.recipientRowId, 'cancelled', 'cancelled_by_source');
+        }
+      }
+      await this.repository.setExternalState(tx, dispatchId, 'cancelled');
+      await this.recordExternal(tx, requestId, dispatch, 'onec.alert_notification.external_cancelled', { cancelled, reason: 'all_members_closed' });
+    });
+  }
+
+  /** A new attempt of one recipient row after `delivery_gap`/`expired` (plan §2.5 redeliver); not a new dispatch. */
+  private async redeliver(watched: ExternalRecipientRow, state: string, reason: string, requestId: string): Promise<void> {
+    await this.repository.transaction(async (tx) => {
+      const locked = await this.lockExternal(tx, watched.dispatchId);
+      if (!locked) return;
+      const { dispatch, policy } = locked;
+      // Re-read after every lock: a PATCH or another path may have recorded this row meanwhile.
+      const row = await this.repository.externalRow(tx, watched.recipientRowId);
+      if (!row || row.status !== 'queued' || row.channelState !== null) return;
+      const members = await this.repository.dispatchMembers(tx, dispatch.dispatchId);
+      const firstExpiresAt = await this.repository.firstAttemptExpiresAt(tx, dispatch.dispatchId, row);
+      const now = new Date();
+      const target: OnecAlertWhatsAppTarget | null = row.userId !== null ? { userId: row.userId } : row.chatId !== null ? { chatId: row.chatId } : null;
+      // Still wanted: the dispatch is relevant and the policy still sends this target (a removed channel or a changed
+      // chat is not redelivered).
+      const wanted =
+        target !== null &&
+        policy !== null &&
+        dispatch.externalState === 'queued' &&
+        externalStillRelevant(dispatch, members, now, firstExpiresAt) &&
+        whatsappTargets(policy, row.userId !== null ? [row.userId] : []).some((t) => JSON.stringify(t) === JSON.stringify(target));
+      // A recovery notice whose first lifetime ends before its quiet hours do cannot be sent any more.
+      const startsInTime =
+        dispatch.stage !== 'resolved' || !firstExpiresAt || !policy ||
+        Math.max(now.getTime(), externalWindow({ stage: dispatch.stage, importance: dispatch.importance, policy }, now).notBefore?.getTime() ?? 0) < firstExpiresAt.getTime();
+      if (!wanted || !startsInTime || !target || !policy) {
+        await this.repository.recordChannelState(tx, row.recipientRowId, state, reason);
+        return;
+      }
+      await this.repository.supersede(tx, row.recipientRowId, state, reason);
+      const rows = await this.enqueueWhatsApp(tx, {
+        dispatchId: dispatch.dispatchId,
+        stage: dispatch.stage,
+        importance: dispatch.importance,
+        policy,
+        text: this.textOf(dispatch, members),
+        level: levelOf(dispatch.stage, dispatch.importance),
+        targets: [target],
+        attempt: row.attempt + 1,
+        fallbackLevel: null,
+        correlationId: requestId,
+        now,
+        expiresAtCap: dispatch.stage === 'resolved' ? firstExpiresAt : null,
+      });
+      await this.repository.insertRecipientRows(tx, dispatch.dispatchId, rows);
+      await this.recordExternal(tx, requestId, dispatch, 'onec.alert_notification.external_redelivered', {
+        attempt: row.attempt + 1,
+        previous: { state, reason },
+        whatsapp: externalCounts(rows),
+      });
+    });
+  }
+
+  private textOf(dispatch: LockedDispatch, members: readonly EpisodeCandidate[]): { title: string; message: string } {
+    return buildOnecAlertText({
+      stage: dispatch.stage,
+      group: dispatch.group,
+      importance: dispatch.importance,
+      members: members.map((episode) => ({ ...episode, severity: episode.severityMax })),
+    });
+  }
+
+  private async recordExternal(tx: DatabaseClient, requestId: string, dispatch: LockedDispatch, event: string, after: Record<string, unknown>): Promise<void> {
+    await this.audit.bySystem(
+      tx,
+      ONEC_ALERT_NOTIFIER_ACTOR,
+      requestId,
+      {
+        event,
+        entityType: ONEC_ALERT_DISPATCH_ENTITY,
+        entityId: dispatch.dispatchId,
+        stageCode: dispatch.stage,
+        after: { group: dispatch.group, stage: dispatch.stage, channel: 'whatsapp', ...after },
+      },
+      { sourceId: dispatch.sourceId, agentId: null, correlationId: requestId },
     );
   }
 
@@ -333,6 +719,33 @@ export class OnecAlertNotifier {
     }
     await this.alerts.transaction((tx) => this.alerts.resolveAlertByDedupeKey(tx, NO_RECIPIENTS_DEDUPE_KEY));
   }
+}
+
+/** A WhatsApp row that is not handed to the channel (everything closed already). */
+function skippedRow(target: OnecAlertWhatsAppTarget, reason: string): RecipientRowInput {
+  return {
+    channel: 'whatsapp',
+    ...('userId' in target ? { userId: target.userId, chatId: null } : { userId: null, chatId: target.chatId }),
+    fallbackLevel: null,
+    status: 'skipped',
+    skipReason: reason,
+  };
+}
+
+type ExternalCounts = { queued: number; skipped: number; chat: boolean };
+
+/** Counts of the WhatsApp rows for the audit (no addresses). */
+function externalCounts(rows: readonly RecipientRowInput[]): ExternalCounts {
+  const whatsapp = rows.filter((row) => row.channel === 'whatsapp');
+  return {
+    queued: whatsapp.filter((row) => row.status === 'queued').length,
+    skipped: whatsapp.filter((row) => row.status === 'skipped').length,
+    chat: whatsapp.some((row) => row.chatId),
+  };
+}
+
+function levelOf(stage: OnecAlertStage, importance: OnecAlertImportance): 'info' | 'warning' | 'error' {
+  return stage === 'resolved' ? 'info' : levelForImportance(importance);
 }
 
 function describe(error: unknown): string {

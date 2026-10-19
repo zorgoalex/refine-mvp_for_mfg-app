@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../../database/database.module';
 import { PermissionsModule } from '../../permissions/permissions.module';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { PgOnecCommandRepository } from './adapters/pg-onec-command-repository';
 import { PgOnecEtlRepository } from './adapters/pg-onec-etl-repository';
 import { PgOnecMatchingRepository } from './adapters/pg-onec-matching-repository';
@@ -42,7 +43,8 @@ import { ONEC_STOCK_SNAPSHOTS } from './onec-stock-snapshots.port';
  * its queue port and module outbox events.
  */
 @Module({
-  imports: [DatabaseModule, PermissionsModule],
+  // WhatsApp — the notification channel of 1C alerts (plan 2026-10-19 §5); WhatsApp never imports 1C modules.
+  imports: [DatabaseModule, PermissionsModule, WhatsAppModule],
   controllers: [OnecAgentController, OnecAdminController],
   providers: [
     OnecRuntimeConfigService,

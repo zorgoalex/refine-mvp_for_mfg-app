@@ -10,19 +10,27 @@ import {
   type OnecAlertNotificationsOverview,
   type OnecAlertRecentDispatch,
 } from '../../onec/onecAlertNotificationsApi';
+import type { WhatsAppGroupDto } from '../../../api/types/whatsappApi.types';
 import {
+  DELAY_OPTIONS,
   IMPORTANCE_LABELS,
   IMPORTANCE_OPTIONS,
   REPEAT_OPTIONS,
   STAGE_LABELS,
   buildPolicyUpdate,
+  channelLabels,
+  formProblem,
   importanceLabel,
   overviewWarnings,
   policyToFormValues,
+  quietHoursOptions,
   recipientsSummary,
   repeatLabel,
+  whatsappStateColor,
+  whatsappStateLabel,
   type OnecAlertPolicyFormValues,
 } from './onecAlertNotificationsModel';
+import { loadWhatsAppGroups } from './whatsappGroupsCache';
 
 const { Paragraph, Text } = Typography;
 
@@ -31,12 +39,16 @@ const errorText = (error: unknown, fallback: string) => (error instanceof ApiErr
 
 /**
  * «Конфигурация → Оповещения 1С» (plan 2026-10-19 §3): for each group of 1C alerts — importance, recipients,
- * repeat of critical alerts, recovery notice. The bell and the balloon that closes only with its cross are always on
- * and cannot be switched off; Telegram and WhatsApp come with the next releases. View — onec.view, change and
- * «Проверить» — onec.manage (the backend checks the same literal permissions).
+ * repeat of critical alerts, recovery notice, WhatsApp personally and/or to a chat with a delay and quiet hours.
+ * The bell and the balloon that closes only with its cross are always on and cannot be switched off; Telegram comes
+ * later. View — onec.view, change and «Проверить» — onec.manage; choosing the chat also needs whatsapp.manage (it
+ * lists the WhatsApp groups) — the backend checks the same literal permissions.
  */
 export const OnecAlertNotificationsConfig: React.FC = () => {
   const canManage = can('onec.manage');
+  const canPickChat = can('whatsapp.manage');
+  const [chats, setChats] = useState<WhatsAppGroupDto[] | null>(null);
+  const [chatsError, setChatsError] = useState('');
   const [overview, setOverview] = useState<OnecAlertNotificationsOverview | null>(null);
   const [recent, setRecent] = useState<OnecAlertRecentDispatch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,10 +79,19 @@ export const OnecAlertNotificationsConfig: React.FC = () => {
   const openEditor = (group: OnecAlertGroupView) => {
     setEditing(group);
     setValues(policyToFormValues(group.policy));
+    if (canPickChat && chats === null) {
+      setChatsError('');
+      loadWhatsAppGroups().then(setChats, (error: unknown) => setChatsError(errorText(error, 'Не удалось загрузить чаты WhatsApp')));
+    }
   };
 
   const save = async () => {
     if (!editing || !values) return;
+    const problem = formProblem(values);
+    if (problem) {
+      message.error(problem);
+      return;
+    }
     setSaving(true);
     try {
       await onecAlertNotificationsApi.update(editing.code, editing.policy.version, buildPolicyUpdate(editing.policy, values));
@@ -96,6 +117,12 @@ export const OnecAlertNotificationsConfig: React.FC = () => {
       const result = await onecAlertNotificationsApi.test(group.code);
       if (result.visibleInBell) message.success('Проверочное оповещение отправлено вам: колокольчик и балун');
       else message.warning('Отправлено, но в колокольчике его не видно: нужно право «Просмотр интеграции 1С»');
+      for (const item of result.whatsapp ?? []) {
+        const where = item.target === 'chat' ? 'WhatsApp-чат' : 'WhatsApp вам лично';
+        const text = `${where}: ${whatsappStateLabel(item.state, item.reason)}`;
+        if (item.state === 'queued') message.success(text);
+        else message.warning(text);
+      }
     } catch (error) {
       message.error(errorText(error, 'Не удалось отправить проверку'));
     } finally {
@@ -117,7 +144,8 @@ export const OnecAlertNotificationsConfig: React.FC = () => {
     <Space direction="vertical" size="middle" style={{ width: '100%', padding: '16px 0' }}>
       <Paragraph type="secondary" style={{ marginBottom: 0 }}>
         Каждое оповещение интеграции 1С приходит в колокольчик и отдельным окном, которое закрывается только крестиком.
-        Здесь — кому, с какой важностью и как часто. Telegram и WhatsApp появятся в следующих выпусках.
+        Здесь — кому, с какой важностью, как часто и куда ещё: в WhatsApp лично получателям и в общий чат. Telegram
+        появится позже.
       </Paragraph>
       <Text type="secondary">
         Рассылка: {overview.flagEnabled ? (overview.active ? 'включена' : 'включается') : 'выключена'}
@@ -154,11 +182,12 @@ export const OnecAlertNotificationsConfig: React.FC = () => {
           {
             title: 'Каналы',
             key: 'channels',
-            width: 170,
-            render: () => (
+            width: 210,
+            render: (_, group) => (
               <Space size={4} wrap>
-                <Tag>Колокольчик</Tag>
-                <Tag>Окно с крестиком</Tag>
+                {channelLabels(group.policy).map((label) => (
+                  <Tag key={label} color={label.startsWith('WhatsApp') ? 'green' : undefined}>{label}</Tag>
+                ))}
               </Space>
             ),
           },
@@ -209,6 +238,21 @@ export const OnecAlertNotificationsConfig: React.FC = () => {
                 </Tag>
               )),
           },
+          {
+            title: 'WhatsApp',
+            key: 'whatsapp',
+            render: (_, row) => {
+              if (row.externalState === 'pending_delay') return <Tag>ждёт конца задержки</Tag>;
+              const rows = (row.external ?? []).filter((item) => item.status !== 'superseded');
+              if (rows.length === 0) return row.externalState === 'suppressed' ? <Tag>не понадобилось</Tag> : '—';
+              return rows.map((item) => (
+                <Tag key={item.recipientRowId} color={whatsappStateColor(item)}>
+                  {item.chatId ? 'чат' : item.username ?? `#${item.userId}`}
+                  {item.attempt > 1 ? ` (попытка ${item.attempt})` : ''} · {whatsappStateLabel(item.state, item.reason)}
+                </Tag>
+              ));
+            },
+          },
         ]}
       />
 
@@ -258,10 +302,66 @@ export const OnecAlertNotificationsConfig: React.FC = () => {
               <Space direction="vertical" size={2}>
                 <Checkbox checked disabled>Колокольчик — всегда</Checkbox>
                 <Checkbox checked disabled>Окно, которое закрывается только крестиком — всегда</Checkbox>
-                <Checkbox disabled>Telegram — в следующем выпуске</Checkbox>
-                <Checkbox disabled>WhatsApp — в следующем выпуске</Checkbox>
+                <Checkbox checked={values.whatsappPersonal} onChange={(event) => setValues({ ...values, whatsappPersonal: event.target.checked })}>
+                  WhatsApp лично каждому получателю (на рабочий номер сотрудника)
+                </Checkbox>
+                <Checkbox checked={values.whatsappChat} onChange={(event) => setValues({ ...values, whatsappChat: event.target.checked })}>
+                  В чат WhatsApp
+                </Checkbox>
+                <Checkbox disabled>Telegram — позже</Checkbox>
               </Space>
             </Form.Item>
+            {values.whatsappChat && (
+              <Form.Item
+                label="Чат WhatsApp"
+                extra={canPickChat ? 'Чаты подключённого номера WhatsApp.' : 'Выбрать другой чат может пользователь с правом «Управление WhatsApp».'}
+              >
+                {canPickChat ? (
+                  <>
+                    <Select
+                      showSearch
+                      allowClear
+                      loading={chats === null && !chatsError}
+                      value={values.whatsappChatId ?? undefined}
+                      placeholder="Выберите чат"
+                      optionFilterProp="label"
+                      options={[
+                        ...(values.whatsappChatId && !(chats ?? []).some((chat) => chat.id === values.whatsappChatId)
+                          ? [{ value: values.whatsappChatId, label: values.whatsappChatName ?? values.whatsappChatId }]
+                          : []),
+                        ...(chats ?? []).map((chat) => ({ value: chat.id, label: chat.name || chat.id })),
+                      ]}
+                      onChange={(chatId?: string) => {
+                        const chat = (chats ?? []).find((item) => item.id === chatId);
+                        setValues({ ...values, whatsappChatId: chatId ?? null, whatsappChatName: chat ? chat.name || chat.id : chatId ? values.whatsappChatName : null });
+                      }}
+                    />
+                    {chatsError && <Text type="danger">{chatsError}</Text>}
+                  </>
+                ) : (
+                  <Text>{values.whatsappChatName ?? values.whatsappChatId ?? 'Чат не выбран'}</Text>
+                )}
+              </Form.Item>
+            )}
+            {(values.whatsappPersonal || values.whatsappChat) && (
+              <>
+                <Form.Item label="WhatsApp о новом оповещении" extra="Если за это время оповещение закроется, в WhatsApp ничего не уйдёт. Колокольчик и окно — всегда сразу.">
+                  <Select value={values.delayMinutes} options={DELAY_OPTIONS} onChange={(delayMinutes) => setValues({ ...values, delayMinutes })} />
+                </Form.Item>
+                <Form.Item label="Тихие часы WhatsApp (время Алматы)" extra="В тихие часы сообщение ждёт утра.">
+                  <Select
+                    value={values.quietHours ?? 'none'}
+                    options={quietHoursOptions(editing.policy.quietHours)}
+                    onChange={(value) => setValues({ ...values, quietHours: value === 'none' ? null : value })}
+                  />
+                </Form.Item>
+                {values.quietHours && (
+                  <Form.Item label="Критичные — сразу, даже ночью">
+                    <Switch checked={values.criticalIgnoresQuietHours} onChange={(criticalIgnoresQuietHours) => setValues({ ...values, criticalIgnoresQuietHours })} />
+                  </Form.Item>
+                )}
+              </>
+            )}
             <Form.Item label="Повтор критичных, пока не нажмут «Принять» на экране «Интеграция 1С»">
               <Select
                 value={values.repeatMinutes ?? 'none'}
