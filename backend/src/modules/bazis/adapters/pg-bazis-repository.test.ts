@@ -149,7 +149,31 @@ describe('PgBazisRepository.importRevision', () => {
     const projectInsert = database.queries.find((query) =>
       normalizeSql(query.text).startsWith('INSERT INTO bazis_projects'),
     );
-    expect(projectInsert?.params[1]).toBe('nova.xml');
+    expect(projectInsert?.params[1]).toBe('nova');
+  });
+
+  it('strips the .xml extension case-insensitively from the file-name fallback', async () => {
+    const database = createDatabase();
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.importRevision(
+      importCommand({
+        fileName: '1690.XML',
+        parsed: parsedRevision({
+          bazisOrderNo: null,
+          nodes: parsedRevision().nodes.map((node) => ({ ...node, productOrderNo: null })),
+        }),
+      }),
+    );
+
+    const projectInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO bazis_projects'),
+    );
+    expect(projectInsert?.params[1]).toBe('1690');
+    const revisionInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO bazis_project_revisions'),
+    );
+    expect(revisionInsert?.params).toContain('1690.XML');
   });
 
   it('throws BazisRevisionDuplicateError when sha256 exists in same bazis project', async () => {
@@ -3912,13 +3936,13 @@ function createDatabase(
   };
 }
 
-function importCommand(overrides: Partial<{ parsed: ParsedBazisRevision }> = {}) {
+function importCommand(overrides: Partial<{ parsed: ParsedBazisRevision; fileName: string }> = {}) {
   return {
     currentUser: currentUser(),
     requestId: 'req-1',
     projectId: 77,
     bazisProjectId: null,
-    fileName: 'nova.xml',
+    fileName: overrides.fileName ?? 'nova.xml',
     fileSize: 2048,
     xmlSha256: 'sha-001',
     rawXmlGzip: Buffer.from('gz'),
