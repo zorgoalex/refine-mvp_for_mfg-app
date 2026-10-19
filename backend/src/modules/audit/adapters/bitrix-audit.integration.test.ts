@@ -184,6 +184,9 @@ describe.skipIf(!url)('Bitrix journal real PostgreSQL, rollback-only', () => {
       cardClosed: await row('crm_sync.payment_card_closed', 'crm-sync', 'payment'),
       cardFailed: await row('crm_sync.payment_card_close_failed', 'crm-sync', 'payment', { error: 'POST https://x.bitrix24.kz/rest/1/abcdef0123456789abcd/crm.activity.update failed' }),
       paymentUpsert: await row('crm_sync.upsert', 'crm-sync', 'payment'),
+      notificationSent: await row('crm_sync.payment_notification_sent', 'crm-sync', 'order'),
+      notificationFailed: await row('crm_sync.payment_notification_failed', 'crm-sync', 'order'),
+      notificationSkipped: await row('crm_sync.payment_notification_skipped', 'crm-sync', 'order'),
       statusChange: await row('orders.payment_status_change', 'backend-orders-command', 'order'),
       orderUpdate: await row('orders.update', 'backend-orders-command', 'order'),
     };
@@ -192,7 +195,7 @@ describe.skipIf(!url)('Bitrix journal real PostgreSQL, rollback-only', () => {
     }
     const business = await list({ scope: 'business', excludeBitrix24: true });
     expect(business.data.map((r) => r.auditId).sort()).toEqual(Object.values(visible).sort());
-    expect(business.pagination.total).toBe(7);
+    expect(business.pagination.total).toBe(10);
     const failed = business.data.find((r) => r.auditId === visible.cardFailed)!;
     expect(JSON.stringify(failed.after)).not.toContain('abcdef0123456789abcd');
 

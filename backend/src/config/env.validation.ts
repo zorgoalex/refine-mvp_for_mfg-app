@@ -560,6 +560,16 @@ export const envSchema = z
       },
       'BACKEND_BITRIX24_PAID_PAYMENT_RESET_ORDER_IDS: up to 50 distinct positive order ids, comma-separated',
     ),
+    // ERP → Bitrix24: комментарий в сделке и уведомление ответственному об изменениях оплат из ERP
+    // (миграция 260). Строки пишутся всегда; доставка — только при флаге. Список заказов — канарейка (пусто = все).
+    BACKEND_BITRIX24_PAYMENT_NOTIFICATIONS: booleanFromEnv.default(false),
+    BACKEND_BITRIX24_PAYMENT_NOTIFICATIONS_ORDER_IDS: z.string().trim().default('').refine(
+      (value) => {
+        const ids = value.split(',').map((id) => id.trim()).filter(Boolean);
+        return new Set(ids).size === ids.length && ids.length <= 50 && ids.every((id) => /^[1-9][0-9]{0,17}$/.test(id));
+      },
+      'BACKEND_BITRIX24_PAYMENT_NOTIFICATIONS_ORDER_IDS: up to 50 distinct positive order ids, comma-separated',
+    ),
     BACKEND_BITRIX24_REVERSE_SYNC_RELAY_OWNER: z
       .enum(['none', 'in_process', 'external'])
       .default('none'),

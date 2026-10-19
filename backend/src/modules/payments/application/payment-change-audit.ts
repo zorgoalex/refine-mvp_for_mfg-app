@@ -4,6 +4,7 @@ import { computeDiff } from '../../../common/audit/audit-diff';
 import type { AuditRelatedEntity } from '../../../common/audit/related-entities';
 import type { DatabaseClient } from '../../../database/database.types';
 import { sanitizeBitrixAudit } from '../../audit/application/bitrix-audit-sanitization';
+import { recordPaymentNotifications, type NotifiedPaymentChange } from './payment-change-notification';
 
 /**
  * One audit trail for every change of a `payments` row, whoever writes it (order form, payment command,
@@ -119,6 +120,13 @@ export async function beginPaymentAuditCapture(client: DatabaseClient): Promise<
      ) ON COMMIT DELETE ROWS`,
   );
   await client.query('DELETE FROM pg_temp.payment_audit_capture');
+  // The order sync events this command enqueues (migration 260 trigger), for its Bitrix24 notifications.
+  await client.query(
+    `CREATE TEMP TABLE IF NOT EXISTS payment_notification_sync_event (
+       outbox_event_id uuid PRIMARY KEY, idempotency_key text
+     ) ON COMMIT DELETE ROWS`,
+  );
+  await client.query('DELETE FROM pg_temp.payment_notification_sync_event');
   await client.query(`SELECT set_config('${CAPTURE_SETTING}', 'on', true)`);
 }
 
@@ -209,7 +217,10 @@ export function emptyPaymentAuditState(): PaymentAuditState {
 
 export type PaymentChangeEvent = 'payments.create' | 'payments.update' | 'payments.delete' | 'payments.restore';
 
-/** Writes one audit event per changed payment. Returns the number of events written. */
+/**
+ * Writes one audit event per changed payment and, for changes made in ERP, the Bitrix24 notification rows of the
+ * affected orders (`recordPaymentNotifications`). Returns the number of events written.
+ */
 export async function recordPaymentChanges(
   client: DatabaseClient,
   input: RecordPaymentChangesInput,
@@ -217,6 +228,7 @@ export async function recordPaymentChanges(
   const paymentIds = [...new Set([...input.before.payments.keys(), ...input.after.payments.keys()])].sort((a, b) => a - b);
   let actor: PaymentAuditActor | null = input.actor;
   let written = 0;
+  const notified: NotifiedPaymentChange[] = [];
   for (const paymentId of paymentIds) {
     const was = input.before.payments.get(paymentId) ?? null;
     const now = input.after.payments.get(paymentId) ?? null;
@@ -234,7 +246,7 @@ export async function recordPaymentChanges(
       : { ...now!, ...orderTotals(input.after, afterOrderId) });
     const relatedEntities: AuditRelatedEntity[] = [{ entityType: 'order', entityId: afterOrderId }];
     if (beforeOrderId !== afterOrderId) relatedEntities.push({ entityType: 'order', entityId: beforeOrderId });
-    await auditService.record(client, {
+    const auditId = await auditService.record(client, {
       event,
       entityType: 'payment',
       entityId: paymentId,
@@ -255,8 +267,10 @@ export async function recordPaymentChanges(
         ...(input.requestRef ? { requestRef: input.requestRef } : {}),
       },
     });
+    notified.push({ event, was, now, auditId });
     written += 1;
   }
+  await recordPaymentNotifications(client, { origin: input.origin, requestId: input.requestId, actor }, notified);
   return written;
 }
 

@@ -122,6 +122,15 @@ export class CrmSyncRuntimeConfigService {
     };
   }
 
+  /** Delivery of payment notifications (rows are written regardless). */
+  getPaymentNotifications(): { enabled: boolean; orderIds: ReadonlySet<string> } {
+    const raw = this.config.get('BACKEND_BITRIX24_PAYMENT_NOTIFICATIONS_ORDER_IDS', { infer: true }) ?? '';
+    return {
+      enabled: this.config.get('BACKEND_BITRIX24_PAYMENT_NOTIFICATIONS', { infer: true }) ?? false,
+      orderIds: new Set(raw.split(',').map((id) => id.trim()).filter(Boolean)),
+    };
+  }
+
   isProductionInitializationReady(): boolean {
     // Explicit CRM conversion owns deadline registration in its transaction.
     // The generic order-save sync flag and background relays do not own it.

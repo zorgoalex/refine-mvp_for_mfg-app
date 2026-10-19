@@ -139,7 +139,8 @@ describe('recordPaymentChanges', () => {
     const client = fakeClient();
     await recordPaymentChanges(client, input(state([], { 15: 0 }), state([row()], { 15: 250 })));
 
-    expect(client.queries.some((q) => /FROM users/.test(q.text))).toBe(false);
+    // The audit itself does not look the author up (the notification reads the full name separately).
+    expect(client.queries.some((q) => /FROM users u LEFT JOIN roles/.test(q.text))).toBe(false);
     expect(client.audits()[0]).toMatchObject({ userId: '1', username: 'admin', role: 'admin' });
   });
 });
