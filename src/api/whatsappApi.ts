@@ -12,6 +12,9 @@ import type {
   WhatsAppTemplateInput,
   WhatsAppTechnicalLogQuery,
   WhatsAppTechnicalLogResponse,
+  WhatsAppNotificationChannelDto,
+  WhatsAppNotificationJournalQuery,
+  WhatsAppNotificationJournalResponse,
 } from "./types/whatsappApi.types";
 
 export const whatsappApi = {
@@ -63,9 +66,16 @@ export const whatsappApi = {
     ),
   exportTechnicalLogs: (query: WhatsAppTechnicalLogQuery = {}) =>
     httpClient.download(withQuery(apiRoutes.whatsapp.technicalLogsExport, query)),
+  notificationChannel: (options?: RequestOptions) =>
+    httpClient.get<WhatsAppNotificationChannelDto>(apiRoutes.whatsapp.notificationChannel, options),
+  notificationDeliveries: (query: WhatsAppNotificationJournalQuery = {}, options?: RequestOptions) =>
+    httpClient.get<WhatsAppNotificationJournalResponse>(
+      withQuery(apiRoutes.whatsapp.notificationDeliveries, query),
+      options,
+    ),
 };
 
-function withQuery(path: string, query: WhatsAppTechnicalLogQuery): string {
+function withQuery(path: string, query: object): string {
   const params = new URLSearchParams();
   Object.entries(query).forEach(([key, value]) => {
     if (value !== undefined && value !== "") params.set(key, String(value));

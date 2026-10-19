@@ -398,6 +398,8 @@ export const apiRoutes = {
     audit: backendApiPath('/whatsapp/audit'),
     technicalLogs: backendApiPath('/whatsapp/technical-logs'),
     technicalLogsExport: backendApiPath('/whatsapp/technical-logs/export'),
+    notificationChannel: backendApiPath('/whatsapp/notifications/channel'),
+    notificationDeliveries: backendApiPath('/whatsapp/notifications/deliveries'),
     dailyDigest: {
       settings: backendApiPath('/whatsapp/daily-digest/settings'),
       preview: backendApiPath('/whatsapp/daily-digest/preview'),

@@ -11,6 +11,9 @@ import { installAuthorizationSnapshot, withLocalAuthorizationSnapshot } from '..
 import { WhatsAppNotificationPort } from './whatsapp-notification.port';
 import { WhatsAppNotificationRepository } from './whatsapp-notification.repository';
 import { WhatsAppNotificationWorker } from './whatsapp-notification-worker.service';
+import { parseWhatsAppNotificationJournalQuery } from './whatsapp-notification-journal.dto';
+import { WhatsAppNotificationJournalService } from './whatsapp-notification-journal.service';
+import type { PermissionName } from '../../../permissions/permissions';
 import type { WhatsAppNotificationRequest } from './whatsapp-notification.types';
 
 // Real PostgreSQL in an isolated schema: set WHATSAPP_BROADCAST_TEST_DATABASE_URL (or TEST_DATABASE_URL).
@@ -627,5 +630,59 @@ describe.skipIf(!databaseUrl)('WhatsApp notification channel (PostgreSQL, isolat
     const after = await enqueue();
     await tick();
     expect((await row(after.deliveryId)).state).toBe('sent');
+  });
+
+  it('the journal lists deliveries newest first with filters, a masked phone and the channel state', async () => {
+    const VIEWER = { permissions: ['whatsapp.manage', 'onec.view'] as PermissionName[] };
+    const journal = new WhatsAppNotificationJournalService(database, { getConfig: () => runtime } as unknown as WhatsAppRuntimeConfigService);
+    const marker = `Тест журнал ${randomUUID().slice(0, 8)}`;
+    const toUser = await enqueue({ title: marker });
+    now = new Date(now.getTime() + 1000);
+    const toChat = await enqueue({ title: `${marker} 100%_`, recipient: { chatId: GROUP }, requiredPermission: null, level: 'error' });
+    await tick();
+    const all = await journal.list({ page: 1, pageSize: 50, search: marker }, VIEWER);
+    expect(all.pagination.total).toBe(2);
+    expect(all.data.map((item) => item.deliveryId)).toEqual([toChat.deliveryId, toUser.deliveryId]);
+    expect(all.data[0]).toMatchObject({ state: 'sent', level: 'error', recipient: { kind: 'chat', chatId: GROUP }, sourceType: 'onec_alert', sourceId: '77' });
+    expect(all.data[1]).toMatchObject({ state: 'queued', title: marker, text: `*${marker}*\n\nНет связи 15 минут`, requiredPermission: 'onec.view',
+      recipient: { kind: 'user', userId: OPERATOR, username: 'notify-operator', employeeName: 'Тест Оператор' } });
+    const masked = (all.data[1].recipient as { phoneMasked: string | null }).phoneMasked;
+    expect(masked).toBeTruthy();
+    expect(masked).not.toContain(PHONE);
+    // LIKE wildcards in the search are literal.
+    expect((await journal.list({ page: 1, pageSize: 50, search: `${marker} 100%_` }, VIEWER)).data.map((item) => item.deliveryId)).toEqual([toChat.deliveryId]);
+    expect((await journal.list({ page: 1, pageSize: 50, search: '%' }, VIEWER)).data.every((item) => `${item.title}`.includes('%'))).toBe(true);
+    expect((await journal.list({ page: 1, pageSize: 50, search: marker, state: 'queued' }, VIEWER)).data.map((item) => item.deliveryId)).toEqual([toUser.deliveryId]);
+    expect((await journal.list({ page: 1, pageSize: 50, search: marker, recipientKind: 'chat' }, VIEWER)).pagination.total).toBe(1);
+    expect((await journal.list({ page: 2, pageSize: 1, search: marker }, VIEWER)).data.map((item) => item.deliveryId)).toEqual([toUser.deliveryId]);
+    expect((await journal.list({ page: 1, pageSize: 50, search: marker, from: '2000-01-01', to: '2000-01-02' }, VIEWER)).pagination.total).toBe(0);
+    expect((await journal.list({ page: 1, pageSize: 50, search: marker, from: '2000-01-01', to: '2999-01-01' }, VIEWER)).pagination.total).toBe(2);
+
+    await q('UPDATE whatsapp_broadcast_control SET paused = true');
+    // Rows of a source need its read permission (literal, at read time); a row's own required permission too.
+    const hidden = await journal.list({ page: 1, pageSize: 50, search: marker }, { permissions: ['whatsapp.manage'] });
+    expect(hidden).toMatchObject({ data: [], pagination: { total: 0, totalCapped: false } });
+    await q(`UPDATE whatsapp_notification_deliveries SET source_type = 'other_module' WHERE delivery_id = $1`, [toChat.deliveryId]);
+    expect((await journal.list({ page: 1, pageSize: 50, search: marker }, VIEWER)).data.map((item) => item.deliveryId)).toEqual([toUser.deliveryId]);
+    await q(`UPDATE whatsapp_notification_deliveries SET source_type = 'onec_alert', required_permission = NULL WHERE delivery_id = $1`, [toChat.deliveryId]);
+    await q(`UPDATE whatsapp_notification_deliveries SET required_permission = 'orders.view' WHERE delivery_id = $1`, [toUser.deliveryId]);
+    expect((await journal.list({ page: 1, pageSize: 50, search: marker }, VIEWER)).data.map((item) => item.deliveryId)).toEqual([toChat.deliveryId]);
+    expect((await journal.list({ page: 1, pageSize: 50, search: marker }, { permissions: [...VIEWER.permissions, 'orders.view'] })).pagination.total).toBe(2);
+    await q(`UPDATE whatsapp_notification_deliveries SET required_permission = 'onec.view' WHERE delivery_id = $1`, [toUser.deliveryId]);
+
+    const channel = await journal.channel();
+    expect(channel).toMatchObject({ enabled: true, relayOwner: 'in_process', deliverable: true, paused: true, epoch: worker.currentEpoch(),
+      limits: { globalGapSeconds: 10, perRecipientHourly: 20, purgeAfterDays: 30 } });
+    expect(channel.queued).toBeGreaterThanOrEqual(1);
+    expect(channel.lastSentAt).not.toBeNull();
+  });
+
+  it('the journal query refuses unknown filters and a reversed period', () => {
+    expect(parseWhatsAppNotificationJournalQuery({ page: '2', state: 'sent', from: '2026-10-01', to: '2026-10-19' })).toMatchObject({ page: 2, pageSize: 50, state: 'sent' });
+    expect(parseWhatsAppNotificationJournalQuery({ from: '2028-02-29', to: '2028-02-29' })).toMatchObject({ from: '2028-02-29' });
+    for (const bad of [{ state: 'bogus' }, { pageSize: '500' }, { from: '2026-10-19', to: '2026-10-01' }, { other: '1' }, { sourceType: 'Bad Type' },
+      { from: '2026-02-30' }, { from: '2026-02-29' }, { to: '2026-13-01' }, { to: '2026-00-10' }, { from: '0000-01-01' }]) {
+      expect(() => parseWhatsAppNotificationJournalQuery(bad)).toThrow(ApiError);
+    }
   });
 });
