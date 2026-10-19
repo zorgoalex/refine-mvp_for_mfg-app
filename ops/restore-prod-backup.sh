@@ -85,10 +85,13 @@ PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 [[ -n "$MAIN_DUMP" ]] || fail "--main-dump is required"
 [[ -f "$MAIN_DUMP" ]] || fail "Main dump not found: $MAIN_DUMP"
 
-set -a
-# shellcheck disable=SC1090
-source "$ENV_FILE"
-set +a
+# Literal .env reading: an unquoted `$` in an unrelated secret must not abort
+# under `set -u`; docker compose reads the same file via --env-file.
+# shellcheck source=lib/env-file.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env-file.sh"
+# Export the whole file (as `set -a; source` did): its COMPOSE_PROJECT_NAME must
+# override one inherited from the caller, or compose would target another stack.
+load_env_file "$ENV_FILE" || fail "Cannot parse env file: $ENV_FILE"
 
 [[ -n "${PG_DB:-}" ]] || fail "PG_DB is required in .env"
 [[ -n "${PG_USER:-}" ]] || fail "PG_USER is required in .env"

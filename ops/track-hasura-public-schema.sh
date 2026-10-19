@@ -50,10 +50,10 @@ PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 [[ -f "$COMPOSE_FILE" ]] || fail "Compose file not found: $COMPOSE_FILE"
 [[ "$SCHEMA" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || fail "Unsafe schema name: $SCHEMA"
 
-set -a
-# shellcheck disable=SC1090
-source "$ENV_FILE"
-set +a
+# Literal .env reading (no shell expansion): see lib/env-file.sh.
+# shellcheck source=lib/env-file.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env-file.sh"
+load_env_file "$ENV_FILE" || fail "Cannot parse env file: $ENV_FILE"
 
 [[ -n "${PG_DB:-}" ]] || fail "PG_DB is required in .env"
 [[ -n "${PG_USER:-}" ]] || fail "PG_USER is required in .env"
