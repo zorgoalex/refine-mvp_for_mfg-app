@@ -886,3 +886,67 @@ describe('Bitrix24ApiClient payment cards', () => {
     expect(requests.at(-1)).toEqual({ method: 'crm.activity.update', body: { id: 8015, fields: { COMPLETED: 'Y' } } });
   });
 });
+
+describe('Bitrix24ApiClient payment notifications', () => {
+  const webhook = 'https://portal.bitrix24.kz/rest/1/abcdef0123456789abcd';
+  const body = (fetchFn: ReturnType<typeof vi.fn<FetchFn>>, call = 0) => JSON.parse(String(fetchFn.mock.calls[call][1]?.body));
+
+  it('adds a deal comment and returns its id', async () => {
+    const fetchFn = vi.fn<FetchFn>().mockResolvedValue(jsonResponse({ result: 901 }));
+    const client = new Bitrix24ApiClient(webhook, fetchFn, 30000, noWait);
+    expect(await client.addDealComment('7001', 'текст')).toBe('901');
+    expect(String(fetchFn.mock.calls[0][0])).toMatch(/\/crm\.timeline\.comment\.add$/);
+    expect(body(fetchFn)).toEqual({ fields: { ENTITY_ID: 7001, ENTITY_TYPE: 'deal', COMMENT: 'текст' } });
+  });
+
+  it.each([
+    ['a 500 after the comment was created', () => jsonResponse({ error: 'INTERNAL_SERVER_ERROR' }, 500)],
+    ['a network failure', () => { throw new TypeError('fetch failed'); }],
+    ['a query limit', () => jsonResponse({ error: 'QUERY_LIMIT_EXCEEDED' }, 503)],
+  ])('never repeats comment.add or im.notify after %s', async (_name, answer) => {
+    const fetchFn = vi.fn<FetchFn>().mockImplementation(async () => answer());
+    const client = new Bitrix24ApiClient(webhook, fetchFn, 30000, noWait);
+    await expect(client.addDealComment('7001', 'текст')).rejects.toBeInstanceOf(Bitrix24ApiError);
+    await expect(client.notifyUser('42', 'текст')).rejects.toBeInstanceOf(Bitrix24ApiError);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not put the webhook into an error', async () => {
+    const fetchFn = vi.fn<FetchFn>().mockResolvedValue(jsonResponse({ error: 'X', error_description: `bad ${webhook}/im.notify.system.add` }, 400));
+    const client = new Bitrix24ApiClient(webhook, fetchFn, 30000, noWait);
+    const error = await client.notifyUser('42', 'текст').catch((caught: Error) => caught);
+    expect(String(error)).not.toContain('abcdef0123456789abcd');
+  });
+
+  it('sends a system notification to the user', async () => {
+    const fetchFn = vi.fn<FetchFn>().mockResolvedValue(jsonResponse({ result: 555 }));
+    const client = new Bitrix24ApiClient(webhook, fetchFn, 30000, noWait);
+    await client.notifyUser('42', 'текст');
+    expect(String(fetchFn.mock.calls[0][0])).toMatch(/\/im\.notify\.system\.add$/);
+    expect(body(fetchFn)).toEqual({ USER_ID: 42, MESSAGE: 'текст' });
+  });
+
+  it('lists deal comments page by page and reports a complete listing', async () => {
+    const fetchFn = vi.fn<FetchFn>()
+      .mockResolvedValueOnce(jsonResponse({ result: [{ ID: '1', ENTITY_ID: '7001', COMMENT: 'a' }], next: 50 }))
+      .mockResolvedValueOnce(jsonResponse({ result: [{ ID: '2', ENTITY_ID: '7001', COMMENT: 'b' }, { ID: '3', ENTITY_ID: '9', COMMENT: 'other deal' }] }));
+    const client = new Bitrix24ApiClient(webhook, fetchFn, 30000, noWait);
+    const page = await client.listDealComments('7001', new Date('2026-10-19T10:00:00Z'));
+    expect(page).toEqual({ complete: true, comments: [{ id: '1', comment: 'a' }, { id: '2', comment: 'b' }] });
+    expect(body(fetchFn, 0)).toMatchObject({ filter: { ENTITY_ID: 7001, ENTITY_TYPE: 'deal', '>=CREATED': '2026-10-19T10:00:00.000Z' }, start: 0 });
+    expect(body(fetchFn, 1)).toMatchObject({ start: 50 });
+  });
+
+  it('reports an incomplete listing on a malformed page or after the page limit', async () => {
+    const malformed = vi.fn<FetchFn>().mockResolvedValue(jsonResponse({ result: [{ ID: '1', ENTITY_ID: '7001' }], next: 0 }));
+    expect((await new Bitrix24ApiClient(webhook, malformed, 30000, noWait).listDealComments('7001', new Date())).complete).toBe(false);
+    let start = 0;
+    const endless = vi.fn<FetchFn>().mockImplementation(async () => {
+      start += 50;
+      return jsonResponse({ result: [{ ID: String(start), ENTITY_ID: '7001', COMMENT: '' }], next: start });
+    });
+    const page = await new Bitrix24ApiClient(webhook, endless, 30000, noWait).listDealComments('7001', new Date());
+    expect(page.complete).toBe(false);
+    expect(endless).toHaveBeenCalledTimes(20);
+  });
+});

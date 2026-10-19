@@ -485,6 +485,27 @@ describe('bitrix payment effect events', () => {
     expect(buildAuditReadableSummary(effect('crm_sync.payment_card_close_requested')).notes).toContain('Bitrix: запрошено закрытие карточки оплаты');
   });
 
+  it('payment notifications: comment, bell, warning and skip reason', () => {
+    const sent = buildAuditReadableSummary(effect('crm_sync.payment_notification_sent', {
+      entityType: 'order',
+      after: { status: 'sent', commentState: 'created', notifyState: 'no_scope' },
+      metadata: { notifyOutcome: 'no_scope', syncIncomplete: true },
+    }));
+    expect(sent.title).toBe('Bitrix: менеджер уведомлён об изменении оплат');
+    expect(sent.notes).toEqual(expect.arrayContaining([
+      'Комментарий в сделке: добавлен',
+      'Уведомление ответственному: нет права «Чат и уведомления» у вебхука',
+      'Оплата в Bitrix к этому моменту ещё не была обновлена',
+    ]));
+    const skipped = buildAuditReadableSummary(effect('crm_sync.payment_notification_skipped', { entityType: 'order', metadata: { skipReason: 'no_deal' } }));
+    expect(skipped.notes).toContain('Bitrix: у заказа нет сделки — уведомление не отправлено');
+    const failed = buildAuditReadableSummary(effect('crm_sync.payment_notification_failed', {
+      entityType: 'order', after: { commentState: 'unknown', notifyState: 'failed' }, metadata: { notifyOutcome: 'failed' },
+    }));
+    expect(failed.title).toBe('Bitrix: не удалось уведомить менеджера');
+    expect(failed.notes).toEqual(expect.arrayContaining(['Комментарий в сделке: не удалось подтвердить', 'Уведомление ответственному: не отправлено']));
+  });
+
   it('titles crm_sync upsert/delete by entity type', () => {
     expect(buildAuditReadableSummary(effect('crm_sync.upsert')).title).toBe('Оплата отправлена в Bitrix');
     expect(buildAuditReadableSummary(effect('crm_sync.delete')).title).toBe('Оплата удалена в Bitrix');

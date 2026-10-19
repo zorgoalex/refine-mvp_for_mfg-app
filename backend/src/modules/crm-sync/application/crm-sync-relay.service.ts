@@ -34,6 +34,10 @@ interface CrmSyncRelayServiceDeps {
   paidPaymentRecovery?: {
     recoverDue(requestGuard: () => Promise<void>): Promise<{ completed: number; failed: number }>;
   };
+  /** Delivers payment notifications to Bitrix24 (Bitrix24PaymentNotificationWorker.runDue). */
+  paymentNotifications?: {
+    runDue(requestGuard: () => Promise<void>): Promise<{ processed: number }>;
+  };
   outboxRepo: PgCrmSyncOutboxRepository;
   consumer: Bitrix24SyncConsumer;
   dryRunConsumer: Bitrix24SyncConsumer;
@@ -56,6 +60,7 @@ interface CrmSyncRelayServiceDeps {
 export class CrmSyncRelayService {
   private readonly stageLane: CrmSyncRelayServiceDeps['stageLane'];
   private readonly paidPaymentRecovery: CrmSyncRelayServiceDeps['paidPaymentRecovery'];
+  private readonly paymentNotifications: CrmSyncRelayServiceDeps['paymentNotifications'];
   private readonly outboxRepo: PgCrmSyncOutboxRepository;
   private readonly consumer: Bitrix24SyncConsumer;
   private readonly dryRunConsumer: Bitrix24SyncConsumer;
@@ -68,6 +73,7 @@ export class CrmSyncRelayService {
   constructor(deps: CrmSyncRelayServiceDeps) {
     this.stageLane = deps.stageLane;
     this.paidPaymentRecovery = deps.paidPaymentRecovery;
+    this.paymentNotifications = deps.paymentNotifications;
     this.outboxRepo = deps.outboxRepo;
     this.consumer = deps.consumer;
     this.dryRunConsumer = deps.dryRunConsumer;
@@ -399,6 +405,23 @@ export class CrmSyncRelayService {
         );
       }
       activeEvents.delete(event.outboxEventId);
+      }
+      // Payment notifications go after the batch: the sync they wait for has just been processed.
+      if (!writerOwnershipLost) {
+        try {
+          const notified = await this.paymentNotifications?.runDue(async () => {
+            await assertAdvisoryOwned();
+            if (writerOwnershipLost || !await this.outboxRepo.heartbeatWriterLock(this.db, writerToken)) {
+              writerOwnershipLost = true;
+              throw new OwnershipLost();
+            }
+          });
+          if (notified && notified.processed > 0) {
+            this.logger.log(redactLogFields({ event: 'crm_sync_payment_notifications', ...notified }));
+          }
+        } catch (error) {
+          this.logger.error(redactLogFields({ event: 'crm_sync_payment_notifications_failed', errorMessage: error instanceof Error ? error.message : String(error) }));
+        }
       }
     } finally {
       clearInterval(heartbeatTimer);

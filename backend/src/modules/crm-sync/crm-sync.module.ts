@@ -14,6 +14,8 @@ import { Bitrix24ApiClient, Bitrix24AdmissionState, NoopBitrix24ApiClient } from
 import { FailingBitrix24ApiClient } from './adapters/failing-bitrix24-api-client';
 import { Bitrix24SyncConsumer } from './application/bitrix24-sync-consumer';
 import { Bitrix24PaidPaymentGuard } from './application/bitrix24-paid-payment-guard';
+import { Bitrix24PaymentNotificationWorker } from './application/bitrix24-payment-notification-worker';
+import { PgCrmSyncPaymentNotificationRepository } from './adapters/pg-crm-sync-payment-notification-repository';
 import { PgCrmSyncPaidPaymentOperationRepository } from './adapters/pg-crm-sync-paid-payment-operation-repository';
 import { CrmSyncRelayService } from './application/crm-sync-relay.service';
 import { CrmSyncRelaySchedulerService } from './application/crm-sync-relay-scheduler.service';
@@ -372,9 +374,20 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
           durablePaymentCreates: false,
         });
 
+        const paymentNotifications = database.isConfigured
+          ? new Bitrix24PaymentNotificationWorker({
+            bitrix: realBitrix,
+            store: new PgCrmSyncPaymentNotificationRepository(database, audit),
+            policy: () => config.getPaymentNotifications(),
+            erpBaseUrl: bitrixConfig.erpBaseUrl ?? null,
+            portalHost: bitrixPortalHost(bitrixConfig.webhookUrl),
+          })
+          : undefined;
+
         return new CrmSyncRelayService({
           stageLane,
           paidPaymentRecovery: paidPayments,
+          paymentNotifications,
           outboxRepo,
           consumer,
           dryRunConsumer,
@@ -403,3 +416,13 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
   ],
 })
 export class CrmSyncModule {}
+
+/** Host of the portal for deal links; only the host of the webhook URL is used, never its path. */
+function bitrixPortalHost(webhookUrl: string | null): string | null {
+  if (!webhookUrl) return null;
+  try {
+    return new URL(webhookUrl).host || null;
+  } catch {
+    return null;
+  }
+}

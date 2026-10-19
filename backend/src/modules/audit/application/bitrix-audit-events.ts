@@ -98,6 +98,9 @@ export const BITRIX_EVENT_CATALOG: BitrixEventDefinition[] = [
   definition('crm_sync.payment_card_close_requested','Запрошено закрытие карточки оплаты Bitrix со старой суммой','forward','payment','started'),
   definition('crm_sync.payment_card_closed','Закрыта карточка оплаты Bitrix со старой суммой','forward','payment','success'),
   definition('crm_sync.payment_card_close_failed','Не удалось закрыть карточку оплаты Bitrix со старой суммой','forward','payment','error'),
+  definition('crm_sync.payment_notification_sent','Менеджер в Bitrix уведомлён об изменении оплат','forward','payment','success'),
+  definition('crm_sync.payment_notification_failed','Не удалось уведомить менеджера в Bitrix об изменении оплат','forward','payment','error'),
+  definition('crm_sync.payment_notification_skipped','Уведомление менеджеру в Bitrix не отправлено','forward','payment','skipped'),
   definition(
     'bitrix24_reverse.client_upsert',
     'Клиент получен из Bitrix',
