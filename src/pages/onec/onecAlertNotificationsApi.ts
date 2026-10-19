@@ -13,7 +13,9 @@ export type OnecAlertGroupCode =
   | 'other';
 export type OnecAlertPolicyImportance = 'auto' | 'critical' | 'important' | 'info';
 export type OnecAlertImportance = Exclude<OnecAlertPolicyImportance, 'auto'>;
-export type OnecAlertExternalChannel = 'telegram' | 'whatsapp';
+/** `whatsapp` — each recipient personally, `whatsapp_chat` — the policy's WhatsApp chat; Telegram comes later. */
+export type OnecAlertExternalChannel = 'telegram' | 'whatsapp' | 'whatsapp_chat';
+export type OnecAlertExternalState = 'none' | 'pending_delay' | 'queued' | 'suppressed' | 'cancelled';
 export type OnecAlertStage = 'opened' | 'escalated' | 'reminder' | 'resolved' | 'digest';
 
 export interface OnecAlertPolicy {
@@ -44,6 +46,8 @@ export interface OnecAlertGroupView {
   /** Who would receive a stage now; null — nobody (a stage then waits and a critical alert is raised). */
   recipients: { fallbackLevel: 1 | 2 | 3; users: { id: number; name: string }[] } | null;
   filteredOut: { userId: number; username: string }[];
+  /** Recipients WhatsApp cannot reach personally (no employee or work phone); only when the personal channel is on. */
+  withoutWorkPhone?: { id: number; name: string }[];
 }
 
 export interface OnecAlertNotificationsOverview {
@@ -64,11 +68,27 @@ export interface OnecAlertPolicyUpdate {
   recipientRoleCodes: string[];
   recipientUserIds: number[];
   externalChannels: OnecAlertExternalChannel[];
+  /** Absent — the chat is unchanged (changing it needs whatsapp.manage). */
+  whatsappChatId?: string | null;
+  whatsappChatName?: string | null;
   delayMinutes: number;
   repeatMinutes: number | null;
   notifyResolved: boolean;
   quietHours: string | null;
   criticalIgnoresQuietHours: boolean;
+}
+
+/** One WhatsApp recipient row of a dispatch, latest attempt first. */
+export interface OnecAlertExternalRecipient {
+  recipientRowId: number;
+  channel: 'whatsapp';
+  userId: number | null;
+  username?: string | null;
+  chatId: string | null;
+  attempt: number;
+  status: 'queued' | 'skipped' | 'superseded';
+  state: string | null;
+  reason: string | null;
 }
 
 export interface OnecAlertRecentDispatch {
@@ -84,6 +104,15 @@ export interface OnecAlertRecentDispatch {
   kinds: string[];
   kindLabels: string[];
   recipients: { userId: number; username: string | null; shown: boolean; read: boolean }[];
+  externalState?: OnecAlertExternalState;
+  external?: OnecAlertExternalRecipient[];
+}
+
+export interface OnecAlertTestResult {
+  notificationId: string;
+  channels: string[];
+  visibleInBell: boolean;
+  whatsapp?: { target: 'self' | 'chat'; state: string; reason: string | null }[];
 }
 
 const GROUP_PATTERN = /^[a-z_]{1,32}$/;
@@ -104,7 +133,7 @@ export const onecAlertNotificationsApi = {
     return httpClient.patch(path(`/alert-notification-policies/${groupPath(group)}`), body, { headers: { 'If-Match': String(version) } });
   },
 
-  test(group: OnecAlertGroupCode): Promise<{ notificationId: string; channels: string[]; visibleInBell: boolean }> {
+  test(group: OnecAlertGroupCode): Promise<OnecAlertTestResult> {
     return httpClient.post(path(`/alert-notification-policies/${groupPath(group)}/test`), {});
   },
 

@@ -12,6 +12,7 @@ import {
   levelForImportance,
   maxImportance,
   onecAlertGroupOf,
+  quietHoursEnd,
   type OnecAlertMemberView,
 } from './onec-alert-groups';
 
@@ -104,5 +105,25 @@ describe('1C alert groups (plan 2026-10-19 §2.3)', () => {
     });
     expect(many.title).toBe('1С — Выгрузка данных: 12');
     expect(many.message).toContain('…и ещё 2.');
+  });
+});
+
+describe('quietHoursEnd (Asia/Almaty, UTC+5)', () => {
+  it('returns the end of a range crossing midnight when inside it, else null', () => {
+    // 23:30 Almaty = 18:30 UTC → quiet until 08:00 Almaty = 03:00 UTC next day.
+    expect(quietHoursEnd('23:00-08:00', new Date('2026-10-19T18:30:45Z'))?.toISOString()).toBe('2026-10-20T03:00:00.000Z');
+    // 07:59 Almaty → 08:00 Almaty.
+    expect(quietHoursEnd('23:00-08:00', new Date('2026-10-20T02:59:10Z'))?.toISOString()).toBe('2026-10-20T03:00:00.000Z');
+    // 08:00 Almaty is outside (end exclusive), 23:00 inside (start inclusive).
+    expect(quietHoursEnd('23:00-08:00', new Date('2026-10-20T03:00:00Z'))).toBeNull();
+    expect(quietHoursEnd('23:00-08:00', new Date('2026-10-19T18:00:00Z'))?.toISOString()).toBe('2026-10-20T03:00:00.000Z');
+    expect(quietHoursEnd('23:00-08:00', new Date('2026-10-19T10:00:00Z'))).toBeNull();
+  });
+
+  it('handles a daytime range and no quiet hours', () => {
+    expect(quietHoursEnd('13:00-14:00', new Date('2026-10-19T08:20:00Z'))?.toISOString()).toBe('2026-10-19T09:00:00.000Z');
+    expect(quietHoursEnd('13:00-14:00', new Date('2026-10-19T09:20:00Z'))).toBeNull();
+    expect(quietHoursEnd(null, new Date())).toBeNull();
+    expect(quietHoursEnd('bad', new Date())).toBeNull();
   });
 });

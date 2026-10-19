@@ -17314,7 +17314,9 @@ paths:
         version), the users who would receive a stage now with the fallback level (1 — configured, 2 — onec.manage,
         3 — superadmins; all need the literal onec.view), configured users filtered out, the flag
         BACKEND_ONEC_ALERT_NOTIFICATIONS, the dispatcher state (active, enabledAt, lastTickAt) and recipient options.
-        The bell and the mandatory balloon are always on (mandatoryChannels).
+        The bell and the mandatory balloon are always on (mandatoryChannels). External channels: whatsapp (each
+        recipient personally), whatsapp_chat (the policy's WhatsApp chat); groups[].withoutWorkPhone lists recipients
+        WhatsApp cannot reach personally.
       security:
         - {bearerAuth: []}
       x-permission: onec.view
@@ -17331,8 +17333,11 @@ paths:
       description: >-
         Replaces the editable fields of the policy; audited as onec.alert_notification_policy.updated. The bell and the
         mandatory balloon cannot be switched off (inApp/balloon/channels in the body → 422
-        ONEC_ALERT_MANDATORY_CHANNELS); an external channel that is not available yet → 422
-        ONEC_ALERT_CHANNEL_UNAVAILABLE.
+        ONEC_ALERT_MANDATORY_CHANNELS); an external channel that is not available yet (telegram) → 422
+        ONEC_ALERT_CHANNEL_UNAVAILABLE. whatsapp_chat needs whatsappChatId (422 ONEC_ALERT_WHATSAPP_CHAT_REQUIRED);
+        changing whatsappChatId needs the literal whatsapp.manage too (403 ONEC_ALERT_WHATSAPP_MANAGE_REQUIRED);
+        absent whatsappChatId/whatsappChatName keep the current chat. A removed channel or a changed chat cancels the
+        unstarted WhatsApp deliveries it no longer wants, in the same transaction.
       security:
         - {bearerAuth: []}
       x-permission: onec.manage
@@ -17351,7 +17356,9 @@ paths:
                 importance: {type: string, enum: [auto, critical, important, info]}
                 recipientRoleCodes: {type: array, maxItems: 50, items: {type: string}}
                 recipientUserIds: {type: array, maxItems: 200, items: {type: integer, minimum: 1}}
-                externalChannels: {type: array, maxItems: 2, items: {type: string, enum: [telegram, whatsapp]}}
+                externalChannels: {type: array, maxItems: 3, items: {type: string, enum: [telegram, whatsapp, whatsapp_chat]}}
+                whatsappChatId: {type: string, nullable: true, pattern: "^\\d{5,24}(?:-\\d{5,24})?@g\\.us$", description: "Chat from GET /api/v1/whatsapp/groups; absent — unchanged"}
+                whatsappChatName: {type: string, nullable: true, maxLength: 200, description: "Name of the chat, shown on the screen"}
                 delayMinutes: {type: integer, minimum: 0, maximum: 120}
                 repeatMinutes: {type: integer, minimum: 30, maximum: 1440, nullable: true}
                 notifyResolved: {type: boolean}
@@ -17372,15 +17379,16 @@ paths:
       operationId: testOnecAlertNotification
       summary: "Send a test 1C alert notification of a group to the caller"
       description: >-
-        One bell row with the mandatory balloon to the caller; audited as onec.alert_notification.test_sent. At most
-        one per minute per caller and group. visibleInBell=false when the caller lacks the literal onec.view.
+        One bell row with the mandatory balloon to the caller, plus the policy's WhatsApp channels (the caller
+        personally, the chat); audited as onec.alert_notification.test_sent. At most one per minute per caller and
+        group. visibleInBell=false when the caller lacks the literal onec.view.
       security:
         - {bearerAuth: []}
       x-permission: onec.manage
       parameters:
         - {name: group, in: path, required: true, schema: {type: string, enum: [agent_offline, agent_state, sync, commands, config_source, certificate, stock_snapshots, other]}}
       responses:
-        '200': {description: "{notificationId, channels, visibleInBell}"}
+        '200': {description: "{notificationId, channels, visibleInBell, whatsapp[{target: self|chat, state, reason}]}"}
         '401': {description: Authentication required}
         '403': {description: Permission denied}
         '404': {description: Unknown group}
@@ -17397,7 +17405,7 @@ paths:
       parameters:
         - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
       responses:
-        '200': {description: "{data[]}: dispatchId, groupCode, groupLabel, stage, importance, sourceId, fallbackLevel, createdAt, members, kinds, kindLabels, recipients[{userId, username, shown, read}]"}
+        '200': {description: "{data[]}: dispatchId, groupCode, groupLabel, stage, importance, sourceId, fallbackLevel, createdAt, members, kinds, kindLabels, recipients[{userId, username, shown, read}], externalState, external[{recipientRowId, channel, userId, username, chatId, attempt, status, skipReason, deliveryId, expiresAt, channelState, channelReason, state, reason}]"}
         '401': {description: Authentication required}
         '403': {description: Permission denied}
   /api/v1/onec/alerts/{alertId}/acknowledge:

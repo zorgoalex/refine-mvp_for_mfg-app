@@ -126,6 +126,29 @@ export function isValidQuietHours(value: string): boolean {
   return start !== end;
 }
 
+const almatyClock = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Almaty', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+
+function minutesOf(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + m;
+}
+
+/**
+ * End of the quiet hours (Asia/Almaty) when `now` is inside them, else null. The start is inclusive, the end
+ * exclusive; a range may cross midnight (23:00-08:00).
+ */
+export function quietHoursEnd(quietHours: string | null, now: Date): Date | null {
+  if (quietHours === null || !isValidQuietHours(quietHours)) return null;
+  const [start, end] = quietHours.split('-').map(minutesOf);
+  const local = minutesOf(almatyClock.format(now));
+  const inside = start < end ? local >= start && local < end : local >= start || local < end;
+  if (!inside) return null;
+  const wait = (end - local + 1440) % 1440;
+  const at = new Date(now.getTime() + wait * 60_000);
+  at.setUTCSeconds(0, 0);
+  return at;
+}
+
 // ---------------------------------------------------------------- texts
 
 export interface OnecAlertMemberView {

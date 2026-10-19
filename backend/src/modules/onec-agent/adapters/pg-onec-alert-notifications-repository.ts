@@ -10,13 +10,17 @@ import type {
   OnecAlertStage,
 } from '../domain/onec-alert-groups';
 
+/** External channels of a policy: `whatsapp` — personally to the recipients, `whatsapp_chat` — to the policy's chat. */
+export type OnecAlertExternalChannel = 'telegram' | 'whatsapp' | 'whatsapp_chat';
+export type OnecAlertExternalState = 'none' | 'pending_delay' | 'queued' | 'suppressed' | 'cancelled';
+
 /** One row of onec_alert_notification_policies. */
 export interface OnecAlertPolicy {
   groupCode: OnecAlertGroupCode;
   importance: OnecAlertPolicyImportance;
   recipientRoleCodes: string[];
   recipientUserIds: number[];
-  externalChannels: ('telegram' | 'whatsapp')[];
+  externalChannels: OnecAlertExternalChannel[];
   whatsappChatId: string | null;
   whatsappChatName: string | null;
   delayMinutes: number;
@@ -81,6 +85,87 @@ export interface RecentDispatchRow {
   members: number;
   kinds: string[];
   recipients: { userId: number; username: string | null; shown: boolean; read: boolean }[];
+  externalState: OnecAlertExternalState;
+  external: ExternalRecipientRow[];
+}
+
+/** One external-channel recipient row (WhatsApp personal or chat), the latest attempt first. */
+export interface ExternalRecipientRow {
+  recipientRowId: number;
+  dispatchId: number;
+  channel: 'whatsapp';
+  userId: number | null;
+  username?: string | null;
+  chatId: string | null;
+  attempt: number;
+  status: 'queued' | 'skipped' | 'superseded';
+  skipReason: string | null;
+  deliveryId: string | null;
+  expiresAt: string | null;
+  channelState: string | null;
+  channelReason: string | null;
+}
+
+/** A recipient row to insert. */
+export interface RecipientRowInput {
+  channel: 'in_app' | 'balloon' | 'whatsapp';
+  userId: number | null;
+  chatId?: string | null;
+  attempt?: number;
+  fallbackLevel: number | null;
+  status: 'written' | 'queued' | 'skipped';
+  skipReason?: string | null;
+  notificationId?: string | null;
+  channelDeliveryRef?: string | null;
+  expiresAt?: Date | null;
+  channelState?: string | null;
+  channelReason?: string | null;
+}
+
+/** The dispatch row under its lock (external part of a dispatch, plan §2.5). */
+export interface LockedDispatch {
+  dispatchId: number;
+  sourceId: number | null;
+  group: OnecAlertGroupCode;
+  stage: OnecAlertStage;
+  importance: OnecAlertImportance;
+  externalState: OnecAlertExternalState;
+  createdAt: Date;
+}
+
+const EXTERNAL_ROW_COLUMNS = `r.recipient_row_id::text, r.dispatch_id::text, r.channel, r.user_id::text, r.chat_id, r.attempt, r.status,
+  r.skip_reason, r.channel_delivery_ref, r.expires_at, r.channel_state, r.channel_reason`;
+
+interface ExternalRow {
+  recipient_row_id: string;
+  dispatch_id: string;
+  channel: 'whatsapp';
+  user_id: string | null;
+  chat_id: string | null;
+  attempt: number;
+  status: ExternalRecipientRow['status'];
+  skip_reason: string | null;
+  channel_delivery_ref: string | null;
+  expires_at: Date | null;
+  channel_state: string | null;
+  channel_reason: string | null;
+}
+
+function mapExternal(row: ExternalRow): ExternalRecipientRow {
+  return {
+    recipientRowId: Number(row.recipient_row_id),
+    dispatchId: Number(row.dispatch_id),
+    channel: row.channel,
+    userId: row.user_id === null ? null : Number(row.user_id),
+    chatId: row.chat_id,
+    attempt: Number(row.attempt),
+    status: row.status,
+    skipReason: row.skip_reason,
+    deliveryId: row.channel_delivery_ref,
+    expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : null,
+    channelState: row.channel_state,
+    channelReason: row.channel_reason,
+  };
 }
 
 interface PolicyRow {
@@ -88,7 +173,7 @@ interface PolicyRow {
   importance: OnecAlertPolicyImportance;
   recipient_role_codes: string[];
   recipient_user_ids: (string | number)[];
-  external_channels: ('telegram' | 'whatsapp')[];
+  external_channels: OnecAlertExternalChannel[];
   whatsapp_chat_id: string | null;
   whatsapp_chat_name: string | null;
   delay_minutes: number;
@@ -298,17 +383,19 @@ export class PgOnecAlertNotificationsRepository {
   async updatePolicy(
     tx: DatabaseClient,
     group: OnecAlertGroupCode,
-    next: Pick<OnecAlertPolicy, 'importance' | 'recipientRoleCodes' | 'recipientUserIds' | 'externalChannels' | 'delayMinutes' | 'repeatMinutes' | 'notifyResolved' | 'quietHours' | 'criticalIgnoresQuietHours'>,
+    next: Pick<OnecAlertPolicy, 'importance' | 'recipientRoleCodes' | 'recipientUserIds' | 'externalChannels' | 'whatsappChatId' | 'whatsappChatName' | 'delayMinutes' | 'repeatMinutes' | 'notifyResolved' | 'quietHours' | 'criticalIgnoresQuietHours'>,
     actorId: number,
   ): Promise<void> {
     await tx.query(
       `UPDATE onec_alert_notification_policies
           SET importance = $2, recipient_role_codes = $3::text[], recipient_user_ids = $4::bigint[], external_channels = $5::text[],
               delay_minutes = $6, repeat_minutes = $7, notify_resolved = $8, quiet_hours = $9, critical_ignores_quiet_hours = $10,
+              whatsapp_chat_id = $12, whatsapp_chat_name = $13,
               version = version + 1, updated_by = $11, updated_at = now()
         WHERE group_code = $1`,
       [group, next.importance, next.recipientRoleCodes, next.recipientUserIds, next.externalChannels, next.delayMinutes,
-        next.repeatMinutes, next.notifyResolved, next.quietHours, next.criticalIgnoresQuietHours, actorId],
+        next.repeatMinutes, next.notifyResolved, next.quietHours, next.criticalIgnoresQuietHours, actorId,
+        next.whatsappChatId, next.whatsappChatName],
     );
   }
 
@@ -465,12 +552,22 @@ export class PgOnecAlertNotificationsRepository {
 
   async insertDispatch(
     tx: DatabaseClient,
-    input: { sourceId: number | null; group: OnecAlertGroupCode; stage: OnecAlertStage; importance: OnecAlertImportance; fallbackLevel: number; requestId: string },
+    input: {
+      sourceId: number | null;
+      group: OnecAlertGroupCode;
+      stage: OnecAlertStage;
+      importance: OnecAlertImportance;
+      fallbackLevel: number;
+      requestId: string;
+      externalState?: OnecAlertExternalState;
+      externalDueAt?: Date | null;
+    },
   ): Promise<number> {
     const { rows } = await tx.query<{ dispatch_id: string }>(
-      `INSERT INTO onec_alert_dispatches (source_id, group_code, stage, importance, fallback_level, request_id)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING dispatch_id::text`,
-      [input.sourceId, input.group, input.stage, input.importance, input.fallbackLevel, input.requestId],
+      `INSERT INTO onec_alert_dispatches (source_id, group_code, stage, importance, fallback_level, request_id, external_state, external_due_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING dispatch_id::text`,
+      [input.sourceId, input.group, input.stage, input.importance, input.fallbackLevel, input.requestId, input.externalState ?? 'none',
+        input.externalDueAt ?? null],
     );
     return Number(rows[0].dispatch_id);
   }
@@ -484,18 +581,224 @@ export class PgOnecAlertNotificationsRepository {
     );
   }
 
-  async insertRecipientRows(
-    tx: DatabaseClient,
-    dispatchId: number,
-    rows: readonly { channel: 'in_app' | 'balloon'; userId: number; fallbackLevel: number; notificationId: string }[],
-  ): Promise<void> {
+  async insertRecipientRows(tx: DatabaseClient, dispatchId: number, rows: readonly RecipientRowInput[]): Promise<void> {
     if (rows.length === 0) return;
     await tx.query(
-      `INSERT INTO onec_alert_dispatch_recipients (dispatch_id, channel, user_id, fallback_level, status, notification_id)
-       SELECT $1, r.channel, r.user_id, r.fallback_level, 'written', r.notification_id
-         FROM unnest($2::text[], $3::bigint[], $4::smallint[], $5::uuid[]) AS r(channel, user_id, fallback_level, notification_id)`,
-      [dispatchId, rows.map((r) => r.channel), rows.map((r) => r.userId), rows.map((r) => r.fallbackLevel), rows.map((r) => r.notificationId)],
+      `INSERT INTO onec_alert_dispatch_recipients (dispatch_id, channel, user_id, chat_id, attempt, fallback_level, status, skip_reason,
+              notification_id, channel_delivery_ref, expires_at, channel_state, channel_reason, channel_state_at)
+       SELECT $1, r.channel, r.user_id, r.chat_id, r.attempt, r.fallback_level, r.status, r.skip_reason, r.notification_id,
+              r.channel_delivery_ref, r.expires_at, r.channel_state, r.channel_reason, CASE WHEN r.channel_state IS NULL THEN NULL ELSE now() END
+         FROM unnest($2::text[], $3::bigint[], $4::text[], $5::smallint[], $6::smallint[], $7::text[], $8::text[], $9::uuid[], $10::text[],
+                     $11::timestamptz[], $12::text[], $13::text[])
+              AS r(channel, user_id, chat_id, attempt, fallback_level, status, skip_reason, notification_id, channel_delivery_ref, expires_at,
+                   channel_state, channel_reason)`,
+      [
+        dispatchId,
+        rows.map((r) => r.channel),
+        rows.map((r) => r.userId),
+        rows.map((r) => r.chatId ?? null),
+        rows.map((r) => r.attempt ?? 1),
+        rows.map((r) => r.fallbackLevel),
+        rows.map((r) => r.status),
+        rows.map((r) => r.skipReason ?? null),
+        rows.map((r) => r.notificationId ?? null),
+        rows.map((r) => r.channelDeliveryRef ?? null),
+        rows.map((r) => (r.expiresAt ? r.expiresAt.toISOString() : null)),
+        rows.map((r) => r.channelState ?? null),
+        rows.map((r) => r.channelReason ?? null),
+      ],
     );
+  }
+
+  // ---------------------------------------------------------------- external part of dispatches (plan §2.5, §5)
+
+  /** Dispatches whose delay is over: their external part is queued (or suppressed) now. */
+  async dueDelayedDispatches(limit: number): Promise<number[]> {
+    const { rows } = await this.database.query<{ dispatch_id: string }>(
+      `SELECT dispatch_id::text FROM onec_alert_dispatches
+        WHERE external_state = 'pending_delay' AND external_due_at <= now()
+        ORDER BY external_due_at, dispatch_id LIMIT $1`,
+      [limit],
+    );
+    return rows.map((row) => Number(row.dispatch_id));
+  }
+
+  /**
+   * Alarm-stage dispatches with a queued external part whose members are ALL closed (plan §2.5 «отмена по закрытию»):
+   * their unstarted deliveries are cancelled. `resolved` is not cancelled by closing.
+   */
+  async closedQueuedDispatches(limit: number): Promise<number[]> {
+    const { rows } = await this.database.query<{ dispatch_id: string }>(
+      `SELECT d.dispatch_id::text FROM onec_alert_dispatches d
+        WHERE d.external_state = 'queued' AND d.stage <> 'resolved'
+          AND NOT EXISTS (SELECT 1 FROM onec_alert_dispatch_members m JOIN onec_alert_episodes e USING (episode_id)
+                           WHERE m.dispatch_id = d.dispatch_id AND e.resolved_at IS NULL)
+          AND EXISTS (SELECT 1 FROM onec_alert_dispatch_recipients r
+                       WHERE r.dispatch_id = d.dispatch_id AND r.channel = 'whatsapp' AND r.status = 'queued' AND r.channel_state IS NULL)
+        ORDER BY d.dispatch_id LIMIT $1`,
+      [limit],
+    );
+    return rows.map((row) => Number(row.dispatch_id));
+  }
+
+  /**
+   * External rows the dispatcher still watches (handed to the channel, final state not seen yet), least recently
+   * polled first. Not bounded by the dispatch's age (R2-1): a row stays watched until the channel reports a final
+   * state, which it does within the delivery lifetime (≤ 7 days, the channel's limit).
+   */
+  async watchedExternalRows(limit: number): Promise<ExternalRecipientRow[]> {
+    const { rows } = await this.database.query<ExternalRow>(
+      `SELECT ${EXTERNAL_ROW_COLUMNS} FROM onec_alert_dispatch_recipients r
+        WHERE r.channel = 'whatsapp' AND r.status = 'queued' AND r.channel_state IS NULL AND r.channel_delivery_ref IS NOT NULL
+        ORDER BY r.channel_state_at NULLS FIRST, r.recipient_row_id LIMIT $1`,
+      [limit],
+    );
+    return rows.map(mapExternal);
+  }
+
+  /** The alert group of a dispatch, read without a lock (to take the policy lock first, plan §2.2). */
+  async dispatchGroup(client: DatabaseClient, dispatchId: number): Promise<OnecAlertGroupCode | null> {
+    const { rows } = await client.query<{ group_code: OnecAlertGroupCode }>(`SELECT group_code FROM onec_alert_dispatches WHERE dispatch_id = $1`, [dispatchId]);
+    return rows[0]?.group_code ?? null;
+  }
+
+  /**
+   * Locks the dispatch's member episodes FOR UPDATE SKIP LOCKED, in the dispatcher's order (policy → episodes →
+   * dispatch): a writer closing one of them either committed before (the decision sees it closed) or waits for this
+   * transaction. Returns false when a member is locked right now — the caller retries on the next tick.
+   */
+  async lockDispatchMembers(tx: DatabaseClient, dispatchId: number): Promise<boolean> {
+    const { rows } = await tx.query<{ total: number; locked: number }>(
+      `WITH members AS (SELECT episode_id FROM onec_alert_dispatch_members WHERE dispatch_id = $1),
+            locked AS (SELECT e.episode_id FROM onec_alert_episodes e WHERE e.episode_id IN (SELECT episode_id FROM members)
+                        ORDER BY e.episode_id FOR UPDATE SKIP LOCKED)
+       SELECT (SELECT count(*) FROM members)::int AS total, (SELECT count(*) FROM locked)::int AS locked`,
+      [dispatchId],
+    );
+    return rows[0] !== undefined && rows[0].total === rows[0].locked;
+  }
+
+  /** The dispatch row FOR UPDATE: one transition of its external part at a time. */
+  async lockDispatch(tx: DatabaseClient, dispatchId: number): Promise<LockedDispatch | null> {
+    const { rows } = await tx.query<{
+      dispatch_id: string;
+      source_id: string | null;
+      group_code: OnecAlertGroupCode;
+      stage: OnecAlertStage;
+      importance: OnecAlertImportance;
+      external_state: OnecAlertExternalState;
+      created_at: Date;
+    }>(
+      `SELECT dispatch_id::text, source_id::text, group_code, stage, importance, external_state, created_at
+         FROM onec_alert_dispatches WHERE dispatch_id = $1 FOR UPDATE`,
+      [dispatchId],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      dispatchId: Number(row.dispatch_id),
+      sourceId: row.source_id === null ? null : Number(row.source_id),
+      group: row.group_code,
+      stage: row.stage,
+      importance: row.importance,
+      externalState: row.external_state,
+      createdAt: new Date(row.created_at),
+    };
+  }
+
+  /** Members of a dispatch as episodes (texts, open or closed) — read without locks. */
+  async dispatchMembers(client: DatabaseClient, dispatchId: number): Promise<EpisodeCandidate[]> {
+    const { rows } = await client.query<CandidateRow>(
+      `${CANDIDATES_SQL} WHERE e.episode_id IN (SELECT episode_id FROM onec_alert_dispatch_members WHERE dispatch_id = $1) ORDER BY e.episode_id`,
+      [dispatchId],
+    );
+    return rows.map(mapCandidate);
+  }
+
+  /** The users the dispatch was written to (its bell rows) with their fallback level. */
+  async inAppRecipients(client: DatabaseClient, dispatchId: number): Promise<{ userId: number; fallbackLevel: number | null }[]> {
+    const { rows } = await client.query<{ user_id: string; fallback_level: number | null }>(
+      `SELECT user_id::text, fallback_level FROM onec_alert_dispatch_recipients
+        WHERE dispatch_id = $1 AND channel = 'in_app' AND user_id IS NOT NULL ORDER BY user_id`,
+      [dispatchId],
+    );
+    return rows.map((row) => ({ userId: Number(row.user_id), fallbackLevel: row.fallback_level === null ? null : Number(row.fallback_level) }));
+  }
+
+  async setExternalState(tx: DatabaseClient, dispatchId: number, state: OnecAlertExternalState): Promise<void> {
+    await tx.query(`UPDATE onec_alert_dispatches SET external_state = $2 WHERE dispatch_id = $1`, [dispatchId, state]);
+  }
+
+  /** External rows of one dispatch still watched, under the dispatch lock. */
+  async queuedExternalRows(tx: DatabaseClient, dispatchId: number): Promise<ExternalRecipientRow[]> {
+    const { rows } = await tx.query<ExternalRow>(
+      `SELECT ${EXTERNAL_ROW_COLUMNS} FROM onec_alert_dispatch_recipients r
+        WHERE r.dispatch_id = $1 AND r.channel = 'whatsapp' AND r.status = 'queued' AND r.channel_state IS NULL
+        ORDER BY r.recipient_row_id`,
+      [dispatchId],
+    );
+    return rows.map(mapExternal);
+  }
+
+  /**
+   * Watched external rows of the policy's recent alarm and recovery dispatches — to cancel when a channel or the chat
+   * is changed in the policy (PATCH, under the policy row FOR UPDATE).
+   */
+  async watchedRowsOfGroup(tx: DatabaseClient, group: OnecAlertGroupCode): Promise<ExternalRecipientRow[]> {
+    const { rows } = await tx.query<ExternalRow>(
+      `SELECT ${EXTERNAL_ROW_COLUMNS} FROM onec_alert_dispatch_recipients r
+         JOIN onec_alert_dispatches d ON d.dispatch_id = r.dispatch_id
+        WHERE d.group_code = $1
+          AND r.channel = 'whatsapp' AND r.status = 'queued' AND r.channel_state IS NULL
+        ORDER BY r.recipient_row_id`,
+      [group],
+    );
+    return rows.map(mapExternal);
+  }
+
+  /** Records the final state the channel reported; the row is no longer watched. */
+  async recordChannelState(client: DatabaseClient, recipientRowId: number, state: string, reason: string | null): Promise<void> {
+    await client.query(
+      `UPDATE onec_alert_dispatch_recipients SET channel_state = $2, channel_reason = $3, channel_state_at = now() WHERE recipient_row_id = $1`,
+      [recipientRowId, state, reason],
+    );
+  }
+
+  /** A watched row that is still in flight: seen now (the oldest-seen rows are polled first). */
+  async touchWatched(client: DatabaseClient, recipientRowIds: readonly number[]): Promise<void> {
+    if (recipientRowIds.length === 0) return;
+    await client.query(
+      `UPDATE onec_alert_dispatch_recipients SET channel_state_at = now() WHERE recipient_row_id = ANY($1::bigint[]) AND channel_state IS NULL`,
+      [recipientRowIds],
+    );
+  }
+
+  /** The row is replaced by a new attempt (redeliver): superseded, with the state that caused it. */
+  async supersede(tx: DatabaseClient, recipientRowId: number, state: string, reason: string | null): Promise<void> {
+    await tx.query(
+      `UPDATE onec_alert_dispatch_recipients SET status = 'superseded', channel_state = $2, channel_reason = $3, channel_state_at = now()
+        WHERE recipient_row_id = $1`,
+      [recipientRowId, state, reason],
+    );
+  }
+
+  /** Lifetime the first attempt of this recipient row got (a redelivered recovery notice keeps it, R1-2). */
+  async firstAttemptExpiresAt(tx: DatabaseClient, dispatchId: number, row: Pick<ExternalRecipientRow, 'userId' | 'chatId'>): Promise<Date | null> {
+    const { rows } = await tx.query<{ expires_at: Date | null }>(
+      `SELECT expires_at FROM onec_alert_dispatch_recipients
+        WHERE dispatch_id = $1 AND channel = 'whatsapp' AND attempt = 1
+          AND user_id IS NOT DISTINCT FROM $2::bigint AND chat_id IS NOT DISTINCT FROM $3::text`,
+      [dispatchId, row.userId, row.chatId],
+    );
+    return rows[0]?.expires_at ? new Date(rows[0].expires_at) : null;
+  }
+
+  /** The external row under the dispatch lock, re-read (redeliver decides on committed values). */
+  async externalRow(tx: DatabaseClient, recipientRowId: number): Promise<ExternalRecipientRow | null> {
+    const { rows } = await tx.query<ExternalRow>(`SELECT ${EXTERNAL_ROW_COLUMNS} FROM onec_alert_dispatch_recipients r WHERE r.recipient_row_id = $1`, [
+      recipientRowId,
+    ]);
+    return rows[0] ? mapExternal(rows[0]) : null;
   }
 
   /** Opening and digest mark the episode notified; later stages leave the status as it is. */
@@ -518,8 +821,19 @@ export class PgOnecAlertNotificationsRepository {
       members: number;
       kinds: string[] | null;
       recipients: { userId: number; username: string | null; shown: boolean; read: boolean }[] | null;
+      external_state: OnecAlertExternalState;
+      external: (Omit<ExternalRow, 'expires_at'> & { expires_at: string | null; username: string | null })[] | null;
     }>(
-      `SELECT d.dispatch_id::text, d.group_code, d.stage, d.importance, d.source_id::text, d.fallback_level, d.created_at,
+      `SELECT d.dispatch_id::text, d.group_code, d.stage, d.importance, d.source_id::text, d.fallback_level, d.created_at, d.external_state,
+              (SELECT json_agg(json_build_object('recipient_row_id', r.recipient_row_id::text, 'dispatch_id', r.dispatch_id::text,
+                                                 'channel', r.channel, 'user_id', r.user_id::text, 'username', u.username, 'chat_id', r.chat_id,
+                                                 'attempt', r.attempt, 'status', r.status, 'skip_reason', r.skip_reason,
+                                                 'channel_delivery_ref', r.channel_delivery_ref, 'expires_at', r.expires_at,
+                                                 'channel_state', r.channel_state, 'channel_reason', r.channel_reason)
+                               ORDER BY r.chat_id NULLS LAST, r.user_id, r.attempt DESC)
+                 FROM onec_alert_dispatch_recipients r
+                 LEFT JOIN users u ON u.user_id = r.user_id
+                WHERE r.dispatch_id = d.dispatch_id AND r.channel = 'whatsapp') AS external,
               (SELECT count(*) FROM onec_alert_dispatch_members m WHERE m.dispatch_id = d.dispatch_id)::int AS members,
               (SELECT array_agg(DISTINCT e.kind ORDER BY e.kind) FROM onec_alert_dispatch_members m
                  JOIN onec_alert_episodes e ON e.episode_id = m.episode_id WHERE m.dispatch_id = d.dispatch_id) AS kinds,
@@ -546,7 +860,30 @@ export class PgOnecAlertNotificationsRepository {
       members: Number(row.members),
       kinds: row.kinds ?? [],
       recipients: (row.recipients ?? []).map((r) => ({ ...r, userId: Number(r.userId) })),
+      externalState: row.external_state,
+      external: (row.external ?? []).map((r) => ({
+        ...mapExternal({ ...r, expires_at: r.expires_at === null ? null : new Date(r.expires_at) }),
+        username: r.username,
+      })),
     }));
+  }
+
+  /**
+   * Of these users, the ones WhatsApp cannot reach personally (no linked active employee or no work phone) — a
+   * warning on the settings screen only; the channel itself re-checks at queue and send time.
+   */
+  async withoutWorkPhone(userIds: readonly number[]): Promise<number[]> {
+    if (userIds.length === 0) return [];
+    const { rows } = await this.database.query<{ user_id: string }>(
+      `SELECT u.user_id::text FROM users u
+         LEFT JOIN employees e ON e.employee_id = u.employee_id
+        WHERE u.user_id = ANY($1::bigint[])
+          AND (e.employee_id IS NULL OR e.is_active = false
+               OR NOT EXISTS (SELECT 1 FROM employee_work_contacts c WHERE c.employee_id = e.employee_id AND c.kind = 'phone'))
+        ORDER BY u.user_id`,
+      [userIds],
+    );
+    return rows.map((row) => Number(row.user_id));
   }
 
   /** Users who may be chosen as recipients on the settings screen: active, non-service, literal onec.view. */
