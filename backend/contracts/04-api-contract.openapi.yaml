@@ -29434,6 +29434,11 @@ components:
           items:
             type: integer
             minimum: 1
+        anyProductionStatusIn:
+          type: array
+          items:
+            type: integer
+            minimum: 1
         paidShareGte:
           type: number
           minimum: 0
@@ -29500,6 +29505,7 @@ components:
               - currentPaymentStatusNotIn
               - currentProductionStatusIn
               - currentProductionStatusNotIn
+              - anyProductionStatusIn
               - paidShareGte
               - orderSourceIn
               - firstPaymentOnly
