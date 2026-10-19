@@ -123,10 +123,10 @@ fi
 
 COMPOSE_PROJECT_NAME=""
 if [[ -f "$ENV_FILE" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
+  # Literal .env reading (no shell expansion): see lib/env-file.sh.
+  # shellcheck source=lib/env-file.sh
+  source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env-file.sh"
+  load_env_file "$ENV_FILE" || fail "Cannot parse env file: $ENV_FILE"
 fi
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-}"
 [[ -n "$COMPOSE_PROJECT_NAME" ]] || fail "COMPOSE_PROJECT_NAME is required in $ENV_FILE"
