@@ -5,7 +5,7 @@ import { ApiError } from '../../common/errors/api-error';
 import type { CurrentUser, RequestWithCurrentUser } from '../../permissions/current-user';
 import { PermissionsGuard } from '../../permissions/permissions.guard';
 import { RequirePermissions } from '../../permissions/require-permissions.decorator';
-import { PARTY_ADDRESS_MAX, PARTY_CONTACT_KINDS, PARTY_ONEC_CONTACTS_MAX, PARTY_OWN_CONTACTS_MAX, type PartyContactInput, type PartyKind } from './party-contacts';
+import { PARTY_ADDRESS_MAX, PARTY_CONFIG, PARTY_CONTACT_KINDS, PARTY_ONEC_CONTACTS_MAX, PARTY_OWN_CONTACTS_MAX, type PartyContactInput, type PartyKind } from './party-contacts';
 import { CONFIRM_MAX, ClientCounterpartyRepository } from './client-counterparty.repository';
 import { PartyContactsRepository } from './party-contacts.repository';
 import { SupplierCounterpartyRepository, parseRefKey1c } from './supplier-counterparty.repository';
@@ -47,7 +47,7 @@ export class PartyContactsController {
 
   @ApiOperation({ summary: 'Contacts of a supplier with the set version' })
   @Get('suppliers/:id/contacts') @RequirePermissions(['suppliers.view'])
-  supplier(@Param('id') id: string) { return this.contacts.get('supplier', parseId(id)); }
+  supplier(@Param('id') id: string) { return this.contacts.get('supplier', parseOwnerId('supplier', id)); }
 
   @ApiOperation({ summary: 'Replace the contacts of a supplier (version compare-and-swap; one primary per kind)' })
   @Put('suppliers/:id/contacts') @RequirePermissions(['suppliers.manage'])
@@ -59,7 +59,7 @@ export class PartyContactsController {
 
   @ApiOperation({ summary: 'Contacts of a vendor with the set version' })
   @Get('vendors/:id/contacts') @RequirePermissions(['vendors.view'])
-  vendor(@Param('id') id: string) { return this.contacts.get('vendor', parseId(id)); }
+  vendor(@Param('id') id: string) { return this.contacts.get('vendor', parseOwnerId('vendor', id)); }
 
   @ApiOperation({ summary: 'Replace the contacts of a vendor (version compare-and-swap; one primary per kind)' })
   @Put('vendors/:id/contacts') @RequirePermissions(['vendors.manage'])
@@ -87,14 +87,14 @@ export class PartyContactsController {
   @ApiOperation({ summary: 'The 1C counterparty a supplier is linked to, with what the last 1C contacts sync saw' })
   @Get('suppliers/:id/counterparty') @RequirePermissions(['suppliers.view'])
   async supplierCounterparty(@Param('id') id: string) {
-    return { ...(await this.counterparties.link(parseId(id))), onecSyncEnabled: this.onecContacts.enabled() };
+    return { ...(await this.counterparties.link(parseOwnerId('supplier', id))), onecSyncEnabled: this.onecContacts.enabled() };
   }
 
   @ApiOperation({ summary: 'Sync the contacts of a supplier with its 1C counterparty now (the loaded 1C data)' })
   @Post('suppliers/:id/contacts/onec-sync') @HttpCode(200) @RequirePermissions(['suppliers.manage'])
   async syncSupplierOnec(@Param('id') id: string, @Req() request: RequestWithCurrentUser) {
     const { user, requestId } = actor(request);
-    const supplierId = parseId(id);
+    const supplierId = parseOwnerId('supplier', id);
     const outcome = await this.onecContacts.syncSupplier(supplierId, user, requestId, 'manual');
     if (outcome.status === 'skipped' && outcome.reason === 'not_found') throw new ApiError(404, 'SUPPLIER_NOT_FOUND', 'Поставщик не найден');
     return { outcome, link: { ...(await this.counterparties.link(supplierId)), onecSyncEnabled: true } };
@@ -106,7 +106,7 @@ export class PartyContactsController {
     const parsed = linkSchema.safeParse(body);
     if (!parsed.success) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос привязки');
     const { user, requestId } = actor(request);
-    const supplierId = parseId(id);
+    const supplierId = parseOwnerId('supplier', id);
     const link = await this.counterparties.setLink(supplierId, parsed.data.refKey1c === null ? null : parseRefKey1c(parsed.data.refKey1c),
       parsed.data.expectedRefKey1c === null ? null : parseRefKey1c(parsed.data.expectedRefKey1c), user, requestId);
     return this.afterLink(supplierId, link, user, requestId);
@@ -184,7 +184,7 @@ export class PartyContactsController {
     if (!parsed.success) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный набор контактов');
     const { user, requestId } = actor(request);
     const contacts: PartyContactInput[] = parsed.data.contacts.map((contact) => ({ ...contact, note: contact.note ?? null }));
-    return this.contacts.replace(party, parseId(id), parsed.data.version, contacts, user, requestId);
+    return this.contacts.replace(party, parseOwnerId(party, id), parsed.data.version, contacts, user, requestId);
   }
 
   private async list(party: PartyKind, value: unknown) {
@@ -203,6 +203,15 @@ function actor(request: RequestWithCurrentUser): { user: CurrentUser; requestId:
 export function parseId(value: string): number {
   const id = Number(value);
   if (!Number.isSafeInteger(id) || id <= 0) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный идентификатор');
+  return id;
+}
+
+/**
+ * Suppliers and vendors are keyed by smallint: an id beyond it names nobody (404, not a database error). Clients — bigint.
+ */
+export function parseOwnerId(party: PartyKind, value: string): number {
+  const id = parseId(value);
+  if (party !== 'client' && id > 32_767) throw new ApiError(404, PARTY_CONFIG[party].notFoundCode, PARTY_CONFIG[party].notFoundText);
   return id;
 }
 
