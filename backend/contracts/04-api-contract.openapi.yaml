@@ -796,6 +796,40 @@ paths:
       x-permission: whatsapp.view
       responses:
         '200': {description: Get WhatsApp session status}
+  /api/v1/whatsapp/notifications/channel:
+    get:
+      tags: [WhatsApp]
+      operationId: getWhatsAppNotificationChannel
+      summary: 'State of the WhatsApp notification channel'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage]
+      responses:
+        '200': {description: 'Channel state (Cache-Control: private, no-store)'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/whatsapp/notifications/deliveries:
+    get:
+      tags: [WhatsApp]
+      operationId: listWhatsAppNotificationDeliveries
+      summary: 'Journal of WhatsApp notification deliveries'
+      description: 'Rows of a source are shown only with its read permission (the 1C alerts need onec.view). from/to are inclusive days of created_at in the server time zone.'
+      security: [{bearerAuth: []}]
+      x-permissions: [whatsapp.manage]
+      parameters:
+        - {name: page, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 10000, default: 1}}
+        - {name: pageSize, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {name: state, in: query, required: false, schema: {type: string, enum: [queued, sending, sent, failed, unknown, cancelled, skipped]}}
+        - {name: level, in: query, required: false, schema: {type: string, enum: [info, warning, error]}}
+        - {name: recipientKind, in: query, required: false, schema: {type: string, enum: [user, chat]}}
+        - {name: sourceType, in: query, required: false, schema: {type: string, pattern: '^[a-z][a-z0-9_]{1,40}$'}}
+        - {name: from, in: query, required: false, schema: {type: string, format: date}}
+        - {name: to, in: query, required: false, schema: {type: string, format: date}}
+        - {name: search, in: query, required: false, schema: {type: string, minLength: 1, maxLength: 120}}
+      responses:
+        '200': {description: 'Page of deliveries (Cache-Control: private, no-store)'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {description: VALIDATION_ERROR}
   /api/v1/whatsapp/broadcasts:
     get:
       tags: [WhatsApp]
@@ -1130,6 +1164,21 @@ paths:
         '200': {description: Counterparties, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/SupplierCounterparty'}}}}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/suppliers/{id}/contacts/onec-sync:
+    post:
+      tags: [Party contacts]
+      operationId: syncSupplierContactsFromOnec
+      summary: 'Sync the contacts of a supplier with its 1C counterparty now'
+      description: 'Uses the loaded 1C data. Returns the sync outcome and the refreshed counterparty link.'
+      security: [{bearerAuth: []}]
+      x-permissions: [suppliers.manage]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: 'Outcome and link', content: {application/json: {schema: {type: object, required: [outcome, link], properties: {outcome: {type: object}, link: {$ref: '#/components/schemas/SupplierLink'}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'SUPPLIER_NOT_FOUND'}
   /api/v1/suppliers/{id}/counterparty:
     get:
       tags: [Party contacts]

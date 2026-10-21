@@ -1,4 +1,4 @@
-import { DECORATORS } from '@nestjs/swagger/dist/constants';
+import { DECORATORS } from '@nestjs/swagger';
 import { describe, expect, it } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { GroupDeadlineStatusCountsReportController } from './group-deadline-status-counts-report.controller';

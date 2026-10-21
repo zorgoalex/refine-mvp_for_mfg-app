@@ -1,6 +1,7 @@
 import type { CutJobItemDto } from '../../cut/dto/cut.dto';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { CUT_RENDER_STYLE_MDF_BOARD_PREVIEW } from '../../../shared/cut-render-style';
 import { normalizeSvgRenderContours } from '../../../shared/svg-render-contours';
@@ -10,6 +11,8 @@ import { buildSvgSheetPlacements, cutLayoutOrNull, renderManualSvgScreenshot } f
 import type { CncTelegramCutLayoutDto } from '../dto/cnc-telegram.dto';
 import { resolveCutRenderStyle } from '../../../shared/cut-render-style';
 
+const repoRoot = fileURLToPath(new URL('../../../../../', import.meta.url));
+
 const count = (svg: string) => (svg.match(/class="cut-sheet-piece"/g) ?? []).length;
 
 describe('persisted SVG render contract', () => {
@@ -17,8 +20,8 @@ describe('persisted SVG render contract', () => {
     'worker -> API -> stored layout -> cut sheet and Telegram screenshot: %s', (file, accepted, contours) => {
       const layout: CncTelegramCutLayoutDto = JSON.parse(execFileSync('python3', ['-c',
         'import json,sys;from pathlib import Path;from cnc_telegram_worker.vector import parse_svg_cut_layout,layout_to_dict;print(json.dumps(layout_to_dict(parse_svg_cut_layout(Path(sys.argv[1])))))',
-        resolve('tests/fixtures/svg-source-priority', file)], {
-        env: {...process.env, PYTHONPATH: resolve('cnc-telegram-worker')}, encoding: 'utf8',
+        resolve(repoRoot, 'tests/fixtures/svg-source-priority', file)], {
+        env: {...process.env, PYTHONPATH: resolve(repoRoot, 'cnc-telegram-worker')}, encoding: 'utf8',
       }));
       const items = layout.items.map((item, i) => ({sourceItemKey: `item-${i}`, orderName:item.orderName,
         detailNumber:item.detailNumber,widthMm:item.widthMm,heightMm:item.heightMm,quantity:1,source:'vector',confidence:0.99}));
