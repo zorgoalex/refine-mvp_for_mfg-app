@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { nameRule } from '../../utils/nameRules';
 import { Edit } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
@@ -18,6 +19,10 @@ export const SupplierEdit: React.FC<IResourceComponentsProps> = () => {
 
   const supplierId = Number(queryResult?.data?.data?.supplier_id) || null;
   const canManage = can("suppliers.manage");
+  // A link change or a sync with 1C changes the contacts: the contacts block re-reads them.
+  const [contactsToken, setContactsToken] = useState(0);
+  const [contactsDirty, setContactsDirty] = useState(false);
+  const [counterpartyBusy, setCounterpartyBusy] = useState(false);
 
   return (
     <Edit saveButtonProps={saveButtonProps}>
@@ -41,8 +46,10 @@ export const SupplierEdit: React.FC<IResourceComponentsProps> = () => {
       </Form>
       {/* Phones, emails and Telegram — the contacts block; the 1C link — its own command (neither goes through this form). */}
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <ContactsCard ownerId={supplierId} editable={canManage} source={SUPPLIER_CONTACTS} />
-        <SupplierCounterpartyCard supplierId={supplierId} editable={canManage} />
+        <ContactsCard ownerId={supplierId} editable={canManage} source={SUPPLIER_CONTACTS} reloadToken={contactsToken} onDirtyChange={setContactsDirty}
+          locked={counterpartyBusy} />
+        <SupplierCounterpartyCard supplierId={supplierId} editable={canManage} onContactsChanged={() => setContactsToken((token) => token + 1)}
+          contactsDirty={contactsDirty} onBusyChange={setCounterpartyBusy} />
       </div>
     </Edit>
   );

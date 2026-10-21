@@ -317,6 +317,8 @@ export const envSchema = z
     BACKEND_INVENTORY_ONEC_CONSUMPTION: booleanFromEnv.default(false),
     // Приход склада из поступлений 1С — дополнение к проекции расхода (без BACKEND_INVENTORY_ONEC_CONSUMPTION не действует).
     BACKEND_INVENTORY_ONEC_RECEIPTS: booleanFromEnv.default(false),
+    // Контакты поставщиков из 1С (K4a): сверка с контактами привязанного контрагента 1С после выгрузки и раз в час.
+    BACKEND_PARTY_CONTACTS_ONEC_SYNC: booleanFromEnv.default(false),
     BACKEND_ENABLE_PDF_IMPORT_LAYOUT_PATTERNS: booleanFromEnv.default(false),
     BACKEND_STATUS_AUTOMATION: booleanFromEnv.default(false),
     BACKEND_ENABLE_NOTIFICATION_ENGINE: booleanFromEnv.default(false),

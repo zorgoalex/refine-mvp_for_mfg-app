@@ -9,9 +9,10 @@ const source = (party: PartyKind, fields: Pick<ContactsSource, 'kinds' | 'title'
 });
 
 export const SUPPLIER_CONTACTS = source('supplier', {
-  kinds: ['phone', 'email', 'telegram'],
+  kinds: ['phone', 'email', 'telegram', 'address'],
   title: 'Контакты',
-  hint: 'Основной телефон используется для отправки заявок поставщику в WhatsApp. Поставщика с контактами нельзя удалить — снимите отметку «Активен».',
+  hint: 'Основной телефон используется для отправки заявок поставщику в WhatsApp. Контакты с пометкой «из 1С» приходят из карточки '
+    + 'привязанного контрагента 1С и меняются только в 1С. Поставщика с контактами нельзя удалить — снимите отметку «Активен».',
 });
 
 export const VENDOR_CONTACTS = source('vendor', {

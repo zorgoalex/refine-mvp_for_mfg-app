@@ -23,12 +23,35 @@ export interface SupplierCounterparty {
   supplierName: string | null;
 }
 
+/** What the last 1C contacts sync saw of the counterparty linked to a supplier. */
+export interface SupplierOnecProfile {
+  sourceId: number;
+  refKey1c: string;
+  counterpartyName: string | null;
+  /** ИИН/БИН — only while the 1C contacts may be shown. */
+  identificationNumber: string | null;
+  counterpartyState: 'active' | 'deletion_mark' | 'missing' | 'not_found';
+  /** `unavailable` — the 1C data was revoked or expired after the last sync. */
+  contactsState: 'available' | 'revoked' | 'expired' | 'not_loaded' | 'unavailable';
+  snapshotVersion: string | null;
+  skipped: number;
+  syncedAt: string;
+}
+
 export interface SupplierLink {
   supplierId: number;
   supplierName: string;
   refKey1c: string | null;
   counterpartyName: string | null;
+  /** Absent on a backend before the 1C contacts sync. */
+  onec?: SupplierOnecProfile | null;
+  /** The 1C contacts sync is on (the «Сверить с 1С» button). */
+  onecSyncEnabled?: boolean;
 }
+
+export type SupplierOnecSyncOutcome =
+  | { status: 'changed' | 'unchanged'; added: number; removed: number; updated: number; skipped: number; contactsState: string }
+  | { status: 'skipped'; reason: 'not_found' | 'no_source' | 'not_loaded' | 'mirror_unavailable' };
 
 /** A 1C counterparty as the loaded 1C data has it. */
 export interface CounterpartyCard {
@@ -156,6 +179,8 @@ export const partyContactsApi = {
   /** Link, relink or unlink (refKey1c null); `expectedRefKey1c` is the key this page showed. */
   setSupplierCounterparty: (supplierId: number, body: { refKey1c: string | null; expectedRefKey1c: string | null }) =>
     httpClient.put<SupplierLink>(apiRoutes.partyContacts.supplierCounterparty(supplierId), body),
+  syncSupplierOnec: (supplierId: number) =>
+    httpClient.post<{ outcome: SupplierOnecSyncOutcome; link: SupplierLink }>(apiRoutes.partyContacts.supplierOnecSync(supplierId), {}),
   supplierFromCounterparty: (refKey1c: string) =>
     httpClient.post<SupplierLink & { created: boolean }>(apiRoutes.partyContacts.supplierFromCounterparty, { refKey1c }),
   clientCounterparty: (clientId: number) => httpClient.get<ClientLink>(apiRoutes.partyContacts.clientCounterparty(clientId)),

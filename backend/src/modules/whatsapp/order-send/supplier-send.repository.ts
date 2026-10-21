@@ -40,7 +40,32 @@ interface RequestRow extends QueryResultRow {
   expected_date: string | null; comment: string | null; version: number;
 }
 interface SupplierRow extends QueryResultRow { supplier_id: number; supplier_name: string; is_active: boolean }
-interface ContactRow extends QueryResultRow { contact_id: string; kind: string; value_normalized: string; is_primary: boolean }
+interface ContactRow extends QueryResultRow { contact_id: string; kind: string; value_normalized: string; is_primary: boolean; onec_source_id: string | null; onec_snapshot_version: Date | null }
+
+/**
+ * A phone that came from 1C may be shown and used only while it matches the snapshot its source holds now and that
+ * snapshot is not revoked or expired (migration 243); `party_onec_contacts_lock` share-locks that state to commit, so
+ * a revocation (or a new snapshot) either waits for this transaction or is already seen. The supplier row is
+ * share-locked before (resolveSupplier), so the 1C sync of the same supplier cannot be in between.
+ */
+async function onecPhoneUsable(tx: TransactionClient, contact: ContactRow): Promise<boolean> {
+  if (contact.onec_source_id === null) return true;
+  return (await tx.query<{ ok: boolean }>('SELECT party_onec_contacts_lock($1::bigint, $2::timestamptz) AS ok',
+    [contact.onec_source_id, contact.onec_snapshot_version])).rows[0]?.ok === true;
+}
+
+/** The longest a provider call may hold the 1C state row (agreed with the 1C module: its ETL batches wait on it). */
+export const ONEC_LOCKED_CALL_MS = 10_000;
+
+export function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new ApiError(503, 'WAHA_UNAVAILABLE', 'WhatsApp не ответил вовремя')), ms);
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+}
+
+const CONTACT_COLUMNS = 'contact_id, kind, value_normalized, is_primary, onec_source_id, onec_snapshot_version';
 
 const SENDABLE = new Set(['draft', 'sent']);
 
@@ -74,8 +99,9 @@ export class SupplierSendRepository {
     const settings = await this.sends.settingsRow(this.database, false);
     const queueLength = (await this.sends.queueSnapshot()).rows.length;
     const supplier = await resolveSupplier(this.database, request.supplier_key, false);
-    const contacts = supplier ? (await this.database.query<ContactRow>(`SELECT contact_id, kind, value_normalized, is_primary FROM supplier_contacts
-      WHERE supplier_id = $1 AND kind = 'phone' ORDER BY is_primary DESC, position, contact_id`, [supplier.supplier_id])).rows : [];
+    const contacts = supplier ? (await this.database.query<ContactRow>(`SELECT ${CONTACT_COLUMNS}
+      FROM supplier_contacts WHERE supplier_id = $1 AND kind = 'phone' AND party_onec_contacts_available(onec_source_id, onec_snapshot_version)
+      ORDER BY is_primary DESC, position, contact_id`, [supplier.supplier_id])).rows : [];
     const on = settings.enabled && settings.supplier_requests_enabled === true;
     const unavailableReason: SupplierSendMenu['unavailableReason'] = !this.makesSends ? 'release' : !on ? 'disabled'
       : !SENDABLE.has(request.status) ? 'status' : !supplier ? 'not_linked' : !supplier.is_active ? 'supplier_inactive'
@@ -133,9 +159,12 @@ export class SupplierSendRepository {
         if (!supplier) throw new ApiError(409, 'SUPPLIER_NOT_LINKED', 'Поставщик заявки не связан со справочником «Поставщики»');
         supplierId = Number(supplier.supplier_id);
         if (!supplier.is_active) throw new ApiError(409, 'SUPPLIER_INACTIVE', 'Поставщик заявки не активен');
-        const contact = (await tx.query<ContactRow>(`SELECT contact_id, kind, value_normalized, is_primary FROM supplier_contacts
+        const contact = (await tx.query<ContactRow>(`SELECT ${CONTACT_COLUMNS} FROM supplier_contacts
           WHERE contact_id = $1 AND supplier_id = $2 AND kind = 'phone' FOR SHARE`, [command.contactId, supplierId])).rows[0];
-        if (!contact) throw new ApiError(409, 'SUPPLIER_CONTACT_MISSING', 'У поставщика больше нет этого телефона; обновите страницу');
+        // A phone of 1C whose 1C data is revoked or expired is gone for the sender, the same as a removed one.
+        if (!contact || !(await onecPhoneUsable(tx, contact))) {
+          throw new ApiError(409, 'SUPPLIER_CONTACT_MISSING', 'У поставщика больше нет этого телефона; обновите страницу');
+        }
         // The window showed a mask of a number: the contact must still be that number.
         if (command.contactToken !== phoneToken(settings.identity_salt, 'supplier', Number(contact.contact_id), contact.value_normalized)) {
           throw new ApiError(409, 'ORDER_SEND_PHONE_CHANGED', 'Телефон получателя изменился; обновите страницу и выберите его заново');
@@ -223,11 +252,34 @@ export class SupplierSendRepository {
     if (!supplier) return 'recipient_removed';
     if (String(supplier.supplier_id) !== String(row.supplier_id)) return 'recipient_changed';
     if (!supplier.is_active) return 'recipient_removed';
-    const contact = (await tx.query<ContactRow>(`SELECT contact_id, kind, value_normalized, is_primary FROM supplier_contacts
+    const contact = (await tx.query<ContactRow>(`SELECT ${CONTACT_COLUMNS} FROM supplier_contacts
       WHERE contact_id = $1 AND supplier_id = $2 FOR SHARE`, [row.supplier_contact_id, supplier.supplier_id])).rows[0];
-    if (!contact) return 'recipient_removed';
+    if (!contact || !(await onecPhoneUsable(tx, contact))) return 'recipient_removed';
     if (contact.kind !== 'phone' || contact.value_normalized !== row.phone_normalized) return 'recipient_changed';
     return null;
+  }
+
+  /**
+   * The number check of WAHA — the first provider call of a supplier send — made only while the contact of the send is
+   * still there and, if it came from 1C, its 1C data may be used. For a phone of 1C the state of the 1C contacts set
+   * stays share-locked until the check returns: a revocation either happened before (the check is not made) or waits
+   * for it. The 1C ETL waits on that row too, so the lock is held at most ONEC_LOCKED_CALL_MS whatever the WAHA timeout
+   * setting (an answer later than that postpones the send; the request was already made under the lock) and is waited
+   * for at most 5 s. Nothing else runs in that transaction.
+   * Returns null when the contact may not be used; the intent re-checks everything under its own locks.
+   */
+  async whileContactUsable<T>(row: SendRow, call: () => Promise<T>): Promise<T | null> {
+    const contact = (await this.database.query<ContactRow>(`SELECT ${CONTACT_COLUMNS} FROM supplier_contacts WHERE contact_id = $1 AND supplier_id = $2`,
+      [row.supplier_contact_id, row.supplier_id])).rows[0];
+    if (!contact) return null;
+    if (contact.onec_source_id === null) return call();
+    return this.database.transaction(async (tx) => {
+      await tx.query("SET LOCAL lock_timeout = '5s'");
+      const current = (await tx.query<ContactRow>(`SELECT ${CONTACT_COLUMNS} FROM supplier_contacts WHERE contact_id = $1 AND supplier_id = $2`,
+        [row.supplier_contact_id, row.supplier_id])).rows[0];
+      if (!current || current.value_normalized !== row.phone_normalized || !(await onecPhoneUsable(tx, current))) return null;
+      return withDeadline(call(), ONEC_LOCKED_CALL_MS);
+    });
   }
 
   /** A refusal that does not end the command: its own committed audit row (the command transaction rolled back). */
