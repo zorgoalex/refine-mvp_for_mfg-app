@@ -46,7 +46,7 @@ function harness(writerOwned: boolean) {
     heartbeatWriterLock: vi.fn().mockResolvedValue(writerOwned),
   };
   const mapping = {
-    upsertSuccess: vi.fn().mockResolvedValue(undefined),
+    upsertSuccess: vi.fn().mockResolvedValue(true),
     deletePaymentCreateGuard: vi.fn().mockResolvedValue(undefined),
   };
   const audit = {
@@ -76,6 +76,7 @@ describe('PgCrmSyncBackfillPersistence', () => {
     });
     h.mapping.upsertSuccess.mockImplementation(async () => {
       order.push('mapping');
+      return true;
     });
     h.audit.record.mockImplementation(async () => {
       order.push('audit');

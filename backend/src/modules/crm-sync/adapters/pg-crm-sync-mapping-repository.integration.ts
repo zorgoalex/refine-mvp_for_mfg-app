@@ -24,7 +24,7 @@ async function createSchema(client: import('pg').PoolClient): Promise<void> {
       bitrix_object TEXT NOT NULL,
       bitrix_id     TEXT,
       parent_erp_id TEXT,
-      status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','deleted','failed')),
+      status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','deleted','failed','remote_deleted')),
       attempts      INTEGER NOT NULL DEFAULT 0,
       last_hash     TEXT,
       source_system TEXT NOT NULL DEFAULT 'erp',
@@ -160,5 +160,44 @@ describeIntegration('PgCrmSyncMappingRepository (integration)', () => {
     expect(raw.rows[0].status).toBe('failed');
     expect(raw.rows[0].attempts).toBe(2);
     expect(raw.rows[0].last_error).toBe('timeout');
+  });
+
+  // ── remote_deleted is owned by reverse sync ───────────────────────────────
+
+  const dealRow = (erpId: string, status: MappingRow['status']): MappingRow => ({
+    entityType: 'order', erpId, bitrixObject: 'deal', bitrixId: `deal-${erpId}`,
+    parentErpId: null, status, lastHash: 'h',
+  });
+
+  it('keeps remote_deleted against an outbound success and an outbound failure', async () => {
+    expect(await repo.upsertSuccess(client, dealRow('200', 'active'))).toBe(true);
+    await pool.query(
+      `UPDATE ${schemaName}.crm_sync_mapping SET status='remote_deleted' WHERE entity_type='order' AND erp_id='200'`,
+    );
+
+    expect(await repo.upsertSuccess(client, dealRow('200', 'active'))).toBe(false);
+    await repo.markFailed(client, 'order', '200', 'deal', 'timeout');
+    expect((await repo.get(client, 'order', '200'))?.status).toBe('remote_deleted');
+
+    // The consumer's own skip intent carries remote_deleted and is applied.
+    expect(await repo.upsertSuccess(client, dealRow('200', 'remote_deleted'))).toBe(true);
+  });
+
+  it('an outbound success waiting on a concurrent reverse delete does not reactivate the row', async () => {
+    await repo.upsertSuccess(client, dealRow('201', 'failed'));
+    const reverse = await pool.connect();
+    try {
+      await reverse.query('BEGIN');
+      await reverse.query(
+        `UPDATE ${schemaName}.crm_sync_mapping SET status='remote_deleted' WHERE entity_type='order' AND erp_id='201'`,
+      );
+      const outbound = repo.upsertSuccess(client, dealRow('201', 'active'));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await reverse.query('COMMIT');
+      expect(await outbound).toBe(false);
+    } finally {
+      reverse.release();
+    }
+    expect((await repo.get(client, 'order', '201'))?.status).toBe('remote_deleted');
   });
 });
