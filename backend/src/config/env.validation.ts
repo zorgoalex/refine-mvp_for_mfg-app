@@ -302,6 +302,8 @@ export const envSchema = z
     BACKEND_PROCUREMENT_NOTIFICATIONS_ENABLED: booleanFromEnv.default(false),
     // Шаблоны текста заявки поставщику (миграция 229); выключение — откат функции без заявок.
     BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED: booleanFromEnv.default(false),
+    // Контакты поставщиков из 1С (K4a): сверка с контактами привязанного контрагента 1С после выгрузки и раз в час.
+    BACKEND_PARTY_CONTACTS_ONEC_SYNC: booleanFromEnv.default(false),
     BACKEND_ENABLE_PDF_IMPORT_LAYOUT_PATTERNS: booleanFromEnv.default(false),
     BACKEND_STATUS_AUTOMATION: booleanFromEnv.default(false),
     BACKEND_ENABLE_NOTIFICATION_ENGINE: booleanFromEnv.default(false),

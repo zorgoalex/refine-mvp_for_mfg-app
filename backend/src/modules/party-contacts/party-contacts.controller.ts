@@ -5,21 +5,21 @@ import { ApiError } from '../../common/errors/api-error';
 import type { CurrentUser, RequestWithCurrentUser } from '../../permissions/current-user';
 import { PermissionsGuard } from '../../permissions/permissions.guard';
 import { RequirePermissions } from '../../permissions/require-permissions.decorator';
-import { EMPLOYEE_CONTACT_KINDS, EMPLOYEE_CONTACTS_MAX, type EmployeeContactInput } from '../employees/employee-contacts';
-import type { PartyKind } from './party-contacts';
+import { PARTY_ADDRESS_MAX, PARTY_CONTACT_KINDS, PARTY_ONEC_CONTACTS_MAX, PARTY_OWN_CONTACTS_MAX, type PartyContactInput, type PartyKind } from './party-contacts';
 import { CONFIRM_MAX, ClientCounterpartyRepository } from './client-counterparty.repository';
 import { PartyContactsRepository } from './party-contacts.repository';
 import { SupplierCounterpartyRepository, parseRefKey1c } from './supplier-counterparty.repository';
+import { SupplierOnecContactsService } from './supplier-onec-contacts.service';
 
 const replaceSchema = z.object({
   version: z.number().int().min(0),
   contacts: z.array(z.object({
     contactId: z.number().int().positive().nullable(),
-    kind: z.enum(EMPLOYEE_CONTACT_KINDS),
-    value: z.string().trim().min(1).max(200),
+    kind: z.enum(PARTY_CONTACT_KINDS),
+    value: z.string().trim().min(1).max(PARTY_ADDRESS_MAX),
     isPrimary: z.boolean(),
     note: z.string().max(200).nullable().optional(),
-  }).strict()).max(EMPLOYEE_CONTACTS_MAX),
+  }).strict()).max(PARTY_OWN_CONTACTS_MAX + PARTY_ONEC_CONTACTS_MAX),
 }).strict();
 
 const linkSchema = z.object({ refKey1c: z.string().nullable(), expectedRefKey1c: z.string().nullable() }).strict();
@@ -42,6 +42,7 @@ export class PartyContactsController {
     @Inject(PartyContactsRepository) private readonly contacts: PartyContactsRepository,
     @Inject(SupplierCounterpartyRepository) private readonly counterparties: SupplierCounterpartyRepository,
     @Inject(ClientCounterpartyRepository) private readonly clientCounterparties: ClientCounterpartyRepository,
+    @Inject(SupplierOnecContactsService) private readonly onecContacts: SupplierOnecContactsService,
   ) {}
 
   @ApiOperation({ summary: 'Contacts of a supplier with the set version' })
@@ -83,27 +84,42 @@ export class PartyContactsController {
     return { items: await this.counterparties.counterparties(text) };
   }
 
-  @ApiOperation({ summary: 'The 1C counterparty a supplier is linked to' })
+  @ApiOperation({ summary: 'The 1C counterparty a supplier is linked to, with what the last 1C contacts sync saw' })
   @Get('suppliers/:id/counterparty') @RequirePermissions(['suppliers.view'])
-  supplierCounterparty(@Param('id') id: string) { return this.counterparties.link(parseId(id)); }
+  async supplierCounterparty(@Param('id') id: string) {
+    return { ...(await this.counterparties.link(parseId(id))), onecSyncEnabled: this.onecContacts.enabled() };
+  }
+
+  @ApiOperation({ summary: 'Sync the contacts of a supplier with its 1C counterparty now (the loaded 1C data)' })
+  @Post('suppliers/:id/contacts/onec-sync') @HttpCode(200) @RequirePermissions(['suppliers.manage'])
+  async syncSupplierOnec(@Param('id') id: string, @Req() request: RequestWithCurrentUser) {
+    const { user, requestId } = actor(request);
+    const supplierId = parseId(id);
+    const outcome = await this.onecContacts.syncSupplier(supplierId, user, requestId, 'manual');
+    if (outcome.status === 'skipped' && outcome.reason === 'not_found') throw new ApiError(404, 'SUPPLIER_NOT_FOUND', 'Поставщик не найден');
+    return { outcome, link: { ...(await this.counterparties.link(supplierId)), onecSyncEnabled: true } };
+  }
 
   @ApiOperation({ summary: 'Link, relink or unlink a supplier and a 1C counterparty (compare-and-swap on the previous key)' })
   @Put('suppliers/:id/counterparty') @RequirePermissions(['suppliers.manage'])
-  linkSupplier(@Param('id') id: string, @Body() body: unknown, @Req() request: RequestWithCurrentUser) {
+  async linkSupplier(@Param('id') id: string, @Body() body: unknown, @Req() request: RequestWithCurrentUser) {
     const parsed = linkSchema.safeParse(body);
     if (!parsed.success) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос привязки');
     const { user, requestId } = actor(request);
-    return this.counterparties.setLink(parseId(id), parsed.data.refKey1c === null ? null : parseRefKey1c(parsed.data.refKey1c),
+    const supplierId = parseId(id);
+    const link = await this.counterparties.setLink(supplierId, parsed.data.refKey1c === null ? null : parseRefKey1c(parsed.data.refKey1c),
       parsed.data.expectedRefKey1c === null ? null : parseRefKey1c(parsed.data.expectedRefKey1c), user, requestId);
+    return this.afterLink(supplierId, link, user, requestId);
   }
 
   @ApiOperation({ summary: 'Add a 1C counterparty to the suppliers directory (idempotent by the key)' })
   @Post('suppliers/from-counterparty') @HttpCode(200) @RequirePermissions(['suppliers.manage'])
-  supplierFromCounterparty(@Body() body: unknown, @Req() request: RequestWithCurrentUser) {
+  async supplierFromCounterparty(@Body() body: unknown, @Req() request: RequestWithCurrentUser) {
     const parsed = fromCounterpartySchema.safeParse(body);
     if (!parsed.success) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос');
     const { user, requestId } = actor(request);
-    return this.counterparties.createFromCounterparty(parseRefKey1c(parsed.data.refKey1c), user, requestId);
+    const created = await this.counterparties.createFromCounterparty(parseRefKey1c(parsed.data.refKey1c), user, requestId);
+    return { ...(await this.afterLink(created.supplierId, created, user, requestId)), created: created.created };
   }
 
   @ApiOperation({ summary: 'The 1C counterparty a client is linked to' })
@@ -149,11 +165,25 @@ export class PartyContactsController {
     return { results: await this.clientCounterparties.confirm(pairs, user, requestId) };
   }
 
+  /**
+   * After the link is committed: the contacts of the new counterparty come in at once when the sync is on. Its failure
+   * does not undo the link (the hourly pass repeats it); the answer then shows the link without them.
+   */
+  private async afterLink<T extends { refKey1c: string | null }>(supplierId: number, link: T, user: CurrentUser, requestId: string) {
+    if (!this.onecContacts.enabled() || link.refKey1c === null) return { ...link, onecSyncEnabled: this.onecContacts.enabled() };
+    try {
+      await this.onecContacts.syncSupplier(supplierId, user, requestId, 'link');
+      return { ...(await this.counterparties.link(supplierId)), onecSyncEnabled: true };
+    } catch {
+      return { ...link, onecSyncEnabled: true };
+    }
+  }
+
   private replace(party: PartyKind, id: string, body: unknown, request: RequestWithCurrentUser) {
     const parsed = replaceSchema.safeParse(body);
     if (!parsed.success) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный набор контактов');
     const { user, requestId } = actor(request);
-    const contacts: EmployeeContactInput[] = parsed.data.contacts.map((contact) => ({ ...contact, note: contact.note ?? null }));
+    const contacts: PartyContactInput[] = parsed.data.contacts.map((contact) => ({ ...contact, note: contact.note ?? null }));
     return this.contacts.replace(party, parseId(id), parsed.data.version, contacts, user, requestId);
   }
 

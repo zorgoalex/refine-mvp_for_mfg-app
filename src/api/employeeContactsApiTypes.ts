@@ -1,4 +1,5 @@
-export type EmployeeContactKind = 'phone' | 'email' | 'telegram';
+/** Employees keep phones, emails and Telegram accounts; suppliers also keep addresses. */
+export type EmployeeContactKind = 'phone' | 'email' | 'telegram' | 'address';
 
 export interface EmployeeContact {
   contactId: number;
@@ -8,6 +9,8 @@ export interface EmployeeContact {
   valueNormalized: string;
   isPrimary: boolean;
   note: string | null;
+  /** A contact of a supplier that came from 1C: its value is changed only in 1C (absent — typed in here). */
+  origin?: 'erp' | 'onec';
 }
 
 export interface EmployeeContacts {

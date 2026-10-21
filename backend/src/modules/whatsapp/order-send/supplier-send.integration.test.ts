@@ -18,7 +18,7 @@ import { parseSupplierSendCommand } from './order-send.dto';
 import { OrderSendRepository } from './order-send.repository';
 import { OrderSendService } from './order-send.service';
 import { OrderSendWorker } from './order-send-worker.service';
-import { SupplierSendRepository } from './supplier-send.repository';
+import { ONEC_LOCKED_CALL_MS, SupplierSendRepository, withDeadline } from './supplier-send.repository';
 import { SupplierSendService } from './supplier-send.service';
 import { runMigrationFile } from './migration-file.test-util';
 
@@ -47,6 +47,7 @@ describe.skipIf(!databaseUrl)('supplier request to WhatsApp (PostgreSQL, isolate
   let directory: string;
   let requestNumber = 0;
   const texts: Array<{ chatId: string; text: string }> = [];
+  const checkedPhones: string[] = [];
   let textBehaviour: (index: number) => Promise<{ messageId?: string }> = async (index) => ({ messageId: `text_${index}` });
   const q = <T extends QueryResultRow = QueryResultRow>(text: string, params: unknown[] = []) => client.query<T>(text, params);
 
@@ -107,7 +108,7 @@ describe.skipIf(!databaseUrl)('supplier request to WhatsApp (PostgreSQL, isolate
         (3, 'Тест Без телефона', NULL);
       INSERT INTO orders VALUES (9001, 'E2E-Тест-1', NULL, 12, 11), (9002, 'E2E-Тест-2', NULL, 11, 11);`);
     for (const migration of ['230_whatsapp_order_send', '233_whatsapp_order_send_queue', '235_employee_work_contacts', '236_party_contacts',
-      '237_whatsapp_order_send_client_phone', '238_whatsapp_supplier_send']) {
+      '237_whatsapp_order_send_client_phone', '238_whatsapp_supplier_send', '243_supplier_contacts_onec']) {
       const sql = await readFile(new URL(`../../../../db/migrations/${migration}.sql`, import.meta.url), 'utf8');
       if (migration.startsWith('238_')) await runMigrationFile((text) => q(text), sql); else await q(sql);
     }
@@ -151,7 +152,7 @@ describe.skipIf(!databaseUrl)('supplier request to WhatsApp (PostgreSQL, isolate
     const store = new OrderSendFileStore(database, { get: () => directory } as never);
     const runtime = { getConfig: () => ({ enabled: true, relayOwner: 'in_process', relayStaleLockMs: 10 * 60_000 }) } as unknown as WhatsAppRuntimeConfigService;
     const waha = {
-      checkPhone: async (phone: string) => ({ exists: true, chatId: `${phone}@c.us` }),
+      checkPhone: async (phone: string) => { checkedPhones.push(phone); return { exists: true, chatId: `${phone}@c.us` }; },
       sendText: async (chatId: string, text: string) => {
         const result = await textBehaviour(texts.length);
         texts.push({ chatId, text });
@@ -468,6 +469,80 @@ describe.skipIf(!databaseUrl)('supplier request to WhatsApp (PostgreSQL, isolate
       await worker.work();
       expect(await row(view.sendId), change).toMatchObject({ state: 'cancelled', cancel_reason: reason });
       expect(texts, change).toEqual([]);
+    }
+  });
+
+  it('a phone from 1C is offered and used only while the 1C contacts may be; a revocation cancels the send before any WAHA call', async () => {
+    await q(`INSERT INTO supplier_contacts(contact_id, supplier_id, kind, value, value_normalized, is_primary, position, origin, onec_source_id,
+        onec_snapshot_version, onec_synced_at)
+      VALUES (104, 1, 'phone', '+7 701 555 04 04', '77015550404', false, 99, 'onec', 7, date_trunc('milliseconds', now()), now())`);
+    try {
+      const requestId = await makeRequest();
+      // No 1C state at all (the module is not installed): nothing of 1C is offered.
+      expect((await service.menu(requestId, admin)).contacts.map((contact) => contact.contactId)).toEqual([101, 102]);
+      await q(`CREATE TABLE onec_etl_entity_state(source_id bigint NOT NULL, entity_code text NOT NULL, revoked_at timestamptz, snapshot_version timestamptz,
+        PRIMARY KEY (source_id, entity_code));
+        INSERT INTO onec_etl_entity_state SELECT 7, 'counterparty_contacts', NULL, onec_snapshot_version FROM supplier_contacts WHERE contact_id = 104`);
+      const menu = await service.menu(requestId, admin);
+      expect(menu.contacts.map((contact) => contact.contactId)).toEqual([101, 102, 104]);
+      await openGate();
+      const view = await send(requestId, {}, admin, 2);
+      expect((await row(view.sendId)).supplier_contact_id).toBe('104');
+      await q(`UPDATE onec_etl_entity_state SET revoked_at = now()`);
+      checkedPhones.length = 0;
+      texts.length = 0;
+      await worker.work();
+      expect(await row(view.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_removed' });
+      expect(checkedPhones).toEqual([]);
+      expect(texts).toEqual([]);
+      // A new command to the revoked phone is refused like a removed one; the menu no longer offers it. A new snapshot of 1C
+      // (not yet reconciled by the contacts sync) hides the copy the same way.
+      expect(await code(service.send(parseSupplierSendCommand(requestId, {
+        text: TEXT, edited: false, templateId: 7, templateVersion: 3, textVersion: menu.requestVersion,
+        contactId: 104, contactToken: menu.contacts[2].token, idempotencyKey: randomUUID(),
+      }), admin, `req-${randomUUID()}`))).toBe('SUPPLIER_CONTACT_MISSING');
+      expect((await service.menu(requestId, admin)).contacts.map((contact) => contact.contactId)).toEqual([101, 102]);
+      await q(`UPDATE onec_etl_entity_state SET revoked_at = NULL, snapshot_version = now() + interval '1 second'`);
+      expect((await service.menu(requestId, admin)).contacts.map((contact) => contact.contactId)).toEqual([101, 102]);
+    } finally {
+      await q('DROP TABLE IF EXISTS onec_etl_entity_state');
+    }
+  });
+
+  it('a revocation that comes while WAHA checks a 1C number waits for the check; one that came first stops it', async () => {
+    await q(`INSERT INTO supplier_contacts(contact_id, supplier_id, kind, value, value_normalized, is_primary, position, origin, onec_source_id,
+        onec_snapshot_version, onec_synced_at)
+      VALUES (104, 1, 'phone', '+7 701 555 04 04', '77015550404', false, 99, 'onec', 7, date_trunc('milliseconds', now()), now());
+      CREATE TABLE onec_etl_entity_state(source_id bigint NOT NULL, entity_code text NOT NULL, revoked_at timestamptz, snapshot_version timestamptz,
+        PRIMARY KEY (source_id, entity_code));
+      INSERT INTO onec_etl_entity_state SELECT 7, 'counterparty_contacts', NULL, onec_snapshot_version FROM supplier_contacts WHERE contact_id = 104`);
+    const revoker = await pool.connect();
+    try {
+      await revoker.query(`SET search_path="${schema}",public`);
+      await openGate();
+      const view = await send(await makeRequest(), {}, admin, 2);
+      let release: () => void = () => undefined;
+      const checking = new Promise<void>((resolve) => { release = resolve; });
+      let entered: () => void = () => undefined;
+      const inside = new Promise<void>((resolve) => { entered = resolve; });
+      const sendRow = await row(view.sendId);
+      const during = repository.whileContactUsable(sendRow as never, async () => { entered(); await checking; return 'checked'; });
+      await inside;
+      await revoker.query('BEGIN');
+      await revoker.query(`SET LOCAL lock_timeout = '300ms'`);
+      const revoked = await revoker.query(`UPDATE onec_etl_entity_state SET revoked_at = now()`).then(() => 'updated', (error: { code?: string }) => error.code);
+      await revoker.query('ROLLBACK');
+      expect(revoked).toBe('55P03');
+      release();
+      expect(await during).toBe('checked');
+      await revoker.query(`UPDATE onec_etl_entity_state SET revoked_at = now()`);
+      expect(await repository.whileContactUsable(sendRow as never, async () => 'checked')).toBeNull();
+      // A provider that hangs does not hold the 1C state row longer than the agreed bound.
+      expect(ONEC_LOCKED_CALL_MS).toBeLessThanOrEqual(10_000);
+      expect(await withDeadline(new Promise(() => undefined), 20).then(() => 'answered', (error: ApiError) => error.code)).toBe('WAHA_UNAVAILABLE');
+    } finally {
+      revoker.release();
+      await q('DROP TABLE IF EXISTS onec_etl_entity_state');
     }
   });
 

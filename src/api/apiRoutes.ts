@@ -390,6 +390,7 @@ export const apiRoutes = {
     supplierCounterparties: backendApiPath('/supplier-counterparties'),
     supplierCounterparty: (supplierId: number) => backendApiPath(`/suppliers/${supplierId}/counterparty`),
     supplierFromCounterparty: backendApiPath('/suppliers/from-counterparty'),
+    supplierOnecSync: (supplierId: number) => backendApiPath(`/suppliers/${supplierId}/contacts/onec-sync`),
     clientCounterparty: (clientId: number) => backendApiPath(`/clients/${clientId}/counterparty`),
     clientCounterpartyCandidates: (clientId: number) => backendApiPath(`/clients/${clientId}/counterparty-candidates`),
     clientOnecDocuments: (clientId: number) => backendApiPath(`/clients/${clientId}/onec-documents`),
