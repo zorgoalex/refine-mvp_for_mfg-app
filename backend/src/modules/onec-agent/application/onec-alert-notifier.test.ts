@@ -11,6 +11,7 @@ import {
   orderFairly,
   planKey,
   planOnecAlertDispatches,
+  recoveryPlan,
   whatsappKey,
   whatsappTargets,
 } from './onec-alert-notifier';
@@ -226,5 +227,34 @@ describe('WhatsApp part of a dispatch (plan §5)', () => {
     expect(externalStillRelevant({ stage: 'reminder', createdAt: now }, closed, now)).toBe(false);
     expect(externalStillRelevant({ stage: 'resolved', createdAt: new Date('2026-10-19T07:00:00Z') }, closed, now)).toBe(true);
     expect(externalStillRelevant({ stage: 'resolved', createdAt: new Date('2026-10-19T05:59:00Z') }, closed, now)).toBe(false);
+  });
+
+  it('sends a recovery notice per target only about the episodes whose alarm reached it, waiting for alarms in flight', () => {
+    const user = { userId: 7 };
+    const other = { userId: 8 };
+    const chat = { chatId: '120363000000000001' };
+    const row = (episodeId: number, target: { userId: number } | { chatId: string }, channelState: string | null) =>
+      'userId' in target ? { episodeId, userId: target.userId, chatId: null, channelState } : { episodeId, userId: null, chatId: target.chatId, channelState };
+    const none = { delayedEpisodeIds: [], rows: [] };
+    // Sent or unknown → follows; failed/cancelled/never sent → skipped.
+    expect(recoveryPlan([user, other, chat], [1], { delayedEpisodeIds: [], rows: [row(1, user, 'sent'), row(1, chat, 'unknown'), row(1, other, 'failed')] }, false))
+      .toEqual({ pending: false, sends: [{ targets: [user, chat], episodeIds: [1] }], skip: [other] });
+    expect(recoveryPlan([user, chat], [1], none, false)).toEqual({ pending: false, sends: [], skip: [user, chat] });
+    // R5-1: two episodes, each alarm went to a different recipient → each hears only of its own.
+    expect(recoveryPlan([user, other], [1, 2], { delayedEpisodeIds: [], rows: [row(1, user, 'sent'), row(2, other, 'sent')] }, false).sends).toEqual([
+      { targets: [user], episodeIds: [1] },
+      { targets: [other], episodeIds: [2] },
+    ]);
+    // R5-2: an escalation reached the target while the aggregated opening still waits for the morning → no wait.
+    expect(recoveryPlan([user], [1], { delayedEpisodeIds: [], rows: [row(1, user, null), row(1, user, 'sent')] }, false))
+      .toEqual({ pending: false, sends: [{ targets: [user], episodeIds: [1] }], skip: [] });
+    // Not reached and in flight (or delayed) → wait; when the wait is over, the reached part still goes.
+    const flight = { delayedEpisodeIds: [], rows: [row(1, user, 'sent'), row(2, user, null)] };
+    expect(recoveryPlan([user], [1, 2], flight, false).pending).toBe(true);
+    expect(recoveryPlan([user], [1, 2], flight, true)).toEqual({ pending: false, sends: [{ targets: [user], episodeIds: [1] }], skip: [] });
+    expect(recoveryPlan([user], [1], { delayedEpisodeIds: [1], rows: [] }, false).pending).toBe(true);
+    expect(recoveryPlan([user], [1], { delayedEpisodeIds: [1], rows: [] }, true)).toEqual({ pending: false, sends: [], skip: [user] });
+    // In flight only for a target the policy no longer has → no wait for it.
+    expect(recoveryPlan([user], [1], { delayedEpisodeIds: [], rows: [row(1, user, 'sent'), row(1, other, null)] }, false).pending).toBe(false);
   });
 });

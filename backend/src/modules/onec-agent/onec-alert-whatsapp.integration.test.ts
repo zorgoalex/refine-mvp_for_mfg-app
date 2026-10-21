@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type { ConfigService } from '@nestjs/config';
 import { Pool } from 'pg';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { ApiError } from '../../common/errors/api-error';
 import type { BackendEnv } from '../../config/env.validation';
 import { DatabaseService } from '../../database/database.service';
@@ -53,6 +53,7 @@ suite('1C alerts → WhatsApp — real channel port, isolated PostgreSQL', () =>
   const raise = (kind: string, dedupeKey: string, severity: 'warning' | 'critical' = 'critical') =>
     repo.transaction((tx) => repo.upsertAlert(tx, { kind, agentId: null, sourceId: null, certId: null, severity, dedupeKey, details: {} }));
   const resolve = (dedupeKey: string) => repo.transaction((tx) => repo.resolveAlertByDedupeKey(tx, dedupeKey));
+  const due = () => pool.query(`UPDATE onec_alert_dispatches SET external_due_at = now() - interval '1 second' WHERE external_state = 'pending_delay'`);
   const setPolicy = (group: string, sql: string) => pool.query(`UPDATE onec_alert_notification_policies SET ${sql} WHERE group_code = $1`, [group]);
   const external = () =>
     q<{ dispatch_id: string; user_id: string | null; chat_id: string | null; attempt: number; status: string; skip_reason: string | null; channel_state: string | null }>(
@@ -246,28 +247,206 @@ suite('1C alerts → WhatsApp — real channel port, isolated PostgreSQL', () =>
     expect(await q(`SELECT count(*)::int AS n FROM audit_log WHERE event = 'onec.alert_notification.external_released'`)).toEqual([{ n: 2 }]);
   });
 
-  it('closing all members cancels the unstarted alarm deliveries; the recovery notice is not cancelled', async () => {
+  it('closing all members cancels the unstarted alarm deliveries; no recovery notice goes where the alarm never went', async () => {
     await setPolicy('agent_offline', `external_channels = '{whatsapp,whatsapp_chat}', whatsapp_chat_id = '${CHAT}'`);
     await raise('agent_silent', 'silent:c');
     await notifier.tick();
     await resolve('silent:c');
     await notifier.tick();
-    const dispatches = await q<{ stage: string; external_state: string }>(`SELECT stage, external_state FROM onec_alert_dispatches ORDER BY dispatch_id`);
-    expect(dispatches).toEqual([
+    // The recovery notice waits for the outcome of its alarm, which this tick cancelled.
+    expect(await q(`SELECT stage, external_state FROM onec_alert_dispatches ORDER BY dispatch_id`)).toEqual([
+      { stage: 'opened', external_state: 'cancelled' },
+      { stage: 'resolved', external_state: 'pending_delay' },
+    ]);
+    await due();
+    await notifier.tick();
+    expect(await q(`SELECT stage, external_state FROM onec_alert_dispatches ORDER BY dispatch_id`)).toEqual([
+      { stage: 'opened', external_state: 'cancelled' },
+      { stage: 'resolved', external_state: 'suppressed' },
+    ]);
+    expect((await external()).filter((row) => row.dispatch_id === '2').map((row) => [row.chat_id, row.status, row.skip_reason])).toEqual([
+      [null, 'skipped', 'ALARM_NOT_SENT'],
+      [CHAT, 'skipped', 'ALARM_NOT_SENT'],
+    ]);
+    expect((await deliveries()).map((row) => [row.idempotency_key.split(':')[1], row.state, row.reason])).toEqual([
+      ['1', 'cancelled', 'cancelled_by_source'],
+      ['1', 'cancelled', 'cancelled_by_source'],
+    ]);
+    // Once closed, nothing is cancelled twice; the bell got both stages.
+    await notifier.tick();
+    expect(await q(`SELECT count(*)::int AS n FROM audit_log WHERE event = 'onec.alert_notification.external_cancelled'`)).toEqual([{ n: 1 }]);
+    expect(await q(`SELECT count(*)::int AS n FROM notifications`)).toEqual([{ n: 2 }]);
+  });
+
+  it('the recovery notice follows the alarm only where it was sent (or may have been), not where it failed', async () => {
+    await setPolicy('agent_offline', `external_channels = '{whatsapp,whatsapp_chat}', whatsapp_chat_id = '${CHAT}'`);
+    await raise('agent_silent', 'silent:sent');
+    await notifier.tick();
+    await pool.query(`UPDATE whatsapp_notification_deliveries SET state = CASE recipient_kind WHEN 'user' THEN 'sent' ELSE 'failed' END,
+      reason = CASE recipient_kind WHEN 'user' THEN NULL ELSE 'CHAT_NOT_FOUND' END, sent_at = now(), finished_at = now()`);
+    await resolve('silent:sent');
+    await notifier.tick();
+    // The poll of this tick recorded both outcomes (nothing left to cancel); the notice decides on the next look.
+    await due();
+    await notifier.tick();
+    expect(await q(`SELECT stage, external_state FROM onec_alert_dispatches ORDER BY dispatch_id`)).toEqual([
       { stage: 'opened', external_state: 'cancelled' },
       { stage: 'resolved', external_state: 'queued' },
     ]);
-    const rows = await deliveries();
-    expect(rows.map((row) => [row.idempotency_key.split(':')[1] === '1' ? 'opened' : 'resolved', row.state, row.reason])).toEqual([
-      ['opened', 'cancelled', 'cancelled_by_source'],
-      ['opened', 'cancelled', 'cancelled_by_source'],
-      ['resolved', 'queued', null],
-      ['resolved', 'queued', null],
+    expect((await external()).filter((row) => row.dispatch_id === '2').map((row) => [row.chat_id, row.status, row.skip_reason])).toEqual([
+      [null, 'queued', null],
+      [CHAT, 'skipped', 'ALARM_NOT_SENT'],
     ]);
-    // Once closed, nothing is cancelled twice and the recovery stays queued.
+    expect((await deliveries()).filter((row) => row.idempotency_key.startsWith('onec-alert:2:')).map((row) => row.idempotency_key)).toEqual([
+      `onec-alert:2:whatsapp:user:${MANAGER}:attempt1`,
+    ]);
+    // An alarm already finished when the recovery is planned: decided at once, no waiting.
+    await raise('agent_silent', 'silent:sent2');
     await notifier.tick();
-    expect((await deliveries()).filter((row) => row.state === 'queued')).toHaveLength(2);
-    expect(await q(`SELECT count(*)::int AS n FROM audit_log WHERE event = 'onec.alert_notification.external_cancelled'`)).toEqual([{ n: 1 }]);
+    await pool.query(`UPDATE whatsapp_notification_deliveries SET state = 'unknown', finished_at = now() WHERE state = 'queued' AND idempotency_key LIKE 'onec-alert:3:%'`);
+    await notifier.tick();
+    await resolve('silent:sent2');
+    await notifier.tick();
+    expect(await q(`SELECT stage, external_state FROM onec_alert_dispatches WHERE dispatch_id = 4`)).toEqual([{ stage: 'resolved', external_state: 'queued' }]);
+    expect((await external()).filter((row) => row.dispatch_id === '4').map((row) => [row.chat_id, row.status])).toEqual([
+      [null, 'queued'],
+      [CHAT, 'queued'],
+    ]);
+  });
+
+  it('an aggregated recovery tells each target only of the episodes whose alarm reached it (R5-1)', async () => {
+    // Alarm A went to the chat only, alarm B (after a policy change) to the manager only; both close before one tick.
+    await setPolicy('agent_offline', `external_channels = '{whatsapp_chat}', whatsapp_chat_id = '${CHAT}'`);
+    await raise('agent_silent', 'silent:A');
+    await notifier.tick();
+    await setPolicy('agent_offline', `external_channels = '{whatsapp}', whatsapp_chat_id = NULL`);
+    await raise('agent_silent', 'silent:B');
+    await notifier.tick();
+    await pool.query(`UPDATE whatsapp_notification_deliveries SET state = 'sent', sent_at = now(), finished_at = now()`);
+    await notifier.tick();
+    await setPolicy('agent_offline', `external_channels = '{whatsapp,whatsapp_chat}', whatsapp_chat_id = '${CHAT}'`);
+    await resolve('silent:A');
+    await resolve('silent:B');
+    await notifier.tick();
+    const [recovery] = await q<{ dispatch_id: string; external_state: string }>(`SELECT dispatch_id::text, external_state FROM onec_alert_dispatches WHERE stage = 'resolved'`);
+    expect(recovery.external_state).toBe('queued');
+    expect(await q(`SELECT count(*)::int AS n FROM onec_alert_dispatch_members WHERE dispatch_id = $1`, [recovery.dispatch_id])).toEqual([{ n: 2 }]);
+    const sent = await q<{ recipient_kind: string; body: string }>(
+      `SELECT recipient_kind, body FROM whatsapp_notification_deliveries WHERE idempotency_key LIKE $1 ORDER BY recipient_kind`, [`onec-alert:${recovery.dispatch_id}:%`]);
+    expect(sent.map((row) => row.recipient_kind)).toEqual(['chat', 'user']);
+    for (const row of sent) expect(row.body).toContain('Восстановлено: 1.');
+    // The bell carries both.
+    const [bell] = await q<{ message: string }>(`SELECT message FROM notifications WHERE source_id = $1`, [recovery.dispatch_id]);
+    expect(bell.message).toContain('Восстановлено: 2.');
+  });
+
+  it('a delivered escalation is enough for the recovery while the aggregated opening still waits for the morning (R5-2)', async () => {
+    const [{ importance }] = await q<{ importance: string }>(`SELECT importance FROM onec_alert_notification_policies WHERE group_code = 'agent_offline'`);
+    onTestFinished(() => setPolicy('agent_offline', `importance = '${importance}'`).then(() => undefined));
+    await setPolicy('agent_offline', `external_channels = '{whatsapp}', importance = 'auto'`);
+    await raise('agent_silent', 'silent:esc', 'warning');
+    await notifier.tick();
+    // The opening waits for the end of the quiet hours; the escalation went out and was sent.
+    await pool.query(`UPDATE whatsapp_notification_deliveries SET not_before = now() + interval '8 hours', expires_at = now() + interval '10 hours'`);
+    await raise('agent_silent', 'silent:esc', 'critical');
+    await notifier.tick();
+    expect(await q(`SELECT stage FROM onec_alert_dispatches ORDER BY dispatch_id`)).toEqual([{ stage: 'opened' }, { stage: 'escalated' }]);
+    await pool.query(`UPDATE whatsapp_notification_deliveries SET state = 'sent', sent_at = now(), finished_at = now() WHERE idempotency_key LIKE 'onec-alert:2:%'`);
+    await notifier.tick();
+    // The opening's delivery is still in flight when the alert closes: the recovery does not wait for it.
+    await resolve('silent:esc');
+    await notifier.tick();
+    expect(await q(`SELECT external_state FROM onec_alert_dispatches WHERE stage = 'resolved'`)).toEqual([{ external_state: 'queued' }]);
+    expect(await q(`SELECT count(*)::int AS n FROM whatsapp_notification_deliveries WHERE idempotency_key LIKE 'onec-alert:3:%' AND state = 'queued'`)).toEqual([{ n: 1 }]);
+  });
+
+  it('the recovery asks the channel about an alarm not yet recorded here (R5-2-1)', async () => {
+    await setPolicy('agent_offline', `external_channels = '{whatsapp}'`);
+    await raise('agent_silent', 'silent:stale');
+    await notifier.tick();
+    // The channel sent it; the dispatcher has not polled yet (local channel_state is NULL).
+    await pool.query(`UPDATE whatsapp_notification_deliveries SET state = 'sent', sent_at = now(), finished_at = now()`);
+    expect(await q(`SELECT channel_state FROM onec_alert_dispatch_recipients WHERE channel = 'whatsapp'`)).toEqual([{ channel_state: null }]);
+    await resolve('silent:stale');
+    // The recovery is decided in this tick on the channel's word, before the poll records it.
+    await notifier.tick();
+    expect(await q(`SELECT external_state FROM onec_alert_dispatches WHERE stage = 'resolved'`)).toEqual([{ external_state: 'queued' }]);
+    expect((await external()).filter((row) => row.dispatch_id === '2').map((row) => [row.status, row.skip_reason])).toEqual([['queued', null]]);
+    await notifier.tick();
+    expect(await q(`SELECT count(*)::int AS n FROM whatsapp_notification_deliveries WHERE idempotency_key LIKE 'onec-alert:2:%'`)).toEqual([{ n: 1 }]);
+  });
+
+  it('a recovery past its wait still sends where the channel confirms the alarm, skips the rest', async () => {
+    await setPolicy('agent_offline', `external_channels = '{whatsapp,whatsapp_chat}', whatsapp_chat_id = '${CHAT}'`);
+    await raise('agent_silent', 'silent:late');
+    await notifier.tick();
+    await resolve('silent:late');
+    // A recovery dispatch planned 27 h ago and never decided (the dispatcher stood still); the channel sent the
+    // manager's alarm, the chat's is somehow still queued there; nothing recorded here.
+    await pool.query(`UPDATE whatsapp_notification_deliveries SET state = 'sent', sent_at = now(), finished_at = now() WHERE recipient_kind = 'user'`);
+    const [opened] = await q<{ dispatch_id: string }>(`SELECT dispatch_id::text FROM onec_alert_dispatches WHERE stage = 'opened'`);
+    const original = notifications.closedQueuedDispatches.bind(notifications);
+    // Keep the closing cancellation away so the chat delivery stays in flight.
+    notifications.closedQueuedDispatches = async () => [];
+    try {
+      await notifier.tick();
+      await pool.query(`UPDATE onec_alert_dispatches SET created_at = now() - interval '27 hours', external_due_at = now() - interval '1 second' WHERE stage = 'resolved'`);
+      await pool.query(`UPDATE onec_alert_dispatch_recipients SET channel_state = NULL, channel_reason = NULL WHERE dispatch_id = $1`, [opened.dispatch_id]);
+      await notifier.tick();
+    } finally {
+      notifications.closedQueuedDispatches = original;
+    }
+    expect(await q(`SELECT external_state FROM onec_alert_dispatches WHERE stage = 'resolved'`)).toEqual([{ external_state: 'queued' }]);
+    expect((await external()).filter((row) => row.dispatch_id !== opened.dispatch_id).map((row) => [row.chat_id, row.status, row.skip_reason])).toEqual([
+      [null, 'queued', null],
+      [CHAT, 'skipped', 'ALARM_NOT_SENT'],
+    ]);
+  });
+
+  it('a recovery notice waiting for its delayed alarm is spared when the delay suppresses it', async () => {
+    await setPolicy('agent_offline', `external_channels = '{whatsapp}', delay_minutes = 10`);
+    await raise('agent_silent', 'silent:wait');
+    await notifier.tick();
+    await resolve('silent:wait');
+    await notifier.tick();
+    expect(await q(`SELECT stage, external_state FROM onec_alert_dispatches ORDER BY dispatch_id`)).toEqual([
+      { stage: 'opened', external_state: 'pending_delay' },
+      { stage: 'resolved', external_state: 'pending_delay' },
+    ]);
+    // Before the alarm's delay is over, the notice only postpones itself (no audit).
+    await pool.query(`UPDATE onec_alert_dispatches SET external_due_at = now() - interval '1 second' WHERE stage = 'resolved'`);
+    await notifier.tick();
+    expect(await q(`SELECT external_state, external_due_at > now() AS later FROM onec_alert_dispatches WHERE stage = 'resolved'`)).toEqual([
+      { external_state: 'pending_delay', later: true },
+    ]);
+    expect(await q(`SELECT count(*)::int AS n FROM audit_log WHERE event = 'onec.alert_notification.external_released'`)).toEqual([{ n: 0 }]);
+    await due();
+    await notifier.tick();
+    await due();
+    await notifier.tick();
+    expect(await q(`SELECT stage, external_state FROM onec_alert_dispatches ORDER BY dispatch_id`)).toEqual([
+      { stage: 'opened', external_state: 'suppressed' },
+      { stage: 'resolved', external_state: 'suppressed' },
+    ]);
+    expect((await external()).map((row) => [row.dispatch_id, row.skip_reason])).toEqual([
+      ['1', 'RESOLVED_BEFORE_DELAY'],
+      ['2', 'ALARM_NOT_SENT'],
+    ]);
+    expect(await deliveries()).toEqual([]);
+  });
+
+  it('a blink (opened and closed between two ticks) sends no recovery notice to WhatsApp either', async () => {
+    await setPolicy('agent_offline', `external_channels = '{whatsapp}'`);
+    await raise('agent_silent', 'silent:blink2');
+    await resolve('silent:blink2');
+    await notifier.tick();
+    await notifier.tick();
+    expect(await q(`SELECT stage, external_state FROM onec_alert_dispatches ORDER BY dispatch_id`)).toEqual([
+      { stage: 'opened', external_state: 'suppressed' },
+      { stage: 'resolved', external_state: 'suppressed' },
+    ]);
+    expect(await deliveries()).toEqual([]);
+    expect(await q(`SELECT count(*)::int AS n FROM notifications`)).toEqual([{ n: 2 }]);
   });
 
   it('a delivery cancelled by a backend restart (delivery_gap) is queued again as attempt 2, at most 3 attempts', async () => {
@@ -340,7 +519,10 @@ suite('1C alerts → WhatsApp — real channel port, isolated PostgreSQL', () =>
     await setPolicy('agent_offline', `external_channels = '{whatsapp}'`);
     await raise('agent_silent', 'silent:night');
     await notifier.tick();
+    await pool.query(`UPDATE whatsapp_notification_deliveries SET state = 'sent', sent_at = now(), finished_at = now()`);
     await resolve('silent:night');
+    await notifier.tick();
+    await due();
     await notifier.tick();
     // As if the recovery was queued at night 7 h ago with quiet hours: its first lifetime ends in 5 h.
     const until = new Date(Date.now() + 5 * 60 * 60_000);

@@ -84,6 +84,7 @@ const WHATSAPP_REASON_LABELS: Record<string, string> = {
   NO_WORK_PHONE: 'нет рабочего телефона',
   RESOLVED_BEFORE_DELAY: 'закрылось до конца задержки',
   RESOLVED_BEFORE_SEND: 'закрылось до отправки',
+  ALARM_NOT_SENT: 'само оповещение сюда не уходило',
   ENQUEUE_FAILED: 'сбой постановки в очередь',
   cancelled_by_source: 'оповещение закрылось или настройка изменилась',
   delivery_gap: 'сервер перезапускался',

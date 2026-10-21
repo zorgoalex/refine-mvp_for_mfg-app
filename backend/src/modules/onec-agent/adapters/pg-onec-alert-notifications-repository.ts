@@ -123,6 +123,25 @@ export interface RecipientRowInput {
 }
 
 /** The dispatch row under its lock (external part of a dispatch, plan §2.5). */
+/** WhatsApp of the alarm stages of some episodes, for their recovery notice (alarmDeliveries). */
+export interface AlarmDelivery {
+  /** Episodes in an alarm dispatch still waiting for its delay. */
+  delayedEpisodeIds: readonly number[];
+  /** The current WhatsApp row of each alarm dispatch × target, per member episode. */
+  rows: readonly AlarmDeliveryRow[];
+}
+
+export interface AlarmDeliveryRow {
+  episodeId: number;
+  userId: number | null;
+  chatId: string | null;
+  /** NULL — in flight as far as the dispatcher has recorded (the channel may already know more). */
+  channelState: string | null;
+  channelReason: string | null;
+  deliveryId: string | null;
+  attempt: number;
+}
+
 export interface LockedDispatch {
   dispatchId: number;
   sourceId: number | null;
@@ -771,6 +790,56 @@ export class PgOnecAlertNotificationsRepository {
       `UPDATE onec_alert_dispatch_recipients SET channel_state_at = now() WHERE recipient_row_id = ANY($1::bigint[]) AND channel_state IS NULL`,
       [recipientRowIds],
     );
+  }
+
+  /**
+   * WhatsApp of the alarm stages (opened, escalated, reminder, digest) of these episodes, per episode: the current row
+   * of each target (superseded attempts left out) and the episodes of alarm dispatches still waiting for their delay. Read without locks:
+   * a row only moves from in flight to a final state, so a stale read can only make the recovery notice wait a tick.
+   */
+  async alarmDeliveries(client: DatabaseClient, episodeIds: readonly number[]): Promise<AlarmDelivery> {
+    if (episodeIds.length === 0) return { delayedEpisodeIds: [], rows: [] };
+    const { rows } = await client.query<{
+      episode_id: string;
+      user_id: string | null;
+      chat_id: string | null;
+      channel_state: string | null;
+      channel_reason: string | null;
+      channel_delivery_ref: string | null;
+      attempt: number;
+    }>(
+      `SELECT m.episode_id::text, r.user_id::text, r.chat_id, r.channel_state, r.channel_reason, r.channel_delivery_ref, r.attempt
+         FROM onec_alert_dispatch_members m
+         JOIN onec_alert_dispatches d ON d.dispatch_id = m.dispatch_id
+         JOIN onec_alert_dispatch_recipients r ON r.dispatch_id = d.dispatch_id
+        WHERE m.episode_id = ANY($1::bigint[]) AND d.stage <> 'resolved'
+          AND r.channel = 'whatsapp' AND r.status = 'queued'
+        ORDER BY m.episode_id, r.recipient_row_id`,
+      [episodeIds],
+    );
+    const { rows: delayed } = await client.query<{ episode_id: string }>(
+      `SELECT DISTINCT m.episode_id::text FROM onec_alert_dispatch_members m
+         JOIN onec_alert_dispatches d ON d.dispatch_id = m.dispatch_id
+        WHERE m.episode_id = ANY($1::bigint[]) AND d.stage <> 'resolved' AND d.external_state = 'pending_delay'`,
+      [episodeIds],
+    );
+    return {
+      delayedEpisodeIds: delayed.map((row) => Number(row.episode_id)),
+      rows: rows.map((row) => ({
+        episodeId: Number(row.episode_id),
+        userId: row.user_id === null ? null : Number(row.user_id),
+        chatId: row.chat_id,
+        channelState: row.channel_state,
+        channelReason: row.channel_reason,
+        deliveryId: row.channel_delivery_ref,
+        attempt: Number(row.attempt),
+      })),
+    };
+  }
+
+  /** A delayed dispatch that has to wait more (a recovery notice behind its alarm still in flight). */
+  async postponeDelayed(tx: DatabaseClient, dispatchId: number, seconds: number): Promise<void> {
+    await tx.query(`UPDATE onec_alert_dispatches SET external_due_at = now() + make_interval(secs => $2) WHERE dispatch_id = $1`, [dispatchId, seconds]);
   }
 
   /** The row is replaced by a new attempt (redeliver): superseded, with the state that caused it. */
