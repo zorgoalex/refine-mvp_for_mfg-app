@@ -11,6 +11,10 @@ export default defineConfig({
       JWT_REFRESH_SECRET: 'test-refresh-secret-key-for-unit-tests-only-must-be-256-bits-long',
     },
   },
+  // Test files are excluded from tsconfig.json, so oxc does not pick up its decorator settings for them.
+  oxc: {
+    decorator: { legacy: true, emitDecoratorMetadata: true },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '../src'),
