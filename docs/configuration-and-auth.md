@@ -440,7 +440,12 @@ NOTIFICATION_BALLOON_PENDING`, в колокольчике такие строк
 `POST …/:group/test` — `onec.manage`; `GET /api/v1/onec/alert-notifications/recent`). Колокольчик и балун
 отключить нельзя; Telegram — позже. Если диспетчер, будучи включённым, не работал дольше
 30 минут (backend стоял, откат образа), первый тик снова считает это включением: накопленное приходит сводкой. Перед
-откатом образа — флаг `false` и дождаться `active = false` в `onec_alert_notification_state`.
+откатом образа — флаг `false` (дождаться `active = false` в `onec_alert_notification_state`, если backend работает) и
+перевести ещё не показанные обязательные балуны в `persistent`: `UPDATE notifications SET balloon_mode = 'persistent'
+WHERE balloon_mode = 'mandatory' AND balloon_shown_at IS NULL` — до запуска прежнего образа и ещё раз сразу после
+(пока работал новый backend, строку мог добавить, например, «Проверить»; прежний таких строк не пишет). Backend до
+оповещений 1С режима `mandatory` не знает: он выдаёт такие строки без режима, интерфейс их пропускает, не подтверждая,
+и они занимают выдачу остальных балунов до истечения 24 часов.
 
 WhatsApp для оповещений 1С (миграция `265_onec_alert_whatsapp.sql`) идёт через канал уведомлений WhatsApp
 (`docs/whatsapp-notifications.md` в backend). Каналы группы: `whatsapp` — лично каждому получателю на рабочий номер

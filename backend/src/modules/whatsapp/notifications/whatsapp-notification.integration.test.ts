@@ -229,7 +229,9 @@ describe.skipIf(!databaseUrl)('WhatsApp notification channel (PostgreSQL, isolat
     }
     const related = (await q(`SELECT r.entity_type, r.entity_id FROM audit_log_related_entity r JOIN audit_log a USING (audit_id) WHERE a.entity_id = $1`,
       [queued.deliveryId])).rows;
-    expect(related).toContainEqual({ entity_type: 'onec_alert', entity_id: '77' });
+    // The 1C source id is a dispatch id: the relation names the dispatch, never an alert with the same number.
+    expect(related).toContainEqual({ entity_type: 'onec_alert_dispatch', entity_id: '77' });
+    expect(related.filter((item) => item.entity_type === 'onec_alert')).toEqual([]);
     expect(await port.statuses(database as never, [queued.deliveryId])).toEqual([
       expect.objectContaining({ deliveryId: queued.deliveryId, state: 'sent', reason: null }),
     ]);

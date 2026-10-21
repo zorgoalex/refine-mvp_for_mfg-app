@@ -9,7 +9,7 @@ import { loadEvaluationUsersWith } from '../../../permissions/user-authorization
 import { maskContact } from '../../employees/employee-contacts';
 import { WHATSAPP_GROUP_ID_PATTERN } from '../whatsapp-groups';
 import {
-  WHATSAPP_NOTIFICATION_LIMITS as LIMITS,
+  WHATSAPP_NOTIFICATION_LIMITS as LIMITS, WHATSAPP_NOTIFICATION_SOURCE_ENTITY_TYPES,
   type WhatsAppNotificationRequest, type WhatsAppNotificationResult, type WhatsAppNotificationState, type WhatsAppNotificationStatus,
 } from './whatsapp-notification.types';
 
@@ -341,11 +341,12 @@ export class WhatsAppNotificationRepository {
   /** Audit without values: the recipient as a mask or a number, the body by length and hash. */
   private async audit(tx: DatabaseClient, row: DeliveryRow, event: string, extra: Record<string, unknown>): Promise<void> {
     const sourceNumeric = row.source_id !== null && /^\d{1,15}$/.test(row.source_id) ? Number(row.source_id) : null;
+    const sourceEntityType = WHATSAPP_NOTIFICATION_SOURCE_ENTITY_TYPES[row.source_type];
     await auditService.record(tx, {
       event, entityType: 'whatsapp_notification', entityId: row.delivery_id,
       actorUserId: null, actorUsername: null, actorRole: null, requestId: row.correlation_id, source: AUDIT_SOURCE,
       relatedUserId: row.recipient_user_id === null ? null : Number(row.recipient_user_id),
-      relatedEntities: sourceNumeric === null ? [] : [{ entityType: row.source_type, entityId: sourceNumeric }],
+      relatedEntities: sourceNumeric === null || !sourceEntityType ? [] : [{ entityType: sourceEntityType, entityId: sourceNumeric }],
       after: { state: row.state, reason: row.reason },
       metadata: {
         ...extra, correlationId: row.correlation_id, sourceType: row.source_type, sourceId: row.source_id, recipientKind: row.recipient_kind,
