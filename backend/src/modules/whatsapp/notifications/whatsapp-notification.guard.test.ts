@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { WHATSAPP_NOTIFICATION_SOURCE_READ_PERMISSIONS, journalVisibilitySql } from './whatsapp-notification-journal.service';
+import { WHATSAPP_NOTIFICATION_SOURCE_ENTITY_TYPES } from './whatsapp-notification.types';
 
 const WHATSAPP = resolve(__dirname, '..');
 const MODULES = resolve(WHATSAPP, '..');
@@ -71,5 +72,10 @@ describe('WhatsApp notification channel boundaries', () => {
     journalVisibilitySql({ permissions: ['whatsapp.manage', 'onec.view'] }, allowed);
     expect(allowed[0]).toEqual(['onec_alert']);
     expect(WHATSAPP_NOTIFICATION_SOURCE_READ_PERMISSIONS).toEqual({ onec_alert: 'onec.view' });
+  });
+
+  it('every source is registered in both registries: read permission and audit relation', () => {
+    // A source missing from the entity registry would silently lose its audit relation.
+    expect(Object.keys(WHATSAPP_NOTIFICATION_SOURCE_ENTITY_TYPES).sort()).toEqual(Object.keys(WHATSAPP_NOTIFICATION_SOURCE_READ_PERMISSIONS).sort());
   });
 });
