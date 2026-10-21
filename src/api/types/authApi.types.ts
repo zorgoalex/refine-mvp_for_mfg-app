@@ -41,6 +41,8 @@ export type PermissionName =
   | 'references.view'
   | 'references.manage'
   | 'references.quick_create'
+  | 'integrations.duplicates.view'
+  | 'integrations.duplicates.resolve'
   | 'finance.analytics.view'
   | 'payments.onec.view'
   | 'payments.onec.manage'

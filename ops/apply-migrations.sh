@@ -2706,6 +2706,33 @@ probe_file() {
       "SELECT (SELECT count(*) FROM pg_trigger WHERE tgname IN ('trg_od_stage_marks_insert','trg_od_stage_marks_update','trg_od_stage_marks_delete') AND tgrelid = 'public.order_details'::regclass AND NOT tgisinternal) = 3;" \
       "SELECT (SELECT count(*) FROM pg_trigger WHERE tgname IN ('trg_ohd_stage_marks_insert','trg_ohd_stage_marks_update','trg_ohd_stage_marks_delete') AND tgrelid = 'public.order_hdf_details'::regclass AND NOT tgisinternal) = 3;" \
       "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event = 'production_stage_mark.auto_backfill');" ;;
+    # 243: K4a — supplier contacts from 1C: origin columns on the three contact tables, 1C profile and sync state,
+    # availability/lock functions, the narrowed phone sync, the profile cleanup trigger, version save marker.
+    243_supplier_contacts_onec*) probe_all \
+      "$(q_col supplier_contacts onec_snapshot_version)" \
+      "$(q_col vendor_contacts onec_snapshot_version)" \
+      "$(q_col client_contacts onec_snapshot_version)" \
+      "$(q_tbl party_onec_profiles)" \
+      "$(q_tbl party_onec_sync_state)" \
+      "SELECT to_regprocedure('public.party_onec_contacts_available(bigint,timestamp with time zone)') IS NOT NULL AND to_regprocedure('public.party_onec_contacts_lock(bigint,timestamp with time zone)') IS NOT NULL;" \
+      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'supplier_phone_contact_sync' AND prosrc LIKE '%origin = ''erp''%');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'party_contact_versions_saved' AND prosrc LIKE '%erp.party_contacts_onec_sync%');" \
+      "$(q_trg trg_supplier_drop_onec_profile)" ;;
+    # 267: journal of duplicates of integrations — cases, members, history, 1C dependencies, check requests,
+    # snapshot state function, enqueue triggers of eight directory tables, journal permissions.
+    267_integration_duplicates*) probe_all \
+      "$(q_tbl integration_duplicate_cases)" \
+      "$(q_tbl integration_duplicate_members)" \
+      "$(q_tbl integration_duplicate_case_sources)" \
+      "$(q_tbl integration_duplicate_events)" \
+      "$(q_tbl integration_duplicate_check_requests)" \
+      "$(q_tbl integration_duplicate_check_failures)" \
+      "SELECT EXISTS (SELECT 1 FROM integration_duplicate_settings WHERE id);" \
+      "$(q_col integration_duplicate_settings key_fingerprint)" \
+      "$(q_idx uq_integration_duplicate_cases_key)" \
+      "SELECT to_regprocedure('public.onec_entity_snapshot_state(bigint,text,timestamp with time zone)') IS NOT NULL AND to_regprocedure('public.integration_duplicate_enqueue()') IS NOT NULL;" \
+      "SELECT (SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal AND tgname LIKE 'trg_integration_duplicates_%') = 8;" \
+      "SELECT (SELECT count(*) FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'top_manager' AND rp.permission_name IN ('integrations.duplicates.view', 'integrations.duplicates.resolve')) = 2;" ;;
     # 253: quick add of references from the order form behind its own permission (access groups 0Б).
     253_references_quick_create_permission*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM permissions_catalog WHERE permission_name = 'references.quick_create' AND is_active);" \

@@ -69,6 +69,7 @@ const ProfilePage = lazy(async () => ({ default: (await import("./pages/profile"
 const Bitrix24IncomingRequestsPage = lazy(async () => ({
   default: (await import("./pages/bitrix24/IncomingRequestsPage")).Bitrix24IncomingRequestsPage,
 }));
+const IntegrationsPage = lazy(async () => ({ default: (await import("./pages/integrations/IntegrationsPage")).IntegrationsPage }));
 const OnecPage = lazy(async () => ({ default: (await import("./pages/onec/OnecPage")).OnecPage }));
 
 // Route-level code splitting: every page component is lazy-loaded so the root
@@ -786,6 +787,7 @@ const ThemedApp = () => {
                       },
                     ]
                   : []),
+                { name: "integrations", list: "/integrations", meta: { label: "Интеграции" } },
                 { name: "inbound-signals", list: "/inbound-signals", meta: { label: "Входящие сигналы" } },
               ]}
               options={{
@@ -1080,6 +1082,7 @@ const ThemedApp = () => {
                   {featureFlags.useBackendOnec && (
                     <Route path="/onec" element={<OnecPage />} />
                   )}
+                  <Route path="/integrations" element={<IntegrationsPage />} />
                   <Route path="/workshops" >
                     <Route index element={<WorkshopList />} />
                     <Route path="create" element={<WorkshopCreate />} />

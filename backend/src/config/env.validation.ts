@@ -319,6 +319,10 @@ export const envSchema = z
     BACKEND_INVENTORY_ONEC_RECEIPTS: booleanFromEnv.default(false),
     // Контакты поставщиков из 1С (K4a): сверка с контактами привязанного контрагента 1С после выгрузки и раз в час.
     BACKEND_PARTY_CONTACTS_ONEC_SYNC: booleanFromEnv.default(false),
+    // Журнал дублей интеграций (D0): поиск дублей справочников ERP / Bitrix24 / 1С. Очистка данных 1С в журнале
+    // работает и при выключенном поиске. Ключ дел — HMAC с секретом BACKEND_INTEGRATION_DUPLICATES_KEY (≥ 32 символа).
+    BACKEND_INTEGRATION_DUPLICATES: booleanFromEnv.default(false),
+    BACKEND_INTEGRATION_DUPLICATES_KEY: z.union([z.string().min(32).max(256), emptyTrimmedStringFromEnv]).optional(),
     BACKEND_ENABLE_PDF_IMPORT_LAYOUT_PATTERNS: booleanFromEnv.default(false),
     BACKEND_STATUS_AUTOMATION: booleanFromEnv.default(false),
     BACKEND_ENABLE_NOTIFICATION_ENGINE: booleanFromEnv.default(false),
@@ -637,6 +641,14 @@ export const envSchema = z
       .default(180000),
   })
   .superRefine((env, ctx) => {
+    if (env.BACKEND_INTEGRATION_DUPLICATES && !env.BACKEND_INTEGRATION_DUPLICATES_KEY) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'BACKEND_INTEGRATION_DUPLICATES_KEY is required when BACKEND_INTEGRATION_DUPLICATES is true',
+        path: ['BACKEND_INTEGRATION_DUPLICATES_KEY'],
+      });
+    }
+
     if (env.NODE_ENV === 'production' && !env.FRONTEND_ORIGIN) {
       ctx.addIssue({
         code: 'custom',
