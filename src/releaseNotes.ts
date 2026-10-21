@@ -29,6 +29,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-21", title: "Раскрой ванн с текстурой: плотнее и без поворота",
+    services: ["ERP", "Cutting"], repositories: ["repo_erp", "repo_freecut"],
+    changed: [
+      "В карточке раскроя выбор «Направление текстуры» — «вдоль полотна» или «поперёк полотна» — снимает галочку «Поворот разрешён». Включить поворот можно обратно вручную; выбор «отсутствует» галочку не меняет.",
+    ],
+    fixed: [
+      "Ванны с профилем «вдоль» или «поперёк» больше не переносят деталь на следующий лист, когда на текущем есть свободное место для неё без поворота — например, в конце листа поперёк нескольких рядов.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-21", title: "NewLine: страница входа",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [
