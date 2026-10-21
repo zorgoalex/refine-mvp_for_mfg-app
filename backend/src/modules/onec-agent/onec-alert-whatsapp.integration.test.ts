@@ -106,7 +106,7 @@ suite('1C alerts → WhatsApp — real channel port, isolated PostgreSQL', () =>
     await installAuthorizationSnapshot((sql) => pool.query(sql), schema,
       readFileSync(new URL('../../../db/migrations/248_authorization_snapshot.sql', import.meta.url), 'utf8'));
     for (const file of ['193_onec_agent_foundation.sql', '196_onec_agent_commands.sql', '198_onec_etl.sql', '200_onec_etl_snapshots_revocation.sql',
-      '247_onec_agent_expected_silence.sql', '250_onec_stock_snapshots.sql', '262_onec_alert_episodes.sql', '264_onec_alert_notifications.sql',
+      '247_onec_agent_expected_silence.sql', '262_onec_alert_episodes.sql', '264_onec_alert_notifications.sql',
       '265_onec_alert_whatsapp.sql', '261_whatsapp_notification_deliveries.sql']) {
       await pool.query(readFileSync(new URL(`../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
