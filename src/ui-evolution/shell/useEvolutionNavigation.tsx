@@ -91,5 +91,5 @@ export function useEvolutionNavigation(onNavigate?: () => void) {
     sidebarMenuOrder: sidebarMenuPreferences.settings,
   });
 
-  return { sider, isCreateModalOpen, setIsCreateModalOpen, sidebarMenuPreferences };
+  return { sider, isCreateModalOpen, setIsCreateModalOpen, sidebarMenuPreferences, canViewNavigation, resources };
 }

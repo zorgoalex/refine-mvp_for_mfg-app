@@ -1,0 +1,244 @@
+/* «NewLine» на телефоне (мокап 22). Только представление.
+   Оболочка получает класс .evolution-shell--wb-phone (вариант workbench + уровень устройства phone). */
+
+/* ---------- нижняя панель разделов ---------- */
+:root[data-ui-variant="workbench"] .wb-mtabbar {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 900;
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  padding: 6px 4px calc(8px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--evo-border);
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .wb-mtabbar > a,
+:root[data-ui-variant="workbench"] .wb-mtabbar > button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--wb-ink-3);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  text-decoration: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+:root[data-ui-variant="workbench"] .wb-mtabbar__icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 30px;
+  border-radius: 15px;
+  font-size: 20px;
+}
+
+:root[data-ui-variant="workbench"] .wb-mtabbar > a[aria-current="page"],
+:root[data-ui-variant="workbench"] .wb-mtabbar > button[data-active] {
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-mtabbar > a[aria-current="page"] .wb-mtabbar__icon,
+:root[data-ui-variant="workbench"] .wb-mtabbar > button[data-active] .wb-mtabbar__icon {
+  background: var(--evo-primary-soft);
+}
+
+:root[data-ui-variant="workbench"] .wb-mtabbar > a:focus-visible,
+:root[data-ui-variant="workbench"] .wb-mtabbar > button:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: -2px;
+}
+
+/* содержимое и подвал не уходят под панель */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone {
+  padding-bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+}
+
+/* сканер уже есть в нижней панели — в шапке его не дублировать */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone:has(.wb-mtabbar[data-has-scan]) .evolution-header button[aria-label="Сканер бирок"] {
+  display: none;
+}
+
+/* ---------- карточка заказа ---------- */
+/* сжатая шапка карточки рассчитана на компьютер: на телефоне она выходила за край экрана */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-order-bar-slot {
+  display: none;
+}
+
+/* ---------- список заказов: карточки ---------- */
+:root[data-ui-variant="workbench"] .wb-mcards .ant-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+:root[data-ui-variant="workbench"] .wb-mcard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--evo-surface);
+  box-shadow: var(--evo-shadow);
+  color: var(--evo-text);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+:root[data-ui-variant="workbench"] .wb-mcard:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: 2px;
+}
+
+:root[data-ui-variant="workbench"] .wb-mcard__r1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-mcard__no {
+  flex: none;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-mcard__star {
+  margin-right: 4px;
+  color: var(--evo-warning);
+  font-size: 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-mcard__client {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--evo-text-secondary);
+  font-size: 15px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+:root[data-ui-variant="workbench"] .wb-mcard__r1 > .wb-pill {
+  flex: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-mcard__r2 {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-mcard__money {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+}
+
+:root[data-ui-variant="workbench"] .wb-mcard__money b {
+  font-size: 16px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-mcard__money small {
+  font-size: 13px;
+  color: var(--wb-ink-3);
+}
+
+:root[data-ui-variant="workbench"] .wb-mcard__r2 [data-tone="danger"] {
+  color: var(--evo-danger);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-mcard__r2 [data-tone="warning"] {
+  color: var(--evo-warning);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-mcard__money small[data-tone="ready"] {
+  color: var(--evo-success);
+}
+
+:root[data-ui-variant="workbench"] .wb-mcard__r1 > .wb-pill[data-tone] {
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-mcard__stages:empty {
+  display: none;
+}
+
+/* ---------- карточка заказа: показатели 2×2 и нижняя панель действий ---------- */
+:root[data-ui-variant="workbench"] .wb-mactions {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-mactions {
+  position: fixed;
+  right: 0;
+  bottom: calc(66px + env(safe-area-inset-bottom, 0px));
+  left: 0;
+  z-index: 899;
+  display: flex;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--evo-border);
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-mactions__btn {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 48px;
+  border-radius: 14px;
+  font-size: 16px;
+  text-decoration: none;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-mactions__btn--primary {
+  flex: 1.4;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone:has(.wb-mactions) {
+  padding-bottom: calc(68px + 70px + env(safe-area-inset-bottom, 0px));
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-order-head__tiles {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* ---------- доски (МДФ, статусы): одна колонка на экран, листаются свайпом ---------- */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .status-board-viewport {
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  scroll-padding-inline: 12px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .status-board-columns > .status-board-column {
+  width: calc(100vw - 40px) !important;
+  min-width: calc(100vw - 40px) !important;
+  max-width: none !important;
+  scroll-snap-align: start;
+}

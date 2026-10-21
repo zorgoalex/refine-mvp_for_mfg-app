@@ -22,6 +22,7 @@ import { useUiVariant } from '../../ui-variant/UiVariantProvider';
 import { EvolutionAirNavigation } from './EvolutionAirNavigation';
 import { EvolutionHeader } from './EvolutionHeader';
 import { EvolutionHeaderUtilities } from './EvolutionHeaderUtilities';
+import { WorkbenchMobileTabBar } from './WorkbenchMobileTabBar';
 import { EvolutionMobileNavigation } from './EvolutionMobileNavigation';
 import { EvolutionSider } from './EvolutionSider';
 import { EvolutionTabletNavigation } from './EvolutionTabletNavigation';
@@ -47,6 +48,7 @@ import '../styles/workbench-bazis.css';
 import '../styles/workbench-scan.css';
 import '../styles/workbench-audit.css';
 import '../styles/workbench-profile.css';
+import '../styles/workbench-mobile.css';
 
 const EvolutionRouteSkeleton: React.FC = () => (
   <div
@@ -101,6 +103,8 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
   const effectiveCollapsed = isOperational ? false : collapsed;
   // «NewLine» on desktop: one top bar — workspace tabs on the left, utilities on the right.
   const isWorkbenchDesktop = variant === 'workbench' && !isMobile && !isTablet;
+  // «NewLine» on a phone: sections in a bottom tab bar, the full menu behind «Ещё».
+  const isWorkbenchPhone = variant === 'workbench' && isMobile;
 
   // NewLine: the height of the top bar (utilities row + however many rows of tabs) as a CSS variable,
   // for full-height screens (boards) that must end exactly at the bottom of the window.
@@ -191,6 +195,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
     isAirDesktop ? 'evolution-shell--air-desktop' : '',
     isTablet ? 'evolution-shell--tablet' : '',
     isWorkbenchDesktop ? 'evolution-shell--topbar' : '',
+    isWorkbenchPhone ? 'evolution-shell--wb-phone' : '',
   ].filter(Boolean).join(' ');
 
   return (
@@ -223,7 +228,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
           </div>
         ) : !isAirDesktop && !isTabletLandscape ? (
           <EvolutionHeader
-            onOpenSider={isMobile || isTabletPortrait ? () => setIsNavigationOpen(true) : undefined}
+            onOpenSider={(isMobile && !isWorkbenchPhone) || isTabletPortrait ? () => setIsNavigationOpen(true) : undefined}
             operational={isOperational}
             tablet={isTabletPortrait}
           />
@@ -250,6 +255,9 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
         </Layout.Content>
         <AppFooter />
       </Layout>
+      {isWorkbenchPhone ? (
+        <WorkbenchMobileTabBar moreOpen={isNavigationOpen} onOpenMore={() => setIsNavigationOpen(true)} />
+      ) : null}
       {isMobile || isTablet ? (
         <EvolutionMobileNavigation
           onClose={() => setIsNavigationOpen(false)}

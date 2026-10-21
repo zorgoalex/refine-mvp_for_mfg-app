@@ -4,7 +4,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Tag, Space, Typography, Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
-import { StarOutlined, EyeOutlined, PhoneOutlined } from '@ant-design/icons';
+import { StarOutlined, EyeOutlined, PhoneOutlined, WalletOutlined } from '@ant-design/icons';
 import { useList } from '../../../../query/orderLifecycleQueries';
 import { useNavigate } from 'react-router-dom';
 import { formatNumber } from '../../../../utils/numberFormat';
@@ -432,8 +432,25 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
       </span>
     );
 
+    // телефон (мокап 22): главные действия — в нижней панели; на компьютере она скрыта стилями
+    const phoneActions = primaryPhone || onAddPayment ? (
+      <div className="wb-mactions" aria-label="Действия с заказом">
+        {primaryPhone ? (
+          <a className="ant-btn ant-btn-default wb-mactions__btn" href={`tel:${primaryPhone.replace(/[^+\d]/g, '')}`}>
+            <PhoneOutlined aria-hidden /> Позвонить
+          </a>
+        ) : null}
+        {onAddPayment ? (
+          <button type="button" className="ant-btn ant-btn-primary wb-mactions__btn wb-mactions__btn--primary" onClick={onAddPayment}>
+            <WalletOutlined aria-hidden /> Добавить платёж
+          </button>
+        ) : null}
+      </div>
+    ) : null;
+
     return (
       <div className="order-show-header wb-order-head" aria-label="Сводка заказа">
+        {phoneActions}
         <div className="wb-order-head__top">
           <div className="wb-order-head__identity">
             <div className="wb-order-head__title">
