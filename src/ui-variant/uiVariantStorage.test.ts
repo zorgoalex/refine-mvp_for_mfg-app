@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getDeviceUiVariantHint,
   getStoredUiVariant,
+  setDeviceUiVariantHint,
   setStoredUiVariant,
   uiVariantStorageKey,
 } from './uiVariantStorage';
@@ -40,5 +42,44 @@ describe('per-user UI variant cache', () => {
 
     expect(getStoredUiVariant('7', throwingStorage)).toBeNull();
     expect(() => setStoredUiVariant('7', 'evolution', throwingStorage)).not.toThrow();
+  });
+
+  it('keeps only the NewLine choice as the signed-out device hint', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: (key: string) => { values.delete(key); },
+    };
+
+    expect(getDeviceUiVariantHint(storage)).toBeNull();
+    setDeviceUiVariantHint('workbench', storage);
+    expect(getDeviceUiVariantHint(storage)).toBe('workbench');
+    setDeviceUiVariantHint('line', storage);
+    expect(getDeviceUiVariantHint(storage)).toBeNull();
+    expect(values.size).toBe(0);
+
+    const throwingStorage = {
+      getItem: () => { throw new Error('blocked'); },
+      setItem: () => { throw new Error('blocked'); },
+      removeItem: () => { throw new Error('blocked'); },
+    };
+    expect(getDeviceUiVariantHint(throwingStorage)).toBeNull();
+    expect(() => setDeviceUiVariantHint('workbench', throwingStorage)).not.toThrow();
+  });
+
+  it('survives a browser that throws on the global localStorage getter', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get: () => { throw new DOMException('blocked', 'SecurityError'); },
+    });
+    try {
+      expect(getDeviceUiVariantHint()).toBeNull();
+      expect(() => setDeviceUiVariantHint('workbench')).not.toThrow();
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, 'localStorage', descriptor);
+      else delete (globalThis as { localStorage?: unknown }).localStorage;
+    }
   });
 });

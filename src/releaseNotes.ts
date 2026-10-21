@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-21", title: "NewLine: страница входа",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Если на этом устройстве последним работали в оформлении NewLine, страница входа тоже открывается в нём: слева название системы и схема раскроя листа, справа форма входа, вход через SSO (если включён) и переключатель светлой и тёмной темы. Остальные оформления видят прежнюю страницу входа.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-21", title: "Этапы заказа ставятся и снимаются по деталям",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

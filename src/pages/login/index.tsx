@@ -5,6 +5,10 @@ import { useLogin } from "@refinedev/core";
 import { featureFlags } from "../../config/featureFlags";
 import { SSO_LOGOUT_WARNING_KEY } from "../../authProvider";
 import { resolvePostLoginTarget } from "./postLoginTarget";
+import { useWorkosSso } from "./useWorkosSso";
+import { useOptionalUiVariant } from "../../ui-variant/UiVariantProvider";
+
+const LoginWorkbench = React.lazy(() => import("./LoginWorkbench"));
 
 const { Title, Text } = Typography;
 
@@ -20,6 +24,7 @@ function consumeSsoLogoutWarning(): boolean {
  * Использует username вместо email для аутентификации
  */
 export const LoginPage: React.FC = () => {
+  const isWorkbench = useOptionalUiVariant()?.variant === "workbench";
   const postLoginTarget = React.useRef("/");
   const [loginError, setLoginError] = React.useState<string | null>(null);
   const { mutate: login, isLoading } = useLogin<{
@@ -54,6 +59,20 @@ export const LoginPage: React.FC = () => {
     setLoginError(null);
     login(values);
   };
+
+  if (isWorkbench) {
+    return (
+      <React.Suspense fallback={null}>
+        <LoginWorkbench
+          onFinish={onFinish}
+          isLoading={isLoading}
+          loginError={loginError}
+          ssoLogoutWarning={ssoLogoutWarning}
+          invitationLinked={invitationLinked}
+        />
+      </React.Suspense>
+    );
+  }
 
   return (
     <div
@@ -170,21 +189,7 @@ export const LoginPage: React.FC = () => {
 
 /** Вход через hosted SSO (WorkOS AuthKit); виден только за флагом workosAuth. */
 const WorkosSsoButton: React.FC = () => {
-  const [redirecting, setRedirecting] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-
-  const startSso = async () => {
-    setRedirecting(true);
-    setError(null);
-    try {
-      const { authApi } = await import("../../api/authApi");
-      const url = await authApi.workosAuthorizeUrl();
-      window.location.assign(url);
-    } catch {
-      setError("SSO недоступен, войдите по паролю");
-      setRedirecting(false);
-    }
-  };
+  const { redirecting, error, startSso } = useWorkosSso();
 
   return (
     <div style={{ marginTop: 8 }}>

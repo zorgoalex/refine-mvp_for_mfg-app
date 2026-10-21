@@ -1,0 +1,332 @@
+/* «NewLine»: страница входа (мокап 21). Только представление. */
+
+:root[data-ui-variant="workbench"] .wb-login {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  min-height: 100dvh;
+  color: var(--evo-text);
+  background: var(--evo-surface);
+}
+
+/* ---------- бренд-панель ---------- */
+:root[data-ui-variant="workbench"] .wb-login__brand {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 100dvh;
+  padding: 40px 48px 0;
+  overflow: hidden;
+  background: var(--evo-canvas);
+}
+
+:root[data-ui-variant="workbench"] .wb-login__logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__logo b {
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--evo-navigation);
+  color: var(--evo-brand-mark-text);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__slogan {
+  max-width: 440px;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__slogan p {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__slogan small {
+  display: block;
+  margin-top: 10px;
+  color: var(--evo-text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__art {
+  margin: 0 0 40px;
+  line-height: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__art svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 52vh;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__sheet {
+  fill: var(--evo-surface);
+  stroke: var(--evo-border-strong);
+  stroke-width: 2;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__part {
+  stroke: var(--evo-border-strong);
+  stroke-width: 1;
+  opacity: 0.6;
+}
+
+:root[data-ui-variant="workbench"][data-theme="dark"] .wb-login__part {
+  opacity: 0.3;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__offcut {
+  stroke: var(--evo-border-strong);
+  stroke-width: 1;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__hatch-bg {
+  fill: #e9edf2;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__hatch-line {
+  stroke: #d8dee6;
+}
+
+:root[data-ui-variant="workbench"][data-theme="dark"] .wb-login__hatch-bg {
+  fill: #1a2230;
+}
+
+:root[data-ui-variant="workbench"][data-theme="dark"] .wb-login__hatch-line {
+  stroke: #222c3d;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__cut {
+  fill: none;
+  stroke: var(--evo-border-strong);
+  stroke-width: 1;
+  stroke-dasharray: 5 5;
+}
+
+/* ---------- форма ---------- */
+:root[data-ui-variant="workbench"] .wb-login__side {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 32px 24px;
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .wb-login__theme {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--evo-radius-md);
+  background: transparent;
+  color: var(--evo-text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__theme:hover {
+  background: var(--app-row-hover);
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-login__theme:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: 2px;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 380px;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__card h1 {
+  margin: 0 0 2px;
+  color: var(--evo-text);
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__lead {
+  margin: 0;
+  color: var(--evo-text-secondary);
+  font-size: 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: var(--evo-radius-md);
+  background: var(--evo-primary-soft);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__notice > .anticon {
+  margin-top: 3px;
+  font-size: 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__notice b {
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__notice[data-tone="bad"] {
+  background: color-mix(in srgb, var(--evo-danger) 12%, var(--evo-surface));
+}
+
+:root[data-ui-variant="workbench"] .wb-login__notice[data-tone="bad"] > .anticon {
+  color: var(--evo-danger);
+}
+
+:root[data-ui-variant="workbench"] .wb-login__notice[data-tone="warn"] {
+  background: color-mix(in srgb, var(--evo-warning) 14%, var(--evo-surface));
+}
+
+:root[data-ui-variant="workbench"] .wb-login__notice[data-tone="warn"] > .anticon {
+  color: var(--evo-warning);
+}
+
+:root[data-ui-variant="workbench"] .wb-login__notice[data-tone="ok"] {
+  background: color-mix(in srgb, var(--evo-success) 12%, var(--evo-surface));
+}
+
+:root[data-ui-variant="workbench"] .wb-login__notice[data-tone="ok"] > .anticon {
+  color: var(--evo-success);
+}
+
+:root[data-ui-variant="workbench"] .wb-login__sso .ant-btn,
+:root[data-ui-variant="workbench"] .wb-login__submit.ant-btn {
+  height: 44px;
+  font-size: 15px;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__sso-error {
+  margin-top: 8px;
+  color: var(--evo-danger);
+  font-size: 13px;
+  text-align: center;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--wb-ink-3);
+  font-size: 13px;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__or::before,
+:root[data-ui-variant="workbench"] .wb-login__or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-login__form .ant-form-item {
+  margin-bottom: 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__form .ant-form-item-label {
+  padding-bottom: 4px;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__form .ant-form-item-label > label {
+  color: var(--evo-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__form .ant-input,
+:root[data-ui-variant="workbench"] .wb-login__form .ant-input-affix-wrapper {
+  min-height: 40px;
+  font-size: 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__form .ant-input-affix-wrapper > .ant-input {
+  min-height: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__submit.ant-btn {
+  margin-top: 4px;
+}
+
+:root[data-ui-variant="workbench"] .wb-login__foot {
+  margin: 4px 0 0;
+  color: var(--wb-ink-3);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+@media (max-width: 860px) {
+  :root[data-ui-variant="workbench"] .wb-login {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  :root[data-ui-variant="workbench"] .wb-login__brand {
+    flex-direction: row;
+    align-items: center;
+    min-height: 0;
+    padding: 14px 16px;
+  }
+
+  :root[data-ui-variant="workbench"] .wb-login__logo b {
+    font-size: 17px;
+  }
+
+  :root[data-ui-variant="workbench"] .wb-login__mark {
+    width: 34px;
+    height: 34px;
+    font-size: 17px;
+  }
+
+  :root[data-ui-variant="workbench"] .wb-login__slogan,
+  :root[data-ui-variant="workbench"] .wb-login__art {
+    display: none;
+  }
+
+  :root[data-ui-variant="workbench"] .wb-login__side {
+    place-items: start center;
+    padding: 28px 16px 32px;
+  }
+
+  :root[data-ui-variant="workbench"] .wb-login__theme {
+    top: -49px;
+  }
+
+  :root[data-ui-variant="workbench"] .wb-login__card h1 {
+    font-size: 24px;
+  }
+}
