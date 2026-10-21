@@ -325,8 +325,10 @@ export class Bitrix24SyncConsumer {
     const bitrixOwned = mapping?.sourceSystem === 'bitrix24';
     const fields = bitrixOwned ? bitrixOwnedProductionFields(payload.fields) : payload.fields;
     const nextHash = hash({ fields, productRows: payload.productRows });
+    // A failed attempt keeps the last known Deal ID (markFailed never clears it). Dropping it would
+    // send every retry to the portal-wide originId lookup, and a Bitrix-owned order could never recover.
     const usableId =
-      mapping?.status === 'active' && mapping.bitrixObject === 'deal'
+      (mapping?.status === 'active' || mapping?.status === 'failed') && mapping.bitrixObject === 'deal'
         ? mapping.bitrixId
         : null;
     let dealId = usableId;

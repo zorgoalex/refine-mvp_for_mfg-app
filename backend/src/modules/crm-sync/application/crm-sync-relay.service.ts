@@ -13,6 +13,7 @@ import {
   type Bitrix24SyncConsumer,
 } from './bitrix24-sync-consumer';
 import type { CrmSyncRuntimeConfigService } from '../http/crm-sync-runtime-config.service';
+import { persistSyncIntent } from './persist-sync-intent';
 
 export interface RelayTickResult {
   claimed: number;
@@ -374,17 +375,7 @@ export class CrmSyncRelayService {
           }
           // Persist intents in order (client intent before order intent).
           for (const intent of intents) {
-            await this.mapping.upsertSuccess(tx, intent.mapping);
-            await this.audit.record(tx, intent.audit);
-            for (const extra of intent.extraAudits ?? []) {
-              await this.audit.record(tx, extra);
-            }
-            if (intent.clearPaymentCreateGuardId) {
-              await this.mapping.deletePaymentCreateGuard(
-                tx,
-                intent.clearPaymentCreateGuardId,
-              );
-            }
+            await persistSyncIntent(tx, this.mapping, this.audit, intent);
           }
         });
         processed++;

@@ -1,6 +1,7 @@
 import type { AuditService } from '../../../common/audit/audit.service';
 import type { DatabaseService } from '../../../database/database.service';
 import type { SyncIntent } from '../application/bitrix24-sync-consumer';
+import { persistSyncIntent } from '../application/persist-sync-intent';
 import type {
   BackfillCheckpoint,
   BackfillScope,
@@ -39,17 +40,7 @@ export class PgCrmSyncBackfillPersistence {
         throw new BackfillWriterOwnershipLostError();
       }
       for (const intent of intents) {
-        await this.mapping.upsertSuccess(tx, intent.mapping);
-        await this.audit.record(tx, intent.audit);
-        for (const extra of intent.extraAudits ?? []) {
-          await this.audit.record(tx, extra);
-        }
-        if (intent.clearPaymentCreateGuardId) {
-          await this.mapping.deletePaymentCreateGuard(
-            tx,
-            intent.clearPaymentCreateGuardId,
-          );
-        }
+        await persistSyncIntent(tx, this.mapping, this.audit, intent);
       }
       await this.checkpoints.save(tx, checkpoint);
     });

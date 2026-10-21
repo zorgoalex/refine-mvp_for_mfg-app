@@ -311,6 +311,73 @@ describe('Bitrix24SyncConsumer', () => {
     expect(h.bitrix.createCrmItem).not.toHaveBeenCalled();
   });
 
+  it('keeps the known Deal ID after a failed attempt instead of searching the portal', async () => {
+    const h = harness({
+      mappings: [{
+        entityType: 'order', erpId: '2', bitrixObject: 'deal', bitrixId: '20',
+        parentErpId: '1', status: 'failed', lastHash: 'old',
+      }],
+    });
+
+    const intents = await h.consumer.sync(event('order', '2', 'upsert'));
+
+    expect(h.calls).toContain('update:2:20');
+    expect(h.bitrix.findCrmItemByOrigin).not.toHaveBeenCalledWith(2, expect.anything());
+    expect(h.bitrix.createCrmItem).not.toHaveBeenCalledWith(2, expect.anything());
+    expect(intents.find((intent) => intent.mapping.entityType === 'order')?.mapping)
+      .toMatchObject({ bitrixId: '20', status: 'active' });
+  });
+
+  it('falls back to the origin search when the Deal of a failed mapping is gone', async () => {
+    const h = harness({
+      mappings: [{
+        entityType: 'order', erpId: '2', bitrixObject: 'deal', bitrixId: '20',
+        parentErpId: '1', status: 'failed', lastHash: 'old',
+      }],
+    });
+    vi.mocked(h.bitrix.updateCrmItem).mockImplementation(async (type, id) => {
+      if (type === 2 && id === '20') {
+        throw new Bitrix24ApiError('crm.item.update', 'ENTITY_NOT_FOUND', 404, 'not found');
+      }
+    });
+    vi.mocked(h.bitrix.findCrmItemByOrigin).mockImplementation(async (type) => (type === 2 ? '21' : null));
+
+    const intents = await h.consumer.sync(event('order', '2', 'upsert'));
+
+    expect(h.bitrix.updateCrmItem).toHaveBeenCalledWith(2, '21', expect.anything());
+    expect(intents.find((intent) => intent.mapping.entityType === 'order')?.mapping.bitrixId).toBe('21');
+  });
+
+  it('recovers a Bitrix-owned order whose last sync attempt failed', async () => {
+    const h = harness({
+      order: makeOrder({ orderKind: 'production_order', sourceSystem: 'bitrix24' }),
+      mappings: [{
+        entityType: 'order', erpId: '2', bitrixObject: 'deal', bitrixId: '20',
+        parentErpId: '1', status: 'failed', lastHash: 'old', sourceSystem: 'bitrix24',
+      }],
+    });
+
+    await h.consumer.sync(event('order', '2', 'upsert'));
+
+    expect(h.bitrix.updateCrmItem).toHaveBeenCalledWith(2, '20', expect.anything());
+    expect(h.bitrix.findCrmItemByOrigin).not.toHaveBeenCalledWith(2, expect.anything());
+    expect(h.bitrix.createCrmItem).not.toHaveBeenCalledWith(2, expect.anything());
+  });
+
+  it('still recreates the Deal of a mapping deleted by ERP (no failed reuse of deleted)', async () => {
+    const h = harness({
+      mappings: [{
+        entityType: 'order', erpId: '2', bitrixObject: 'deal', bitrixId: '20',
+        parentErpId: '1', status: 'deleted', lastHash: 'old',
+      }],
+    });
+
+    await h.consumer.sync(event('order', '2', 'upsert'));
+
+    expect(h.calls).not.toContain('update:2:20');
+    expect(h.bitrix.findCrmItemByOrigin).toHaveBeenCalledWith(2, expect.anything());
+  });
+
   it('does not recreate a remotely deleted Bitrix-owned Deal', async () => {
     const h = harness({
       order: makeOrder({ orderKind: 'production_order', sourceSystem: 'bitrix24' }),
