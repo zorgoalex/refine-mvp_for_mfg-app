@@ -3,6 +3,7 @@ import type { CutParamProfile } from '../../api/cutConfigApi';
 import type { CutJobDto, CutSheetTypeOption, CutTextureDirection } from '../../api/types/cutApi.types';
 import {
   applyCutProfileSelection,
+  applyCutTextureDirection,
   firstBathSheetMaterialId,
   isVacuumTableProfile,
   isVacuumTableJob,
@@ -148,6 +149,7 @@ describe('vacuum profile defaults', () => {
         calls.push(['texture', jobId, value, version]);
         return advance(job({ version, paramProfileId: 4 }), { textureDirection: value });
       }),
+      setRotationAllowed: vi.fn(),
       setSplitByMaterial: vi.fn(async (jobId: number, value: boolean, version: number) => {
         calls.push(['split', jobId, value, version]);
         return advance(job({ version, paramProfileId: 4, splitByMaterial: true, combineFilms: true }), { splitByMaterial: value });
@@ -183,28 +185,32 @@ describe('vacuum profile defaults', () => {
     expect(result.bathSheetMissing).toBe(false);
   });
 
-  it('sets the profile-implied texture direction before applying other vacuum defaults', async () => {
+  it('turns rotation off and sets the profile-implied texture direction before other vacuum defaults', async () => {
     const calls: Array<[string, number, number | boolean | string | null, number]> = [];
     const mutations = {
       setProfile: vi.fn(async (jobId: number, value: number | null, version: number) => {
         calls.push(['profile', jobId, value, version]);
         return job({ version: 11, paramProfileId: value, textureDirection: 'none' });
       }),
+      setRotationAllowed: vi.fn(async (jobId: number, value: boolean, version: number) => {
+        calls.push(['rotation', jobId, value, version]);
+        return job({ version: 12, paramProfileId: 4, textureDirection: 'none', rotationAllowed: value });
+      }),
       setTextureDirection: vi.fn(async (jobId: number, value: CutTextureDirection, version: number) => {
         calls.push(['texture', jobId, value, version]);
-        return job({ version: 12, paramProfileId: 4, textureDirection: value });
+        return job({ version: 13, paramProfileId: 4, textureDirection: value, rotationAllowed: false });
       }),
       setSplitByMaterial: vi.fn(async (jobId: number, value: boolean, version: number) => {
         calls.push(['split', jobId, value, version]);
-        return job({ version: 13, paramProfileId: 4, textureDirection: 'vertical', splitByMaterial: value });
+        return job({ version: 14, paramProfileId: 4, textureDirection: 'vertical', rotationAllowed: false, splitByMaterial: value });
       }),
       setCombineFilms: vi.fn(async (jobId: number, value: boolean, version: number) => {
         calls.push(['combine', jobId, value, version]);
-        return job({ version: 14, paramProfileId: 4, textureDirection: 'vertical', splitByMaterial: false, combineFilms: value });
+        return job({ version: 15, paramProfileId: 4, textureDirection: 'vertical', rotationAllowed: false, splitByMaterial: false, combineFilms: value });
       }),
       setSheetMaterial: vi.fn(async (jobId: number, value: number | null, version: number) => {
         calls.push(['sheet', jobId, value, version]);
-        return job({ version: 15, paramProfileId: 4, textureDirection: 'vertical', splitByMaterial: false, combineFilms: false, sheetMaterialTypeId: value });
+        return job({ version: 16, paramProfileId: 4, textureDirection: 'vertical', rotationAllowed: false, splitByMaterial: false, combineFilms: false, sheetMaterialTypeId: value });
       }),
     };
 
@@ -218,12 +224,112 @@ describe('vacuum profile defaults', () => {
 
     expect(calls).toEqual([
       ['profile', 17, 4, 10],
-      ['texture', 17, 'vertical', 11],
-      ['split', 17, false, 12],
-      ['combine', 17, false, 13],
-      ['sheet', 17, 2, 14],
+      ['rotation', 17, false, 11],
+      ['texture', 17, 'vertical', 12],
+      ['split', 17, false, 13],
+      ['combine', 17, false, 14],
+      ['sheet', 17, 2, 15],
     ]);
-    expect(result.job).toMatchObject({ version: 15, textureDirection: 'vertical', sheetMaterialTypeId: 2 });
+    expect(result.job).toMatchObject({
+      version: 16,
+      textureDirection: 'vertical',
+      rotationAllowed: false,
+      sheetMaterialTypeId: 2,
+    });
+  });
+
+  it('turns rotation off when the texture direction changes to вдоль/поперёк полотна', async () => {
+    for (const direction of ['vertical', 'horizontal'] as const) {
+      const calls: Array<[string, CutTextureDirection | boolean, number]> = [];
+      const mutations = {
+        setRotationAllowed: vi.fn(async (_jobId: number, value: boolean, version: number) => {
+          calls.push(['rotation', value, version]);
+          return job({ version: version + 1, textureDirection: 'none', rotationAllowed: value });
+        }),
+        setTextureDirection: vi.fn(async (_jobId: number, value: CutTextureDirection, version: number) => {
+          calls.push(['texture', value, version]);
+          return job({ version: version + 1, textureDirection: value, rotationAllowed: false });
+        }),
+      };
+      const onUpdated = vi.fn();
+
+      const result = await applyCutTextureDirection({
+        currentJob: job({ textureDirection: 'none', rotationAllowed: true }),
+        textureDirection: direction,
+        mutations,
+        onUpdated,
+      });
+
+      expect(calls).toEqual([['rotation', false, 10], ['texture', direction, 11]]);
+      expect(onUpdated).toHaveBeenCalledTimes(2);
+      expect(result).toMatchObject({ version: 12, textureDirection: direction, rotationAllowed: false });
+    }
+  });
+
+  it('completes the change on retry after a transient failure to save the direction once rotation is off', async () => {
+    let failTexture = true;
+    const mutations = {
+      setRotationAllowed: vi.fn(async (_jobId: number, value: boolean, version: number) =>
+        job({ version: version + 1, textureDirection: 'none', rotationAllowed: value })),
+      setTextureDirection: vi.fn(async (_jobId: number, value: CutTextureDirection, version: number) => {
+        if (failTexture) throw new Error('network error');
+        return job({ version: version + 1, textureDirection: value, rotationAllowed: false });
+      }),
+    };
+    const published: CutJobDto[] = [];
+
+    await expect(applyCutTextureDirection({
+      currentJob: job({ textureDirection: 'none', rotationAllowed: true }),
+      textureDirection: 'vertical',
+      mutations,
+      onUpdated: (updated) => published.push(updated),
+    })).rejects.toThrow('network error');
+    // The safe half is already visible: rotation off, direction unchanged.
+    expect(published.at(-1)).toMatchObject({ version: 11, textureDirection: 'none', rotationAllowed: false });
+
+    failTexture = false;
+    const retried = await applyCutTextureDirection({
+      currentJob: published.at(-1)!,
+      textureDirection: 'vertical',
+      mutations,
+    });
+
+    expect(retried).toMatchObject({ version: 12, textureDirection: 'vertical', rotationAllowed: false });
+    expect(mutations.setRotationAllowed).toHaveBeenCalledTimes(1);
+    expect(mutations.setTextureDirection).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps rotation untouched for «отсутствует», an already-off box or an unchanged direction', async () => {
+    const mutations = {
+      setTextureDirection: vi.fn(async (_jobId: number, value: CutTextureDirection, version: number) =>
+        job({ version: version + 1, textureDirection: value, rotationAllowed: value === 'none' })),
+      setRotationAllowed: vi.fn(),
+    };
+
+    const toNone = await applyCutTextureDirection({
+      currentJob: job({ textureDirection: 'vertical', rotationAllowed: true }),
+      textureDirection: 'none',
+      mutations,
+    });
+    expect(toNone).toMatchObject({ textureDirection: 'none', rotationAllowed: true });
+
+    const alreadyOff = await applyCutTextureDirection({
+      currentJob: job({ textureDirection: 'none', rotationAllowed: false }),
+      textureDirection: 'horizontal',
+      mutations,
+    });
+    expect(alreadyOff).toMatchObject({ textureDirection: 'horizontal', rotationAllowed: false });
+
+    // The operator re-checked rotation by hand; re-selecting the same direction keeps it.
+    const unchanged = job({ textureDirection: 'vertical', rotationAllowed: true });
+    expect(await applyCutTextureDirection({
+      currentJob: unchanged,
+      textureDirection: 'vertical',
+      mutations,
+    })).toBe(unchanged);
+
+    expect(mutations.setTextureDirection).toHaveBeenCalledTimes(2);
+    expect(mutations.setRotationAllowed).not.toHaveBeenCalled();
   });
 
   it('renames an auto-created cut job to Ванна when selecting a vacuum profile', async () => {
@@ -252,6 +358,7 @@ describe('vacuum profile defaults', () => {
         });
       }),
       setTextureDirection: vi.fn(),
+      setRotationAllowed: vi.fn(),
       setSplitByMaterial: vi.fn(),
       setCombineFilms: vi.fn(),
       setSheetMaterial: vi.fn(),
@@ -284,6 +391,7 @@ describe('vacuum profile defaults', () => {
         return job({ name: value, version: 12, paramProfileId: 5 });
       }),
       setTextureDirection: vi.fn(),
+      setRotationAllowed: vi.fn(),
       setSplitByMaterial: vi.fn(),
       setCombineFilms: vi.fn(),
       setSheetMaterial: vi.fn(),
@@ -308,6 +416,7 @@ describe('vacuum profile defaults', () => {
     const mutations = {
       setProfile: vi.fn(async () => job({ version: 11, paramProfileId: 4 })),
       setTextureDirection: vi.fn(async () => job({ version: 12, paramProfileId: 4, textureDirection: 'none' })),
+      setRotationAllowed: vi.fn(),
       setSplitByMaterial: vi.fn(async () => job({ version: 12, paramProfileId: 4, splitByMaterial: false })),
       setCombineFilms: vi.fn(async () => job({ version: 13, paramProfileId: 4, splitByMaterial: false, combineFilms: false })),
       setSheetMaterial: vi.fn(),
