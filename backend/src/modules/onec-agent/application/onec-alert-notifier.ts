@@ -6,6 +6,7 @@ import { WhatsAppNotificationPort } from '../../whatsapp/notifications/whatsapp-
 import type { WhatsAppNotificationRecipient } from '../../whatsapp/notifications/whatsapp-notification.types';
 import {
   PgOnecAlertNotificationsRepository,
+  type AlarmDelivery,
   type EpisodeCandidate,
   type ExternalRecipientRow,
   type LockedDispatch,
@@ -114,6 +115,63 @@ export function externalStillRelevant(
     return now.getTime() < until;
   }
   return members.some((member) => member.resolvedAt === null);
+}
+
+/** A recovery notice waits this long between checks of its alarm still in flight. */
+export const ONEC_ALERT_RECOVERY_RECHECK_SECONDS = 60;
+/**
+ * Upper bound of that wait, from the recovery dispatch: an alarm delivery ends by its own lifetime (quiet hours ≤ 24 h
+ * + 2 h) and a delayed alarm by its delay (≤ 2 h), so this only guards against a stuck row.
+ */
+export const ONEC_ALERT_RECOVERY_WAIT_MS = 26 * 60 * 60_000;
+/** The channel states in which the alarm may have reached the phone: the recovery notice follows it there. */
+const ALARM_REACHED_STATES = new Set(['sent', 'unknown']);
+
+export interface RecoveryPlan {
+  /** An episode's alarm to some target, not reached yet, is still in flight or delayed: decide later. */
+  pending: boolean;
+  /** Targets grouped by the episodes whose alarm reached them; each group gets a text of those episodes only. */
+  sends: { targets: OnecAlertWhatsAppTarget[]; episodeIds: number[] }[];
+  /** Targets no alarm of these episodes reached. */
+  skip: OnecAlertWhatsAppTarget[];
+}
+
+/**
+ * WhatsApp of a recovery notice, per episode and target (R5): a target gets «Восстановлено» about exactly the episodes
+ * whose alarm reached it (any alarm stage, `sent` or `unknown` — maybe sent), so nobody hears of the recovery of an
+ * alarm they never saw (spared by the delay or a blink, failed, cancelled, sent to someone else). An episode not yet
+ * reached whose alarm to that target is still in flight, or sits in a delayed alarm dispatch, makes the plan
+ * `pending` — unless `final` (the wait is over): then it counts as not reached.
+ */
+export function recoveryPlan(
+  targets: readonly OnecAlertWhatsAppTarget[],
+  episodeIds: readonly number[],
+  alarm: AlarmDelivery,
+  final: boolean,
+): RecoveryPlan {
+  const delayed = new Set(alarm.delayedEpisodeIds);
+  const sends = new Map<string, { targets: OnecAlertWhatsAppTarget[]; episodeIds: number[] }>();
+  const skip: OnecAlertWhatsAppTarget[] = [];
+  let pending = false;
+  for (const target of targets) {
+    const rows = alarm.rows.filter((row) => ('userId' in target ? row.userId === target.userId : row.chatId === target.chatId));
+    const reached = episodeIds.filter((id) =>
+      rows.some((row) => row.episodeId === id && row.channelState !== null && ALARM_REACHED_STATES.has(row.channelState)),
+    );
+    const waiting = episodeIds.some(
+      (id) => !reached.includes(id) && (delayed.has(id) || rows.some((row) => row.episodeId === id && row.channelState === null)),
+    );
+    if (waiting && !final) pending = true;
+    if (reached.length === 0) {
+      skip.push(target);
+      continue;
+    }
+    const key = reached.join(',');
+    const group = sends.get(key) ?? { targets: [], episodeIds: reached };
+    group.targets.push(target);
+    sends.set(key, group);
+  }
+  return { pending, sends: [...sends.values()], skip };
 }
 
 export const planKey = (plan: Pick<PlannedDispatch, 'stage' | 'group' | 'sourceId'>) => `${plan.stage}|${plan.group}|${plan.sourceId ?? ''}`;
@@ -315,8 +373,10 @@ export class OnecAlertNotifier {
       // An alarm whose members all closed before this tick (opened and resolved between two ticks) still gets the bell
       // and the balloon, but no phone message: decided here, under the episode locks (R3-1). `resolved` is a notice.
       const allClosed = plan.stage !== 'resolved' && members.every((episode) => episode.resolvedAt !== null);
-      // The delay holds back only the external part of an opening (plan §2.5); other stages go out with the minimum.
-      const delayed = targets.length > 0 && !allClosed && plan.stage === 'opened' && policy.delayMinutes > 0;
+      // The delay holds back only the external part of an opening (plan §2.5); other stages go out with the minimum. A
+      // recovery notice is decided by releaseDelayed (this tick, after the dispatches): it goes only where its alarm went.
+      const recovery = plan.stage === 'resolved' && targets.length > 0;
+      const delayed = targets.length > 0 && !allClosed && ((plan.stage === 'opened' && policy.delayMinutes > 0) || recovery);
       const externalState: OnecAlertExternalState =
         targets.length === 0 ? 'none' : allClosed ? 'suppressed' : delayed ? 'pending_delay' : 'queued';
       const dispatchId = await this.repository.insertDispatch(tx, {
@@ -327,7 +387,7 @@ export class OnecAlertNotifier {
         fallbackLevel: chosen.level,
         requestId,
         externalState,
-        externalDueAt: delayed ? new Date(now.getTime() + policy.delayMinutes * 60_000) : null,
+        externalDueAt: delayed ? new Date(now.getTime() + (recovery ? 0 : policy.delayMinutes * 60_000)) : null,
       });
       await this.repository.insertMembers(
         tx,
@@ -559,7 +619,35 @@ export class OnecAlertNotifier {
       const now = new Date();
       let rows: RecipientRowInput[];
       let state: OnecAlertExternalState;
-      if (targets.length === 0 || !policy) {
+      if (dispatch.stage === 'resolved' && policy && targets.length > 0) {
+        // A recovery notice: only where its alarm went, about the episodes that alarm carried (recoveryPlan).
+        const final = now.getTime() >= dispatch.createdAt.getTime() + ONEC_ALERT_RECOVERY_WAIT_MS;
+        const plan = recoveryPlan(targets, members.map((episode) => episode.episodeId), await this.alarmOf(tx, members), final);
+        if (plan.pending) {
+          // An alarm is still in flight: look again on a later tick (no audit — nothing changed).
+          await this.repository.postponeDelayed(tx, dispatchId, ONEC_ALERT_RECOVERY_RECHECK_SECONDS);
+          return;
+        }
+        rows = plan.skip.map((target) => skippedRow(target, 'ALARM_NOT_SENT'));
+        for (const send of plan.sends) {
+          rows.push(
+            ...(await this.enqueueWhatsApp(tx, {
+              dispatchId,
+              stage: dispatch.stage,
+              importance: dispatch.importance,
+              policy,
+              text: this.textOf(dispatch, members.filter((episode) => send.episodeIds.includes(episode.episodeId))),
+              level: levelOf(dispatch.stage, dispatch.importance),
+              targets: send.targets,
+              attempt: 1,
+              fallbackLevel: users[0]?.fallbackLevel ?? null,
+              correlationId: requestId,
+              now,
+            })),
+          );
+        }
+        state = plan.sends.length > 0 ? 'queued' : 'suppressed';
+      } else if (targets.length === 0 || !policy) {
         rows = [];
         state = 'suppressed';
       } else if (!externalStillRelevant(dispatch, members, now)) {
@@ -641,13 +729,23 @@ export class OnecAlertNotifier {
         await this.repository.recordChannelState(tx, row.recipientRowId, state, reason);
         return;
       }
+      // A recovery notice is about the episodes whose alarm reached this target, as on its first attempt.
+      const about =
+        dispatch.stage === 'resolved'
+          ? recoveryPlan([target], members.map((episode) => episode.episodeId), await this.alarmOf(tx, members), true)
+              .sends[0]?.episodeIds ?? []
+          : members.map((episode) => episode.episodeId);
+      if (about.length === 0) {
+        await this.repository.recordChannelState(tx, row.recipientRowId, state, reason);
+        return;
+      }
       await this.repository.supersede(tx, row.recipientRowId, state, reason);
       const rows = await this.enqueueWhatsApp(tx, {
         dispatchId: dispatch.dispatchId,
         stage: dispatch.stage,
         importance: dispatch.importance,
         policy,
-        text: this.textOf(dispatch, members),
+        text: this.textOf(dispatch, members.filter((episode) => about.includes(episode.episodeId))),
         level: levelOf(dispatch.stage, dispatch.importance),
         targets: [target],
         attempt: row.attempt + 1,
@@ -663,6 +761,31 @@ export class OnecAlertNotifier {
         whatsapp: externalCounts(rows),
       });
     });
+  }
+
+  /**
+   * The alarm deliveries of these episodes with the channel's own word on the rows still in flight here (R5-2-1): the
+   * poll that records it may be behind (≤ 200 rows a tick, or the dispatcher stood still), and a recovery notice must
+   * not give up on an alarm the channel already sent. Only read, not recorded — the poll records it, and a delivery
+   * the channel cancelled for a restart or by its lifetime stays in flight while it may still be redelivered.
+   */
+  private async alarmOf(tx: DatabaseClient, members: readonly EpisodeCandidate[]): Promise<AlarmDelivery> {
+    const alarm = await this.repository.alarmDeliveries(tx, members.map((episode) => episode.episodeId));
+    const ids = [...new Set(alarm.rows.filter((row) => row.channelState === null && row.deliveryId).map((row) => row.deliveryId as string))];
+    if (!this.whatsapp || ids.length === 0) return alarm;
+    const known = new Map<string, { state: string; reason: string | null }>();
+    for (let i = 0; i < ids.length; i += 500) {
+      for (const status of await this.whatsapp.statuses(tx, ids.slice(i, i + 500))) known.set(status.deliveryId, status);
+    }
+    return {
+      ...alarm,
+      rows: alarm.rows.map((row) => {
+        const status = row.channelState === null && row.deliveryId ? known.get(row.deliveryId) : undefined;
+        if (!status || !FINAL_CHANNEL_STATES.has(status.state)) return row;
+        const redeliverable = status.state === 'cancelled' && status.reason !== null && REDELIVER_REASONS.has(status.reason) && row.attempt < ONEC_ALERT_EXTERNAL_LIMITS.maxAttempts;
+        return redeliverable ? row : { ...row, channelState: status.state, channelReason: status.reason };
+      }),
+    };
   }
 
   private textOf(dispatch: LockedDispatch, members: readonly EpisodeCandidate[]): { title: string; message: string } {
