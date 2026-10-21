@@ -58,3 +58,13 @@ export const WHATSAPP_NOTIFICATION_LIMITS = {
   purgeAfterMs: 30 * 24 * 60 * 60_000,
   statusesMax: 500,
 } as const;
+
+/**
+ * What `sourceId` of a source identifies, for the normalized audit relation (`audit_log_related_entity`). The source
+ * type classifies the delivery (read permission, journal); the id is of this entity — 1C alerts pass the dispatch id,
+ * not an alert id. A source missing here gets no relation (better none than a wrong one). A new source registers
+ * itself in both registries: here and in `WHATSAPP_NOTIFICATION_SOURCE_READ_PERMISSIONS` (journal service).
+ */
+export const WHATSAPP_NOTIFICATION_SOURCE_ENTITY_TYPES: Readonly<Record<string, string>> = {
+  onec_alert: 'onec_alert_dispatch',
+};

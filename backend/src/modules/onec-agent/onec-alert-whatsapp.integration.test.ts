@@ -164,6 +164,8 @@ suite('1C alerts → WhatsApp — real channel port, isolated PostgreSQL', () =>
 
   it('an opening goes personally and to the chat with the minimum, keyed per attempt, re-checked by permission', async () => {
     await setPolicy('agent_offline', `external_channels = '{whatsapp,whatsapp_chat}', whatsapp_chat_id = '${CHAT}', recipient_user_ids = '{${MANAGER},${NO_PHONE}}'`);
+    // Alert ids far from dispatch ids: the channel audit must relate the dispatch, not an alert with the same number.
+    await pool.query(`SELECT setval(pg_get_serial_sequence('onec_alerts', 'alert_id'), 500)`);
     await raise('agent_silent', 'silent:a');
     const result = await notifier.tick();
     const [dispatch] = result.dispatches;
@@ -192,6 +194,11 @@ suite('1C alerts → WhatsApp — real channel port, isolated PostgreSQL', () =>
     );
     expect(audit.after_json.recipients.whatsapp).toEqual({ queued: 2, skipped: 1, chat: true });
     expect(JSON.stringify(audit.after_json)).not.toContain(CHAT);
+    const related = await q<{ entity_type: string; entity_id: string }>(
+      `SELECT DISTINCT r.entity_type, r.entity_id::text AS entity_id FROM audit_log_related_entity r JOIN audit_log a USING (audit_id)
+        WHERE a.entity_type = 'whatsapp_notification' ORDER BY 1, 2`,
+    );
+    expect(related).toEqual([{ entity_type: 'onec_alert_dispatch', entity_id: String(id) }]);
   });
 
   it('a failing channel call rolls back only itself: the minimum and the other target are committed', async () => {
