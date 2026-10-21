@@ -2,7 +2,7 @@
 // Adapted from OrderHeaderSummary for use with props instead of store
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Tag, Space, Typography, Dropdown } from 'antd';
+import { Button, Tag, Space, Typography, Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
 import { StarOutlined, EyeOutlined, PhoneOutlined, WalletOutlined } from '@ant-design/icons';
 import { useList } from '../../../../query/orderLifecycleQueries';
@@ -436,14 +436,14 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     const phoneActions = primaryPhone || onAddPayment ? (
       <div className="wb-mactions" aria-label="Действия с заказом">
         {primaryPhone ? (
-          <a className="ant-btn ant-btn-default wb-mactions__btn" href={`tel:${primaryPhone.replace(/[^+\d]/g, '')}`}>
-            <PhoneOutlined aria-hidden /> Позвонить
-          </a>
+          <Button className="wb-mactions__btn" href={`tel:${primaryPhone.replace(/[^+\d]/g, '')}`} icon={<PhoneOutlined />}>
+            Позвонить
+          </Button>
         ) : null}
         {onAddPayment ? (
-          <button type="button" className="ant-btn ant-btn-primary wb-mactions__btn wb-mactions__btn--primary" onClick={onAddPayment}>
-            <WalletOutlined aria-hidden /> Добавить платёж
-          </button>
+          <Button className="wb-mactions__btn wb-mactions__btn--primary" type="primary" onClick={onAddPayment} icon={<WalletOutlined />}>
+            Добавить платёж
+          </Button>
         ) : null}
       </div>
     ) : null;

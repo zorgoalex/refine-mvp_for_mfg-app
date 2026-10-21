@@ -237,8 +237,34 @@
 }
 
 :root[data-ui-variant="workbench"] .evolution-shell--wb-phone .status-board-columns > .status-board-column {
-  width: calc(100vw - 40px) !important;
-  min-width: calc(100vw - 40px) !important;
+  width: calc(100cqw - 24px) !important;
+  min-width: calc(100cqw - 24px) !important;
   max-width: none !important;
   scroll-snap-align: start;
+}
+
+/* МДФ-доска — сетка: ширину колонки задаёт дорожка сетки (по ширине самой доски),
+   иначе колонки наезжают друг на друга или шире видимой области */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .status-board-viewport {
+  container-type: inline-size;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .status-board-columns--cnc,
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .status-board-columns--cnc-detailed {
+  width: max-content !important;
+  min-width: 100%;
+  grid-template-columns: none !important;
+  grid-auto-columns: calc(100cqw - 24px) !important;
+  grid-auto-flow: column !important;
+}
+
+/* строка настроек доски на телефоне не прилипает: иначе она наезжает на шапку */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .status-board-page .status-board-toolbar-disclosure {
+  position: static;
+}
+
+/* шапка и вкладки на телефоне прилипают к верху: содержимое прокручивается под ними, а не поверх */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .evolution-header,
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .evolution-workspace-tabs {
+  z-index: 60;
 }
