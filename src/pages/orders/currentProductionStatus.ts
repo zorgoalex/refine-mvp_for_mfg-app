@@ -32,8 +32,8 @@ export function resolveActiveProductionEventCodes(
 
 /**
  * Stage letters of an order: only its own marks, the same state the status menus check.
- * Event codes (legacy Hasura read path) win; otherwise the backend projection, which is
- * built from the same order-level events. Detail stages never become order letters.
+ * Loaded event codes win; otherwise the backend projection, built from the same
+ * order-level events. Detail stages reach the marks only through the database.
  */
 export function resolveOrderStageCodes(
   backendCodes: unknown,
@@ -45,4 +45,24 @@ export function resolveOrderStageCodes(
     .filter(Boolean);
 
   return [...new Set(codes)];
+}
+
+interface StageSourceDetail {
+  detail_id?: number | null;
+  order_hdf_detail_id?: number | null;
+  production_status_id?: number | null;
+}
+
+/**
+ * Changes whenever a stage that sets or clears order marks in the database changes:
+ * ordinary details and HDF details. Used as a key to re-read the marks.
+ */
+export function buildStageMarksSignature(
+  details: readonly StageSourceDetail[] = [],
+  hdfDetails: readonly StageSourceDetail[] = [],
+): string {
+  const part = (rows: readonly StageSourceDetail[], id: (row: StageSourceDetail) => unknown) => rows
+    .map((row) => `${id(row) ?? ''}:${row.production_status_id ?? ''}`)
+    .join(',');
+  return `${part(details, (row) => row.detail_id)}|${part(hdfDetails, (row) => row.order_hdf_detail_id)}`;
 }

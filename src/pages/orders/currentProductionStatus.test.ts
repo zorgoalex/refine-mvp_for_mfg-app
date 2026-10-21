@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildStageMarksSignature,
   buildActiveProductionStatusCodeMap,
   resolveActiveProductionEventCodes,
   resolveOrderStageCodes,
@@ -46,5 +47,25 @@ describe('resolveOrderStageCodes', () => {
   it('prefers loaded event codes, including an explicit empty set', () => {
     expect(resolveOrderStageCodes(['cut'], ['drawn'])).toEqual(['drawn']);
     expect(resolveOrderStageCodes(['cut'], [])).toEqual([]);
+  });
+});
+
+describe('buildStageMarksSignature', () => {
+  const details = [{ detail_id: 1, production_status_id: 16 }, { detail_id: 2, production_status_id: 6 }];
+  const hdf = [{ order_hdf_detail_id: 7, production_status_id: 16 }];
+
+  it('changes when an ordinary detail changes stage', () => {
+    expect(buildStageMarksSignature(details, hdf))
+      .not.toBe(buildStageMarksSignature([details[0], { detail_id: 2, production_status_id: 7 }], hdf));
+  });
+
+  it('changes when only an HDF detail changes stage', () => {
+    expect(buildStageMarksSignature(details, hdf))
+      .not.toBe(buildStageMarksSignature(details, [{ order_hdf_detail_id: 7, production_status_id: 19 }]));
+  });
+
+  it('is stable for the same stages', () => {
+    expect(buildStageMarksSignature(details.map((d) => ({ ...d })), hdf.map((d) => ({ ...d }))))
+      .toBe(buildStageMarksSignature(details, hdf));
   });
 });

@@ -58,7 +58,9 @@ describe('useCalendarData error capability', () => {
     const result = readCalendar();
     expect(result.error).toBe(error);
     expect(result.error?.message).toBe(error.message);
-    expect(result.refetch).toBe(mocks.refetch);
+    // refetch also re-reads the stage marks; it still reaches the orders query
+    result.refetch();
+    expect(mocks.refetch).toHaveBeenCalledTimes(1);
     expect(result.ordersByDate).toEqual({});
   });
 

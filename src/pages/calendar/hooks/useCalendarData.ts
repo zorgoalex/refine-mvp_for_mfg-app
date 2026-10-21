@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useList } from '@refinedev/core';
 import { CalendarOrder, CalendarOrderDetail, CalendarDataResult, CalendarFilters, CalendarFilterOption } from '../types/calendar';
 import { groupOrdersByDate } from '../utils/groupOrdersByDate';
@@ -156,7 +156,7 @@ export const useCalendarData = (
   });
 
   // Загружаем production_status_events для всех заказов
-  const { data: productionEventsData } = useList({
+  const { data: productionEventsData, refetch: refetchProductionEvents } = useList({
     resource: 'production_status_events',
     filters: [
       {
@@ -257,7 +257,7 @@ export const useCalendarData = (
     }));
   }, [productionStatusesData]);
 
-  // Сопоставление кодов по ID и только по однозначным нормализованным названиям.
+  // Сопоставление кодов этапов по ID.
   const productionStatusIdToCode = useMemo(() => {
     return buildProductionStatusCodeLookup(statusesForWorkflow);
   }, [statusesForWorkflow]);
@@ -364,20 +364,26 @@ export const useCalendarData = (
         }).join(', ') || undefined,
         passedProductionCodes: resolveCalendarProductionStatusCodes({
           order,
-          details,
-          eventCodes: passedCodesByOrderId[order.order_id],
-          lookup: productionStatusIdToCode,
+          eventCodes: productionEventsData ? (passedCodesByOrderId[order.order_id] ?? []) : undefined,
         }),
       };
     });
 
     return groupOrdersByDate(applyCalendarFilters(ordersWithDetails, filters));
-  }, [data?.data, detailsByOrderId, dowelingByOrderId, filters, passedCodesByOrderId, productionStatusIdToCode]);
+  }, [data?.data, detailsByOrderId, dowelingByOrderId, filters, passedCodesByOrderId, productionEventsData]);
+
+  // Stage marks change without the order (detail stages set and clear them in
+  // the database): refreshing the calendar re-reads them too.
+  const refetchWithStageMarks = useCallback(() => {
+    // refetch ignores `enabled`: never load unfiltered events.
+    if (orderIds.length > 0) void refetchProductionEvents();
+    return refetch();
+  }, [orderIds.length, refetchProductionEvents, refetch]);
 
   return {
     ordersByDate,
     isLoading,
-    refetch,
+    refetch: refetchWithStageMarks,
     productionWorkflowDisplay,
     materialOptions,
     millingTypeOptions,

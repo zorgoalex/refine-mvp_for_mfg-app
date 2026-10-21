@@ -100,7 +100,8 @@ describe('DailyDigestOrderReader', () => {
         { fullName: 'ЛДСП белая', label: 'ЛДСП' },
       ],
       millingDisplay: 'Выборка',
-      passedProductionCodes: ['cut', 'pack'],
+      // Order marks only; the order (Упакован) and detail stages do not add codes.
+      passedProductionCodes: ['cut'],
       totalArea: 2.75,
     });
     expect(snapshot.orders[1]).toMatchObject({

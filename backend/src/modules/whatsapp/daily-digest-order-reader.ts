@@ -164,8 +164,7 @@ export class DailyDigestOrderReader {
             `,
             [ids],
           ),
-          // Calendar queries order-level events by order_id. Detail statuses are
-          // resolved from the same live, non-deleted detail rows fetched above.
+          // Stage letters are the order-level marks, as in the calendar.
           tx.query<EventRow>(
             `
             SELECT pse.order_id, pse.production_status_id
@@ -267,13 +266,9 @@ export class DailyDigestOrderReader {
         ),
         materials: resolveMaterials(details),
         millingDisplay: resolveMillingDisplay(details),
-        passedProductionCodes: resolvePassedCodes({
-          eventCodes: eventCodesByOrder.get(orderId) ?? [],
-          orderStatusId: toNullableNumber(row.production_status_id),
-          orderStatusName: row.production_status_name,
-          details,
-          lookup: workflow.lookup,
-        }),
+        // Order stage marks only: detail stages reach them through the
+        // database triggers of migration 266.
+        passedProductionCodes: eventCodesByOrder.get(orderId) ?? [],
       } satisfies DailyDigestOrderCard;
     });
 
@@ -290,7 +285,6 @@ export class DailyDigestOrderReader {
 
 interface StatusLookup {
   idToCode: Map<number, string>;
-  uniqueNameToCode: Map<string, string>;
 }
 
 function mapStatus(row: StatusRow): ProductionStatus {
@@ -320,21 +314,10 @@ function resolveWorkflowDisplay(
 
   const codeToName: Record<string, string> = {};
   const idToCode = new Map<number, string>();
-  const codesByName = new Map<string, Set<string>>();
   for (const status of statuses) {
     if (!status.code) continue;
     idToCode.set(status.id, status.code);
     codeToName[status.code] = status.name;
-    const normalizedName = normalizeName(status.name);
-    if (!normalizedName) continue;
-    const codes = codesByName.get(normalizedName) ?? new Set<string>();
-    codes.add(status.code);
-    codesByName.set(normalizedName, codes);
-  }
-
-  const uniqueNameToCode = new Map<string, string>();
-  for (const [name, codes] of codesByName) {
-    if (codes.size === 1) uniqueNameToCode.set(name, [...codes][0]);
   }
 
   const rawLetters = isRecord(raw) && isRecord(raw.letters_by_code)
@@ -353,7 +336,7 @@ function resolveWorkflowDisplay(
 
   return {
     display: { displayOrderCodes, codeToLetter, codeToName },
-    lookup: { idToCode, uniqueNameToCode },
+    lookup: { idToCode },
   };
 }
 
@@ -367,32 +350,6 @@ function unwrapSetting(value: unknown): unknown {
     }
   }
   return isRecord(parsed) && 'value' in parsed ? parsed.value : parsed;
-}
-
-function resolvePassedCodes(input: {
-  eventCodes: string[];
-  orderStatusId: number | null;
-  orderStatusName: string | null;
-  details: DigestDetail[];
-  lookup: StatusLookup;
-}): string[] {
-  const codes = new Set<string>();
-  const add = (code: string | null | undefined) => {
-    const normalized = code?.trim();
-    if (normalized) codes.add(normalized);
-  };
-  input.eventCodes.forEach(add);
-  if (input.orderStatusId !== null) add(input.lookup.idToCode.get(input.orderStatusId));
-  if (input.orderStatusName) {
-    add(input.lookup.uniqueNameToCode.get(normalizeName(input.orderStatusName)));
-  }
-  for (const detail of input.details) {
-    if (detail.productionStatusId !== null) add(input.lookup.idToCode.get(detail.productionStatusId));
-    else if (detail.productionStatusName) {
-      add(input.lookup.uniqueNameToCode.get(normalizeName(detail.productionStatusName)));
-    }
-  }
-  return [...codes];
 }
 
 function resolveBasisProjectDisplay(
@@ -456,10 +413,6 @@ function resolveMillingDisplay(details: DigestDetail[]): string {
   return millingTypes.some((name) => name !== 'модерн' && !name.includes('модерн'))
     ? 'Фрезеровка'
     : 'Модерн';
-}
-
-function normalizeName(value: string): string {
-  return value.trim().toLocaleLowerCase('ru-RU');
 }
 
 function assertBusinessDate(value: string): void {

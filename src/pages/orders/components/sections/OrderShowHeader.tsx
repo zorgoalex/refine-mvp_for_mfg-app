@@ -1,7 +1,7 @@
 // Order Show Header (Read-only summary for show page)
 // Adapted from OrderHeaderSummary for use with props instead of store
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Tag, Space, Typography, Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
 import { StarOutlined, EyeOutlined, PhoneOutlined } from '@ant-design/icons';
@@ -19,7 +19,7 @@ import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../
 import { RowSeparator } from './RowSeparator';
 import dayjs from 'dayjs';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
-import { buildActiveProductionStatusCodeMap, resolveOrderStageCodes } from '../../currentProductionStatus';
+import { buildActiveProductionStatusCodeMap, buildStageMarksSignature, resolveOrderStageCodes } from '../../currentProductionStatus';
 import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
 import { can } from '../../../../utils/permissions';
 import { featureFlags } from '../../../../config/featureFlags';
@@ -235,20 +235,34 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     }).display;
   }, [workflow, statusesForWorkflow]);
 
-  // Same source as the header status menu checks: the order's own stage marks.
-  // Backend reads carry them; the legacy Hasura read path loads the order's events directly.
-  // Detail stages never become order letters.
+  // Same source as the header status menu checks: the order's own stage marks
+  // (detail stages reach them through the database). The backend read carries
+  // them until the order's events load.
   const backendStageCodes = record?.passed_production_status_codes ?? record?.passedProductionStatusCodes;
-  const { data: orderMarkEvents } = useList({
+  const { data: orderMarkEvents, refetch: refetchOrderMarks } = useList({
     resource: 'production_status_events',
     filters: [{ field: 'order_id', operator: 'eq', value: record?.order_id }],
     pagination: { pageSize: 100 },
     queryOptions: {
-      enabled: canViewProductionReferences && record?.order_id != null && !Array.isArray(backendStageCodes),
+      enabled: canViewProductionReferences && record?.order_id != null,
     },
   });
+  // Detail and HDF stages set and clear the marks in the database, so a stage
+  // change on the page (live updates included) or a re-read order re-reads them.
+  const detailStageSignature = useMemo(
+    () => buildStageMarksSignature(details || [], hdfDetails),
+    [details, hdfDetails],
+  );
+  const stageMarksSourceRef = useRef({ record, detailStageSignature });
+  useEffect(() => {
+    const previous = stageMarksSourceRef.current;
+    if (previous.record === record && previous.detailStageSignature === detailStageSignature) return;
+    stageMarksSourceRef.current = { record, detailStageSignature };
+    // refetch ignores `enabled`: keep the permission and order gates.
+    if (canViewProductionReferences && record?.order_id != null) void refetchOrderMarks();
+  }, [canViewProductionReferences, detailStageSignature, record, refetchOrderMarks]);
   const currentProductionStatusCodes = useMemo(() => {
-    if (Array.isArray(backendStageCodes) || !orderMarkEvents) return resolveOrderStageCodes(backendStageCodes);
+    if (!orderMarkEvents) return resolveOrderStageCodes(backendStageCodes);
     const idToCode = buildActiveProductionStatusCodeMap(allProductionStatusesData?.data || []);
     return resolveOrderStageCodes(undefined, (orderMarkEvents.data || [])
       .map((event: any) => idToCode.get(event.production_status_id)));
