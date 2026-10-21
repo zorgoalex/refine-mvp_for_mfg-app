@@ -2772,6 +2772,21 @@ probe_file() {
       "SELECT (SELECT count(*) FROM pg_trigger WHERE tgname IN ('trg_od_stage_marks_insert','trg_od_stage_marks_update','trg_od_stage_marks_delete') AND tgrelid = 'public.order_details'::regclass AND NOT tgisinternal) = 3;" \
       "SELECT (SELECT count(*) FROM pg_trigger WHERE tgname IN ('trg_ohd_stage_marks_insert','trg_ohd_stage_marks_update','trg_ohd_stage_marks_delete') AND tgrelid = 'public.order_hdf_details'::regclass AND NOT tgisinternal) = 3;" \
       "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event = 'production_stage_mark.auto_backfill');" ;;
+    # 267: journal of duplicates of integrations — cases, members, history, 1C dependencies, check requests,
+    # snapshot state function, enqueue triggers of eight directory tables, journal permissions.
+    267_integration_duplicates*) probe_all \
+      "$(q_tbl integration_duplicate_cases)" \
+      "$(q_tbl integration_duplicate_members)" \
+      "$(q_tbl integration_duplicate_case_sources)" \
+      "$(q_tbl integration_duplicate_events)" \
+      "$(q_tbl integration_duplicate_check_requests)" \
+      "$(q_tbl integration_duplicate_check_failures)" \
+      "SELECT EXISTS (SELECT 1 FROM integration_duplicate_settings WHERE id);" \
+      "$(q_col integration_duplicate_settings key_fingerprint)" \
+      "$(q_idx uq_integration_duplicate_cases_key)" \
+      "SELECT to_regprocedure('public.onec_entity_snapshot_state(bigint,text,timestamp with time zone)') IS NOT NULL AND to_regprocedure('public.integration_duplicate_enqueue()') IS NOT NULL;" \
+      "SELECT (SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal AND tgname LIKE 'trg_integration_duplicates_%') = 8;" \
+      "SELECT (SELECT count(*) FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'top_manager' AND rp.permission_name IN ('integrations.duplicates.view', 'integrations.duplicates.resolve')) = 2;" ;;
     # 208/223: profile UI variants «Нейтральная» and NewLine (workbench).
     208_user_preferences_ui_variant_neutral*) probe_all "$(q_col user_preferences ui_variant)" \
                      "SELECT EXISTS (
@@ -3041,7 +3056,7 @@ verify_applied_effect() {
     193_onec_agent_foundation*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|243_supplier_contacts_onec*|245_onec_operator_role*|246_clients_analytics_view_real_orders*|247_onec_agent_expected_silence*|244_client_onec_permissions*|248_authorization_snapshot*|249_role_checks_to_permissions*|251_whatsapp_calendar_send_permission*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|255_crm_sync_paid_payment_operations*|253_references_quick_create_permission*|256_doweling_order_version_triggers*|257_status_automation_clear_details_action*|258_financial_projections*|259_payment_audit_capture*|260_crm_sync_payment_notifications*|261_whatsapp_notification_deliveries*|262_onec_alert_episodes*|263_mandatory_balloons_delivery_checks*|264_onec_alert_notifications*|265_onec_alert_whatsapp*|266_order_stage_marks_from_details*|240_payment_onec_matches*|250_onec_stock_snapshots*|241_client_screen_settings*|270_bitrix24_assignment_channel*|269_client_contacts_screen*)
+    231_cut_result_render_v2*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|243_supplier_contacts_onec*|245_onec_operator_role*|246_clients_analytics_view_real_orders*|247_onec_agent_expected_silence*|244_client_onec_permissions*|248_authorization_snapshot*|249_role_checks_to_permissions*|251_whatsapp_calendar_send_permission*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|255_crm_sync_paid_payment_operations*|253_references_quick_create_permission*|256_doweling_order_version_triggers*|257_status_automation_clear_details_action*|258_financial_projections*|259_payment_audit_capture*|260_crm_sync_payment_notifications*|261_whatsapp_notification_deliveries*|262_onec_alert_episodes*|263_mandatory_balloons_delivery_checks*|264_onec_alert_notifications*|265_onec_alert_whatsapp*|266_order_stage_marks_from_details*|240_payment_onec_matches*|250_onec_stock_snapshots*|241_client_screen_settings*|267_integration_duplicates*|270_bitrix24_assignment_channel*|269_client_contacts_screen*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

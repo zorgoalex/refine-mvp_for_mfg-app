@@ -304,6 +304,10 @@ export const envSchema = z
     BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED: booleanFromEnv.default(false),
     // Контакты поставщиков из 1С (K4a): сверка с контактами привязанного контрагента 1С после выгрузки и раз в час.
     BACKEND_PARTY_CONTACTS_ONEC_SYNC: booleanFromEnv.default(false),
+    // Журнал дублей интеграций (D0): поиск дублей справочников ERP / Bitrix24 / 1С. Очистка данных 1С в журнале
+    // работает и при выключенном поиске. Ключ дел — HMAC с секретом BACKEND_INTEGRATION_DUPLICATES_KEY (≥ 32 символа).
+    BACKEND_INTEGRATION_DUPLICATES: booleanFromEnv.default(false),
+    BACKEND_INTEGRATION_DUPLICATES_KEY: z.union([z.string().min(32).max(256), emptyTrimmedStringFromEnv]).optional(),
     // Виды контактов клиента WhatsApp, Viber, Instagram и «Другое» (migration 269). Выключен: новые и изменённые контакты
     // этих видов не принимаются (уже сохранённые остаются и сохраняются без изменений) — шаг перед откатом backend.
     BACKEND_CLIENT_CONTACT_EXTRA_KINDS: booleanFromEnv.default(false),
@@ -649,6 +653,14 @@ export const envSchema = z
       .default(180000),
   })
   .superRefine((env, ctx) => {
+    if (env.BACKEND_INTEGRATION_DUPLICATES && !env.BACKEND_INTEGRATION_DUPLICATES_KEY) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'BACKEND_INTEGRATION_DUPLICATES_KEY is required when BACKEND_INTEGRATION_DUPLICATES is true',
+        path: ['BACKEND_INTEGRATION_DUPLICATES_KEY'],
+      });
+    }
+
     if (env.NODE_ENV === 'production' && !env.FRONTEND_ORIGIN) {
       ctx.addIssue({
         code: 'custom',

@@ -24,6 +24,8 @@ servers:
 tags:
   - name: Party contacts
     description: Контакты поставщиков, производителей и клиентов; связь поставщика с контрагентом 1С
+  - name: Integration duplicates
+    description: Журнал дублей интеграций (ERP, Bitrix24, 1С)
   - name: Client screen
     description: Настройки экрана клиента — зеркала заказа на втором мониторе
   - name: Reference catalog import
@@ -799,6 +801,120 @@ paths:
         '200': {description: 'Channel state (Cache-Control: private, no-store)'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/integration-duplicates:
+    get:
+      tags: [Integration duplicates]
+      operationId: listIntegrationDuplicates
+      summary: 'Cases of duplicates of integrations (ERP, Bitrix24, 1C)'
+      description: 'Filters, a page and counts per status. Names and values only by the rights of their sources; masks of keys.'
+      security: [{bearerAuth: []}]
+      x-permissions: [integrations.duplicates.view]
+      parameters:
+        - {name: status, in: query, schema: {type: string, enum: [open, dismissed, external, merged, resolved, all], default: open}}
+        - {name: entityKind, in: query, schema: {type: string, enum: [client, supplier, vendor, film, sheet_material, material, onec_counterparty, onec_item]}}
+        - {name: ruleCode, in: query, schema: {type: string}}
+        - {name: system, in: query, schema: {type: string, enum: [erp, bitrix, onec]}}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
+        - {name: search, in: query, schema: {type: string, maxLength: 200}}
+        - {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: pageSize, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        '200': {description: 'A page of cases', content: {application/json: {schema: {type: object, required: [items, total, counts], properties: {items: {type: array, items: {type: object}}, total: {type: integer}, counts: {type: object}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {description: 'VALIDATION_FAILED'}
+  /api/v1/integration-duplicates/rules:
+    get:
+      tags: [Integration duplicates]
+      operationId: listIntegrationDuplicateRules
+      summary: 'Rules of the journal of duplicates (for the filter)'
+      security: [{bearerAuth: []}]
+      x-permissions: [integrations.duplicates.view]
+      responses:
+        '200': {description: 'Rules', content: {application/json: {schema: {type: array, items: {type: object}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/integration-duplicates/{caseId}:
+    get:
+      tags: [Integration duplicates]
+      operationId: getIntegrationDuplicate
+      summary: 'One case: members with their facts, matched values, history, other cases of the same records'
+      security: [{bearerAuth: []}]
+      x-permissions: [integrations.duplicates.view]
+      parameters:
+        - {name: caseId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: 'The case card', content: {application/json: {schema: {type: object}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'DUPLICATE_CASE_NOT_FOUND'}
+  /api/v1/integration-duplicates/{caseId}/dismiss:
+    post:
+      tags: [Integration duplicates]
+      operationId: dismissIntegrationDuplicate
+      summary: 'Mark a case «Не дубль» (a fixed reason)'
+      description: 'Compare-and-swap on the version of the case (409 DUPLICATE_CASE_CHANGED). Audited; a domain event per transition.'
+      security: [{bearerAuth: []}]
+      x-permissions: [integrations.duplicates.view, integrations.duplicates.resolve]
+      parameters:
+        - {name: caseId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [expectedVersion], properties: {expectedVersion: {type: integer, minimum: 0}, reason: {type: string, nullable: true, enum: [different_records, related_records, test_data, other]}}}
+      responses:
+        '200': {description: 'The case card after the decision', content: {application/json: {schema: {type: object}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'DUPLICATE_CASE_NOT_FOUND'}
+        '409': {description: 'DUPLICATE_CASE_CHANGED | DUPLICATE_CASE_STATE'}
+        '422': {description: 'VALIDATION_FAILED | DUPLICATE_CASE_NOT_EXTERNAL'}
+  /api/v1/integration-duplicates/{caseId}/external:
+    post:
+      tags: [Integration duplicates]
+      operationId: markIntegrationDuplicateExternal
+      summary: 'Mark a case of 1C data «Исправить в 1С»'
+      description: 'Compare-and-swap on the version of the case (409 DUPLICATE_CASE_CHANGED). Audited; a domain event per transition.'
+      security: [{bearerAuth: []}]
+      x-permissions: [integrations.duplicates.view, integrations.duplicates.resolve]
+      parameters:
+        - {name: caseId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [expectedVersion], properties: {expectedVersion: {type: integer, minimum: 0}, reason: {type: string, nullable: true, enum: [different_records, related_records, test_data, other]}}}
+      responses:
+        '200': {description: 'The case card after the decision', content: {application/json: {schema: {type: object}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'DUPLICATE_CASE_NOT_FOUND'}
+        '409': {description: 'DUPLICATE_CASE_CHANGED | DUPLICATE_CASE_STATE'}
+        '422': {description: 'VALIDATION_FAILED | DUPLICATE_CASE_NOT_EXTERNAL'}
+  /api/v1/integration-duplicates/{caseId}/reopen:
+    post:
+      tags: [Integration duplicates]
+      operationId: reopenIntegrationDuplicate
+      summary: 'Open a dismissed or external case again'
+      description: 'Compare-and-swap on the version of the case (409 DUPLICATE_CASE_CHANGED). Audited; a domain event per transition.'
+      security: [{bearerAuth: []}]
+      x-permissions: [integrations.duplicates.view, integrations.duplicates.resolve]
+      parameters:
+        - {name: caseId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [expectedVersion], properties: {expectedVersion: {type: integer, minimum: 0}, reason: {type: string, nullable: true, enum: [different_records, related_records, test_data, other]}}}
+      responses:
+        '200': {description: 'The case card after the decision', content: {application/json: {schema: {type: object}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'DUPLICATE_CASE_NOT_FOUND'}
+        '409': {description: 'DUPLICATE_CASE_CHANGED | DUPLICATE_CASE_STATE'}
+        '422': {description: 'VALIDATION_FAILED | DUPLICATE_CASE_NOT_EXTERNAL'}
   /api/v1/whatsapp/notifications/deliveries:
     get:
       tags: [WhatsApp]
@@ -22992,6 +23108,8 @@ components:
         - groups.batch_link
         - whatsapp.calendar_send
         - references.quick_create
+        - integrations.duplicates.view
+        - integrations.duplicates.resolve
         - bitrix24.requests.view_all
         - bitrix24.requests.view_assigned
         - groups.view_history

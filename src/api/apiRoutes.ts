@@ -383,6 +383,13 @@ export const apiRoutes = {
     configuration: backendApiPath('/message-processing/configuration'),
     test: backendApiPath('/message-processing/test'),
   },
+  integrationDuplicates: {
+    list: backendApiPath('/integration-duplicates'),
+    rules: backendApiPath('/integration-duplicates/rules'),
+    detail: (caseId: number) => backendApiPath(`/integration-duplicates/${caseId}`),
+    command: (caseId: number, action: 'dismiss' | 'external' | 'reopen') =>
+      backendApiPath(`/integration-duplicates/${caseId}/${action}`),
+  },
   employees: {
     contacts: (employeeId: number) => backendApiPath(`/employees/${employeeId}/contacts`),
     contactsList: backendApiPath('/employee-contacts'),

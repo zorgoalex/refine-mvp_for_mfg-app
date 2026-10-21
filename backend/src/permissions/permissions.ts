@@ -216,6 +216,12 @@ export const PERMISSIONS = [
   // 2026-10-14: the roles that could do it through Hasura keep it, migration 253). Appended.
   /** Insert a new edge type, milling type or film from the order form; editing and deleting need references.manage. */
   'references.quick_create',
+
+  // Journal of duplicates of integrations (user decision 2026-10-21; migration 267: superadmin, admin, top manager). Appended.
+  /** «Интеграции → Дубли»: cases of duplicates; full values also need the right of their source. */
+  'integrations.duplicates.view',
+  /** «Не дубль», «Исправить в 1С», open a case again. */
+  'integrations.duplicates.resolve',
   // «Контакты клиентов» screen (user decision 2026-10-22: top manager and above; migration 269). Appended. The client
   // card keeps clients.view / clients.update for its own contact editors.
   /** The list of phones, emails and messengers of all clients. */
@@ -288,6 +294,8 @@ export const ROLE_PERMISSIONS = {
     'clients.onec_data.view',
     'clients.onec_documents.view',
     'whatsapp.calendar_send',
+    'integrations.duplicates.view',
+    'integrations.duplicates.resolve',
     'clients.contacts.view',
     'clients.contacts.manage',
 

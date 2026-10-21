@@ -14,6 +14,7 @@ import { ClientPhonesModule } from './modules/client-phones/client-phones.module
 import { ClientScreenModule } from './modules/client-screen/client-screen.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { PartyContactsModule } from './modules/party-contacts/party-contacts.module';
+import { IntegrationDuplicatesModule } from './modules/integration-duplicates/integration-duplicates.module';
 import { ClientContactsModule } from './modules/client-contacts/client-contacts.module';
 import { CncTelegramModule } from './modules/cnc-telegram/cnc-telegram.module';
 import { CrmSyncModule } from './modules/crm-sync/crm-sync.module';
@@ -64,6 +65,7 @@ import { MdfBoardModule } from './modules/mdf-board/mdf-board.module';
     ClientScreenModule,
     EmployeesModule,
     PartyContactsModule,
+    IntegrationDuplicatesModule,
     ClientContactsModule,
     CncTelegramModule,
     CrmSyncModule,
