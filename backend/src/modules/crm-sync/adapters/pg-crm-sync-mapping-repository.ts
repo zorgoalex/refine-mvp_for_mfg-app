@@ -75,8 +75,12 @@ export class PgCrmSyncMappingRepository {
     }));
   }
 
-  async upsertSuccess(client: DatabaseClient, row: MappingRow): Promise<void> {
-    await client.query(
+  /**
+   * Returns false when the row is `remote_deleted` (Deal deleted in Bitrix, written by reverse sync)
+   * and the outbound result is not: only reverse sync may bring such a row back.
+   */
+  async upsertSuccess(client: DatabaseClient, row: MappingRow): Promise<boolean> {
+    const result = await client.query(
       `INSERT INTO crm_sync_mapping (
          entity_type, erp_id, bitrix_object, bitrix_id, parent_erp_id,
          status, last_hash, last_error, attempts, last_synced_at, updated_at
@@ -86,7 +90,8 @@ export class PgCrmSyncMappingRepository {
          bitrix_object=EXCLUDED.bitrix_object, bitrix_id=EXCLUDED.bitrix_id,
          parent_erp_id=EXCLUDED.parent_erp_id,
          status=EXCLUDED.status, last_hash=EXCLUDED.last_hash,
-         last_error=NULL, attempts=0, last_synced_at=now(), updated_at=now()`,
+         last_error=NULL, attempts=0, last_synced_at=now(), updated_at=now()
+       WHERE crm_sync_mapping.status <> 'remote_deleted' OR EXCLUDED.status = 'remote_deleted'`,
       [
         row.entityType,
         row.erpId,
@@ -97,6 +102,7 @@ export class PgCrmSyncMappingRepository {
         row.lastHash,
       ],
     );
+    return (result.rowCount ?? 0) > 0;
   }
 
   async markFailed(
@@ -110,7 +116,8 @@ export class PgCrmSyncMappingRepository {
       `INSERT INTO crm_sync_mapping (entity_type, erp_id, bitrix_object, status, last_error, attempts, updated_at)
        VALUES ($1,$2,$3,'failed',$4,1, now())
        ON CONFLICT (entity_type, erp_id) DO UPDATE SET
-         status='failed', last_error=EXCLUDED.last_error, attempts=crm_sync_mapping.attempts+1, updated_at=now()`,
+         status='failed', last_error=EXCLUDED.last_error, attempts=crm_sync_mapping.attempts+1, updated_at=now()
+       WHERE crm_sync_mapping.status <> 'remote_deleted'`,
       [entityType, erpId, bitrixObject, error.slice(0, 1000)],
     );
   }

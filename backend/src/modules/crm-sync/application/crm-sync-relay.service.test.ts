@@ -95,7 +95,7 @@ function makeOutboxRepo(overrides: Record<string, unknown> = {}) {
 function makeMappingRepo(overrides: Record<string, unknown> = {}) {
   return {
     get: vi.fn(),
-    upsertSuccess: vi.fn().mockResolvedValue(undefined),
+    upsertSuccess: vi.fn().mockResolvedValue(true),
     markFailed: vi.fn().mockResolvedValue(undefined),
     deletePaymentCreateGuard: vi.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -243,6 +243,7 @@ describe('CrmSyncRelayService', () => {
       });
       (mapping.upsertSuccess as ReturnType<typeof vi.fn>).mockImplementation(async (_c: unknown, m: { entityType: string }) => {
         callOrder.push(`upsertSuccess:${m.entityType}`);
+        return true;
       });
       (audit.record as ReturnType<typeof vi.fn>).mockImplementation(async (_c: unknown, e: { entityType: string }) => {
         callOrder.push(`audit.record:${e.entityType}`);
