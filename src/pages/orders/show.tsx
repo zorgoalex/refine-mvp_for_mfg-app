@@ -3683,7 +3683,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 <OrderShowHeader
                   record={record}
                   details={detailsWithLiveProductionStatuses}
-                  detailsLoaded={productionSummaryDetailsLoaded}
                   dowelingLinks={dowelingLinks}
                   compactSticky
                   showFinancials={canViewFinancials}
@@ -3798,7 +3797,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             <OrderShowHeader
               record={record}
               details={detailsWithLiveProductionStatuses}
-              detailsLoaded={productionSummaryDetailsLoaded}
               dowelingLinks={dowelingLinks}
               compactSticky={orderShowStickyEnabled && orderShowSummaryStuck}
               detailMaterialNames={headerMaterialNames}

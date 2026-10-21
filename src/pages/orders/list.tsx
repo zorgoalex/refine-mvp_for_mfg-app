@@ -1,6 +1,5 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import type { TablePaginationConfig } from 'antd/es/table';
-import { OrderProductionSummary } from '../../components/OrderProductionSummary';
 import React, { useMemo, useState, useCallback, useEffect } from "react";
 import type { Dayjs } from "dayjs";
 import {
@@ -54,7 +53,8 @@ import { authStorage } from "../../utils/auth";
 import { authSession } from "../../api/authSession";
 import { getMaterialTextColor } from "../calendar/utils/statusColors";
 import { resolveDetailMaterialName } from "../../utils/materialDisplayName";
-import { ProductionStagesDisplay, getPassedCodesFromStatusName } from "../../components/ProductionStagesDisplay";
+import { ProductionStagesDisplay } from "../../components/ProductionStagesDisplay";
+import { buildActiveProductionStatusCodeMap, resolveOrderStageCodes } from "./currentProductionStatus";
 import { useAppSettings, SETTING_KEYS } from "../../hooks/useAppSettings";
 import { buildProductionStagesDisplayConfig } from "../../utils/productionWorkflow";
 import type { ProductionStatusRef, ProductionWorkflowConfig } from "../../types/productionWorkflow";
@@ -1139,14 +1139,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     return map;
   }, [dowelingLinksData]);
 
-  // Map production_status_id -> production_status_code
-  const productionStatusIdToCode = useMemo(() => {
-    const map = new Map<number, string>();
-    (productionStatusesData?.data || []).forEach((status: any) => {
-      map.set(status.production_status_id, status.production_status_code);
-    });
-    return map;
-  }, [productionStatusesData]);
+  // Stage letters follow the menu: an inactive catalog stage has no menu item and no letter.
+  const activeProductionStatusIdToCode = useMemo(
+    () => buildActiveProductionStatusCodeMap(productionStatusesData?.data || []),
+    [productionStatusesData],
+  );
 
   const statusesForWorkflow: ProductionStatusRef[] = useMemo(() => {
     return (productionStatusesData?.data || []).map((s: any) => ({
@@ -1178,14 +1175,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         if (!map[event.order_id]) {
           map[event.order_id] = [];
         }
-        const code = productionStatusIdToCode.get(event.production_status_id);
+        const code = activeProductionStatusIdToCode.get(event.production_status_id);
         if (code && !map[event.order_id].includes(code)) {
           map[event.order_id].push(code);
         }
       }
     });
     return map;
-  }, [productionEventsData, productionStatusIdToCode]);
+  }, [productionEventsData, activeProductionStatusIdToCode]);
 
   // Функция для получения последней (свежей) присадки для заказа
   const getLatestDoweling = (orderId: number, record?: any) => {
@@ -1506,15 +1503,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       title: "Этапы",
       width: 90,
       className: "orders-col status production-status",
-      render: (value, record) => {
-        const backendCodes = Array.isArray(record.passed_production_status_codes)
-          ? record.passed_production_status_codes
-          : [];
-        const codes = passedCodesByOrderId[record.order_id]
-          || (backendCodes.length > 0 ? backendCodes : getPassedCodesFromStatusName(value || ''));
+      render: (_value, record) => {
+        // Only the order's own stage marks — the same state the status menus check.
         return (
-          <div><ProductionStagesDisplay
-            passedCodes={codes}
+          <ProductionStagesDisplay
+            passedCodes={resolveOrderStageCodes(record.passed_production_status_codes, passedCodesByOrderId[record.order_id])}
             displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
             codeToLetter={productionWorkflowDisplay?.codeToLetter}
             codeToName={productionWorkflowDisplay?.codeToName}
@@ -1522,7 +1515,6 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             showTooltip={true}
             maxWidth={85}
           />
-          <div><OrderProductionSummary order={record} /></div></div>
         );
       },
     },
@@ -1900,6 +1892,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           <div className={isTablet ? 'order-card-list--tablet' : 'order-card-list--mobile'}>
             <OrderCardList
               rows={tableProps.dataSource ?? []}
+              passedCodesByOrderId={passedCodesByOrderId}
+              productionWorkflowDisplay={productionWorkflowDisplay}
               loading={false}
               pagination={tableProps.pagination ?? false}
               onPaginationChange={(nextPage, nextPageSize) => {

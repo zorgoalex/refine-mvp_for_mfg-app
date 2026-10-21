@@ -219,28 +219,6 @@
   font-weight: 600;
 }
 
-/* ================= Сводка производства (список, карточка) ================= */
-
-:root[data-ui-variant="workbench"] .order-production-summary {
-  border-radius: 999px;
-  background: var(--wb-tone-gray-bg);
-  color: var(--evo-text-secondary);
-  font-weight: 550;
-}
-
-/* «смешанный» состав: прежняя двухцветная заливка приглушена до двух тихих тонов */
-:root[data-ui-variant="workbench"] .order-production-summary[data-mixed='true'] {
-  background: linear-gradient(90deg, var(--wb-progress-done) 50%, var(--wb-progress-start) 50%);
-  color: var(--evo-text);
-}
-
-:root[data-ui-variant="workbench"] .order-production-summary[data-mixed='true'] .order-production-summary__text {
-  background: none;
-  -webkit-background-clip: border-box;
-  background-clip: border-box;
-  color: var(--evo-text);
-}
-
 /* ================= Карточка заказа ================= */
 
 /* --- каркас страницы: свои крошки и шапка, стандартная шапка Refine скрыта --- */

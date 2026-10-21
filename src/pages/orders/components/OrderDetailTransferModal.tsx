@@ -1,5 +1,4 @@
 import React from 'react';
-import { OrderProductionSummary } from '../../../components/OrderProductionSummary';
 import { Alert, Input, Modal, Radio, Select, Space, Spin, Typography, message } from 'antd';
 import { SwapOutlined } from '@ant-design/icons';
 import { ordersApi, createOrderTransferIdempotencyKey } from '../../../api/ordersApi';
@@ -242,7 +241,6 @@ export const OrderDetailTransferModal: React.FC<OrderDetailTransferModalProps> =
                 {` · Клиент: ${selectedTarget.clientName ?? '—'}`}
                 {` · Дата: ${formatDate(selectedTarget.orderDate)}`}
                 {` · Статус заказа: ${selectedTarget.orderStatusName ?? '—'}`}
-                {' · '}<OrderProductionSummary order={selectedTarget} />
               </Typography.Text>
             )}
           </Space>

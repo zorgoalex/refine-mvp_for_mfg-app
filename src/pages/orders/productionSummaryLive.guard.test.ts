@@ -1,15 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-describe('order production badge live wiring', () => {
-  it('passes table live statuses and complete/empty load state into every header variant (compact, default, NewLine bar and tiles)', () => {
-    const show = readFileSync(new URL('./show.tsx', import.meta.url), 'utf8');
+describe('order view production letters', () => {
+  it('shows only the order stage marks (the menu state), never detail stages or a word badge', () => {
     const header = readFileSync(new URL('./components/sections/OrderShowHeader.tsx', import.meta.url), 'utf8');
-    expect(show).toContain('overlayDetailProductionStatuses(details, currentDetailProductionStatusById)');
-    expect(show).toContain('details={detailsWithLiveProductionStatuses}');
-    expect(show).toContain('detailsLoaded={productionSummaryDetailsLoaded}');
-    expect(show).toContain('detailsData.data.length === detailsData.total');
-    expect(header.match(/details=\{detailsLoaded \? details : undefined\}/g)).toHaveLength(4);
-    expect(header).not.toContain('details.length ? details : undefined');
+    expect(header).toContain('resolveOrderStageCodes(backendStageCodes)');
+    // legacy Hasura read path: the order's own events, loaded only when the backend codes are absent
+    expect(header).toContain("resource: 'production_status_events'");
+    expect(header).toContain('!Array.isArray(backendStageCodes)');
+    expect(header).not.toContain('detailStatuses');
+    expect(header).not.toContain('OrderProductionSummary');
+    expect(header.match(/passedCodes=\{currentProductionStatusCodes\}/g)).toHaveLength(4);
   });
 });
