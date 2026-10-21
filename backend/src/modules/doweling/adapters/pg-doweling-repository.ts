@@ -16,7 +16,7 @@ import {
   DowelingIdempotencyInProgressError,
   DowelingIdempotencyKeyReusedError,
 } from '../errors/doweling.errors';
-import { assertDowelingAccess, lockOrders, mapDowelingWriteError, requestIdOrFallback, setSessionUser, SOURCE } from './doweling-sql';
+import { assertDowelingAccess, assertDowelingMoneyAllowed, lockOrders, mapDowelingWriteError, requestIdOrFallback, setSessionUser, SOURCE } from './doweling-sql';
 import { updateDowelingOrder } from './pg-doweling-update';
 
 const COMMAND_NAME = 'doweling.create';
@@ -32,6 +32,7 @@ interface InsertedDowelingRow extends QueryResultRow {
   doweling_order_id: number;
   doweling_order_name: string;
   version: number;
+  payment_status_id: number | string;
 }
 
 export class PgDowelingRepository implements DowelingRepositoryPort {
@@ -43,6 +44,11 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
 
   async createDowelingOrder(command: CreateDowelingOrderCommand): Promise<CreateDowelingOrderResponseDto> {
     const orderId = command.dto.orderId ?? null;
+    await assertDowelingMoneyAllowed(
+      { database: this.database, currentUser: command.currentUser, requestId: requestIdOrFallback(command.requestId),
+        action: 'doweling_create', dowelingOrderId: null },
+      command.dto.paymentStatusId !== undefined,
+    );
     try {
       return await this.createInTransaction(command, orderId);
     } catch (error) {
@@ -50,7 +56,7 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
         error,
         {
           designEngineerId: command.dto.designEngineerId,
-          paymentStatusId: command.dto.paymentStatusId,
+          paymentStatusId: command.dto.paymentStatusId ?? null,
           productionStatusId: command.dto.productionStatusId ?? null,
           operatorId: command.dto.operatorId ?? null,
         },
@@ -73,7 +79,8 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
           commandName: COMMAND_NAME,
           dowelingOrderName: command.dto.dowelingOrderName.trim(),
           designEngineerId: command.dto.designEngineerId,
-          paymentStatusId: command.dto.paymentStatusId,
+          // Absent (no money right, access groups «финансы») hashes as null: the default status is not an input.
+          paymentStatusId: command.dto.paymentStatusId ?? null,
           dowelingOrderDate: command.dto.dowelingOrderDate ?? null,
           productionStatusId: command.dto.productionStatusId ?? null,
           operatorId: command.dto.operatorId ?? null,
@@ -109,13 +116,15 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
           INSERT INTO doweling_orders
             (doweling_order_name, doweling_order_date, payment_status_id, production_status_id,
              design_engineer_id, operator_id, parts_count, link_cad_file, link_pdf_file)
-          VALUES ($1, COALESCE($2::date, CURRENT_DATE), $3, $4, $5, $6, COALESCE($7, 0), $8, $9)
-          RETURNING doweling_order_id, doweling_order_name, version
+          VALUES ($1, COALESCE($2::date, CURRENT_DATE),
+                  COALESCE($3::integer, (SELECT payment_status_id FROM payment_statuses WHERE payment_status_code = 'unpaid')),
+                  $4, $5, $6, COALESCE($7, 0), $8, $9)
+          RETURNING doweling_order_id, doweling_order_name, version, payment_status_id
           `,
           [
             command.dto.dowelingOrderName.trim(),
             command.dto.dowelingOrderDate ?? null,
-            command.dto.paymentStatusId,
+            command.dto.paymentStatusId ?? null,
             command.dto.productionStatusId ?? null,
             command.dto.designEngineerId,
             command.dto.operatorId ?? null,
@@ -147,7 +156,7 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
         dowelingOrderId: inserted.doweling_order_id,
         dowelingOrderName: inserted.doweling_order_name,
         designEngineerId: command.dto.designEngineerId,
-        paymentStatusId: command.dto.paymentStatusId,
+        paymentStatusId: Number(inserted.payment_status_id),
         productionStatusId: command.dto.productionStatusId ?? null,
         link,
       });
@@ -165,7 +174,7 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
           entityId: String(inserted.doweling_order_id),
           dowelingOrderId: inserted.doweling_order_id,
           designEngineerId: command.dto.designEngineerId,
-          paymentStatusId: command.dto.paymentStatusId,
+          paymentStatusId: Number(inserted.payment_status_id),
           productionStatusId: command.dto.productionStatusId ?? null,
           orderIds: link ? [link.orderId] : [],
           orderDowelingLinkId: link?.orderDowelingLinkId ?? null,

@@ -37,6 +37,12 @@ describe('DowelingController', () => {
     expect(res.dowelingOrder.dowelingOrderId).toBe(7);
   });
 
+  it('parseCreateDowelingRequest accepts a create without the payment status (default: unpaid)', () => {
+    const { paymentStatusId, ...rest } = validBody;
+    void paymentStatusId;
+    expect(parseCreateDowelingRequest(rest).paymentStatusId).toBeUndefined();
+  });
+
   it('parseCreateDowelingRequest rejects empty name with 422', () => {
     expect(() => parseCreateDowelingRequest({ ...validBody, dowelingOrderName: '   ' })).toThrow(
       expect.objectContaining({ statusCode: 422, code: 'VALIDATION_ERROR' }),
@@ -123,6 +129,23 @@ describe('PATCH /doweling-orders/:id payload', () => {
       expect.objectContaining({ statusCode: 422, code: 'VALIDATION_ERROR' }),
     );
   });
+
+  it('accepts a save without the money group (access groups «финансы»: the money stays as it is)', () => {
+    const { paymentStatusId, paymentDate, totalAmount, finalAmount, discount, surcharge, paidAmount, ...withoutMoney } = validUpdate as Record<string, unknown>;
+    void [paymentStatusId, paymentDate, totalAmount, finalAmount, discount, surcharge, paidAmount];
+    const parsed = parseUpdateDowelingRequest(withoutMoney);
+    expect(parsed.paymentStatusId).toBeUndefined();
+    expect(parsed.totalAmount).toBeUndefined();
+  });
+
+  it.each(['paymentStatusId', 'paymentDate', 'totalAmount', 'finalAmount', 'discount', 'surcharge', 'paidAmount'])(
+    'rejects a money group without %s with 422 (all or none)',
+    (field) => {
+      expect(() => parseUpdateDowelingRequest({ ...validUpdate, [field]: undefined })).toThrow(
+        expect.objectContaining({ statusCode: 422, code: 'VALIDATION_ERROR' }),
+      );
+    },
+  );
 
   it('accepts an inactive doweling order without orders', () => {
     expect(parseUpdateDowelingRequest({ ...validUpdate, isActive: false, orderIds: [] })).toMatchObject({ isActive: false, orderIds: [] });

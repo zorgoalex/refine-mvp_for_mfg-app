@@ -9,10 +9,13 @@ import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
 import { can } from "../../utils/permissions";
 import { QuickCreateDowelingModal } from "./QuickCreateDowelingModal";
+import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
 
 export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
+  // Money columns only with the right and the settings matrix (Hasura answers money only with orders.view_financials).
+  const { canViewFinancials } = useOrderFinancialVisibility();
   // Используем doweling_orders_view - одна строка = одна пара присадка-заказ (через order_doweling_links);
   // standalone присадки (без связи) показываются одной строкой с NULL order-колонками (LEFT JOIN).
   const { tableProps, tableQueryResult } = useTable({
@@ -196,75 +199,84 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
           width={80}
           align="center"
         />
-        <Table.Column
-          dataIndex="payment_status_name"
-          title="Статус оплаты"
-          width={90}
-          render={(value) => {
-            const displayValue = value || "—";
-            let color = undefined;
-            if (value === 'Не оплачен') {
-              color = '#ff4d4f';
-            } else if (value === 'Частично оплачен') {
-              color = '#d4a574';
-            } else if (value === 'Оплачен') {
-              color = '#52c41a';
-            }
-            return (
-              <Tooltip title={displayValue} placement="topLeft">
-                <span style={{ ...(color && { color, fontWeight: 500 }) }}>
-                  {displayValue}
-                </span>
-              </Tooltip>
-            );
-          }}
-        />
+        {canViewFinancials && (
+          <Table.Column
+            dataIndex="payment_status_name"
+            title="Статус оплаты"
+            width={90}
+            render={(value) => {
+              const displayValue = value || "—";
+              let color = undefined;
+              if (value === 'Не оплачен') {
+                color = '#ff4d4f';
+              } else if (value === 'Частично оплачен') {
+                color = '#d4a574';
+              } else if (value === 'Оплачен') {
+                color = '#52c41a';
+              }
+              return (
+                <Tooltip title={displayValue} placement="topLeft">
+                  <span style={{ ...(color && { color, fontWeight: 500 }) }}>
+                    {displayValue}
+                  </span>
+                </Tooltip>
+              );
+            }}
+          />
+        )}
         <Table.Column
           dataIndex="production_status_name"
           title="Статус производства"
           width={100}
           render={(value) => renderStatus(value)}
         />
-        <Table.Column
-          dataIndex="total_amount"
-          title="Сумма"
-          sorter
-          width={90}
-          align="right"
-          render={(value) => formatNumber(value as number, 0)}
-        />
-        <Table.Column
-          dataIndex="discount"
-          title="Скидка"
-          sorter
-          width={70}
-          align="right"
-          render={(value) => formatNumber(value as number, 0)}
-        />
-        <Table.Column
-          dataIndex="surcharge"
-          title="Наценка"
-          sorter
-          width={93}
-          align="right"
-          render={(value) => formatNumber(value as number, 0)}
-        />
-        <Table.Column
-          dataIndex="final_amount"
-          title="Итого"
-          sorter
-          width={90}
-          align="right"
-          render={(value) => formatNumber(value as number, 0)}
-        />
-        <Table.Column
-          dataIndex="paid_amount"
-          title="Оплачено"
-          sorter
-          width={90}
-          align="right"
-          render={(value) => formatNumber(value as number, 0)}
-        />
+        {canViewFinancials && [
+          <Table.Column
+            key="total_amount"
+            dataIndex="total_amount"
+            title="Сумма"
+            sorter
+            width={90}
+            align="right"
+            render={(value) => formatNumber(value as number, 0)}
+          />,
+          <Table.Column
+            key="discount"
+            dataIndex="discount"
+            title="Скидка"
+            sorter
+            width={70}
+            align="right"
+            render={(value) => formatNumber(value as number, 0)}
+          />,
+          <Table.Column
+            key="surcharge"
+            dataIndex="surcharge"
+            title="Наценка"
+            sorter
+            width={93}
+            align="right"
+            render={(value) => formatNumber(value as number, 0)}
+          />,
+          <Table.Column
+            key="final_amount"
+            dataIndex="final_amount"
+            title="Итого"
+            sorter
+            width={90}
+            align="right"
+            render={(value) => formatNumber(value as number, 0)}
+          />,
+          <Table.Column
+            key="paid_amount"
+            dataIndex="paid_amount"
+            title="Оплачено"
+            sorter
+            width={90}
+            align="right"
+            render={(value) => formatNumber(value as number, 0)}
+          />,
+        ]}
         <Table.Column
           dataIndex="issue_date"
           title="Дата выдачи"

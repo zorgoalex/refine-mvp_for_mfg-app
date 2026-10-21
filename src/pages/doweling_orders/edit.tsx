@@ -6,6 +6,8 @@ import { useParams } from "react-router-dom";
 import dayjs, { Dayjs } from "dayjs";
 import { buildUpdateDowelingRequest, dowelingApi } from "../../api/dowelingApi";
 import { isApiError } from "../../api/apiError";
+import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
+import { hasHasuraFinancials } from "../../utils/hasuraFinancials";
 
 type DowelingEditValues = {
   doweling_order_name?: string;
@@ -59,6 +61,11 @@ export const DowelOrderEdit: React.FC<IResourceComponentsProps> = () => {
     queryOptions: { enabled: !!dowelingOrderId, staleTime: 0 },
   });
   const record = recordData?.data;
+  // Money (access groups «финансы»): shown and sent only when the user may see it (permission + the settings matrix;
+  // false while the settings load) AND it arrived (Hasura answers `financials` only with orders.view_financials).
+  // Otherwise the save carries no money and the server keeps it.
+  const { canViewFinancials } = useOrderFinancialVisibility();
+  const moneyEditable = canViewFinancials && hasHasuraFinancials("doweling_orders", record);
 
   const { data: dowelingLinksData, refetch: refetchLinks } = useList({
     resource: "order_doweling_links",
@@ -135,6 +142,7 @@ export const DowelOrderEdit: React.FC<IResourceComponentsProps> = () => {
         // The backend refuses the save when these are no longer the current orders (separate reads may disagree).
         baseOrderIds: linkedOrderIds,
         fallbackDate: toOptionalDate(record.doweling_order_date) ?? dayjs().format("YYYY-MM-DD"),
+        sendMoney: moneyEditable,
       },
     );
 
@@ -225,13 +233,15 @@ export const DowelOrderEdit: React.FC<IResourceComponentsProps> = () => {
           <DatePicker style={{ width: "100%" }} format="DD.MM.YYYY" />
         </Form.Item>
 
-        <Form.Item
-          label="Статус оплаты"
-          name="payment_status_id"
-          rules={[{ required: true, message: "Обязательное поле" }]}
-        >
-          <Select {...paymentStatusSelectProps} placeholder="Выберите статус" />
-        </Form.Item>
+        {moneyEditable && (
+          <Form.Item
+            label="Статус оплаты"
+            name="payment_status_id"
+            rules={[{ required: true, message: "Обязательное поле" }]}
+          >
+            <Select {...paymentStatusSelectProps} placeholder="Выберите статус" />
+          </Form.Item>
+        )}
 
         <Form.Item label="Статус производства" name="production_status_id">
           <Select
@@ -280,54 +290,56 @@ export const DowelOrderEdit: React.FC<IResourceComponentsProps> = () => {
           <InputNumber min={0} style={{ width: "100%" }} />
         </Form.Item>
 
-        <Form.Item label="Сумма" name="total_amount">
-          <InputNumber
-            min={0}
-            precision={2}
-            style={{ width: "100%" }}
-            placeholder="0.00"
-          />
-        </Form.Item>
+        {moneyEditable && (<>
+          <Form.Item label="Сумма" name="total_amount">
+            <InputNumber
+              min={0}
+              precision={2}
+              style={{ width: "100%" }}
+              placeholder="0.00"
+            />
+          </Form.Item>
 
-        <Form.Item label="Скидка" name="discount">
-          <InputNumber
-            min={0}
-            precision={2}
-            style={{ width: "100%" }}
-            placeholder="0.00"
-          />
-        </Form.Item>
+          <Form.Item label="Скидка" name="discount">
+            <InputNumber
+              min={0}
+              precision={2}
+              style={{ width: "100%" }}
+              placeholder="0.00"
+            />
+          </Form.Item>
 
-        <Form.Item label="Наценка" name="surcharge">
-          <InputNumber
-            min={0}
-            precision={2}
-            style={{ width: "100%" }}
-            placeholder="0.00"
-          />
-        </Form.Item>
+          <Form.Item label="Наценка" name="surcharge">
+            <InputNumber
+              min={0}
+              precision={2}
+              style={{ width: "100%" }}
+              placeholder="0.00"
+            />
+          </Form.Item>
 
-        <Form.Item label="Итого со скидкой" name="final_amount">
-          <InputNumber
-            min={0}
-            precision={2}
-            style={{ width: "100%" }}
-            placeholder="0.00"
-          />
-        </Form.Item>
+          <Form.Item label="Итого со скидкой" name="final_amount">
+            <InputNumber
+              min={0}
+              precision={2}
+              style={{ width: "100%" }}
+              placeholder="0.00"
+            />
+          </Form.Item>
 
-        <Form.Item label="Оплачено" name="paid_amount">
-          <InputNumber
-            min={0}
-            precision={2}
-            style={{ width: "100%" }}
-            placeholder="0.00"
-          />
-        </Form.Item>
+          <Form.Item label="Оплачено" name="paid_amount">
+            <InputNumber
+              min={0}
+              precision={2}
+              style={{ width: "100%" }}
+              placeholder="0.00"
+            />
+          </Form.Item>
 
-        <Form.Item label="Дата оплаты" name="payment_date">
-          <DatePicker style={{ width: "100%" }} format="DD.MM.YYYY" />
-        </Form.Item>
+          <Form.Item label="Дата оплаты" name="payment_date">
+            <DatePicker style={{ width: "100%" }} format="DD.MM.YYYY" />
+          </Form.Item>
+        </>)}
 
         <Form.Item label="Ссылка на CAD-файл" name="link_cad_file">
           <Input placeholder="https://..." />

@@ -261,6 +261,48 @@ maybe('doweling writes on PostgreSQL', () => {
     await expect(update(id, body(0, { totalAmount: 1000, discount: 100, finalAmount: 900 }))).resolves.toMatchObject({ changed: true });
   });
 
+  it('a save without the money group keeps the money and the payment status (access groups «финансы»)', async () => {
+    const id = await newDoweling([]);
+    await update(id, body(0, { totalAmount: 1000, discount: 100, finalAmount: 900, paidAmount: 300, paymentStatusId: 2, paymentDate: '2026-10-16' }));
+    const { paymentStatusId, paymentDate, totalAmount, finalAmount, discount, surcharge, paidAmount, ...withoutMoney } = body(1, { partsCount: 7 });
+    void [paymentStatusId, paymentDate, totalAmount, finalAmount, discount, surcharge, paidAmount];
+    await expect(update(id, withoutMoney as UpdateDowelingOrderRequestDto)).resolves.toMatchObject({ changed: true });
+    const row = (await pool.query(
+      `SELECT payment_status_id, to_char(payment_date, 'YYYY-MM-DD') AS payment_date, total_amount::text, final_amount::text,
+              discount::text, paid_amount::text, parts_count, version FROM doweling_orders WHERE doweling_order_id = $1`,
+      [id],
+    )).rows[0];
+    expect(row).toMatchObject({ payment_status_id: 2, payment_date: '2026-10-16', total_amount: '1000.00', final_amount: '900.00',
+      discount: '100.00', paid_amount: '300.00', parts_count: 7, version: 2 });
+  });
+
+  it('money from a user without orders.view_financials: 403 and a durable denied audit, nothing changes', async () => {
+    const id = await newDoweling([]);
+    const operator: CurrentUser = { id: '1', username: 'e2e-test-operator', role: 'operator', roleId: 2, permissions: getPermissionsForRole('operator') };
+    const requestId = randomUUID();
+    await expect(update(id, body(0, { totalAmount: 5 }), operator, requestId)).rejects.toMatchObject({
+      statusCode: 403, code: 'PERMISSION_DENIED', details: { requiredPermissions: ['orders.view_financials'] },
+    });
+    const audit = (await pool.query('SELECT event, metadata_json::text AS metadata FROM audit_log WHERE request_id = $1', [requestId])).rows;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].event).toBe('doweling.update_denied');
+    expect(audit[0].metadata).toContain('FINANCIALS_PERMISSION_REQUIRED');
+    expect((await state(id)).version).toBe(0);
+  });
+
+  it('a create without the payment status gets the status with code unpaid', async () => {
+    const created = await repository.createDowelingOrder({
+      currentUser: admin(),
+      requestId: randomUUID(),
+      dto: { dowelingOrderName: `E2E-Тест ${randomUUID().slice(0, 8)}`, designEngineerId: 1, idempotencyKey: `e2e-${randomUUID()}` },
+    });
+    const status = (await pool.query(
+      `SELECT ps.payment_status_code FROM doweling_orders d JOIN payment_statuses ps USING (payment_status_id) WHERE d.doweling_order_id = $1`,
+      [created.dowelingOrder.dowelingOrderId],
+    )).rows[0];
+    expect(status.payment_status_code).toBe('unpaid');
+  });
+
   it('quick-create from an order links in the same transaction; a foreign order is refused and nothing is created', async () => {
     const created = await repository.createDowelingOrder({
       currentUser: manager({ update: ['own'], view: ['own'] }),

@@ -122,6 +122,22 @@ export async function assertDowelingAccess(input: DowelingAccessInput): Promise<
   });
 }
 
+/**
+ * Money of a doweling order (payment status, amounts, payment date; access groups «финансы») is changed only with
+ * orders.view_financials. Checked before the command transaction; a refusal is recorded like every other doweling
+ * refusal (denied audit outside the transaction) and answered 403.
+ */
+export async function assertDowelingMoneyAllowed(
+  input: Pick<DowelingAccessInput, 'database' | 'currentUser' | 'requestId' | 'action' | 'dowelingOrderId'>,
+  carriesMoney: boolean,
+): Promise<void> {
+  if (!carriesMoney || input.currentUser.permissions.includes('orders.view_financials')) return;
+  await recordDeniedBestEffort({ ...input, requiredPermission: 'orders.view_financials' }, 'FINANCIALS_PERMISSION_REQUIRED', []);
+  throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для изменения сумм и оплаты присадки', {
+    requiredPermissions: ['orders.view_financials'],
+  });
+}
+
 export async function recordDeniedBestEffort(
   input: Pick<DowelingAccessInput, 'database' | 'currentUser' | 'requestId' | 'action' | 'dowelingOrderId'> & { requiredPermission?: string },
   reason: string,

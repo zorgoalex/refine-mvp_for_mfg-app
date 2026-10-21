@@ -34,7 +34,8 @@ export function createDowelingIdempotencyKey(prefix = 'doweling-quick-create'): 
 export interface BuildCreateDowelingInput {
   dowelingOrderName: string;
   designEngineerId: number;
-  paymentStatusId: number;
+  /** Only when the user may edit money; otherwise omitted and the server uses «Не оплачен». */
+  paymentStatusId?: number | null;
   idempotencyKey: string;
   /** Quick-create from an order: the order the new doweling order is linked to (same transaction). */
   orderId?: number | null;
@@ -51,9 +52,9 @@ export function buildCreateDowelingRequest(input: BuildCreateDowelingInput): Cre
   const request: CreateDowelingOrderRequest = {
     dowelingOrderName: input.dowelingOrderName.trim(),
     designEngineerId: input.designEngineerId,
-    paymentStatusId: input.paymentStatusId,
     idempotencyKey: input.idempotencyKey,
   };
+  if (input.paymentStatusId) request.paymentStatusId = input.paymentStatusId;
   if (input.orderId) request.orderId = input.orderId;
   if (input.dowelingOrderDate) request.dowelingOrderDate = input.dowelingOrderDate;
   if (input.productionStatusId) request.productionStatusId = input.productionStatusId;
@@ -96,33 +97,40 @@ const textOrNull = (value: string | null | undefined): string | null => {
 };
 
 /**
- * Pure mapper of the doweling card → `PATCH /doweling-orders/:id`. The card sends the full state (like before) with the
- * version it was loaded with; an inactive doweling order is linked to no order.
+ * Pure mapper of the doweling card → `PATCH /doweling-orders/:id`. The card sends the full state with the version it was
+ * loaded with; an inactive doweling order is linked to no order. Money (payment status, amounts, payment date) goes
+ * only with `sendMoney` — the user may edit money, the money is shown and it was loaded (access groups «финансы»);
+ * without it the server keeps the money as it is.
  */
 export function buildUpdateDowelingRequest(
   values: DowelingCardValues,
-  context: { expectedVersion: number; fallbackDate: string; baseOrderIds: number[] },
+  context: { expectedVersion: number; fallbackDate: string; baseOrderIds: number[]; sendMoney: boolean },
 ): UpdateDowelingOrderRequest {
   const isActive = values.is_active !== false;
   const orderIds = isActive
     ? [...new Set((values.order_ids ?? []).map(toNumberOrNull).filter((id): id is number => id !== null && id > 0))]
     : [];
+  const money = context.sendMoney
+    ? {
+        paymentStatusId: toNumberOrNull(values.payment_status_id) ?? 0,
+        paymentDate: values.payment_date || null,
+        totalAmount: toNumberOrNull(values.total_amount),
+        finalAmount: toNumberOrNull(values.final_amount),
+        discount: toNumberOrNull(values.discount) ?? 0,
+        surcharge: toNumberOrNull(values.surcharge) ?? 0,
+        paidAmount: toNumberOrNull(values.paid_amount) ?? 0,
+      }
+    : {};
   return {
     expectedVersion: context.expectedVersion,
     dowelingOrderName: String(values.doweling_order_name ?? '').trim(),
     dowelingOrderDate: values.doweling_order_date || context.fallbackDate,
-    paymentStatusId: toNumberOrNull(values.payment_status_id) ?? 0,
     designEngineerId: toNumberOrNull(values.design_engineer_id) ?? 0,
     productionStatusId: toNumberOrNull(values.production_status_id),
     operatorId: toNumberOrNull(values.operator_id),
     issueDate: values.issue_date || null,
-    paymentDate: values.payment_date || null,
     partsCount: toNumberOrNull(values.parts_count) ?? 0,
-    totalAmount: toNumberOrNull(values.total_amount),
-    finalAmount: toNumberOrNull(values.final_amount),
-    discount: toNumberOrNull(values.discount) ?? 0,
-    surcharge: toNumberOrNull(values.surcharge) ?? 0,
-    paidAmount: toNumberOrNull(values.paid_amount) ?? 0,
+    ...money,
     linkCadFile: textOrNull(values.link_cad_file),
     linkPdfFile: textOrNull(values.link_pdf_file),
     refKey1c: textOrNull(values.ref_key_1c),

@@ -11,7 +11,7 @@ const matrix = (grants: Record<string, Record<string, boolean>>) => ({
   rolePermissions: grants,
 });
 
-describe('PERMISSION_NARROWING_BLOCKED (access groups 0Б)', () => {
+describe('PERMISSION_NARROWING_BLOCKED (access groups 0Б, «финансы»)', () => {
   it('refuses to take orders.view_financials away from a role while Hasura still serves the financial columns', () => {
     const before = matrix({ '2': { 'orders.view_financials': true, 'orders.view': true } });
     const next = matrix({ '2': { 'orders.view_financials': false, 'orders.view': true } });
@@ -73,25 +73,41 @@ describe('PERMISSION_NARROWING_BLOCKED (access groups 0Б)', () => {
     )).not.toThrow();
   });
 
-  it('keeps orders.view_financials blocked while a Hasura select exposes financial columns without requiring it', () => {
-    // Guard against removing the entry before the «finances» stage closes the columns (metadata snapshot = stage).
+  it('lets orders.view_financials go only once step F2 closed the money columns (financials state `closed`)', () => {
+    const before = matrix({ '2': { 'orders.view_financials': true, 'orders.view': true } });
+    const next = matrix({ '2': { 'orders.view_financials': false, 'orders.view': true } });
+    for (const state of ['open', 'reverting'] as const) {
+      expect(() => assertNoUnclosedHasuraNarrowing(before, next, true, state)).toThrow(
+        expect.objectContaining({ code: 'PERMISSION_NARROWING_BLOCKED', details: expect.objectContaining({ hasuraFinancialsState: state }) }),
+      );
+    }
+    expect(() => assertNoUnclosedHasuraNarrowing(before, next, true, 'closed')).not.toThrow();
+    // Closed money columns do not lift the 0Б rule: before step B (or after its revert) nothing may be narrowed.
+    expect(() => assertNoUnclosedHasuraNarrowing(before, next, false, 'closed')).toThrow(
+      expect.objectContaining({ code: 'PERMISSION_NARROWING_BLOCKED' }),
+    );
+    expect(HASURA_UNCLOSED_PERMISSIONS['orders.view_financials']?.closedBy).toBe('closed');
+  });
+
+  it('the release snapshot (after F2) serves money of orders, details and doweling orders only with orders.view_financials', () => {
     const metadata = JSON.parse(readFileSync(resolve(__dirname, '../../../ops/hasura/metadata.json'), 'utf8'));
     const root = metadata.metadata ?? metadata;
-    const financial = ['final_amount', 'paid_amount', 'total_amount', 'discount', 'surcharge', 'detail_cost'];
+    const financial = ['final_amount', 'paid_amount', 'total_amount', 'discount', 'surcharge', 'detail_cost', 'milling_cost_per_sqm',
+      'payment_status_name', 'payment_status_id', 'payment_date', 'purchase_price'];
+    const sources = ['orders_view', 'order_details', 'order_details_view', 'doweling_orders', 'doweling_orders_view',
+      'order_financials_view', 'order_detail_financials_view', 'doweling_order_financials_view', 'order_resource_requirements'];
     const exposing: string[] = [];
     for (const source of root.sources) {
       for (const table of source.tables) {
+        if (!sources.includes(table.table.name)) continue;
         for (const permission of table.select_permissions ?? []) {
           const columns = permission.permission.columns;
-          const readsFinancial = columns === '*' ? true : financial.some((column) => columns.includes(column));
+          const readsFinancial = columns === '*' || financial.some((column) => columns.includes(column));
           const requiresFinancials = JSON.stringify(permission.permission.filter ?? {}).includes('"orders.view_financials"');
-          if (readsFinancial && !requiresFinancials && ['orders_view', 'order_details', 'order_details_view', 'doweling_orders', 'doweling_orders_view'].includes(table.table.name)) {
-            exposing.push(`${table.table.name}/${permission.role}`);
-          }
+          if (readsFinancial && !requiresFinancials) exposing.push(`${table.table.name}/${permission.role}`);
         }
       }
     }
-    expect(exposing.length).toBeGreaterThan(0);
-    expect(Object.keys(HASURA_UNCLOSED_PERMISSIONS)).toContain('orders.view_financials');
+    expect(exposing).toEqual([]);
   });
 });

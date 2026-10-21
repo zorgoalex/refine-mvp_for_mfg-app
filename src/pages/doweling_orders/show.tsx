@@ -5,6 +5,7 @@ import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
+import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
 
 const { Text } = Typography;
 
@@ -14,6 +15,8 @@ export const DowelOrderShow: React.FC<IResourceComponentsProps> = () => {
   });
   const { data, isLoading } = queryResult;
   const record = data?.data;
+  // Money only with the right and the settings matrix (Hasura answers it only with orders.view_financials).
+  const { canViewFinancials } = useOrderFinancialVisibility();
 
   useCurrentRecordTabTitle(record);
 
@@ -63,7 +66,9 @@ export const DowelOrderShow: React.FC<IResourceComponentsProps> = () => {
             <Descriptions title="Даты" {...descProps} style={{ marginTop: 16 }}>
               <Descriptions.Item label="Дата заказа">{formatDate(record.doweling_order_date)}</Descriptions.Item>
               <Descriptions.Item label="Дата выдачи">{formatDate(record.issue_date)}</Descriptions.Item>
-              <Descriptions.Item label="Дата оплаты">{formatDate(record.payment_date)}</Descriptions.Item>
+              {canViewFinancials && (
+                <Descriptions.Item label="Дата оплаты">{formatDate(record.payment_date)}</Descriptions.Item>
+              )}
             </Descriptions>
 
             <Descriptions title="Производство" {...descProps} style={{ marginTop: 16 }}>
@@ -74,11 +79,13 @@ export const DowelOrderShow: React.FC<IResourceComponentsProps> = () => {
             </Descriptions>
 
             <Descriptions title="Статусы и ответственные" {...descProps} style={{ marginTop: 16 }}>
-              <Descriptions.Item label="Статус оплаты">
-                <Tag color={getPaymentStatusColor(record.payment_status_name)}>
-                  {record.payment_status_name || "—"}
-                </Tag>
-              </Descriptions.Item>
+              {canViewFinancials && (
+                <Descriptions.Item label="Статус оплаты">
+                  <Tag color={getPaymentStatusColor(record.payment_status_name)}>
+                    {record.payment_status_name || "—"}
+                  </Tag>
+                </Descriptions.Item>
+              )}
               <Descriptions.Item label="Статус производства">
                 <Tag color={getProductionStatusColor(record.production_status_name)}>
                   {record.production_status_name || "—"}
@@ -90,16 +97,18 @@ export const DowelOrderShow: React.FC<IResourceComponentsProps> = () => {
           </Col>
 
           <Col xs={24} lg={12}>
-            <Descriptions title="Финансы" {...descProps}>
-              <Descriptions.Item label="Сумма">{formatNumber(record.total_amount, 0)} ₽</Descriptions.Item>
-              <Descriptions.Item label="Скидка">{formatNumber(record.discount, 0)} ₽</Descriptions.Item>
-              <Descriptions.Item label="Итого со скидкой">
-                <Text strong>{formatNumber(record.final_amount, 0)} ₽</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="Оплачено">{formatNumber(record.paid_amount, 0)} ₽</Descriptions.Item>
-            </Descriptions>
+            {canViewFinancials && (
+              <Descriptions title="Финансы" {...descProps} style={{ marginBottom: 16 }}>
+                <Descriptions.Item label="Сумма">{formatNumber(record.total_amount, 0)} ₽</Descriptions.Item>
+                <Descriptions.Item label="Скидка">{formatNumber(record.discount, 0)} ₽</Descriptions.Item>
+                <Descriptions.Item label="Итого со скидкой">
+                  <Text strong>{formatNumber(record.final_amount, 0)} ₽</Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="Оплачено">{formatNumber(record.paid_amount, 0)} ₽</Descriptions.Item>
+              </Descriptions>
+            )}
 
-            <Descriptions title="Файлы" {...descProps} style={{ marginTop: 16 }}>
+            <Descriptions title="Файлы" {...descProps}>
               <Descriptions.Item label="CAD-файл">{fileLink(record.link_cad_file)}</Descriptions.Item>
               <Descriptions.Item label="PDF-файл">{fileLink(record.link_pdf_file)}</Descriptions.Item>
             </Descriptions>

@@ -74,7 +74,7 @@ describe('doweling card → PATCH /doweling-orders/:id', () => {
   };
 
   it('sends the full card with the loaded version and every linked order once', () => {
-    expect(buildUpdateDowelingRequest(values, { expectedVersion: 4, fallbackDate: '2026-01-01', baseOrderIds: [102, 101, 101] })).toEqual({
+    expect(buildUpdateDowelingRequest(values, { expectedVersion: 4, fallbackDate: '2026-01-01', baseOrderIds: [102, 101, 101], sendMoney: true })).toEqual({
       expectedVersion: 4,
       dowelingOrderName: 'Присадка',
       dowelingOrderDate: '2026-10-15',
@@ -100,7 +100,15 @@ describe('doweling card → PATCH /doweling-orders/:id', () => {
   });
 
   it('an inactive doweling order is linked to no order; a missing date falls back to the stored one', () => {
-    const request = buildUpdateDowelingRequest({ ...values, is_active: false, doweling_order_date: null }, { expectedVersion: 0, fallbackDate: '2026-01-01', baseOrderIds: [] });
+    const request = buildUpdateDowelingRequest({ ...values, is_active: false, doweling_order_date: null }, { expectedVersion: 0, fallbackDate: '2026-01-01', baseOrderIds: [], sendMoney: true });
     expect(request).toMatchObject({ isActive: false, orderIds: [], dowelingOrderDate: '2026-01-01' });
+  });
+
+  it('without sendMoney no money field goes out at all (the server keeps the money; access groups «финансы»)', () => {
+    const request = buildUpdateDowelingRequest(values, { expectedVersion: 4, fallbackDate: '2026-01-01', baseOrderIds: [101, 102], sendMoney: false });
+    for (const field of ['paymentStatusId', 'paymentDate', 'totalAmount', 'finalAmount', 'discount', 'surcharge', 'paidAmount']) {
+      expect(request).not.toHaveProperty(field);
+    }
+    expect(request).toMatchObject({ dowelingOrderName: 'Присадка', partsCount: 12, orderIds: [101, 102] });
   });
 });

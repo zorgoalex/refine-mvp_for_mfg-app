@@ -3,13 +3,14 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import { DowelingService } from './doweling.service';
 
-const user = (role: 'manager' | 'worker'): CurrentUser => ({
+const user = (role: 'manager' | 'worker' | 'operator'): CurrentUser => ({
   id: '1',
   username: role,
   role,
   roleId: 1,
   permissions: getPermissionsForRole(role),
 });
+const money = { paymentStatusId: 1, paymentDate: null, totalAmount: 100, finalAmount: 100, discount: 0, surcharge: 0, paidAmount: 0 };
 
 const repo = () =>
   ({
@@ -46,6 +47,14 @@ describe('DowelingService.updateDowelingOrder', () => {
   it('passes a manager (doweling.update) to the repository, which checks the order scope', async () => {
     const r = updateRepo();
     await new DowelingService({ doweling: r }).updateDowelingOrder({ currentUser: user('manager'), dowelingOrderId: 1, dto: {} as any });
+    expect(r.updateDowelingOrder).toHaveBeenCalledOnce();
+  });
+});
+
+describe('DowelingService: the money right is checked by the repository (audited refusal)', () => {
+  it('passes money from a user without orders.view_financials on to the repository, which refuses and audits', async () => {
+    const r = { ...repo(), updateDowelingOrder: vi.fn().mockResolvedValue({ changed: true }) } as any;
+    await new DowelingService({ doweling: r }).updateDowelingOrder({ currentUser: user('operator'), dowelingOrderId: 1, dto: { ...money } as any });
     expect(r.updateDowelingOrder).toHaveBeenCalledOnce();
   });
 });
