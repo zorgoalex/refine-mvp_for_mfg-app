@@ -27766,8 +27766,10 @@ components:
       type: object
       description: |
         Runtime requires idempotencyKey and at least one mutable field:
-        phoneNumber, phoneType, isPrimary, or refKey1c. clientId is accepted
-        only for validation/compatibility and is not sufficient by itself.
+        phoneNumber, phoneType, isPrimary, or refKey1c. clientId is the client the
+        form showed the phone at (another owner — 409 CLIENT_PHONE_CLIENT_CHANGE_UNSUPPORTED);
+        it is not sufficient by itself and is required while merges of clients are on
+        (BACKEND_CLIENT_MERGE=true; without it — 422).
       required:
         - idempotencyKey
       anyOf:
@@ -27810,6 +27812,10 @@ components:
           type: string
           minLength: 8
           maxLength: 200
+        clientId:
+          type: integer
+          minimum: 1
+          description: 'The client the form showed the phone at (409 CLIENT_PHONE_OWNER_CHANGED when it lives at another one now); required while merges of clients are on'
 
     ClientPhoneResponse:
       type: object

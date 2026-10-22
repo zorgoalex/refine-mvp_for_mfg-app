@@ -92,7 +92,9 @@ describe('dataProvider backend client phones mutation routing', () => {
       refKey1c: null,
     });
     expect(updatePhone).toHaveBeenCalledWith(10, { clientId: 1, isPrimary: false });
-    expect(deletePhone).toHaveBeenCalledWith(10);
+    expect(deletePhone).toHaveBeenCalledWith(10, undefined);
+    await provider.deleteOne({ resource: 'client_phones', id: 11, meta: { clientId: 7 } });
+    expect(deletePhone).toHaveBeenLastCalledWith(11, 7);
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });

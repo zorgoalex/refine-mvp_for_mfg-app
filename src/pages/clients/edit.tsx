@@ -75,7 +75,8 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
       await deletePhone({
         resource: "client_phones",
         id: phoneId,
-        meta: { idColumnName: "phone_id" },
+        // The client of this form: the backend refuses the delete when the phone lives at another client now.
+        meta: { idColumnName: "phone_id", clientId },
       });
     }
 
