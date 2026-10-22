@@ -107,6 +107,9 @@ import { invalidateOrderSendMenu, useOrderClientContacts, useOrderSendMenu } fro
 import { OrderCatalogLinesTable } from './components/OrderCatalogLinesTable';
 import { useIsMobile } from '../../hooks/useDeviceTier';
 import { DetailCardList } from './mobile/DetailCardList';
+import { WorkbenchQuickPaymentSheet } from './mobile/WorkbenchQuickPaymentSheet';
+import { quickPaymentRemaining } from './mobile/workbenchQuickPaymentModel';
+import { refetchFresh } from './mobile/freshRefetch';
 import type { DetailCardLookups } from './mobile/detailCardModel';
 import { makeOrderDeleteHandler } from './orderDeleteAction';
 import { canDeleteOrderForUser } from './orderDeleteVisibility';
@@ -771,6 +774,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const isOperational = useOperationalUi();
   const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
   const isMobile = useIsMobile();
+  const [quickPaymentOpen, setQuickPaymentOpen] = useState(false);
   const { isActive: isWorkspaceTabActive } = useKeepAlive();
   const ordinaryReadActive = useOrderLifecycleReadActive();
   const { activationRevision, documentVisible } = useAppActivitySnapshot();
@@ -2338,7 +2342,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   );
 
   // Загрузка платежей для расчёта статуса оплаты и экспорта
-  const { data: paymentsData } = useList({
+  const { data: paymentsData, refetch: refetchPaymentsList } = useList({
     resource: 'payments',
     filters: [
       {
@@ -3231,9 +3235,28 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
   // «NewLine» draws its own page head (crumbs, title, actions); a deleted order keeps the standard one.
   const ownPageHead = isOperational || (isWorkbench && !deletedOrder);
-  const openAddPayment = record?.order_id && canCreatePayment
+  const openAddPaymentForm = record?.order_id && canCreatePayment
     ? () => navigate(buildOrderEditAddPaymentPath(Number(record.order_id)))
     : undefined;
+  // NewLine на телефоне — быстрый платёж нижним листом (POST /payments); без backend-платежей — прежняя форма.
+  // Лист смонтирован и вне телефона (переход ширины не сбрасывает защиту от повтора), показывается только на телефоне.
+  const quickPaymentMounted = isWorkbench && featureFlags.useBackendPayments && !deletedOrder;
+  const quickPaymentAvailable = quickPaymentMounted && isMobile;
+  const paymentsListActive = !!record?.order_id && !useBackendOrdersRead && canViewFinancials;
+  /**
+   * Перечитать заказ и, при старом чтении заказа, отдельный список оплат; true — оба реально перечитаны
+   * (отменённый при закрытии вкладки refetch возвращает старые данные и не считается).
+   */
+  const reconcileQuickPayment = async (): Promise<boolean> => {
+    const [orderOk, paymentsOk] = await Promise.all([
+      refetchFresh((options) => queryResult.refetch(options)),
+      paymentsListActive ? refetchFresh((options) => refetchPaymentsList(options)) : Promise.resolve(true),
+    ]);
+    return orderOk && paymentsOk;
+  };
+  const openAddPayment = openAddPaymentForm && quickPaymentAvailable
+    ? () => setQuickPaymentOpen(true)
+    : openAddPaymentForm;
   const workbenchPrintItems = canExportOrders ? [
     ...(canViewFinancials ? [
       { key: 'print', icon: <PrinterOutlined />, label: 'Печать', disabled: !record || details.length === 0 },
@@ -3807,6 +3830,19 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               projectLabel={featureFlags.projects && projectId ? projectLabel : null}
               onAddPayment={openAddPayment}
             />
+            {quickPaymentMounted && openAddPaymentForm && record?.order_id ? (
+              <WorkbenchQuickPaymentSheet
+                key={Number(record.order_id)}
+                open={quickPaymentOpen && quickPaymentAvailable}
+                orderId={Number(record.order_id)}
+                orderName={String(record.order_name ?? record.order_id)}
+                clientName={record.client_name}
+                remaining={quickPaymentRemaining(record as Record<string, unknown>)}
+                onClose={() => setQuickPaymentOpen(false)}
+                onReconcile={reconcileQuickPayment}
+                onOpenFullForm={() => { setQuickPaymentOpen(false); openAddPaymentForm(); }}
+              />
+            ) : null}
 
             <div ref={orderShowTabsShellRef} className="order-show-tabs-shell">
             <div

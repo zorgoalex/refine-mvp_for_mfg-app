@@ -268,3 +268,199 @@
 :root[data-ui-variant="workbench"] .evolution-shell--wb-phone .evolution-workspace-tabs {
   z-index: 60;
 }
+
+/* Быстрый платёж — нижний лист (мокап 22, экран 4). Drawer живёт в портале на body. */
+/* rootClassName ставится на корень Drawer (.ant-drawer), обёртка и содержимое — внутри */
+:root[data-ui-variant="workbench"] .wb-paysheet .ant-drawer-content-wrapper {
+  max-height: 92vh;
+  max-height: 92dvh;
+  box-shadow: var(--evo-shadow);
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet .ant-drawer-content {
+  border-radius: 24px 24px 0 0;
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet .ant-drawer-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__grab {
+  width: 40px;
+  height: 5px;
+  margin: 0 auto 4px;
+  border-radius: 3px;
+  background: var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__head h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__head .ant-btn {
+  width: 44px;
+  height: 44px;
+  margin: -4px -6px 0 auto;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__sub {
+  margin-top: 2px;
+  font-size: 14px;
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__label {
+  font-size: 14px;
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__amount {
+  width: 100%;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__amount .ant-input-number-input {
+  height: 50px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__amount .ant-input-number-group-addon {
+  font-size: 18px;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__chip {
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--evo-border);
+  border-radius: 999px;
+  background: var(--evo-surface);
+  color: var(--evo-text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__chip[aria-pressed="true"] {
+  border-color: var(--evo-primary);
+  background: var(--evo-primary-soft);
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--wb-surface-2, rgba(0, 0, 0, 0.04));
+  min-height: 52px;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__seg button {
+  flex: 1 1 auto;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--evo-text-secondary);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__seg button[aria-pressed="true"] {
+  background: var(--evo-surface);
+  color: var(--evo-text);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 10px;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__row .ant-picker,
+:root[data-ui-variant="workbench"] .wb-paysheet__row .ant-input {
+  width: 100%;
+  height: 44px;
+  font-size: 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__notice {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  background: var(--evo-primary-soft);
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__notice[data-tone="ok"] .anticon {
+  color: var(--evo-success);
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__notice[data-tone="warn"] .anticon {
+  color: var(--evo-warning);
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__notice .anticon {
+  margin-top: 3px;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__acts {
+  display: flex;
+  gap: 10px;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__acts .ant-btn {
+  flex: 1;
+  height: 52px;
+  border-radius: 14px;
+  font-size: 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__acts .ant-btn-primary {
+  flex: 1.6;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet__full {
+  align-self: center;
+  font-size: 14px;
+}

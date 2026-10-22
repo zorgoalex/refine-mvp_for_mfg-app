@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-22", title: "NewLine на телефоне: быстрый платёж",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "В NewLine на телефоне «Добавить платёж» в карточке заказа открывает лист снизу: сумма с кнопками «Весь остаток» и «Половина», способ оплаты, дата и примечание. Под суммой видно, что будет с заказом: оплачен полностью, сколько останется или какая будет переплата. Полная форма платежей открывается ссылкой из листа.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-22", title: "Автостатусы: выгрузка одного правила",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
