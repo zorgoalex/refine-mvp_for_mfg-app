@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-22", title: "Автостатусы: выгрузка одного правила",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "В «Конфигурация → Автостатусы» у каждого правила есть кнопка выгрузки в JSON — можно перенести одно правило, а не все сразу. Файл загружается той же кнопкой «Загрузить JSON».",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-22", title: "Журнал дублей интеграций",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

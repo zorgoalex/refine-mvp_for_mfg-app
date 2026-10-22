@@ -86,7 +86,11 @@ describe('StatusAutomationConfig CNC cut-status setting guards', () => {
   it('offers JSON export and import for auto-status rules with a detailed import report', () => {
     expect(config).toContain('DownloadOutlined');
     expect(config).toContain('UploadOutlined');
-    expect(config).toContain('buildStatusAutomationRulesExportFile(rules)');
+    expect(config).toContain('buildStatusAutomationRulesExportFile(rulesToExport)');
+    expect(config).toContain('downloadRulesExport(rules, ');
+    // any single rule exports on its own, in the same file format the import reads
+    expect(config).toContain('downloadRulesExport([rule], ');
+    expect(config).toContain('onClick={() => handleRuleExport(rule)}');
     expect(config).toContain('readStatusAutomationRulesImportSource(parsedJson)');
     expect(config).toContain('planStatusAutomationRulesImport(rawRules');
     expect(config).toContain('statusAutomationApi.create(item.rule)');
