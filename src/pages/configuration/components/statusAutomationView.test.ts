@@ -413,6 +413,19 @@ describe('statusAutomationView', () => {
     });
   });
 
+  it('a single exported rule is a complete import file', () => {
+    const file = JSON.parse(JSON.stringify(buildStatusAutomationRulesExportFile([rule])));
+    const plan = planStatusAutomationRulesImport(readStatusAutomationRulesImportSource(file), {
+      existingRules: [],
+      eventTypes: [eventDescriptor({ eventType: 'order.created' })],
+      statusCatalog: importStatusCatalog,
+    });
+
+    expect(plan.failedRules).toEqual([]);
+    expect(plan.skippedDuplicates).toEqual([]);
+    expect(plan.rulesToCreate.map((item) => item.name)).toEqual(['Существующее правило']);
+  });
+
   it('reads import rules from either a plain array or an export wrapper', () => {
     const imported = [{ name: 'Правило' }];
 

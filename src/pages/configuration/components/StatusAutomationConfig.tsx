@@ -730,21 +730,28 @@ export function StatusAutomationConfig() {
     }
   };
 
-  const handleRulesExport = () => {
-    const exportFile = buildStatusAutomationRulesExportFile(rules);
+  // One file format for all rules and for a single rule; «Загрузить JSON» reads both.
+  const downloadRulesExport = (rulesToExport: readonly StatusAutomationRuleDto[], fileName: string) => {
+    const exportFile = buildStatusAutomationRulesExportFile(rulesToExport);
     const blob = new Blob([JSON.stringify(exportFile, null, 2)], {
       type: 'application/json;charset=utf-8',
     });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `status-automation-rules-${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = fileName;
     document.body.appendChild(link);
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
     message.success(`Выгружено правил: ${exportFile.rules.length}`);
   };
+
+  const handleRulesExport = () =>
+    downloadRulesExport(rules, `status-automation-rules-${new Date().toISOString().slice(0, 10)}.json`);
+
+  const handleRuleExport = (rule: StatusAutomationRuleDto) =>
+    downloadRulesExport([rule], `status-automation-rule-${rule.id}-${new Date().toISOString().slice(0, 10)}.json`);
 
   const handleRulesImport = async (file: File) => {
     setRulesImporting(true);
@@ -1198,9 +1205,16 @@ export function StatusAutomationConfig() {
             {
               title: '',
               key: 'actions',
-              width: 170,
+              width: 210,
               render: (_, rule) => (
                 <Space size={4}>
+                  <Button
+                    size="small"
+                    icon={<DownloadOutlined />}
+                    title="Выгрузить это правило в JSON"
+                    aria-label={`Выгрузить правило «${rule.name}» в JSON`}
+                    onClick={() => handleRuleExport(rule)}
+                  />
                   {canManage && (
                     <Button size="small" onClick={() => openEdit(rule)}>
                       Изменить
