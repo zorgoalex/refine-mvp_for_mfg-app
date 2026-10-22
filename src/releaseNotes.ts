@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-22", title: "Раскрой ванн: алгоритм «Экономия плёнки»",
+    services: ["ERP", "Cutting"], repositories: ["repo_erp", "repo_freecut"],
+    added: [
+      "В профилях раскроя «Вакуумный стол» («Конфигурация → Раскрой») появился выбор «Алгоритм укладки»: «Стандартный» или «Экономия плёнки». «Экономия плёнки» при том же числе листов выбирает раскладку с меньшим расходом плёнки по отметкам 0,8 / 1,8 / 2,8 м и перебирает варианты укладки, так что последний лист получается короче.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-22", title: "Поступления 1С: только с правом на финансы",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

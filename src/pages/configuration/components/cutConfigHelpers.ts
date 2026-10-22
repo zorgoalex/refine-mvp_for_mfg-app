@@ -77,7 +77,7 @@ export interface ParamProfileForm {
   engine: FreecutEngineChoice;
   cutQuality: FreecutCutQuality;
   groupShift: boolean;
-  vacuum?: { direction?: 'optimal' | 'width' | 'height' };
+  vacuum?: { direction?: 'optimal' | 'width' | 'height'; algorithm?: 'standard' | 'min_film' };
 }
 
 /** Defaults = the seeded "default" profile (calibrated prod budget, commit dcfa2db). */
@@ -142,7 +142,12 @@ export function paramsToForm(params: Record<string, unknown> | null | undefined)
     cutQuality: oneOf(p.cut_quality, FREECUT_CUT_QUALITIES, 'max'),
     groupShift: isPlainObject(p.group_shift) && (p.group_shift as { enabled?: unknown }).enabled === true,
     ...(isPlainObject(p.vacuum)
-      ? { vacuum: { direction: oneOf((p.vacuum as Record<string, unknown>).direction, ['optimal', 'width', 'height'] as const, 'optimal') } }
+      ? {
+          vacuum: {
+            direction: oneOf((p.vacuum as Record<string, unknown>).direction, ['optimal', 'width', 'height'] as const, 'optimal'),
+            algorithm: oneOf((p.vacuum as Record<string, unknown>).algorithm, ['standard', 'min_film'] as const, 'standard'),
+          },
+        }
       : {}),
   };
 }
@@ -165,7 +170,14 @@ export function formToParams(form: ParamProfileForm): Record<string, unknown> {
       : {}),
     ...(form.layout_mode !== 'vacuum_table' && form.engine === 'ga' ? { engine: 'ga' } : {}),
     ...(form.groupShift ? { group_shift: { enabled: true, min_shift_mm: 5, max_passes: 4 } } : {}),
-    ...(form.layout_mode === 'vacuum_table' ? { vacuum: { direction: form.vacuum?.direction ?? 'optimal' } } : {}),
+    ...(form.layout_mode === 'vacuum_table'
+      ? {
+          vacuum: {
+            direction: form.vacuum?.direction ?? 'optimal',
+            ...(form.vacuum?.algorithm === 'min_film' ? { algorithm: 'min_film' } : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -238,6 +250,9 @@ export function summarizeParams(params: Record<string, unknown> | null | undefin
   if (f.engine === 'ga') parts.push('движок: GA');
   if (f.layout_mode === 'vacuum_table' && f.vacuum?.direction) {
     parts.push(VACUUM_DIRECTION_LABEL[f.vacuum.direction]);
+  }
+  if (f.layout_mode === 'vacuum_table' && f.vacuum?.algorithm === 'min_film') {
+    parts.push('экономия плёнки');
   }
   return parts.join(' / ');
 }

@@ -101,7 +101,7 @@ export interface FreecutParams {
   restarts?: number;
   seed?: number;
   layout_mode?: 'guillotine' | 'nested' | 'vacuum_table';
-  vacuum?: { direction?: 'optimal' | 'width' | 'height' };
+  vacuum?: { direction?: 'optimal' | 'width' | 'height'; algorithm?: 'standard' | 'min_film' };
   /** Solver engine (freecut V62). Absent = ERP auto mode: heuristic for large
    *  groups (threshold), GA otherwise. Explicit value pins the engine. */
   engine?: 'ga' | 'heuristic';

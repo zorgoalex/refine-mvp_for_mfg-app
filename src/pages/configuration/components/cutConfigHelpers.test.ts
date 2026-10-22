@@ -168,6 +168,16 @@ describe('cutConfigHelpers', () => {
     expect(roundTripped.vacuum?.direction).toBe('height');
   });
 
+  it('vacuum.algorithm: min_film round-trips; standard/empty is omitted from params', () => {
+    const form = paramsToForm({ layout_mode: 'vacuum_table', vacuum: { direction: 'width', algorithm: 'min_film' } });
+    expect(form.vacuum?.algorithm).toBe('min_film');
+    expect(formToParams(form).vacuum).toEqual({ direction: 'width', algorithm: 'min_film' });
+    expect(summarizeParams({ layout_mode: 'vacuum_table', vacuum: { direction: 'width', algorithm: 'min_film' } })).toContain('экономия плёнки');
+    const std = { ...DEFAULT_PARAM_FORM, layout_mode: 'vacuum_table' as const, vacuum: { direction: 'optimal' as const, algorithm: 'standard' as const } };
+    expect(formToParams(std).vacuum).toEqual({ direction: 'optimal' });
+    expect(paramsToForm({ layout_mode: 'vacuum_table', vacuum: { direction: 'optimal' } }).vacuum?.algorithm).toBe('standard');
+  });
+
   it('formToParams OMITS vacuum key when layout_mode is NOT vacuum_table', () => {
     const form = { ...DEFAULT_PARAM_FORM, layout_mode: 'guillotine' as const, vacuum: { direction: 'width' as const } };
     const params = formToParams(form);

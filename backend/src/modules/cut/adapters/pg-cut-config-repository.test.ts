@@ -232,6 +232,21 @@ describe('mergeParams read-side validation (via getParamsByProfileId)', () => {
     await expect(repo.getParamsByProfileId(1)).rejects.toMatchObject({ statusCode: 422 });
   });
 
+  it('rejects vacuum.algorithm with an invalid enum value', async () => {
+    const repo = new PgCutConfigRepository(
+      stubDb([{ params: { layout_mode: 'vacuum_table', vacuum: { algorithm: 'turbo' } } }]),
+    );
+    await expect(repo.getParamsByProfileId(1)).rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it('reads vacuum.algorithm min_film cleanly', async () => {
+    const repo = new PgCutConfigRepository(
+      stubDb([{ params: { layout_mode: 'vacuum_table', vacuum: { direction: 'optimal', algorithm: 'min_film' } } }]),
+    );
+    const p = await repo.getParamsByProfileId(1);
+    expect((p as unknown as Record<string, unknown>).vacuum).toEqual({ direction: 'optimal', algorithm: 'min_film' });
+  });
+
   it('rejects stored vacuum when it is an array', async () => {
     const repo = new PgCutConfigRepository(stubDb([{ params: { vacuum: [] } }]));
     await expect(repo.getParamsByProfileId(1)).rejects.toMatchObject({ statusCode: 422 });

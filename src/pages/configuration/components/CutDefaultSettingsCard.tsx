@@ -336,12 +336,31 @@ export const CutDefaultSettingsCard: React.FC<Props> = ({ config, canManage, onS
                   optionType="button"
                   buttonStyle="solid"
                   value={form.vacuum?.direction ?? 'optimal'}
-                  onChange={(e) => setField('vacuum', { direction: e.target.value as 'optimal' | 'width' | 'height' })}
+                  onChange={(e) => setField('vacuum', { ...(form.vacuum ?? {}), direction: e.target.value as 'optimal' | 'width' | 'height' })}
                   disabled={!canManage}
                   options={[
                     { value: 'optimal', label: 'Авто' },
                     { value: 'width', label: 'Вдоль' },
                     { value: 'height', label: 'Поперёк' },
+                  ]}
+                />
+              </Form.Item>
+            )}
+            {form.layout_mode === 'vacuum_table' && (
+              <Form.Item
+                label="Алгоритм укладки"
+                tooltip="Экономия плёнки: при том же числе листов выбирает раскладку с меньшим расходом плёнки (отметки 0,8 / 1,8 / 2,8 м) и перебирает варианты укладки. Стандартный — прежний алгоритм."
+                style={{ marginBottom: 12 }}
+              >
+                <Radio.Group
+                  optionType="button"
+                  buttonStyle="solid"
+                  value={form.vacuum?.algorithm ?? 'standard'}
+                  onChange={(e) => setField('vacuum', { ...((form.vacuum ?? {})), algorithm: e.target.value as 'standard' | 'min_film' })}
+                  disabled={!canManage}
+                  options={[
+                    { value: 'standard', label: 'Стандартный' },
+                    { value: 'min_film', label: 'Экономия плёнки' },
                   ]}
                 />
               </Form.Item>

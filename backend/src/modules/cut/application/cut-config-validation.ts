@@ -105,6 +105,9 @@ const QUALITY_PROFILES = ['fast', 'balanced', 'quality'];
 export const FREECUT_ENGINES = ['ga', 'heuristic'] as const;
 export const FREECUT_CUT_QUALITY_TIERS = ['fast', 'balanced', 'max'] as const;
 
+const VACUUM_DIRECTIONS_RAW = ['optimal', 'width', 'height'] as const;
+const VACUUM_ALGORITHMS_RAW = ['standard', 'min_film'] as const;
+
 /**
  * Structural validation of the known freecut param keys so a stored profile can
  * never push an out-of-range value (e.g. negative kerf, unknown layout_mode) to
@@ -185,6 +188,11 @@ export function validateFreecutParams(params: Record<string, unknown>): void {
         invalid('params.vacuum.direction', `vacuum.direction должен быть одним из: ${VACUUM_DIRECTIONS.join(', ')}`);
       }
     }
+    if (vac.algorithm !== undefined) {
+      if (typeof vac.algorithm !== 'string' || !VACUUM_ALGORITHMS_RAW.includes(vac.algorithm as 'standard' | 'min_film')) {
+        invalid('params.vacuum.algorithm', `vacuum.algorithm должен быть одним из: ${VACUUM_ALGORITHMS_RAW.join(', ')}`);
+      }
+    }
   }
   if (params.trim_mm !== undefined) {
     if (!isObject(params.trim_mm)) invalid('params.trim_mm', 'trim_mm должен быть объектом');
@@ -200,7 +208,6 @@ export function validateFreecutParams(params: Record<string, unknown>): void {
   }
 }
 
-const VACUUM_DIRECTIONS_RAW = ['optimal', 'width', 'height'] as const;
 
 /**
  * RAW-stage guard for stored (un-merged) cut param rows read from the DB.
@@ -212,7 +219,8 @@ const VACUUM_DIRECTIONS_RAW = ['optimal', 'width', 'height'] as const;
  *   1. top-level `stored` must be a plain object (false/scalar/array → 422).
  *   2. `stored.trim_mm`, when present, must be a plain object (array/null → 422).
  *   3. `stored.vacuum`,  when present, must be a plain object (array/null → 422);
- *      `vacuum.direction`, when present, must be a string ∈ {optimal,width,height}.
+ *      `vacuum.direction`, when present, must be a string ∈ {optimal,width,height};
+ *      `vacuum.algorithm`, when present, must be a string ∈ {standard,min_film}.
  *
  * Partial plain-object trim_mm overlays (e.g. {left:5}) remain ALLOWED here;
  * the four-side completeness check is enforced only by validateFreecutParams on
@@ -241,6 +249,17 @@ export function validateStoredFreecutParamsRaw(stored: unknown): void {
         invalid(
           'params.vacuum.direction',
           `vacuum.direction должен быть одним из: ${VACUUM_DIRECTIONS_RAW.join(', ')}`,
+        );
+      }
+    }
+    if (vac.algorithm !== undefined) {
+      if (
+        typeof vac.algorithm !== 'string' ||
+        !(VACUUM_ALGORITHMS_RAW as readonly string[]).includes(vac.algorithm)
+      ) {
+        invalid(
+          'params.vacuum.algorithm',
+          `vacuum.algorithm должен быть одним из: ${VACUUM_ALGORITHMS_RAW.join(', ')}`,
         );
       }
     }

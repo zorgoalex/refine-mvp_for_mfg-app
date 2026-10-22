@@ -238,6 +238,16 @@ describe('cut-config validation', () => {
     expect(() => validateParamProfileInput({ name: 'bad', params: { vacuum: { direction: 'diagonal' } } })).toThrow();
   });
 
+  it('accepts vacuum.algorithm standard|min_film and rejects other values', () => {
+    for (const algorithm of ['standard', 'min_film']) {
+      expect(() =>
+        validateParamProfileInput({ name: 'ok', params: { layout_mode: 'vacuum_table', vacuum: { direction: 'optimal', algorithm } } }),
+      ).not.toThrow();
+    }
+    expect(() => validateParamProfileInput({ name: 'bad', params: { vacuum: { algorithm: 'fast' } } })).toThrow();
+    expect(() => validateParamProfileInput({ name: 'bad', params: { vacuum: { algorithm: 5 } } })).toThrow();
+  });
+
   describe('validateFreecutParams engine/cut_quality', () => {
     it('accepts engine ga|heuristic and heuristic cut_quality tiers', () => {
       expect(() => validateFreecutParams({ engine: 'heuristic', cut_quality: 'max' })).not.toThrow();

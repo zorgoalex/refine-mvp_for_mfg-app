@@ -43,6 +43,12 @@ describe('CutDefaultSettingsCard', () => {
     expect(src).toMatch(/Вакуумный стол/);
   });
 
+  it('vacuum-algorithm control is gated on form.layout_mode === vacuum_table (structural guard)', () => {
+    expect(src).toMatch(
+      /form\.layout_mode\s*===\s*['"]vacuum_table['"]\s*&&\s*\((?:(?!\)\}).)*label="Алгоритм укладки"(?:(?!\)\}).)*algorithm:/s,
+    );
+  });
+
   it('vacuum-direction control is gated on form.layout_mode === vacuum_table (structural guard)', () => {
     // The gate and the distinctive control token must appear together in one conditional block.
     // setField('vacuum', { direction: exists ONLY on the actual Radio.Group control, not on tooltip constants.

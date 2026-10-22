@@ -8,6 +8,15 @@ const profiles = [
 ];
 const settings = [{ key: 'defaults', value: { param_profile: 'Стандарт' }, version: 1 }];
 
+describe('describeCutProfile min_film', () => {
+  it('appends the min-film phrase only for min_film vacuum profiles', () => {
+    const base = { layout_mode: 'vacuum_table', vacuum: { direction: 'width' } };
+    expect(describeCutProfile(base)).not.toContain('Экономия плёнки');
+    expect(describeCutProfile({ ...base, vacuum: { direction: 'width', algorithm: 'min_film' } })).toContain('Экономия плёнки.');
+    expect(describeCutProfile({ layout_mode: 'vacuum_table', vacuum: { algorithm: 'min_film' } })).toContain('Экономия плёнки.');
+  });
+});
+
 describe('resolveProfileLabel', () => {
   it('names the chosen active profile', () => {
     expect(resolveProfileLabel(2, profiles, settings)).toBe('Быстрый');

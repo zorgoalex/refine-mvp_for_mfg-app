@@ -157,6 +157,12 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     );
   });
 
+  it('vacuum-algorithm control is gated on vacuum_table in ProfileModal (structural guard)', () => {
+    expect(tabSrc).toMatch(
+      /params\.layout_mode\s*===\s*['"]vacuum_table['"]\s*&&\s*\((?:(?!\)\}).)*label="Алгоритм укладки"(?:(?!\)\}).)*algorithm:/s,
+    );
+  });
+
   it('renders the engine selector in both the profile modal and default settings', () => {
     const cardSrc = readFileSync(new URL('./CutDefaultSettingsCard.tsx', import.meta.url), 'utf8');
     for (const src of [tabSrc, cardSrc]) {

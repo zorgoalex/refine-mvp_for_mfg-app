@@ -139,6 +139,21 @@ describe('freecut optimize request builder (§6)', () => {
     expect(request.params.vacuum?.direction).toBe('optimal');
   });
 
+  it('forwards vacuum.algorithm min_film unchanged and keeps it absent otherwise', () => {
+    const withAlgo = buildOptimizeRequest({
+      stock,
+      items,
+      params: { ...params, layout_mode: 'vacuum_table', vacuum: { direction: 'optimal', algorithm: 'min_film' } },
+    });
+    expect(withAlgo.params.vacuum?.algorithm).toBe('min_film');
+    const without = buildOptimizeRequest({
+      stock,
+      items,
+      params: { ...params, layout_mode: 'vacuum_table', vacuum: { direction: 'optimal' } },
+    });
+    expect(without.params.vacuum).not.toHaveProperty('algorithm');
+  });
+
   it.each([
     ['missing vacuum', undefined],
     ['empty vacuum', {}],
