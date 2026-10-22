@@ -1,9 +1,13 @@
 import { ApiError } from '../../common/errors/api-error';
 import { maskContact, normalizeContact } from '../employees/employee-contacts';
+import { maskPhone, normalizeClientPhone } from '../whatsapp/order-send/order-send-phone';
 import {
   PARTY_ADDRESS_MAX, PARTY_CONTACT_CODES, PARTY_VALUE_MAX, PARTY_CONTACT_KINDS, PARTY_CONTACT_ONEC_READONLY, PARTY_CONTACTS_VERSION_CONFLICT, PARTY_OWN_CONTACTS_MAX,
   type PartyContactInput, type PartyContactKind, type PartyContactOrigin,
 } from './party-contacts';
+
+const INSTAGRAM = /^@?([a-z0-9._]{1,30})\/?$/;
+const KIND_TEXT: Partial<Record<PartyContactKind, string>> = { whatsapp: 'WhatsApp', viber: 'Viber' };
 
 /** An address compares by its words: spaces collapsed, lower case. */
 export function normalizeAddress(raw: string): string {
@@ -14,7 +18,8 @@ export function normalizeAddress(raw: string): string {
 export function normalizePartyContact(kind: PartyContactKind, raw: string): string {
   if (kind !== 'address') {
     if (raw.trim().length > PARTY_VALUE_MAX) throw new ApiError(422, PARTY_CONTACT_CODES.invalid, `Значение — не длиннее ${PARTY_VALUE_MAX} символов`, { kind });
-    return normalizeContact(kind, raw, PARTY_CONTACT_CODES);
+    if (kind === 'phone' || kind === 'email' || kind === 'telegram') return normalizeContact(kind, raw, PARTY_CONTACT_CODES);
+    return normalizeMessenger(kind, raw.trim());
   }
   const value = normalizeAddress(raw);
   if (!value || raw.trim().length > PARTY_ADDRESS_MAX) {
@@ -25,7 +30,30 @@ export function normalizePartyContact(kind: PartyContactKind, raw: string): stri
 
 /** The only form of a value in audit and logs; an address — by its length. */
 export function maskPartyContact(kind: PartyContactKind, normalized: string): string {
-  return kind === 'address' ? `адрес (${normalized.length})` : maskContact(kind, normalized);
+  if (kind === 'address') return `адрес (${normalized.length})`;
+  if (kind === 'other') return `другое (${normalized.length})`;
+  if (kind === 'whatsapp' || kind === 'viber') return maskPhone(normalized);
+  if (kind === 'instagram') return `@${normalized.slice(0, 2)}***`;
+  return maskContact(kind, normalized);
+}
+
+/** WhatsApp / Viber — a number like a client phone (7XXXXXXXXXX); Instagram — the account without «@» or the link; «Другое» — by its words. */
+function normalizeMessenger(kind: 'whatsapp' | 'viber' | 'instagram' | 'other', value: string): string {
+  if (kind === 'whatsapp' || kind === 'viber') {
+    try {
+      return normalizeClientPhone(value);
+    } catch {
+      throw new ApiError(422, PARTY_CONTACT_CODES.invalid, `Номер ${KIND_TEXT[kind]} не удалось распознать (нужен номер +7 XXX XXX XX XX)`, { kind });
+    }
+  }
+  if (kind === 'instagram') {
+    const match = INSTAGRAM.exec(value.replace(/^(?:https?:\/\/)?(?:www\.)?instagram\.com\//i, '').toLowerCase());
+    if (!match) throw new ApiError(422, PARTY_CONTACT_CODES.invalid, 'Аккаунт Instagram указан неверно (до 30 символов: латиница, цифры, «.», «_»)', { kind });
+    return match[1];
+  }
+  const words = value.replace(/\s+/g, ' ').toLowerCase();
+  if (!words) throw new ApiError(422, PARTY_CONTACT_CODES.invalid, 'Значение не может быть пустым', { kind });
+  return words;
 }
 
 /** A contact as stored (what the set command starts from). `available` — a row from 1C whose 1C data may be shown now. */
@@ -39,6 +67,8 @@ export interface StoredContact {
   position: number;
   origin: PartyContactOrigin;
   available: boolean;
+  /** The label («Другое»); compared when a switched-off kind comes back unchanged. */
+  note?: string | null;
 }
 
 /** A line naming a row of 1C must bring its value back unchanged: as shown, or the same value in another spelling. */
@@ -64,6 +94,7 @@ export interface PlannedOnec { contactId: number; isPrimary: boolean; position: 
  */
 export function planContactSet(
   input: readonly PartyContactInput[], stored: readonly StoredContact[], kinds: readonly PartyContactKind[], owner: string,
+  frozen: readonly PartyContactKind[] = [],
 ): { own: PlannedOwn[]; onec: PlannedOnec[] } {
   const byId = new Map(stored.map((row) => [row.contactId, row]));
   const named = new Set<number>();
@@ -93,10 +124,20 @@ export function planContactSet(
       onec.set(row.contactId, { contactId: row.contactId, kind: row.kind, valueNormalized: row.valueNormalized, isPrimary: line.isPrimary, position, explicit: true });
       return;
     }
-    own.push({
+    const planned: PlannedOwn = {
       contactId: line.contactId, kind: line.kind, value: line.value.trim(), valueNormalized: normalizePartyContact(line.kind, line.value),
       isPrimary: line.isPrimary, note: line.note?.trim() ? line.note.trim() : null, position,
-    });
+    };
+    if (planned.kind === 'other' && !planned.note) {
+      throw new ApiError(422, PARTY_CONTACT_CODES.invalid, 'У контакта «Другое» укажите подпись (например, VK)', { kind: planned.kind });
+    }
+    // A kind switched off now: a stored contact comes back as it is (the set stays savable), nothing new or changed.
+    if (frozen.includes(planned.kind) && !(row && row.kind === planned.kind && row.valueNormalized === planned.valueNormalized
+      && (row.note ?? null) === planned.note)) {
+      throw new ApiError(422, PARTY_CONTACT_CODES.invalid, 'Этот вид контакта сейчас не ведётся: его можно только оставить как есть или удалить',
+        { kind: planned.kind });
+    }
+    own.push(planned);
   });
   if (own.length > PARTY_OWN_CONTACTS_MAX) {
     throw new ApiError(422, PARTY_CONTACT_CODES.invalid, `Не больше ${PARTY_OWN_CONTACTS_MAX} своих контактов у ${owner}`);
@@ -113,7 +154,10 @@ export function planContactSet(
     const key = `${line.kind}:${line.valueNormalized}`;
     const taken = seen.get(key);
     if (taken) {
-      throw new ApiError(422, PARTY_CONTACT_CODES.duplicate, taken === 'onec' ? `Контакт «${line.value}» уже есть из 1С` : `Контакт «${line.value}» указан дважды`);
+      // The line, not the value: error payloads are not masked.
+      const where = `в строке ${line.position + 1}`;
+      throw new ApiError(422, PARTY_CONTACT_CODES.duplicate, taken === 'onec' ? `Контакт ${where} уже есть из 1С` : `Контакт ${where} указан дважды`,
+        { kind: line.kind, line: line.position + 1 });
     }
     seen.set(key, 'erp');
   }

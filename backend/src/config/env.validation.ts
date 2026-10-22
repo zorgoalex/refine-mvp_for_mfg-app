@@ -319,6 +319,9 @@ export const envSchema = z
     BACKEND_INVENTORY_ONEC_RECEIPTS: booleanFromEnv.default(false),
     // Контакты поставщиков из 1С (K4a): сверка с контактами привязанного контрагента 1С после выгрузки и раз в час.
     BACKEND_PARTY_CONTACTS_ONEC_SYNC: booleanFromEnv.default(false),
+    // Виды контактов клиента WhatsApp, Viber, Instagram и «Другое» (migration 269). Выключен: новые и изменённые контакты
+    // этих видов не принимаются (уже сохранённые остаются и сохраняются без изменений) — шаг перед откатом backend.
+    BACKEND_CLIENT_CONTACT_EXTRA_KINDS: booleanFromEnv.default(false),
     // Журнал дублей интеграций (D0): поиск дублей справочников ERP / Bitrix24 / 1С. Очистка данных 1С в журнале
     // работает и при выключенном поиске. Ключ дел — HMAC с секретом BACKEND_INTEGRATION_DUPLICATES_KEY (≥ 32 символа).
     BACKEND_INTEGRATION_DUPLICATES: booleanFromEnv.default(false),

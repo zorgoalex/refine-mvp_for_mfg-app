@@ -9,21 +9,29 @@ import {
   type EmployeeContactDraft,
 } from './contactsModel';
 
-const PLACEHOLDERS = { phone: '+7 701 555 01 01', email: 'name@mebel.kz', telegram: '@username', address: 'Город, улица, дом' } as const;
+const PLACEHOLDERS: Record<EmployeeContactKind, string> = {
+  phone: '+7 701 555 01 01', email: 'name@mebel.kz', telegram: '@username', address: 'Город, улица, дом',
+  whatsapp: '+7 701 555 01 01', viber: '+7 701 555 01 01', instagram: '@account', other: 'vk.com/…',
+};
 const FROM_ONEC_TAG = <Tag color="blue">из 1С</Tag>;
 
 /** Where a contact set lives: employees, suppliers, vendors and clients each bring their own API. */
 export interface ContactsSource {
-  load: (ownerId: number) => Promise<{ version: number; contacts: EmployeeContact[] }>;
-  save: (ownerId: number, body: { version: number; contacts: EmployeeContactInput[] }) => Promise<{ version: number; contacts: EmployeeContact[] }>;
+  load: (ownerId: number) => Promise<LoadedContacts>;
+  save: (ownerId: number, body: { version: number; contacts: EmployeeContactInput[] }) => Promise<LoadedContacts>;
   /** The API code of a stale set version. */
   conflictCode: string;
-  /** Kinds this owner keeps here (a client's phones live in the client phones list). */
+  /**
+   * Kinds this owner keeps here (a client's phones live in the client phones list). A backend that answers `kinds`
+   * decides instead (the client messengers can be switched off there; an older backend does not know them).
+   */
   kinds: readonly EmployeeContactKind[];
   title: string;
   /** The grey line under the editor. */
   hint: ReactNode;
 }
+
+interface LoadedContacts { version: number; contacts: EmployeeContact[]; kinds?: EmployeeContactKind[] }
 
 interface Props {
   ownerId: number | null | undefined;
@@ -40,7 +48,7 @@ interface Props {
 
 /** Contacts of an owner: phones, emails, Telegram accounts; one «основной» per kind. */
 export const ContactsCard: React.FC<Props> = ({ ownerId, editable, source, reloadToken = 0, onDirtyChange, locked = false }) => {
-  const [data, setData] = useState<{ version: number; contacts: EmployeeContact[] } | null>(null);
+  const [data, setData] = useState<LoadedContacts | null>(null);
   const [rows, setRows] = useState<EmployeeContactDraft[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [unsupported, setUnsupported] = useState(false);
@@ -106,6 +114,7 @@ export const ContactsCard: React.FC<Props> = ({ ownerId, editable, source, reloa
 
   if (!ownerId || unsupported) return null;
   const title = source.title;
+  const kinds = data?.kinds ?? source.kinds;
   if (loadError) return <Card title={title} size="small"><Alert type="error" showIcon message={loadError} /></Card>;
 
   if (!editable) {
@@ -155,7 +164,7 @@ export const ContactsCard: React.FC<Props> = ({ ownerId, editable, source, reloa
               disabled={busy}
               value={row.kind}
               style={{ width: 120 }}
-              options={source.kinds.map((kind) => ({ value: kind, label: EMPLOYEE_CONTACT_KIND_LABELS[kind] }))}
+              options={[...kinds, ...(kinds.includes(row.kind) ? [] : [row.kind])].map((kind) => ({ value: kind, label: EMPLOYEE_CONTACT_KIND_LABELS[kind] }))}
               onChange={(kind) => change(changeDraftKind(rows, row.rowKey, kind))}
             />
             <Input
@@ -173,7 +182,7 @@ export const ContactsCard: React.FC<Props> = ({ ownerId, editable, source, reloa
               disabled={busy}
               value={row.note}
               maxLength={200}
-              placeholder="Примечание"
+              placeholder={row.kind === 'other' ? 'Подпись (например, VK)' : 'Примечание'}
               style={{ flex: '1 1 160px', minWidth: 0 }}
               onChange={(event) => patch(row.rowKey, { note: event.target.value })}
             />
@@ -181,7 +190,7 @@ export const ContactsCard: React.FC<Props> = ({ ownerId, editable, source, reloa
           </div>
         ))}
         <Space wrap>
-          {source.kinds.map((kind) => (
+          {kinds.map((kind) => (
             <Button key={kind} size="small" icon={<PlusOutlined />} disabled={busy || rows.filter((row) => !row.fromOnec).length >= EMPLOYEE_CONTACTS_MAX}
               onClick={() => change(addDraftRow(rows, kind))}>
               {EMPLOYEE_CONTACT_KIND_LABELS[kind]}

@@ -223,6 +223,13 @@ export const PERMISSIONS = [
   'integrations.duplicates.view',
   /** «Не дубль», «Исправить в 1С», open a case again. */
   'integrations.duplicates.resolve',
+
+  // «Контакты клиентов» screen (user decision 2026-10-22: top manager and above; migration 269). Appended. The client
+  // card keeps clients.view / clients.update for its own contact editors.
+  /** The list of phones, emails and messengers of all clients. */
+  'clients.contacts.view',
+  /** Change them in that list. */
+  'clients.contacts.manage',
 ] as const;
 
 export type PermissionName = (typeof PERMISSIONS)[number];
@@ -291,6 +298,8 @@ export const ROLE_PERMISSIONS = {
     'whatsapp.calendar_send',
     'integrations.duplicates.view',
     'integrations.duplicates.resolve',
+    'clients.contacts.view',
+    'clients.contacts.manage',
 
     'bitrix24.requests.view',
     'bitrix24.requests.view_all',

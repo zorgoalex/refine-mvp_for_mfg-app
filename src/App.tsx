@@ -70,6 +70,7 @@ const Bitrix24IncomingRequestsPage = lazy(async () => ({
   default: (await import("./pages/bitrix24/IncomingRequestsPage")).Bitrix24IncomingRequestsPage,
 }));
 const IntegrationsPage = lazy(async () => ({ default: (await import("./pages/integrations/IntegrationsPage")).IntegrationsPage }));
+const ClientContactsPage = lazy(async () => ({ default: (await import("./pages/clientContacts/ClientContactsPage")).ClientContactsPage }));
 const OnecPage = lazy(async () => ({ default: (await import("./pages/onec/OnecPage")).OnecPage }));
 
 // Route-level code splitting: every page component is lazy-loaded so the root
@@ -531,6 +532,11 @@ const ThemedApp = () => {
                   meta: { idColumnName: "client_id", label: "Клиенты" },
                 },
                 {
+                  name: "client_contacts",
+                  list: "/client-contacts",
+                  meta: { idColumnName: "client_id", label: "Контакты клиентов" },
+                },
+                {
                   name: "bitrix24_incoming_requests",
                   list: "/bitrix24/incoming-requests",
                   meta: { idColumnName: "request_id", label: "Входящие заявки Bitrix" },
@@ -955,6 +961,7 @@ const ThemedApp = () => {
                     <Route path="edit/:id" element={<ClientEdit />} />
                     <Route path="show/:id" element={<ClientShow />} />
                   </Route>
+                  <Route path="/client-contacts" element={<PermissionRoute permission="clients.contacts.view"><ClientContactsPage /></PermissionRoute>} />
                   <Route path="/bitrix24/incoming-requests" element={<Bitrix24IncomingRequestsPage />} />
                   <Route path="/clients-analytics" >
                     <Route index element={<ClientsAnalyticsList />} />

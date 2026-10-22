@@ -5,6 +5,7 @@ import type {
   ClientPhoneRepositoryPort,
   CreateClientPhoneCommand,
   DeleteClientPhoneCommand,
+  ReplaceClientPhoneSetCommand,
   UpdateClientPhoneCommand,
 } from './client-phone.types';
 
@@ -35,8 +36,14 @@ export class ClientPhoneService {
     return this.ports.clientPhones.deleteClientPhone(command);
   }
 
+  /** The contacts screen: its own right (`clients.contacts.manage`), the card keeps `clients.update`. */
+  async replaceSet(command: ReplaceClientPhoneSetCommand) {
+    this.requirePermission(command, 'clients.contacts.manage');
+    return this.ports.clientPhones.replaceClientPhoneSet(command);
+  }
+
   private requirePermission(
-    command: Pick<CreateClientPhoneCommand | UpdateClientPhoneCommand | DeleteClientPhoneCommand, 'currentUser'>,
+    command: Pick<CreateClientPhoneCommand | UpdateClientPhoneCommand | DeleteClientPhoneCommand | ReplaceClientPhoneSetCommand, 'currentUser'>,
     permission: PermissionName,
   ): void {
     if (!this.permissions.canUser(command.currentUser, permission)) {

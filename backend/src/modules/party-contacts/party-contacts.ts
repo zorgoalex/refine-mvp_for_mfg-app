@@ -1,9 +1,16 @@
 import type { PermissionName } from '../../permissions/permissions';
-import type { ContactErrorCodes, EmployeeContactKind } from '../employees/employee-contacts';
+import type { ContactErrorCodes } from '../employees/employee-contacts';
 
-/** Kinds of a party contact: the employee kinds and, for suppliers, addresses (text, from 1C or typed in). */
-export const PARTY_CONTACT_KINDS = ['phone', 'email', 'telegram', 'address'] as const;
-export type PartyContactKind = EmployeeContactKind | 'address';
+/**
+ * Kinds of a party contact: the employee kinds, for suppliers addresses (text, from 1C or typed in), for clients
+ * messengers (migration 269): WhatsApp and Viber numbers, Instagram accounts and «Другое» with a label in the note.
+ */
+export const PARTY_CONTACT_KINDS = ['phone', 'email', 'telegram', 'address', 'whatsapp', 'viber', 'instagram', 'other'] as const;
+export type PartyContactKind = (typeof PARTY_CONTACT_KINDS)[number];
+/** Client kinds behind BACKEND_CLIENT_CONTACT_EXTRA_KINDS (off: stored ones are kept, nothing new or changed is taken). */
+export const CLIENT_EXTRA_CONTACT_KINDS = ['whatsapp', 'viber', 'instagram', 'other'] as const satisfies readonly PartyContactKind[];
+/** Kinds whose value is a phone number (7XXXXXXXXXX). */
+export const PHONE_LIKE_CONTACT_KINDS: readonly PartyContactKind[] = ['phone', 'whatsapp', 'viber'];
 /** Where a contact came from: typed in ERP, or brought by the 1C sync (value read-only here). */
 export type PartyContactOrigin = 'erp' | 'onec';
 
@@ -20,6 +27,8 @@ export interface PartyConfig {
   ownerTable: string;
   /** Kinds this owner keeps here: a client's phones live in client_phones. */
   kinds: readonly PartyContactKind[];
+  /** Kinds of `kinds` that are taken only while BACKEND_CLIENT_CONTACT_EXTRA_KINDS is on. */
+  extraKinds: readonly PartyContactKind[];
   /** Contacts of the linked 1C counterparty come in by the sync (suppliers only for now). */
   onec: boolean;
   view: PermissionName;
@@ -33,17 +42,17 @@ export interface PartyConfig {
 
 export const PARTY_CONFIG: Record<PartyKind, PartyConfig> = {
   supplier: {
-    kind: 'supplier', table: 'supplier_contacts', idColumn: 'supplier_id', ownerTable: 'suppliers', kinds: ['phone', 'email', 'telegram', 'address'], onec: true,
+    kind: 'supplier', table: 'supplier_contacts', idColumn: 'supplier_id', ownerTable: 'suppliers', kinds: ['phone', 'email', 'telegram', 'address'], extraKinds: [], onec: true,
     view: 'suppliers.view', manage: 'suppliers.manage', auditEvent: 'supplier.contacts.updated',
     notFoundCode: 'SUPPLIER_NOT_FOUND', notFoundText: 'Поставщик не найден', ownerGenitive: 'поставщика',
   },
   vendor: {
-    kind: 'vendor', table: 'vendor_contacts', idColumn: 'vendor_id', ownerTable: 'vendors', kinds: ['phone', 'email', 'telegram'], onec: false,
+    kind: 'vendor', table: 'vendor_contacts', idColumn: 'vendor_id', ownerTable: 'vendors', kinds: ['phone', 'email', 'telegram'], extraKinds: [], onec: false,
     view: 'vendors.view', manage: 'vendors.manage', auditEvent: 'vendor.contacts.updated',
     notFoundCode: 'VENDOR_NOT_FOUND', notFoundText: 'Производитель не найден', ownerGenitive: 'производителя',
   },
   client: {
-    kind: 'client', table: 'client_contacts', idColumn: 'client_id', ownerTable: 'clients', kinds: ['email', 'telegram'], onec: false,
+    kind: 'client', table: 'client_contacts', idColumn: 'client_id', ownerTable: 'clients', kinds: ['email', 'telegram', ...CLIENT_EXTRA_CONTACT_KINDS], extraKinds: CLIENT_EXTRA_CONTACT_KINDS, onec: false,
     view: 'clients.view', manage: 'clients.update', auditEvent: 'client.contacts.updated',
     notFoundCode: 'CLIENT_NOT_FOUND', notFoundText: 'Клиент не найден', ownerGenitive: 'клиента',
   },
@@ -58,13 +67,17 @@ export const PARTY_ONEC_CONTACTS_MAX = 30;
 export const PARTY_ADDRESS_MAX = 500;
 /** Every other value (as before addresses came). */
 export const PARTY_VALUE_MAX = 200;
+/** The label of a «Другое» contact (its note). */
+export const PARTY_NOTE_MAX = 200;
 
 export interface PartyContacts {
   party: PartyKind;
   partyId: number;
-  /** Version of the whole set (0 = never saved); for a client — of emails and Telegram accounts only. */
+  /** Version of the whole set (0 = never saved); for a client — of its emails and messengers (not phones). */
   version: number;
   contacts: PartyContact[];
+  /** Kinds a new or changed contact may have now (the editor offers only these). */
+  kinds: PartyContactKind[];
 }
 
 export interface PartyContact {

@@ -6,10 +6,16 @@ export const EMPLOYEE_CONTACT_KIND_LABELS: Record<EmployeeContactKind, string> =
   email: 'Email',
   telegram: 'Telegram',
   address: 'Адрес',
+  whatsapp: 'WhatsApp',
+  viber: 'Viber',
+  instagram: 'Instagram',
+  other: 'Другое',
 };
 export const EMPLOYEE_CONTACT_KINDS: EmployeeContactKind[] = ['phone', 'email', 'telegram'];
 /** Display order of every kind (addresses last). */
-const KIND_ORDER: EmployeeContactKind[] = ['phone', 'email', 'telegram', 'address'];
+const KIND_ORDER: EmployeeContactKind[] = ['phone', 'whatsapp', 'telegram', 'email', 'viber', 'instagram', 'other', 'address'];
+/** Kinds whose value is a phone number. */
+export const PHONE_LIKE_KINDS: readonly EmployeeContactKind[] = ['phone', 'whatsapp', 'viber'];
 /** An address may be longer than the other values. */
 export const contactValueMaxLength = (kind: EmployeeContactKind): number => (kind === 'address' ? 500 : 200);
 export const EMPLOYEE_CONTACTS_MAX = 20;
@@ -81,6 +87,7 @@ export function changeDraftKind(rows: readonly EmployeeContactDraft[], key: stri
 export function draftToInput(rows: readonly EmployeeContactDraft[]): { contacts: EmployeeContactInput[] } | { error: string } {
   if (rows.filter((row) => !row.fromOnec).length > EMPLOYEE_CONTACTS_MAX) return { error: `Не больше ${EMPLOYEE_CONTACTS_MAX} своих контактов` };
   if (rows.some((row) => !row.value.trim())) return { error: 'Заполните значение каждого контакта или удалите пустую строку' };
+  if (rows.some((row) => row.kind === 'other' && !row.note.trim())) return { error: 'У контакта «Другое» укажите подпись (например, VK)' };
   return {
     contacts: rows.map((row) => ({
       contactId: row.contactId, kind: row.kind, value: row.value.trim(), isPrimary: row.isPrimary,
@@ -89,14 +96,14 @@ export function draftToInput(rows: readonly EmployeeContactDraft[]): { contacts:
   };
 }
 
-/** Display form of a contact: phone +7 XXX XXX XX XX, Telegram with «@», an address as written. */
+/** Display form of a contact: phone-like +7 XXX XXX XX XX, Telegram / Instagram with «@», an address and «Другое» as written. */
 export function formatContact(contact: Pick<EmployeeContact, 'kind' | 'valueNormalized'> & { value?: string }): string {
-  if (contact.kind === 'address') return contact.value ?? contact.valueNormalized;
+  if (contact.kind === 'address' || contact.kind === 'other') return contact.value ?? contact.valueNormalized;
   const value = contact.valueNormalized;
-  if (contact.kind === 'phone' && /^7\d{10}$/.test(value)) {
+  if (PHONE_LIKE_KINDS.includes(contact.kind) && /^7\d{10}$/.test(value)) {
     return `+7 ${value.slice(1, 4)} ${value.slice(4, 7)} ${value.slice(7, 9)} ${value.slice(9)}`;
   }
-  if (contact.kind === 'telegram') return `@${value}`;
+  if (contact.kind === 'telegram' || contact.kind === 'instagram') return `@${value}`;
   return value;
 }
 

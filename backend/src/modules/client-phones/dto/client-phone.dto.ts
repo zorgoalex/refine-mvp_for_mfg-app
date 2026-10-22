@@ -49,3 +49,34 @@ export interface UpdateClientPhoneRequestDto {
 export interface DeleteClientPhoneRequestDto {
   idempotencyKey: string;
 }
+
+/** A phone of the client as the contacts screen saw it (the set command compares the whole set). */
+export interface ClientPhoneSetExpectedDto {
+  phoneId: number;
+  phoneNumber: string;
+  phoneType: ClientPhoneTypeDto;
+  isPrimary: boolean;
+}
+
+/** A phone of the wanted set: an existing one keeps its id, a new one has none. */
+export interface ClientPhoneSetLineDto {
+  phoneId: number | null;
+  phoneNumber: string;
+  phoneType: ClientPhoneTypeDto;
+  isPrimary: boolean;
+}
+
+export interface ReplaceClientPhoneSetRequestDto {
+  idempotencyKey: string;
+  expected: ClientPhoneSetExpectedDto[];
+  phones: ClientPhoneSetLineDto[];
+}
+
+export interface ReplaceClientPhoneSetResponseDto {
+  clientId: number;
+  phones: ClientPhoneDto[];
+  created: number;
+  updated: number;
+  deleted: number;
+  requestId: string;
+}

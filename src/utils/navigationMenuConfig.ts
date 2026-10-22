@@ -15,6 +15,7 @@ export const LEGACY_CATEGORY_ORDER = [
 
 export const LEGACY_CATEGORY_MAP: Record<string, string> = {
   clients: 'Контрагенты',
+  client_contacts: 'Контрагенты',
   bitrix24_incoming_requests: 'Контрагенты',
   clients_analytics_view: 'Контрагенты',
   suppliers: 'Контрагенты',
@@ -86,6 +87,7 @@ export function getEvolutionCategoryLabels(variant: UiVariant): EvolutionCategor
 
 export const EVOLUTION_CATEGORY_MAP: Record<string, (typeof EVOLUTION_CATEGORY_ORDER)[number]> = {
   clients: 'CRM',
+  client_contacts: 'CRM',
   bitrix24_incoming_requests: 'CRM',
   clients_analytics_view: 'CRM',
   suppliers: 'CRM',

@@ -21,9 +21,9 @@ export const VENDOR_CONTACTS = source('vendor', {
   hint: 'Производителя с контактами нельзя удалить — снимите отметку «Активен».',
 });
 
-/** A client's phones are edited in the phones list above; here — emails and Telegram accounts. */
+/** A client's phones are edited in the phones list above; here — emails and messengers (the backend says which kinds are on). */
 export const CLIENT_CONTACTS = source('client', {
   kinds: ['email', 'telegram'],
-  title: 'Email и Telegram',
+  title: 'Email и мессенджеры',
   hint: 'Телефоны клиента ведутся в списке телефонов выше; основной телефон используется для отправки заказа клиенту в WhatsApp.',
 });

@@ -4,13 +4,14 @@
 
 У поставщика и производителя — блок «Контакты»: телефоны, email, аккаунты Telegram; у каждого вида один
 «основной» (первый контакт вида становится основным сам). У клиента телефоны остаются в списке телефонов клиента
-(`client_phones`, прежние правила), а блок контактов хранит email и Telegram.
+(`client_phones`, прежние правила), а блок контактов хранит email и мессенджеры: Telegram, WhatsApp, Viber,
+Instagram и «Другое» с подписью (миграция 269).
 
 | Владелец | Таблица | Виды | Чтение | Изменение |
 |---|---|---|---|---|
 | Поставщик | `supplier_contacts` | phone, email, telegram, address | `suppliers.view` | `suppliers.manage` |
 | Производитель | `vendor_contacts` | phone, email, telegram | `vendors.view` | `vendors.manage` |
-| Клиент | `client_contacts` | email, telegram | `clients.view` | `clients.update` |
+| Клиент | `client_contacts` | email, telegram, whatsapp, viber, instagram, other | `clients.view` | `clients.update` |
 
 - `GET /api/v1/{suppliers|vendors|clients}/:id/contacts` — набор и его версия.
 - `PUT …/contacts {version, contacts[]}` — замена набора целиком: версия сравнивается под блокировкой строки
@@ -20,8 +21,14 @@
 - `GET /api/v1/supplier-contacts?ids=`, `GET /api/v1/vendor-contacts?ids=` — контакты для колонки списка.
 - Версия набора лежит в `party_contact_versions` (нет строки = 0). Строка владельца командой **не обновляется**:
   не меняются `updated_at`/`edited_by`, у клиента не срабатывает CRM-синхронизация.
-- Нормализация: телефон → `7XXXXXXXXXX`, email → нижний регистр, Telegram → без `@`, адрес (до 500 символов) —
-  слова через один пробел в нижнем регистре (для сравнения; показывается как введён).
+- Нормализация: телефон, WhatsApp, Viber → `7XXXXXXXXXX`, email → нижний регистр, Telegram и Instagram → без `@`
+  (Instagram — и без ссылки `instagram.com/`), адрес (до 500 символов) и «Другое» — слова через один пробел в нижнем
+  регистре (для сравнения; показывается как введён). У «Другое» подпись (`note`) обязательна.
+- Виды клиента WhatsApp, Viber, Instagram и «Другое» включает флаг `BACKEND_CLIENT_CONTACT_EXTRA_KINDS`. Выключен —
+  новые и изменённые контакты этих видов отклоняются (`422 PARTY_CONTACT_INVALID`), сохранённые без изменений
+  принимаются и удаляются; `GET …/contacts` отдаёт в `kinds` только виды, доступные сейчас (редактор берёт их оттуда).
+  Это шаг перед откатом backend на образ без этих видов: флаг выключить, backend пересоздать, проверить
+  `SELECT count(*) FROM client_contacts WHERE kind NOT IN ('email','telegram')` = 0 — только тогда прежний образ.
 - У каждой строки — происхождение `origin`: `erp` (введено в ERP) или `onec` (контакт привязанного контрагента 1С,
   см. «Контакты поставщика из 1С»). Не больше 20 своих контактов на владельца; строки из 1С — сверх этого.
 - Аудит: `supplier.contacts.updated`, `vendor.contacts.updated`, `client.contacts.updated` — только маски
@@ -29,6 +36,31 @@
 - Владельца с контактами нельзя удалить напрямую (`ON DELETE RESTRICT`) — его деактивируют.
 - Миграция **236** переносит прежнее поле «Телефон» поставщика в основной телефон набора, если оно читается как
   номер; само поле остаётся в таблице и видно в «Просмотре» как «Телефон (прежнее поле)».
+
+## Экран «Контакты клиентов»
+
+Все клиенты с их телефонами, email и мессенджерами одним списком; правка прямо в списке. Свои права:
+`clients.contacts.view` (экран) и `clients.contacts.manage` (правка на нём), по умолчанию — superadmin, admin,
+top_manager (миграция 269). Карточка клиента остаётся на `clients.view` / `clients.update`.
+
+- `GET /api/v1/client-contacts?q=&page=&pageSize=&sort=&order=&active=&f.<колонка>=` — страница клиентов (до 100).
+  `q` — имя, значения и подписи контактов; телефоны — по цифрам (любая часть номера; полный номер с ведущей 8
+  читается как 7…). Колонки `phone|email|telegram|whatsapp|viber|instagram|other`, фильтр колонки: `has`, `none`,
+  `~текст`. `sort` — `client|updated|<колонка>` (по основному значению, пустые в конце). `active` —
+  `active` (по умолчанию) | `archived` | `all`. В ответе также `kinds`, `canManage`, `phonesEditable`.
+- `GET /api/v1/client-contacts/:clientId` — одна строка (после сохранения или конфликта).
+- `PUT /api/v1/client-contacts/:clientId/contacts {version, contacts[]}` — та же команда набора, что у карточки
+  (`client.contacts.updated`, `source = client_contacts_screen`).
+- `PUT /api/v1/client-contacts/:clientId/phones {idempotencyKey, expected[], phones[]}` — весь набор телефонов
+  клиента. Сначала ключ: выполненная команда с тем же телом отвечает прежним ответом, с другим —
+  `409 IDEMPOTENCY_KEY_REUSED`. Затем блокировка клиента и его телефонов; сохранённый набор (id, номер, тип,
+  основной) должен совпасть с `expected`, иначе `409 CLIENT_PHONES_STALE` с текущим набором в `details.phones`
+  (ключ не занимается). Каждый изменённый телефон пишет те же аудит и outbox, что карточка (`client_phones.*`,
+  `client_phone.*`), каждое событие — со своим ключом `<ключ>:<действие>:<phoneId>`. До 20 телефонов; при
+  выключенном `BACKEND_ENABLE_CLIENT_PHONES` — `503`.
+- Порядок блокировок всех, кто пишет телефоны клиента: клиент → телефоны (команды карточки, этот экран, импорт
+  снимка заказа, обратная синхронизация Bitrix24).
+- В аудите телефонов номер маскируется (`***` + последние 4 цифры).
 
 ## Контакты поставщика из 1С
 

@@ -63,3 +63,16 @@ export class ClientPhoneIdempotencyFailedError extends ApiError {
     });
   }
 }
+
+/** The phones of the client are not the ones the screen saw (another editor, an order import, the Bitrix24 sync). */
+export class ClientPhonesStaleError extends ApiError {
+  constructor(clientId: number, phones: unknown[]) {
+    super(409, 'CLIENT_PHONES_STALE', 'Телефоны клиента уже изменились; показаны текущие', { clientId, phones });
+  }
+}
+
+export class ClientPhoneSetInvalidError extends ApiError {
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(422, 'CLIENT_PHONE_SET_INVALID', message, details);
+  }
+}
