@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-22", title: "Поступления 1С: только с правом на финансы",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Вкладка «Платежи → Поступления 1С» показывает суммы заказов и платежей, поэтому теперь видна только тем, у кого есть и право на финансы (суммы заказов) — как сами платежи.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-22", title: "Контакты клиентов",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

@@ -7,7 +7,9 @@ import type { PgOnecReceiptsReadRepository, ReceiptsReadContext } from '../adapt
 import { paymentScope } from '../domain/onec-receipts';
 import type { OnecReceiptCardDto, OnecReceiptListQuery, OnecReceiptListResponseDto } from './onec-receipts.types';
 
-const VIEW = ['payments.onec.view', 'payments.view'] as const;
+// Amounts of ERP orders and payments are financial data: like payments in Hasura (access predicates) they also need
+// orders.view_financials (the «финансы» stage).
+const VIEW = ['payments.onec.view', 'payments.view', 'orders.view_financials'] as const;
 
 export interface OnecReceiptsSettings {
   /** `BACKEND_ONEC_PAYMENT_MATCHING_VIEW` и включённая интеграция 1С. */

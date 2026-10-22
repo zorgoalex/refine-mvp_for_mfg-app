@@ -3,6 +3,13 @@
 -- права; существующие таблицы и данные не меняются. В срезе A таблицы остаются пустыми (только чтение).
 BEGIN;
 
+SET LOCAL lock_timeout = '5s';
+
+-- Lock order of authorization changes (access groups plan §5.1, as migration 249): permissions_state first, before the
+-- foreign keys to users/orders/payments and the catalog writes — a user or roles-matrix command takes the state first
+-- and then those tables, so the reverse order here could deadlock with it. This migration reaches production after 249.
+SELECT version FROM public.permissions_state WHERE id = true FOR UPDATE;
+
 -- Ручные исключения связи «заказ 1С ↔ заказ ERP». Правило по серии номера — в коде, не хранится.
 -- order_id NULL = «этот заказ 1С к ERP не относится» (запрет правила).
 CREATE TABLE IF NOT EXISTS public.order_onec_order_links (

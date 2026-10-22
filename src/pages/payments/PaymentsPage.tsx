@@ -10,7 +10,7 @@ const OnecReceiptsTab = lazy(async () => ({ default: (await import('./OnecReceip
 
 /** Вкладка «Поступления 1С» видна при включённой интеграции 1С и обоих правах; backend проверяет те же права. */
 export function canSeeOnecReceiptsTab(): boolean {
-  return featureFlags.useBackendOnec && can('payments.onec.view') && can('payments.view');
+  return featureFlags.useBackendOnec && can('payments.onec.view') && can('payments.view') && can('orders.view_financials');
 }
 
 /**
