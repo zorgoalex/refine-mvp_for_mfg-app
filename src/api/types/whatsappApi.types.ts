@@ -143,3 +143,67 @@ export interface WhatsAppGroupsResponse {
   fetchedAt: string;
   cached: boolean;
 }
+
+export type WhatsAppNotificationState = "queued" | "sending" | "sent" | "failed" | "unknown" | "cancelled" | "skipped";
+export type WhatsAppNotificationLevel = "info" | "warning" | "error";
+
+export interface WhatsAppNotificationChannelDto {
+  enabled: boolean;
+  relayOwner: string;
+  /** WhatsApp is on and this backend delivers; otherwise every new notification is skipped at once. */
+  deliverable: boolean;
+  /** «Остановить все рассылки» also holds notifications. */
+  paused: boolean;
+  epoch: number | null;
+  epochStartedAt: string | null;
+  queued: number;
+  lastSentAt: string | null;
+  last24h: Partial<Record<WhatsAppNotificationState, number>>;
+  limits: { globalGapSeconds: number; perRecipientHourly: number; purgeAfterDays: number };
+}
+
+export type WhatsAppNotificationRecipientDto =
+  | { kind: "user"; userId: number | null; username: string | null; employeeName: string | null; phoneMasked: string | null }
+  | { kind: "chat"; chatId: string | null };
+
+export interface WhatsAppNotificationDeliveryDto {
+  deliveryId: string;
+  createdAt: string;
+  updatedAt: string;
+  sourceType: string;
+  sourceId: string | null;
+  correlationId: string;
+  idempotencyKey: string;
+  level: WhatsAppNotificationLevel;
+  title: string | null;
+  /** The sent text; null after the content is cleared (30 days after the delivery finished). */
+  text: string | null;
+  recipient: WhatsAppNotificationRecipientDto;
+  requiredPermission: string | null;
+  state: WhatsAppNotificationState;
+  reason: string | null;
+  attempts: number;
+  notBefore: string;
+  expiresAt: string;
+  sentAt: string | null;
+  finishedAt: string | null;
+  purgedAt: string | null;
+}
+
+export interface WhatsAppNotificationJournalQuery {
+  page?: number;
+  pageSize?: number;
+  state?: WhatsAppNotificationState;
+  level?: WhatsAppNotificationLevel;
+  recipientKind?: "user" | "chat";
+  sourceType?: string;
+  from?: string;
+  to?: string;
+  search?: string;
+}
+
+export interface WhatsAppNotificationJournalResponse {
+  data: WhatsAppNotificationDeliveryDto[];
+  /** `total` stops at 10 000: `totalCapped` — there are more. */
+  pagination: { page: number; pageSize: number; total: number; totalCapped: boolean };
+}

@@ -114,7 +114,7 @@ describe.skipIf(!url)('Procurement notifications (phase 4b) — real PostgreSQL'
     expect(visible.data.map((row) => row.notificationId).sort()).toEqual([own, digest, deadline].sort());
     expect(visible.unreadCount).toBe(3);
     expect(await repository.markReadForUser({ notificationId: foreign, viewer: manager })).toBeNull();
-    expect(await repository.deleteForUser({ notificationId: foreign, viewer: manager })).toBe(false);
+    expect(await repository.deleteForUser({ notificationId: foreign, viewer: manager })).toBe('not_found');
 
     // Право снято: видно только прочие уведомления; «прочитать всё» не трогает скрытые и не считает их.
     const revoked: CurrentUser = { ...manager, permissions: ['orders.view'] };

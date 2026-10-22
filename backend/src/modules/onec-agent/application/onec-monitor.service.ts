@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { DatabaseService } from '../../../database/database.service';
 import { PgOnecCommandRepository } from '../adapters/pg-onec-command-repository';
 import { PgOnecEtlRepository } from '../adapters/pg-onec-etl-repository';
@@ -10,6 +10,7 @@ import { PgOnecRepository } from '../adapters/pg-onec-repository';
 import { OnecRuntimeConfigService } from '../onec-runtime-config.service';
 import { buildOnecEvent } from '../domain/onec-events';
 import { isSilenceExpected, parseExpectedSilence } from '../domain/onec-expected-silence';
+import { OnecAlertNotifier } from './onec-alert-notifier';
 import { OnecAlertProjector } from './onec-alert-projector';
 import { OnecAuditWriter } from './onec-audit';
 import { OnecEtlRevocationService } from './onec-etl-revocation.service';
@@ -50,6 +51,7 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
     @Inject(PgOnecEtlRepository) private readonly etl: PgOnecEtlRepository,
     @Inject(OnecAuditWriter) private readonly audit: OnecAuditWriter,
     @Inject(OnecEtlRevocationService) private readonly revocation: OnecEtlRevocationService,
+    @Optional() @Inject(OnecAlertNotifier) private readonly notifier?: OnecAlertNotifier,
   ) {}
 
   onModuleInit(): void {
@@ -75,6 +77,8 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
         await this.recoverEtl(now);
         await this.revocation.cleanupAll();
         await this.relayOutbox();
+        await this.reconcileAlertEpisodes();
+        await this.notifyAlerts(now);
         if (now.getTime() - this.lastRetentionAt >= RETENTION_EVERY_MS) {
           const removed = {
             ...(await this.repository.applyRetention()),
@@ -89,6 +93,31 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`1C monitor tick failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       this.running = false;
+    }
+  }
+
+  /** Episode journal ↔ onec_alerts (plan 2026-10-19 §2.2); a failure is logged and does not stop the tick. */
+  async reconcileAlertEpisodes(): Promise<void> {
+    try {
+      const result = await this.repository.reconcileAlertEpisodes(this.database);
+      if (result.closed + result.created + result.acknowledged + result.escalated > 0) {
+        this.logger.log(`1C alert episodes reconciled: ${JSON.stringify(result)}`);
+      }
+    } catch (error) {
+      this.logger.error(`1C alert episodes reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Delivery of 1C alerts (plan 2026-10-19 §2.1) after the reconciliation of the same tick, so stages are chosen on
+   * a journal in step with onec_alerts; a failure is logged and does not stop the tick.
+   */
+  async notifyAlerts(now: Date): Promise<void> {
+    if (!this.notifier) return;
+    try {
+      await this.notifier.tick(now);
+    } catch (error) {
+      this.logger.error(`1C alert notifications failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

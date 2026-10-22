@@ -41,7 +41,7 @@ import { ProductionWorkflowTab } from './components/ProductionWorkflowTab';
 import { DeadlineTransitionRulesConfig } from './components/DeadlineTransitionRulesConfig';
 import { StatusAutomationConfig } from './components/StatusAutomationConfig';
 import { MessageProcessingConfig } from './components/MessageProcessingConfig';
-import { NotificationRulesConfig } from './components/NotificationRulesConfig';
+import { NotificationsConfigTab } from './components/NotificationsConfigTab';
 import { OrgStructureConfig } from './components/OrgStructureConfig';
 import { CutConfigTab } from './components/CutConfigTab';
 import { LabelsConfigTab } from './components/LabelsConfigTab';
@@ -99,8 +99,11 @@ export const filterConfigurationTabItems = <T extends { key: string }>(
   messageProcessingVisible = false,
   dailyDigestVisible = false,
   procurementSettingsVisible = false,
+  /** «Уведомления» shows to anyone who sees at least one of its sub-items (rules, 1C alerts, WhatsApp channel). */
+  notificationsVisible = false,
 ): T[] =>
   items.filter((item) => {
+    if (item.key === 'notification-rules') return notificationsVisible;
     if (item.key === 'message-processing') return messageProcessingVisible;
     if (item.key === 'daily-order-digest') return dailyDigestVisible;
     if (item.key === 'whatsapp-connection' || item.key === 'whatsapp-automation' || item.key === 'whatsapp-technical-logs') {
@@ -661,6 +664,17 @@ export const ConfigurationPage: React.FC = () => {
   const dailyDigestVisible = dailyDigestTabVisible(authSession.getUser()?.permissions);
   const procurementSettingsVisible =
     !featureFlags.useBackendPermissions || can('settings.manage') || can('procurement.view');
+  // Same gate as the «Интеграция 1С» screen: the backend checks onec.view (implied by onec.manage/onec.commands.send).
+  const onecAlertNotificationsVisible =
+    featureFlags.useBackendOnec && (can('onec.view') || can('onec.manage') || can('onec.commands.send'));
+  // Delivery texts of the WhatsApp notification channel: the backend checks whatsapp.manage.
+  const whatsappNotificationChannelVisible =
+    featureFlags.useBackendWhatsApp && (!featureFlags.useBackendPermissions || can('whatsapp.manage'));
+  const notificationsSubsectionsVisible = {
+    rules: generalSettingsVisible,
+    onecAlerts: onecAlertNotificationsVisible,
+    whatsappChannel: whatsappNotificationChannelVisible,
+  };
 
   const allTabItems = [
     ...(can('message_signals.manage_config') ? [{ key: 'message-processing', label: 'Обработка сообщений', children: <MessageProcessingConfig /> }] : []),
@@ -764,7 +778,7 @@ export const ConfigurationPage: React.FC = () => {
           Уведомления
         </span>
       ),
-      children: <NotificationRulesConfig />,
+      children: <NotificationsConfigTab visible={notificationsSubsectionsVisible} active={activeTab === 'notification-rules'} />,
     },
     {
       key: 'org-structure',
@@ -877,6 +891,7 @@ export const ConfigurationPage: React.FC = () => {
     can('message_signals.manage_config'),
     dailyDigestVisible,
     procurementSettingsVisible,
+    notificationsSubsectionsVisible.rules || notificationsSubsectionsVisible.onecAlerts || notificationsSubsectionsVisible.whatsappChannel,
   );
 
   const availableTabKeys = tabItems.map((item) => item.key);

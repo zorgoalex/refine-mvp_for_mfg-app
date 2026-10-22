@@ -96,6 +96,7 @@ export function toLocalPanelNotification(notification: Notification): PanelNotif
     title: null,
     sourceType: 'frontend-warning',
     sourceId: null,
+    deletable: true,
   };
 }
 

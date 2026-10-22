@@ -2148,6 +2148,11 @@ body .ant-notification .app-balloon .ant-notification-notice-close {
   color: #bfbfbf;
 }
 
+/* Критичный обязательный балун (оповещения интеграции 1С, план 2026-10-19 §2.7): красная полоса слева, в обеих темах. */
+body .ant-notification .ant-notification-notice.app-balloon.app-balloon--critical {
+  border-left: 4px solid #cf1322;
+}
+
 /* Make the main layout container full height */
 .ant-layout {
   min-height: 100vh;

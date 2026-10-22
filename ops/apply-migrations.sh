@@ -2692,6 +2692,43 @@ probe_file() {
       "$(q_col permissions_state hasura_financials_state)" "$(q_col permissions_state hasura_financials_users)" \
       "$(q_col permissions_state hasura_financials_revert)" \
       "$(q_con_on permissions_state permissions_state_hasura_financials_state_check)" ;;
+    # 261: WhatsApp notification channel — deliveries queued by backend modules and the delivery epoch (new tables only).
+    261_whatsapp_notification_deliveries*) probe_all \
+      "$(q_tbl whatsapp_notification_deliveries)" \
+      "$(q_tbl whatsapp_notification_worker_state)" \
+      "SELECT EXISTS (SELECT 1 FROM whatsapp_notification_worker_state WHERE singleton);" \
+      "$(q_idx idx_wnd_queue)" \
+      "$(q_con_on whatsapp_notification_deliveries chk_wnd_purged)" ;;
+    # 262: 1C alert episodes (written together with onec_alerts; read by the alert notifier).
+    262_onec_alert_episodes*) probe_all \
+      "$(q_tbl onec_alert_episodes)" \
+      "$(q_idx uq_onec_alert_episodes_alert_opened)" \
+      "$(q_idx idx_onec_alert_episodes_open)" \
+      "$(q_idx idx_onec_alert_episodes_pending)" \
+      "$(q_con_on onec_alert_episodes chk_onec_alert_episodes_status)" ;;
+    # 263: mandatory notification balloons; permission and expiry of external deliveries.
+    263_mandatory_balloons_delivery_checks*) probe_all \
+      "$(q_idx idx_notifications_balloon_mandatory_pending)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_notifications_balloon_mode' AND conrelid = 'public.notifications'::regclass AND convalidated AND pg_get_constraintdef(oid) LIKE '%mandatory%');" \
+      "$(q_col notification_channel_deliveries required_permission)" \
+      "$(q_col notification_channel_deliveries expires_at)" ;;
+    # 264: delivery of 1C alerts — policies by alert group, dispatches, their members and recipients, dispatcher state.
+    264_onec_alert_notifications*) probe_all \
+      "$(q_tbl onec_alert_notification_policies)" \
+      "SELECT (SELECT count(*) FROM onec_alert_notification_policies) >= 8;" \
+      "SELECT EXISTS (SELECT 1 FROM onec_alert_notification_state WHERE id);" \
+      "$(q_tbl onec_alert_dispatches)" \
+      "$(q_idx uq_onec_alert_dispatch_members_stage)" \
+      "$(q_idx uq_onec_alert_recipients_user)" \
+      "$(q_con_on onec_alert_dispatch_recipients chk_onec_alert_recipients_address)" ;;
+    # 265: 1C alerts to WhatsApp — personal and chat channels, cancellable external part.
+    265_onec_alert_whatsapp*) probe_all \
+      "$(q_con_on onec_alert_notification_policies chk_onec_alert_policies_whatsapp_chat)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_onec_alert_policies_channels' AND pg_get_constraintdef(oid) LIKE '%whatsapp_chat%');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_onec_alert_dispatches_external' AND pg_get_constraintdef(oid) LIKE '%cancelled%');" \
+      "$(q_idx idx_onec_alert_dispatches_external_queued)" \
+      "$(q_idx idx_onec_alert_recipients_external_queued)" \
+      "$(q_col onec_alert_dispatch_recipients channel_state)" ;;
     # 253: quick add of references from the order form behind its own permission (access groups 0Б).
     253_references_quick_create_permission*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM permissions_catalog WHERE permission_name = 'references.quick_create' AND is_active);" \
@@ -2888,7 +2925,7 @@ verify_applied_effect() {
     193_onec_agent_foundation*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|245_onec_operator_role*|247_onec_agent_expected_silence*|244_client_onec_permissions*|248_authorization_snapshot*|249_role_checks_to_permissions*|251_whatsapp_calendar_send_permission*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|255_crm_sync_paid_payment_operations*|253_references_quick_create_permission*|256_doweling_order_version_triggers*|257_status_automation_clear_details_action*|258_financial_projections*|259_payment_audit_capture*|260_crm_sync_payment_notifications*)
+    231_cut_result_render_v2*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|245_onec_operator_role*|247_onec_agent_expected_silence*|244_client_onec_permissions*|248_authorization_snapshot*|249_role_checks_to_permissions*|251_whatsapp_calendar_send_permission*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|255_crm_sync_paid_payment_operations*|253_references_quick_create_permission*|256_doweling_order_version_triggers*|257_status_automation_clear_details_action*|258_financial_projections*|259_payment_audit_capture*|260_crm_sync_payment_notifications*|261_whatsapp_notification_deliveries*|262_onec_alert_episodes*|263_mandatory_balloons_delivery_checks*|264_onec_alert_notifications*|265_onec_alert_whatsapp*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

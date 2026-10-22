@@ -33,13 +33,15 @@ describe('role «Оператор интеграции 1С» in the web client',
     expect(editSource).toMatch(/\{roleLocked && \(\s*<Select\.Option value="onec_operator">/);
   });
 
-  it('shows the operator exactly one section — «Интеграция 1С» — and lands on it', () => {
+  it('shows the operator «Интеграция 1С» and «Конфигурация» (only its «Оповещения 1С» tab)', () => {
     // The «Настройки» category opens for the 1C permission; settings.view is not needed.
     expect(canViewSettingsCategory(operator, true, false)).toBe(true);
     expect(canViewSettingsCategory({ permissions: ['profile.view'] }, true, false)).toBe(false);
 
+    // «Конфигурация» opens for the 1C permissions because of its «Оповещения 1С» tab (view onec.view, change onec.manage);
+    // its other tabs keep their own permissions, which the operator does not have.
     const visible = Object.keys(RESOURCE_PERMISSION_MAP).filter((name) => canViewNavigationResource(name, operator, true, false));
-    expect(visible).toEqual(['onec']);
+    expect(visible).toEqual(['configuration', 'onec']);
 
     for (const variant of ['classic', 'workbench'] as const) {
       const config = getSidebarMenuConfig(variant as never);

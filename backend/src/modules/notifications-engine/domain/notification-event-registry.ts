@@ -43,6 +43,11 @@ export interface NotificationEventDefinition {
 export const PROCUREMENT_ORDER_EVENT_SOURCE = 'procurement_order_event';
 /** source_type сводки дефицита и «приход не распределён» (сервис закупа, ф.4б-2). */
 export const PROCUREMENT_DIGEST_SOURCE = 'procurement_digest';
+/**
+ * Оповещения интеграции 1С (план 2026-10-19 §2.7–2.8): пишет диспетчер модуля onec-agent; видны только при буквальном
+ * `onec.view` на момент чтения; балун у них — обязательный (`mandatory`).
+ */
+export const ONEC_ALERT_NOTIFICATION_SOURCE = 'onec_alert';
 /** Уведомления закупа: читаются только с буквальным procurement.view и, у заказа, в его текущем scope. */
 export const PROCUREMENT_NOTIFICATION_SOURCES: readonly string[] = [PROCUREMENT_ORDER_EVENT_SOURCE, PROCUREMENT_DIGEST_SOURCE];
 

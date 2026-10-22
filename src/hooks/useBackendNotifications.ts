@@ -1,3 +1,4 @@
+import { ApiError } from '../api/httpClient';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NOTIFICATIONS_CHANGED_EVENT } from '../notifications/balloons/notificationEvents';
 import { notificationsApi } from '../api/notificationsApi';
@@ -13,6 +14,8 @@ export interface PanelNotification {
   title: string | null;
   sourceType: string | null;
   sourceId: string | null;
+  /** false — обязательный балун ещё не показан: удалить нельзя (план 2026-10-19 §2.7). */
+  deletable: boolean;
 }
 
 export interface BackendNotificationsState {
@@ -141,7 +144,13 @@ export function useBackendNotifications(enabled: boolean): BackendNotificationsS
     const idList = Array.isArray(ids) ? ids : [ids];
 
     for (const id of idList) {
-      await notificationsApi.delete(id);
+      try {
+        await notificationsApi.delete(id);
+      } catch (error) {
+        // Обязательный балун ещё не показан (409): строка остаётся, остальные удаляются.
+        if (error instanceof ApiError && error.status === 409) continue;
+        throw error;
+      }
       invalidatePendingRefresh();
       setSnapshot((current) => removeNotificationFromSnapshot(current, id));
     }
@@ -180,6 +189,7 @@ export function toPanelNotification(notification: BackendNotificationDto): Panel
     title: notification.title,
     sourceType: notification.sourceType,
     sourceId: notification.sourceId,
+    deletable: notification.balloonPending !== true,
   };
 }
 

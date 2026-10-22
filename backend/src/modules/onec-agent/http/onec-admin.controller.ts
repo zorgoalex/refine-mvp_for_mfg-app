@@ -10,6 +10,7 @@ import { OnecMatchingService } from '../application/onec-matching.service';
 import { OnecJournalService } from '../application/onec-journal.service';
 import type { OnecRequestContext } from '../application/onec-audit';
 import { OnecPermissionsGuard } from './onec-permissions.guard';
+import { OnecAlertNotificationSettingsService } from '../application/onec-alert-notification-settings.service';
 
 function user(request: RequestWithCurrentUser): CurrentUser {
   if (!request.user) throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication required');
@@ -51,6 +52,7 @@ export class OnecAdminController {
     @Inject(OnecEtlAdminService) private readonly etl: OnecEtlAdminService,
     @Inject(OnecMatchingService) private readonly matching: OnecMatchingService,
     @Inject(OnecJournalService) private readonly journal: OnecJournalService,
+    @Inject(OnecAlertNotificationSettingsService) private readonly alertNotifications: OnecAlertNotificationSettingsService,
   ) {}
 
   @ApiOperation({ summary: 'Overview of 1C agents: connection, state, queues, certificates, configuration' })
@@ -263,6 +265,44 @@ export class OnecAdminController {
   @RequirePermissions('onec.view')
   listAlerts(@Query() query: { agentId?: string; state?: string; limit?: string }) {
     return this.service.listAlerts(query);
+  }
+
+  @ApiOperation({ summary: 'Delivery of 1C alerts: policies by alert group, current recipients, dispatcher state' })
+  @Get('alert-notification-policies')
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.view')
+  alertNotificationPolicies() {
+    return this.alertNotifications.overview();
+  }
+
+  @ApiOperation({ summary: 'Change the delivery policy of a 1C alert group (If-Match: policy version)' })
+  @Patch('alert-notification-policies/:group')
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.manage')
+  updateAlertNotificationPolicy(
+    @Param('group') group: string,
+    @Headers('if-match') ifMatch: string | undefined,
+    @Req() request: RequestWithCurrentUser,
+    @Body() body: unknown,
+  ) {
+    return this.alertNotifications.updatePolicy(group, ifMatch, body, user(request), requestId(request));
+  }
+
+  @ApiOperation({ summary: 'Send a test 1C alert notification of a group to the caller' })
+  @Post('alert-notification-policies/:group/test')
+  @HttpCode(200)
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.manage')
+  testAlertNotification(@Param('group') group: string, @Req() request: RequestWithCurrentUser) {
+    return this.alertNotifications.sendTest(group, user(request), requestId(request));
+  }
+
+  @ApiOperation({ summary: 'Recent dispatches of 1C alert notifications with their recipients' })
+  @Get('alert-notifications/recent')
+  @ApiBearerAuth('bearerAuth')
+  @RequirePermissions('onec.view')
+  recentAlertNotifications(@Query('limit') limit: string | undefined) {
+    return this.alertNotifications.recent(limit);
   }
 
   @ApiOperation({ summary: 'Acknowledge a 1C integration alert' })

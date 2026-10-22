@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../../database/database.module';
 import { PermissionsModule } from '../../permissions/permissions.module';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { PgOnecCommandRepository } from './adapters/pg-onec-command-repository';
 import { PgOnecEtlRepository } from './adapters/pg-onec-etl-repository';
 import { PgOnecMatchingRepository } from './adapters/pg-onec-matching-repository';
@@ -8,6 +9,9 @@ import { PgOnecRepository } from './adapters/pg-onec-repository';
 import { OnecAdminService } from './application/onec-admin.service';
 import { OnecAgentProtocolService } from './application/onec-agent-protocol.service';
 import { OnecAlertProjector } from './application/onec-alert-projector';
+import { OnecAlertNotifier } from './application/onec-alert-notifier';
+import { OnecAlertNotificationSettingsService } from './application/onec-alert-notification-settings.service';
+import { PgOnecAlertNotificationsRepository } from './adapters/pg-onec-alert-notifications-repository';
 import { OnecAlertsPort } from './application/onec-alerts-port';
 import { OnecAuditWriter } from './application/onec-audit';
 import { OnecCommandWakeups } from './application/onec-command-wakeups';
@@ -36,7 +40,8 @@ import { OnecCatalogReader } from './onec-catalog-reader';
  * its queue port and module outbox events.
  */
 @Module({
-  imports: [DatabaseModule, PermissionsModule],
+  // WhatsApp — the notification channel of 1C alerts (plan 2026-10-19 §5); WhatsApp never imports 1C modules.
+  imports: [DatabaseModule, PermissionsModule, WhatsAppModule],
   controllers: [OnecAgentController, OnecAdminController],
   providers: [
     OnecRuntimeConfigService,
@@ -45,6 +50,9 @@ import { OnecCatalogReader } from './onec-catalog-reader';
     OnecAgentProtocolService,
     OnecAdminService,
     OnecAlertProjector,
+    PgOnecAlertNotificationsRepository,
+    OnecAlertNotifier,
+    OnecAlertNotificationSettingsService,
     OnecAlertsPort,
     OnecMonitorService,
     OnecNightlyFullSyncService,

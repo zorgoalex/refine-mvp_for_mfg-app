@@ -14,7 +14,19 @@ describe('NotificationService balloons (plan 2026-10-03)', () => {
     await expect(service.claimBalloons({ currentUser: undefined, token, limit: 1 })).rejects.toBeInstanceOf(ApiError);
     await expect(service.claimBalloons({ currentUser: user, token: 'x', limit: 1 })).rejects.toMatchObject({ statusCode: 400 });
     await service.claimBalloons({ currentUser: user, token, limit: 50 });
-    expect(claim).toHaveBeenCalledWith({ viewer: user, token, limit: 5 });
+    expect(claim).toHaveBeenCalledWith({ viewer: user, token, limit: 5, mandatory: false });
+    await service.claimBalloons({ currentUser: user, token, limit: 1, capabilities: ['mandatory'] });
+    expect(claim).toHaveBeenLastCalledWith({ viewer: user, token, limit: 1, mandatory: true });
+  });
+  it('delete: a pending mandatory balloon is a 409, a missing row a 404', async () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    const pending = new NotificationService({ repository: createRepository({ deleteForUser: async () => 'balloon_pending' as const }) });
+    await expect(pending.delete({ currentUser: user, notificationId: id })).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'NOTIFICATION_BALLOON_PENDING',
+    });
+    const missing = new NotificationService({ repository: createRepository({ deleteForUser: async () => 'not_found' as const }) });
+    await expect(missing.delete({ currentUser: user, notificationId: id })).rejects.toMatchObject({ statusCode: 404 });
   });
   it('ack: ids deduplicated and validated', async () => {
     const ack = vi.fn(async () => 1);
@@ -134,7 +146,7 @@ describe('NotificationService', () => {
           notificationId: '11111111-1111-4111-8111-111111111111',
           viewer: currentUser('42'),
         });
-        return true;
+        return 'deleted';
       },
     });
     const service = new NotificationService({ repository });
@@ -175,7 +187,7 @@ function createRepository(
       return 0;
     },
     async deleteForUser() {
-      return true;
+      return 'deleted' as const;
     },
     async claimBalloonsForUser() {
       return [];

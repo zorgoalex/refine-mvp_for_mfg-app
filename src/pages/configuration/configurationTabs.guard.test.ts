@@ -6,6 +6,7 @@ import {
   filterConfigurationTabItems,
   resolveConfigurationActiveTab,
 } from './index';
+import { notificationsSubsections } from './components/NotificationsConfigTab';
 
 describe('configuration tabs layout', () => {
   it('uses a wrapping tab bar so configuration tabs do not require horizontal scrolling', () => {
@@ -28,6 +29,28 @@ describe('configuration tabs layout', () => {
     expect(source).toContain("key: 'export-templates'");
     expect(source).toContain('Шаблоны экспорта');
     expect(source).toContain('<ExportTemplatesConfigTab />');
+  });
+
+  it('«Уведомления» holds rules, 1C alerts and the WhatsApp channel, each behind its own gate', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
+    expect(source).not.toContain("key: 'onec-alert-notifications'");
+    expect(source).toContain("<NotificationsConfigTab visible={notificationsSubsectionsVisible} active={activeTab === 'notification-rules'} />");
+    // The journal stops polling while another section is open (outer tabs keep panels mounted).
+    const channel = fs.readFileSync(path.resolve(__dirname, 'components/WhatsAppNotificationChannelConfig.tsx'), 'utf8');
+    expect(channel).toContain('if (!active) return undefined;');
+    expect(channel).toContain('}, [load, active]);');
+    expect(fs.readFileSync(path.resolve(__dirname, 'components/NotificationsConfigTab.tsx'), 'utf8')).toContain('<WhatsAppNotificationChannelConfig active={active} />');
+    expect(source).toContain("featureFlags.useBackendOnec && (can('onec.view') || can('onec.manage') || can('onec.commands.send'))");
+    expect(source).toContain("featureFlags.useBackendWhatsApp && (!featureFlags.useBackendPermissions || can('whatsapp.manage'))");
+    expect(source).toContain('rules: generalSettingsVisible,');
+    const items = [{ key: 'orders' }, { key: 'notification-rules' }];
+    // The section follows its sub-items, not the general settings gate.
+    expect(filterConfigurationTabItems(items, true, false, false, false, false, false, false)).toEqual([{ key: 'orders' }]);
+    expect(filterConfigurationTabItems(items, false, false, false, false, false, false, true)).toEqual([{ key: 'notification-rules' }]);
+    expect(notificationsSubsections({ rules: false, onecAlerts: true, whatsappChannel: false }).map((item) => item.key)).toEqual(['onec-alerts']);
+    expect(notificationsSubsections({ rules: true, onecAlerts: true, whatsappChannel: true }).map((item) => item.label))
+      .toEqual(['Правила', 'Оповещения 1С', 'Канал WhatsApp']);
+    expect(notificationsSubsections({ rules: false, onecAlerts: false, whatsappChannel: false })).toEqual([]);
   });
 
   it('does not register journals inside the configuration screen', () => {

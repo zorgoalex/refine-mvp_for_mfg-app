@@ -6,7 +6,7 @@ import { authSession } from '../../api/authSession';
 import { notificationsApi } from '../../api/notificationsApi';
 import type { BackendNotificationDto } from '../../api/types/notificationApi.types';
 import {
-  BalloonSlots, MAX_QUEUE_ITEMS, confirmShown, durationFor, enqueue, leaseForDisplay, readQueue, tabToken, withBalloonLock,
+  BalloonSlots, MAX_QUEUE_ITEMS, closesOnBodyClick, confirmShown, durationFor, enqueue, leaseForDisplay, readQueue, tabToken, withBalloonLock,
   type BalloonKind, type BalloonMode, type LocalBalloon, type StorageLike,
 } from './balloonCenterModel';
 import { NOTIFICATIONS_CHANGED_EVENT } from './notificationEvents';
@@ -14,6 +14,8 @@ import { NOTIFICATIONS_CHANGED_EVENT } from './notificationEvents';
 const POLL_MS = 60_000;
 /** CSS-класс балуна центра (оформление — styles/app.css). */
 export const BALLOON_CLASS_NAME = 'app-balloon';
+/** Критичный обязательный балун (оповещения 1С) — красная полоса слева, `.app-balloon--critical` в styles/app.css. */
+export const BALLOON_CRITICAL_CLASS_NAME = 'app-balloon--critical';
 
 interface BalloonCenterApi {
   /**
@@ -42,6 +44,8 @@ function serverKind(level: BackendNotificationDto['level']): BalloonKind {
 /** Ссылка сущности уведомления (как в карточках приложения); нет — клик только отмечает прочитанным. */
 export function entityPath(item: Pick<BackendNotificationDto, 'entityType' | 'entityId'>): string | null {
   if (item.entityType === 'order' && item.entityId && /^\d+$/.test(item.entityId)) return `/orders/show/${item.entityId}`;
+  // Оповещения интеграции 1С (план 2026-10-19) — экран «Интеграция 1С».
+  if (item.entityType === 'onec_alert_dispatch') return '/onec';
   return null;
 }
 
@@ -100,10 +104,16 @@ export const BalloonCenterProvider: React.FC<{ children: React.ReactNode }> = ({
     api[input.kind]({
       key: input.key, message: input.title, description: <BalloonBody text={input.text} onShown={shown} />,
       // Вид балуна (мельче текст, серый контур, светло-голубой фон) — `.app-balloon` в styles/app.css.
-      className: BALLOON_CLASS_NAME,
+      className: input.mode === 'mandatory' && input.kind === 'error' ? `${BALLOON_CLASS_NAME} ${BALLOON_CRITICAL_CLASS_NAME}` : BALLOON_CLASS_NAME,
       placement: 'bottomRight', duration: durationFor(input.mode), style: input.onClick ? { cursor: 'pointer' } : undefined,
       onClose: closed,
-      onClick: input.onClick ? () => { api.destroy(input.key); closed(); input.onClick!(); } : undefined,
+      // Обязательный балун клик по телу не закрывает — только крестик (план 2026-10-19 §2.7).
+      onClick: input.onClick
+        ? () => {
+          if (closesOnBodyClick(input.mode)) { api.destroy(input.key); closed(); }
+          input.onClick!();
+        }
+        : undefined,
     });
     return true;
   }, [api]);

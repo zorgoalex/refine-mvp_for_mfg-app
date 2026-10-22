@@ -14,7 +14,12 @@ const rule = (selector: string) => {
 describe('balloon look', () => {
   it('every balloon of the center carries the look class', () => {
     expect(center).toContain("export const BALLOON_CLASS_NAME = 'app-balloon';");
-    expect(center).toContain('className: BALLOON_CLASS_NAME,');
+    // Обычный балун — только класс вида; критичный обязательный — ещё и красная полоса (план 2026-10-19 §2.7).
+    expect(center).toContain(
+      "className: input.mode === 'mandatory' && input.kind === 'error' ? `${BALLOON_CLASS_NAME} ${BALLOON_CRITICAL_CLASS_NAME}` : BALLOON_CLASS_NAME,",
+    );
+    expect(center).toContain("export const BALLOON_CRITICAL_CLASS_NAME = 'app-balloon--critical';");
+    expect(rule('body .ant-notification .ant-notification-notice.app-balloon.app-balloon--critical')).toContain('border-left: 4px solid #cf1322;');
   });
 
   it('text is 20% smaller than the antd notification (16 → 12.8px title, 14 → 11.2px text)', () => {
