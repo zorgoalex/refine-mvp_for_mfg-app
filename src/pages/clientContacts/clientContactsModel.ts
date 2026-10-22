@@ -61,9 +61,12 @@ export function writeQuery(query: ClientContactsQuery): URLSearchParams {
 
 export const hasFilters = (query: ClientContactsQuery) => Boolean(query.q?.trim()) || Object.keys(query.filters).length > 0 || query.active !== 'active';
 
-/** Values of one column of a row, the primary first. */
+/** A read-only copy from the linked 1C counterparty: shown in its column, never edited here. */
+export const isOnecCopy = (contact: Pick<ClientContactsContact, 'origin'>): boolean => contact.origin === 'onec';
+
+/** Values of one column of a row, the primary first; the phone column ends with the phone copies from 1C. */
 export function columnValues(row: ClientContactsRow, column: ClientContactColumn): Array<ClientContactsPhone | ClientContactsContact> {
-  if (column === 'phone') return row.phones;
+  if (column === 'phone') return [...row.phones, ...row.contacts.filter((contact) => contact.kind === 'phone' && isOnecCopy(contact))];
   return row.contacts.filter((contact) => contact.kind === column);
 }
 
@@ -134,7 +137,7 @@ export interface KindDraft {
 }
 
 export const kindToDraft = (row: ClientContactsRow, kind: EmployeeContactKind): KindDraft[] =>
-  row.contacts.filter((contact) => contact.kind === kind)
+  row.contacts.filter((contact) => contact.kind === kind && !isOnecCopy(contact))
     .map((contact) => ({ rowKey: key(), contactId: contact.contactId, value: contact.value, note: contact.note ?? '', isPrimary: contact.isPrimary }));
 
 export function addKindDraft(rows: readonly KindDraft[]): KindDraft[] {
@@ -159,7 +162,8 @@ export function kindDraftToSet(row: ClientContactsRow, kind: EmployeeContactKind
   { contacts: EmployeeContactInput[] } | { error: string } {
   if (rows.some((draft) => !draft.value.trim())) return { error: 'Заполните значение или удалите пустую строку' };
   if (kind === 'other' && rows.some((draft) => !draft.note.trim())) return { error: 'У контакта «Другое» укажите подпись (например, VK)' };
-  const others = row.contacts.filter((contact) => contact.kind !== kind)
+  // The copies from 1C are not sent: the server keeps the ones a set does not name.
+  const others = row.contacts.filter((contact) => contact.kind !== kind && !isOnecCopy(contact))
     .map((contact) => ({ contactId: contact.contactId, kind: contact.kind, value: contact.value, isPrimary: contact.isPrimary, note: contact.note }));
   const edited = rows.map((draft) => ({
     contactId: draft.contactId, kind, value: draft.value.trim(), isPrimary: draft.isPrimary, note: draft.note.trim() ? draft.note.trim() : null,
@@ -168,7 +172,7 @@ export function kindDraftToSet(row: ClientContactsRow, kind: EmployeeContactKind
 }
 
 export function rebaseKindDraft(rows: readonly KindDraft[], fresh: ClientContactsRow, kind: EmployeeContactKind): KindDraft[] {
-  const ids = new Set(fresh.contacts.filter((contact) => contact.kind === kind).map((contact) => contact.contactId));
+  const ids = new Set(fresh.contacts.filter((contact) => contact.kind === kind && !isOnecCopy(contact)).map((contact) => contact.contactId));
   return rows.map((row) => (row.contactId !== null && !ids.has(row.contactId) ? { ...row, contactId: null } : row));
 }
 

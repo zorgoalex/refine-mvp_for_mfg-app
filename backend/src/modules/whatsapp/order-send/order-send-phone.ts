@@ -8,6 +8,13 @@ import { ApiError } from '../../../common/errors/api-error';
  */
 const MAIN_NUMBER = /^\s*(?:\+?([78]))[\s()-]*(\d{3})[\s()-]*(\d{3})[\s-]*(\d{2})[\s-]*(\d{2})(?:\s*(?:[-,;/]|доб\.?|вн\.?)\s*.*)?\s*$/iu;
 
+/**
+ * The same rule in SQL (PostgreSQL ARE has the same syntax for it): `7` + the main number of `expr`, or NULL when it is
+ * not one. For reads that must agree with `normalizeClientPhone` (K4b: a copy of 1C hidden behind an own phone).
+ */
+export const normalizedClientPhoneSql = (expr: string): string =>
+  `(CASE WHEN ${expr} ~* '${MAIN_NUMBER.source}' THEN '7' || regexp_replace(${expr}, '${MAIN_NUMBER.source}', '\\2\\3\\4\\5', 'i') END)`;
+
 export function normalizeClientPhone(raw: string | null | undefined): string {
   const value = (raw ?? '').trim();
   if (!value) throw new ApiError(409, 'CLIENT_PHONE_MISSING', 'У клиента заказа нет телефона');

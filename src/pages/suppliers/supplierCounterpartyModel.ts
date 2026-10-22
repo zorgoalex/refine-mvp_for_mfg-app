@@ -65,11 +65,11 @@ export function onecProfileView(profile: SupplierOnecProfile | null | undefined,
   };
 }
 
-/** The message after «Сверить с 1С». */
-export function onecSyncMessage(outcome: SupplierOnecSyncOutcome): { type: 'success' | 'info' | 'warning'; text: string } {
+/** The message after «Сверить с 1С» (`owner` — whose card says it: a supplier or a client). */
+export function onecSyncMessage(outcome: SupplierOnecSyncOutcome, owner: 'Поставщик' | 'Клиент' = 'Поставщик'): { type: 'success' | 'info' | 'warning'; text: string } {
   if (outcome.status === 'skipped') {
     const reasons: Record<typeof outcome.reason, string> = {
-      not_found: 'Поставщик не найден — обновите страницу',
+      not_found: `${owner} не найден — обновите страницу`,
       no_source: 'Контрагент не найден ни в одной базе 1С',
       not_loaded: 'Контакты контрагентов из 1С ещё не загружались — сверять пока не с чем',
       mirror_unavailable: 'Данные 1С сейчас недоступны',

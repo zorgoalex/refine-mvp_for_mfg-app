@@ -12,6 +12,7 @@ import { CLIENT_PERSON_TYPE_LABELS, ClientPersonType } from "../../types/clients
 import { ContactsCard } from "../../components/contacts/ContactsCard";
 import { CLIENT_CONTACTS } from "../../components/contacts/partyContactsSources";
 import { ClientCounterpartyCard } from "./ClientCounterpartyCard";
+import { ClientOnecContactsStatus } from "./ClientOnecContactsStatus";
 import { ClientOrdersTab } from "./ClientOrdersTab";
 import { ClientOnecDocumentsTab } from "./ClientOnecDocumentsTab";
 import { canSeeClientOnecDocuments } from "./clientOnecDocumentsModel";
@@ -131,6 +132,9 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
         style={{ marginBottom: 16 }}
       />
       <ContactsCard ownerId={Number(record?.client_id) || null} editable={false} source={CLIENT_CONTACTS} />
+      <div style={{ marginTop: 8 }}>
+        <ClientOnecContactsStatus clientId={Number(record?.client_id) || null} />
+      </div>
 
       <Divider />
 

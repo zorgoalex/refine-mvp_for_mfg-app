@@ -5,6 +5,7 @@ import { DatabaseService } from '../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../database/database.types';
 import type { CurrentUser } from '../../permissions/current-user';
 import { livePersonalSnapshotJoin, normalizedName, normalizedPhone } from '../onec-agent/domain/onec-matching-sql';
+import { dropClientOnecCopy } from './supplier-onec-contacts.repository';
 
 const SOURCE = 'erp_party_contacts';
 /** Similar names (pg_trgm) are offered from this similarity up — the threshold of the 1C «Сопоставление» tab. */
@@ -322,6 +323,9 @@ export class ClientCounterpartyRepository {
       }
       const actorId = Number(actor.id);
       await tx.query('UPDATE clients SET ref_key_1c = $2::uuid, edited_by = $3 WHERE client_id = $1', [clientId, refKey1c, actorId]);
+      // K4b: the copy of the previous counterparty's contacts goes with the link (audited and announced there); the new
+      // counterparty's contacts come with the sync after the commit. Nothing of 1C is locked here.
+      const removedOnecContacts = await dropClientOnecCopy(tx, clientId, { actor, requestId, reason: refKey1c ? 'relinked' : 'unlinked', via });
       await auditService.record(tx, {
         event: refKey1c ? 'client.counterparty_linked' : 'client.counterparty_unlinked', entityType: 'client', entityId: clientId,
         actorUserId: actorId, actorUsername: actor.username, actorRole: actor.role, requestId, source: SOURCE,
@@ -330,7 +334,7 @@ export class ClientCounterpartyRepository {
         before: { refKey1c: row.ref, counterpartyName: before?.name ?? null },
         after: { refKey1c, counterpartyName: after?.name ?? null },
         // The name and the code identify the counterparty; BIN/IIN is personal data and stays out of the audit.
-        metadata: { counterpartyCode: (after ?? before)?.code ?? null, via },
+        metadata: { counterpartyCode: (after ?? before)?.code ?? null, via, removedOnecContacts },
       });
       return this.link(clientId, tx, withData);
     }).catch((error: unknown) => { throw taken(error); });
@@ -343,7 +347,8 @@ export class ClientCounterpartyRepository {
    * client before calling (the guard of migration 268 refuses a 1C key on a merged client; that refusal is a 409 here).
    * `from` must still hold the key and `to` must have none — anything else is a conflict,
    * never an overwrite. The counterparty need not be in the loaded 1C data any more (no `requireKnown`): the link moves
-   * as it is. Two audit rows (`via`); the profile of 1C contacts of `from` is dropped — the sync builds the one of `to`.
+   * as it is. Two audit rows (`via`); the copy of 1C contacts of `from` and its profile are dropped — the sync builds the
+   * one of `to`.
    */
   async transferLink(
     tx: TransactionClient,
@@ -372,12 +377,15 @@ export class ClientCounterpartyRepository {
         }
         throw error;
       });
-    await tx.query(`DELETE FROM party_onec_profiles WHERE party_kind = 'client' AND party_id = $1`, [input.fromClientId]);
+    // K4b: the copy of 1C contacts of `from` and its profile go (audited and announced); the sync builds the copy of `to`.
+    const removedOnecContacts = await dropClientOnecCopy(tx, input.fromClientId, {
+      actor: input.actor, requestId: input.requestId, reason: 'merge_transfer', via: input.via,
+    });
     const common = {
       entityType: 'client', actorUserId: actorId, actorUsername: input.actor.username, actorRole: input.actor.role,
       requestId: input.requestId, source: SOURCE,
     };
-    const metadata = { counterpartyCode: card?.code ?? null, via: input.via, mergeId: input.mergeId };
+    const metadata = { counterpartyCode: card?.code ?? null, via: input.via, mergeId: input.mergeId, removedOnecContacts };
     await auditService.record(tx, {
       ...common, event: 'client.counterparty_unlinked', entityId: input.fromClientId, relatedClientId: input.fromClientId,
       relatedEntities: [{ entityType: 'client', entityId: input.fromClientId }, { entityType: 'client', entityId: input.toClientId }, { entityType: 'client_merge', entityId: input.mergeId }],

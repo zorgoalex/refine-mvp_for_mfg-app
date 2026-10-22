@@ -7,6 +7,7 @@ import type { BackendEnv } from '../../config/env.validation';
 import { DatabaseService } from '../../database/database.service';
 import type { DatabaseClient } from '../../database/database.types';
 import type { CurrentUser } from '../../permissions/current-user';
+import { CLIENT_ONEC_DATA_VIEW, clientOnecCopyVisible } from './client-onec-visibility';
 import { maskPartyContact, planContactSet, type StoredContact } from './party-contact-values';
 import {
   PARTY_CONFIG, PARTY_CONTACT_CODES, PARTY_CONTACTS_VERSION_CONFLICT,
@@ -23,9 +24,11 @@ interface ContactRow extends QueryResultRow {
 /**
  * A row of 1C is shown and used only while it matches the snapshot its source holds now and that snapshot may be used
  * (party_onec_contacts_available, migration 243): a revocation, a new snapshot or the expiry of the 1C contacts hides it at
- * once, until the sync reconciles it.
+ * once, until the sync reconciles it. A client's copy also needs `clients.onec_data.view` and its current link (K4b).
  */
-const ROW_COLUMNS = (owner: string) => `c.*, c.${owner} AS owner_id, party_onec_contacts_available(c.onec_source_id, c.onec_snapshot_version) AS available`;
+const visibleSql = (config: PartyConfig, onecData: boolean) => (config.kind === 'client'
+  ? clientOnecCopyVisible('c', onecData) : 'party_onec_contacts_available(c.onec_source_id, c.onec_snapshot_version)');
+const ROW_COLUMNS = (config: PartyConfig, onecData: boolean) => `c.*, c.${config.idColumn} AS owner_id, ${visibleSql(config, onecData)} AS available`;
 
 /**
  * Contacts of suppliers, vendors and clients. The whole set of one owner is replaced by one command under a
@@ -51,24 +54,25 @@ export class PartyContactsRepository {
     return config.kinds.filter((kind) => this.extraKindsEnabled() || !config.extraKinds.includes(kind));
   }
 
-  async get(party: PartyKind, partyId: number, client: DatabaseClient = this.database): Promise<PartyContacts> {
+  /** `onecData` — a client reader with `clients.onec_data.view` (copies of 1C are shown only to them). */
+  async get(party: PartyKind, partyId: number, client: DatabaseClient = this.database, onecData = false): Promise<PartyContacts> {
     const config = PARTY_CONFIG[party];
     const owner = (await client.query(`SELECT 1 FROM ${config.ownerTable} WHERE ${config.idColumn} = $1`, [partyId])).rows[0];
     if (!owner) throw new ApiError(404, config.notFoundCode, config.notFoundText);
     return {
       party, partyId, version: await this.version(client, config, partyId),
-      contacts: (await this.rows(client, config, partyId)).filter((row) => row.available).map(toContact),
+      contacts: (await this.rows(client, config, partyId, onecData)).filter((row) => row.available).map(toContact),
       kinds: this.kindsNow(party),
     };
   }
 
   /** Contacts of many owners at once (list columns). */
-  async listFor(party: PartyKind, partyIds: readonly number[]): Promise<Map<number, PartyContacts['contacts']>> {
+  async listFor(party: PartyKind, partyIds: readonly number[], onecData = false): Promise<Map<number, PartyContacts['contacts']>> {
     const config = PARTY_CONFIG[party];
     const result = new Map<number, PartyContacts['contacts']>();
     if (!partyIds.length) return result;
-    const rows = (await this.database.query<ContactRow>(`SELECT ${ROW_COLUMNS(config.idColumn)} FROM ${config.table} c
-      WHERE c.${config.idColumn} = ANY($1::bigint[]) AND party_onec_contacts_available(c.onec_source_id, c.onec_snapshot_version)
+    const rows = (await this.database.query<ContactRow>(`SELECT ${ROW_COLUMNS(config, onecData)} FROM ${config.table} c
+      WHERE c.${config.idColumn} = ANY($1::bigint[]) AND ${visibleSql(config, onecData)}
       ORDER BY c.${config.idColumn}, c.kind, c.is_primary DESC, c.position, c.contact_id`, [partyIds])).rows;
     for (const row of rows) {
       const id = Number(row.owner_id);
@@ -81,7 +85,9 @@ export class PartyContactsRepository {
    * Replaces the user's own contacts of the set: the owner row is locked, the set version compared, the own rows
    * deleted and the kept ones re-inserted under their own ids (the unique indexes only see the final set); rows from
    * 1C stay and get the «основной» flag and position the command gives them; the version is bumped. Audited with
-   * masks only.
+   * masks only. A client's copy hidden from this user (no `clients.onec_data.view`, a previous link, unavailable 1C data)
+   * that has the value of one of the user's lines is deleted (the user's value wins, as in the sync): the command never
+   * answers «already there» about a value the user cannot see.
    */
   async replace(party: PartyKind, partyId: number, version: number, input: readonly PartyContactInput[], actor: CurrentUser,
     requestId: string, source: string = SOURCE): Promise<PartyContacts> {
@@ -92,7 +98,8 @@ export class PartyContactsRepository {
       if (!owner) throw new ApiError(404, config.notFoundCode, config.notFoundText);
       const current = await this.version(tx, config, partyId);
       if (current !== version) throw new ApiError(409, PARTY_CONTACTS_VERSION_CONFLICT, 'Контакты уже изменены; обновите страницу');
-      const before = await this.rows(tx, config, partyId);
+      const onecData = party === 'client' && actor.permissions.includes(CLIENT_ONEC_DATA_VIEW);
+      const before = await this.rows(tx, config, partyId, onecData);
       const frozen = this.extraKindsEnabled() ? [] : config.extraKinds;
       const plan = planContactSet(input, before.map(toStored), config.kinds, config.ownerGenitive, frozen);
       const byId = new Map(before.map((row) => [Number(row.contact_id), row]));
@@ -102,6 +109,11 @@ export class PartyContactsRepository {
       // «Основной» comes off every row of 1C first: the partial unique index sees only the final flags.
       await tx.query(`UPDATE ${config.table} SET is_primary = FALSE WHERE ${config.idColumn} = $1 AND origin = 'onec' AND is_primary`, [partyId]);
       await tx.query(`DELETE FROM ${config.table} WHERE ${config.idColumn} = $1 AND origin = 'erp'`, [partyId]);
+      const ownKeys = new Set(plan.own.map((line) => `${line.kind}:${line.valueNormalized}`));
+      const hiddenDuplicates = party === 'client'
+        ? before.filter((row) => row.origin === 'onec' && !row.available && ownKeys.has(`${row.kind}:${row.value_normalized}`)).map((row) => row.contact_id)
+        : [];
+      if (hiddenDuplicates.length) await tx.query(`DELETE FROM ${config.table} WHERE contact_id = ANY($1::bigint[])`, [hiddenDuplicates]);
       for (const contact of plan.own) {
         const previous = contact.contactId !== null ? byId.get(contact.contactId) : undefined;
         if (previous) {
@@ -126,7 +138,7 @@ export class PartyContactsRepository {
       }
       await tx.query(`INSERT INTO party_contact_versions (party_kind, party_id, version) VALUES ($1, $2, 1)
         ON CONFLICT (party_kind, party_id) DO UPDATE SET version = party_contact_versions.version + 1, updated_at = now()`, [party, partyId]);
-      const after = await this.get(party, partyId, tx);
+      const after = await this.get(party, partyId, tx, onecData);
       await auditService.record(tx, {
         event: config.auditEvent, entityType: party, entityId: partyId,
         actorUserId: actorId, actorUsername: actor.username, actorRole: actor.role, requestId, source,
@@ -134,7 +146,10 @@ export class PartyContactsRepository {
         relatedEntities: [{ entityType: party, entityId: partyId }],
         before: { version, contacts: before.filter((row) => row.available).map((row) => auditView(toContact(row))) },
         after: { version: after.version, contacts: after.contacts.map(auditView) },
-        metadata: { added: plan.own.filter((contact) => contact.contactId === null).length, removed },
+        metadata: {
+          added: plan.own.filter((contact) => contact.contactId === null).length, removed,
+          ...(hiddenDuplicates.length ? { removedOnecDuplicates: hiddenDuplicates.length } : {}),
+        },
       });
       return after;
     }).catch((error: unknown) => {
@@ -152,8 +167,8 @@ export class PartyContactsRepository {
   }
 
   /** Every row of the owner, hidden rows of 1C too (`available` says which may be shown). */
-  private async rows(client: DatabaseClient, config: PartyConfig, partyId: number): Promise<ContactRow[]> {
-    return (await client.query<ContactRow>(`SELECT ${ROW_COLUMNS(config.idColumn)} FROM ${config.table} c WHERE c.${config.idColumn} = $1
+  private async rows(client: DatabaseClient, config: PartyConfig, partyId: number, onecData: boolean): Promise<ContactRow[]> {
+    return (await client.query<ContactRow>(`SELECT ${ROW_COLUMNS(config, onecData)} FROM ${config.table} c WHERE c.${config.idColumn} = $1
       ORDER BY c.kind, c.is_primary DESC, c.position, c.contact_id`, [partyId])).rows;
   }
 }

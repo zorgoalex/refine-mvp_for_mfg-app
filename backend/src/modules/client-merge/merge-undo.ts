@@ -29,6 +29,8 @@ export interface UndoPlan {
   keysBack: JournalItem[];
   contactsBack: number[];
   contactsRestore: JournalItem[];
+  /** Survivor's 1C copies the merge dropped for a moved own row (K4b): given back only to the same link. */
+  copiesRestore: JournalItem[];
   primaryPhone: number | null;
   primaryContacts: number[];
   onecLink: string | null;
@@ -78,6 +80,8 @@ export interface UndoState {
   phones: PhoneState[];
   contacts: ContactState[];
   refs: Map<number, string | null>;
+  /** The 1C contacts profile of the survivor (source and key of the link its copies were made for). */
+  survivorProfile: { sourceId: number; ref: string } | null;
   redirects: Array<{ mergedClientId: number; survivorId: number }>;
   aliasRequests: number;
   pendingOrderIds: number[];
@@ -108,6 +112,8 @@ export async function readUndoState(db: DatabaseClient, merge: MergeRow, items: 
   const refs = new Map((await db.query<{ client_id: string; ref: string | null }>(
     'SELECT client_id, lower(ref_key_1c::text) AS ref FROM clients WHERE client_id = ANY($1::bigint[])', [[s, merge.mergedId]])).rows
     .map((r) => [Number(r.client_id), r.ref]));
+  const profile = (await db.query<{ source_id: string; ref: string }>(
+    `SELECT source_id, lower(ref_key_1c::text) AS ref FROM party_onec_profiles WHERE party_kind = 'client' AND party_id = $1`, [s])).rows[0];
   const aliases = [merge.mergedId, ...journalIds(items, 'redirect_repointed')];
   const redirects = (await db.query<{ merged_client_id: string; survivor_id: string }>(
     'SELECT merged_client_id, survivor_id FROM client_merge_redirects WHERE merged_client_id = ANY($1::bigint[]) ORDER BY merged_client_id', [aliases])).rows
@@ -124,6 +130,7 @@ export async function readUndoState(db: DatabaseClient, merge: MergeRow, items: 
         AND (order_id = ANY($1::bigint[]) OR client_phone_id = ANY($2::bigint[])) ORDER BY send_id`, [orderIds, movedPhoneIds])).rows;
   return {
     projects, orders, phones, contacts, refs, redirects, aliasRequests,
+    survivorProfile: profile ? { sourceId: Number(profile.source_id), ref: profile.ref } : null,
     pendingOrderIds: [...new Set(pending.filter((r) => r.order_id !== null).map((r) => Number(r.order_id)))].sort((a, b) => a - b),
     pendingPhoneIds: [...new Set(pending.filter((r) => r.client_phone_id !== null).map((r) => Number(r.client_phone_id)))].sort((a, b) => a - b),
   };
@@ -137,6 +144,7 @@ export function undoFingerprint(merge: MergeRow, state: UndoState): string {
     phones: state.phones.map((p) => [p.phoneId, p.clientId, p.number, p.type, p.isPrimary, p.ref]),
     contacts: state.contacts.map((c) => [c.contactId, c.clientId, c.kind, c.valueNormalized, c.isPrimary, c.note]),
     refs: [...state.refs.entries()].sort(([a], [b]) => a - b),
+    survivorProfile: state.survivorProfile ? [state.survivorProfile.sourceId, state.survivorProfile.ref] : null,
     redirects: state.redirects.map((r) => [r.mergedClientId, r.survivorId]),
     blockers: [state.aliasRequests, state.pendingOrderIds, state.pendingPhoneIds],
   });
@@ -151,7 +159,7 @@ export function planUndo(merge: MergeRow, items: readonly JournalItem[], state: 
   const skipped: UndoSkip[] = [];
   const plan: UndoPlan = {
     projects: [], looseOrderIds: [], orderIds: [], skipped, phonesBack: [], phonesRestore: [], keysBack: [], contactsBack: [],
-    contactsRestore: [], primaryPhone: null, primaryContacts: [], onecLink: null, repointed: [],
+    contactsRestore: [], copiesRestore: [], primaryPhone: null, primaryContacts: [], onecLink: null, repointed: [],
   };
   const ordersById = new Map(state.orders.map((o) => [o.orderId, o]));
   for (const item of items.filter((i) => i.kind === 'project')) {
@@ -217,9 +225,15 @@ export function planUndo(merge: MergeRow, items: readonly JournalItem[], state: 
       plan.contactsBack.push(current.contactId);
     } else skipped.push({ kind: 'contact_moved', rowId: item.rowId, reason: current ? 'changed_after_merge' : 'deleted_after_merge' });
   }
+  const survivorCopies: JournalItem[] = [];
   for (const item of items.filter((i) => i.kind === 'contact_deleted')) {
     if (!item.before) { skipped.push({ kind: 'contact_deleted', rowId: item.rowId, reason: 'journal_purged' }); continue; }
-    if (item.before.origin !== 'erp') { skipped.push({ kind: 'contact_deleted', rowId: item.rowId, reason: 'onec_copy' }); continue; }
+    if (item.before.origin !== 'erp') {
+      // The survivor's copy dropped for a moved own row is decided after the 1C link below; the merged client's copies stay gone.
+      if (Number(item.before.clientId) === s && item.before.refKey1c) survivorCopies.push(item);
+      else skipped.push({ kind: 'contact_deleted', rowId: item.rowId, reason: 'onec_copy' });
+      continue;
+    }
     if (mergedContacts.some((c) => c.kind === item.before!.kind && c.valueNormalized === item.before!.valueNormalized)) {
       skipped.push({ kind: 'contact_deleted', rowId: item.rowId, reason: 'value_exists' });
     } else plan.contactsRestore.push(item);
@@ -235,6 +249,18 @@ export function planUndo(merge: MergeRow, items: readonly JournalItem[], state: 
     const ref = String(link.after?.refKey1c ?? '');
     if (state.refs.get(s) === ref && state.refs.get(m) === null) plan.onecLink = ref;
     else skipped.push({ kind: 'onec_link', rowId: link.rowId, reason: 'link_changed' });
+  }
+  // K4b: a survivor's copy comes back only to the very link and profile it was made for, as the only row of its value and,
+  // when it was «основной», with no other «основной» of its kind on the survivor after the undo.
+  const survivorAfter = state.contacts.filter((c) => c.clientId === s && !plan.contactsBack.includes(c.contactId));
+  for (const item of survivorCopies) {
+    const b = item.before!;
+    const sameLink = plan.onecLink === null && state.refs.get(s) === b.refKey1c && state.survivorProfile !== null
+      && state.survivorProfile.ref === b.refKey1c && state.survivorProfile.sourceId === Number(b.onecSourceId);
+    if (!sameLink) skipped.push({ kind: 'contact_deleted', rowId: item.rowId, reason: 'onec_copy_relinked' });
+    else if (survivorAfter.some((c) => c.kind === b.kind && c.valueNormalized === b.valueNormalized)) skipped.push({ kind: 'contact_deleted', rowId: item.rowId, reason: 'value_exists' });
+    else if (b.isPrimary === true && survivorAfter.some((c) => c.kind === b.kind && c.isPrimary)) skipped.push({ kind: 'contact_deleted', rowId: item.rowId, reason: 'primary_taken' });
+    else plan.copiesRestore.push(item);
   }
   for (const item of items.filter((i) => i.kind === 'redirect_repointed')) {
     if (state.redirects.some((r) => r.mergedClientId === item.rowId && r.survivorId === s)) plan.repointed.push(item.rowId);
@@ -326,6 +352,16 @@ export async function applyUndo(
           AND NOT EXISTS (SELECT 1 FROM client_contacts x WHERE x.client_id = $1 AND x.kind = $2 AND x.is_primary)`,
       [m, item.before.kind, item.before.valueNormalized]);
   }
+  for (const item of plan.copiesRestore) {
+    const b = item.before!;
+    // The copy as it was (its id, its «основной», its snapshot): shown again once its snapshot is current (the sync restamps it).
+    await tx.query(
+      `INSERT INTO client_contacts (contact_id, client_id, kind, value, value_normalized, is_primary, note, position, origin, onec_source_id,
+           onec_snapshot_version, onec_synced_at)
+       VALUES (CASE WHEN EXISTS (SELECT 1 FROM client_contacts WHERE contact_id = $1) THEN nextval(pg_get_serial_sequence('client_contacts', 'contact_id')) ELSE $1 END,
+               $2, $3, $4, $5, $6, NULL, $7, 'onec', $8, $9::timestamptz, $10::timestamptz)`,
+      [item.rowId, s, b.kind, b.value, b.valueNormalized, b.isPrimary === true, Number(b.position ?? 99), Number(b.onecSourceId), b.onecSnapshotVersion, b.onecSyncedAt]);
+  }
   await bumpContactVersions(tx, [s, m]);
 
   if (plan.onecLink) {
@@ -335,7 +371,8 @@ export async function applyUndo(
   const report: UndoReport = {
     returned: {
       projects: plan.projects.length, orders: plan.orderIds.length, phonesMoved: plan.phonesBack.length, phonesRestored: restoredPhones,
-      contactsMoved: plan.contactsBack.length, contactsRestored: plan.contactsRestore.length, onecLink: plan.onecLink ? 1 : 0,
+      contactsMoved: plan.contactsBack.length, contactsRestored: plan.contactsRestore.length, onecCopiesRestored: plan.copiesRestore.length,
+      onecLink: plan.onecLink ? 1 : 0,
       redirectsRestored: plan.repointed.length,
     },
     skipped,

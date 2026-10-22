@@ -7,9 +7,12 @@ import { PermissionsGuard } from '../../permissions/permissions.guard';
 import { RequirePermissions } from '../../permissions/require-permissions.decorator';
 import { PARTY_ADDRESS_MAX, PARTY_CONFIG, PARTY_CONTACT_KINDS, PARTY_ONEC_CONTACTS_MAX, PARTY_OWN_CONTACTS_MAX, type PartyContactInput, type PartyKind } from './party-contacts';
 import { CONFIRM_MAX, ClientCounterpartyRepository } from './client-counterparty.repository';
+import { CLIENT_ONEC_DATA_VIEW } from './client-onec-visibility';
 import { PartyContactsRepository } from './party-contacts.repository';
 import { SupplierCounterpartyRepository, parseRefKey1c } from './supplier-counterparty.repository';
 import { SupplierOnecContactsService } from './supplier-onec-contacts.service';
+import { readOnecProfile } from './supplier-onec-contacts.repository';
+import { DatabaseService } from '../../database/database.service';
 
 const replaceSchema = z.object({
   version: z.number().int().min(0),
@@ -43,6 +46,7 @@ export class PartyContactsController {
     @Inject(SupplierCounterpartyRepository) private readonly counterparties: SupplierCounterpartyRepository,
     @Inject(ClientCounterpartyRepository) private readonly clientCounterparties: ClientCounterpartyRepository,
     @Inject(SupplierOnecContactsService) private readonly onecContacts: SupplierOnecContactsService,
+    @Inject(DatabaseService) private readonly database: DatabaseService,
   ) {}
 
   @ApiOperation({ summary: 'Contacts of a supplier with the set version' })
@@ -69,9 +73,21 @@ export class PartyContactsController {
   @Get('vendor-contacts') @RequirePermissions(['vendors.view'])
   vendors(@Query('ids') ids: unknown) { return this.list('vendor', ids); }
 
-  @ApiOperation({ summary: 'Emails and Telegram accounts of a client with the set version (phones stay in client phones)' })
+  @ApiOperation({ summary: 'Emails and messengers of a client with the set version; copies of 1C (phones, emails, addresses) only with clients.onec_data.view' })
   @Get('clients/:id/contacts') @RequirePermissions(['clients.view'])
-  client(@Param('id') id: string) { return this.contacts.get('client', parseId(id)); }
+  client(@Param('id') id: string, @Req() request: RequestWithCurrentUser) {
+    return this.contacts.get('client', parseId(id), undefined, actor(request).user.permissions.includes(CLIENT_ONEC_DATA_VIEW));
+  }
+
+  @ApiOperation({ summary: 'Sync the contacts of a client with its 1C counterparty now (the loaded 1C data)' })
+  @Post('clients/:id/contacts/onec-sync') @HttpCode(200) @RequirePermissions(['clients.update', 'clients.onec_data.view'])
+  async syncClientOnec(@Param('id') id: string, @Req() request: RequestWithCurrentUser) {
+    const { user, requestId } = actor(request);
+    const clientId = parseId(id);
+    const outcome = await this.onecContacts.syncClient(clientId, user, requestId);
+    if (outcome.status === 'skipped' && outcome.reason === 'not_found') throw new ApiError(404, 'CLIENT_NOT_FOUND', 'Клиент не найден');
+    return { outcome, contacts: await this.contacts.get('client', clientId, undefined, true), onec: await readOnecProfile(this.database, 'client', clientId) };
+  }
 
   @ApiOperation({ summary: 'Replace the emails and Telegram accounts of a client (version compare-and-swap)' })
   @Put('clients/:id/contacts') @RequirePermissions(['clients.update'])
@@ -124,9 +140,13 @@ export class PartyContactsController {
 
   @ApiOperation({ summary: 'The 1C counterparty a client is linked to' })
   @Get('clients/:id/counterparty') @RequirePermissions(['clients.view'])
-  clientCounterparty(@Param('id') id: string, @Req() request: RequestWithCurrentUser) {
+  async clientCounterparty(@Param('id') id: string, @Req() request: RequestWithCurrentUser) {
     // Phones and BIN/IIN of the counterparty — only with `clients.onec_data.view`; the name and the code — with `clients.view`.
-    return this.clientCounterparties.link(parseId(id), undefined, actor(request).user.permissions.includes('clients.onec_data.view'));
+    const withData = actor(request).user.permissions.includes(CLIENT_ONEC_DATA_VIEW);
+    const clientId = parseId(id);
+    const link = await this.clientCounterparties.link(clientId, undefined, withData);
+    // The state of the copy of 1C contacts (K4b): the time of the last sync and whether the 1C data may be shown now.
+    return { ...link, onecSyncEnabled: this.onecContacts.clientsEnabled(), onec: withData ? await readOnecProfile(this.database, 'client', clientId) : null };
   }
 
   // The search opens the whole 1C counterparty directory (names, BIN/IIN, phones): only for those who may link
@@ -140,12 +160,16 @@ export class PartyContactsController {
 
   @ApiOperation({ summary: 'Link, relink or unlink a client and a 1C counterparty (compare-and-swap on the previous key)' })
   @Put('clients/:id/counterparty') @RequirePermissions(['clients.update'])
-  linkClient(@Param('id') id: string, @Body() body: unknown, @Req() request: RequestWithCurrentUser) {
+  async linkClient(@Param('id') id: string, @Body() body: unknown, @Req() request: RequestWithCurrentUser) {
     const parsed = linkSchema.safeParse(body);
     if (!parsed.success) throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос сопоставления');
     const { user, requestId } = actor(request);
-    return this.clientCounterparties.setLink(parseId(id), parsed.data.refKey1c === null ? null : parseRefKey1c(parsed.data.refKey1c),
+    const clientId = parseId(id);
+    const link = await this.clientCounterparties.setLink(clientId, parsed.data.refKey1c === null ? null : parseRefKey1c(parsed.data.refKey1c),
       parsed.data.expectedRefKey1c === null ? null : parseRefKey1c(parsed.data.expectedRefKey1c), user, requestId);
+    // Committed: the contacts of the new counterparty follow in the background (the previous copy went with the link).
+    if (link.refKey1c !== null) this.onecContacts.syncClientsSoon([clientId], user, requestId);
+    return link;
   }
 
   @ApiOperation({ summary: 'Bulk view: clients without a 1C counterparty and their exact candidates (unambiguous pairs and ambiguous clients)' })
@@ -162,7 +186,9 @@ export class PartyContactsController {
       throw new ApiError(422, 'VALIDATION_ERROR', 'Клиент и контрагент в запросе не должны повторяться');
     }
     const { user, requestId } = actor(request);
-    return { results: await this.clientCounterparties.confirm(pairs, user, requestId) };
+    const results = await this.clientCounterparties.confirm(pairs, user, requestId);
+    this.onecContacts.syncClientsSoon(results.filter((result) => result.status === 'linked').map((result) => result.clientId), user, requestId);
+    return { results };
   }
 
   /**

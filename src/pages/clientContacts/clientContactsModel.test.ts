@@ -103,3 +103,27 @@ describe('one kind of contacts', () => {
       .toEqual({ error: 'У контакта «Другое» укажите подпись (например, VK)' });
   });
 });
+
+describe('copies from 1C on the «Контакты клиентов» screen', () => {
+  const withCopies: ClientContactsRow = {
+    ...row,
+    contacts: [
+      ...row.contacts,
+      { contactId: 20, kind: 'email', value: 'onec@b.kz', valueNormalized: 'onec@b.kz', isPrimary: false, note: null, origin: 'onec' },
+      { contactId: 21, kind: 'phone', value: '+7 701 555 11 01', valueNormalized: '77015551101', isPrimary: false, note: null, origin: 'onec' },
+      { contactId: 22, kind: 'address', value: 'Алматы', valueNormalized: 'алматы', isPrimary: false, note: null, origin: 'onec' },
+    ],
+  };
+
+  it('shows email copies in the email column and phone copies after the phones', () => {
+    expect(columnValues(withCopies, 'email').map((value) => ('contactId' in value ? value.contactId : 0))).toEqual([10, 20]);
+    expect(columnValues(withCopies, 'phone').map((value) => ('phoneId' in value ? `p${value.phoneId}` : `c${value.contactId}`))).toEqual(['p1', 'p2', 'c21']);
+  });
+
+  it('keeps copies out of the editor and out of the set', () => {
+    expect(kindToDraft(withCopies, 'email').map((draft) => draft.contactId)).toEqual([10]);
+    const body = kindDraftToSet(withCopies, 'email', kindToDraft(withCopies, 'email'));
+    expect('contacts' in body && body.contacts.map((contact) => contact.contactId)).toEqual([11, 12, 10]);
+    expect(rebaseKindDraft([{ rowKey: 'x', contactId: 20, value: 'onec@b.kz', note: '', isPrimary: false }], withCopies, 'email')[0].contactId).toBeNull();
+  });
+});

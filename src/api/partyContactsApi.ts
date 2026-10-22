@@ -87,6 +87,10 @@ export interface ClientLink {
   counterparty: CounterpartyCard | null;
   /** Phones and BIN/IIN are left out: the viewer has no `clients.onec_data.view`. */
   dataHidden?: boolean;
+  /** The 1C contacts sync of clients is on (the «Сверить с 1С» button). Absent on an older backend. */
+  onecSyncEnabled?: boolean;
+  /** The copy of the 1C contacts; null without `clients.onec_data.view` or before the first sync. */
+  onec?: SupplierOnecProfile | null;
 }
 
 export type ClientMatchStrength = 'both' | 'phone' | 'name';
@@ -197,6 +201,10 @@ export const partyContactsApi = {
   clientOnecDocuments: (clientId: number, params: { group?: ClientOnecDocumentGroup; page: number; pageSize: number }) =>
     httpClient.get<ClientOnecDocumentsResponse>(
       `${apiRoutes.partyContacts.clientOnecDocuments(clientId)}?page=${params.page}&pageSize=${params.pageSize}${params.group ? `&group=${params.group}` : ''}`),
+  /** Sync the contacts of a client with its linked 1C counterparty now (409 PARTY_CONTACTS_ONEC_SYNC_OFF when the sync is off). */
+  syncClientOnec: (clientId: number) =>
+    httpClient.post<{ outcome: SupplierOnecSyncOutcome; contacts: PartyContacts; onec: SupplierOnecProfile | null }>(
+      apiRoutes.partyContacts.clientContactsOnecSync(clientId), {}),
   clientCounterpartyMatches: () => httpClient.get<ClientCounterpartyMatches>(apiRoutes.partyContacts.clientCounterpartyMatches),
   /** At most CLIENT_CONFIRM_MAX pairs; a pair that is no longer possible is reported and skipped. */
   confirmClientCounterparties: (pairs: Array<{ clientId: number; refKey1c: string }>) =>

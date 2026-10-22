@@ -53,7 +53,8 @@ describe('migration 269: client contact kinds and the «Контакты кли�
 
   it('has an end-state probe in the migration runner', () => {
     expect(runner).toContain('269_client_contacts_screen*) probe_all');
-    expect(runner).toContain('|269_client_contacts_screen*)');
+    // A later migration may follow it in the post-apply list.
+    expect(runner).toMatch(/\|269_client_contacts_screen\*[|)]/);
     expect(runner).toContain("AND convalidated AND conname IN ('ck_client_contacts_kind', 'ck_client_contacts_value_normalized', 'ck_client_contacts_other_note')) = 3;");
   });
 });

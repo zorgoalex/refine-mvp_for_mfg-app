@@ -8,7 +8,10 @@ import { RequirePermissions } from '../../permissions/require-permissions.decora
 import { ClientPhoneService } from '../client-phones/application/client-phone.service';
 import { ClientPhonesRuntimeConfigService } from '../client-phones/http/client-phones-runtime-config.service';
 import { PartyContactsRepository } from '../party-contacts/party-contacts.repository';
-import { PARTY_CONFIG, PARTY_NOTE_MAX, PARTY_OWN_CONTACTS_MAX, PARTY_VALUE_MAX } from '../party-contacts/party-contacts';
+import { CLIENT_ONEC_DATA_VIEW } from '../party-contacts/client-onec-visibility';
+import {
+  PARTY_ADDRESS_MAX, PARTY_CONTACT_KINDS, PARTY_NOTE_MAX, PARTY_ONEC_CONTACTS_MAX, PARTY_OWN_CONTACTS_MAX,
+} from '../party-contacts/party-contacts';
 import {
   CLIENT_CONTACT_COLUMNS, CLIENT_CONTACT_SORTS, ClientContactsListRepository,
   type ClientContactColumn, type ClientContactsQuery, type ColumnFilter,
@@ -18,16 +21,17 @@ import {
 export const CLIENT_CONTACTS_SCREEN_SOURCE = 'client_contacts_screen';
 export const CLIENT_CONTACTS_PAGE_MAX = 100;
 
-const clientKinds = PARTY_CONFIG.client.kinds as readonly [string, ...string[]];
+// As the card's set command: lines naming copies of 1C (their kinds, an address up to 500) pass; which kinds and how many
+// own rows a client keeps is checked by the set planner (one source of the rules).
 const contactsSchema = z.object({
   version: z.number().int().min(0),
   contacts: z.array(z.object({
     contactId: z.number().int().positive().nullable(),
-    kind: z.enum(clientKinds),
-    value: z.string().trim().min(1).max(PARTY_VALUE_MAX),
+    kind: z.enum(PARTY_CONTACT_KINDS),
+    value: z.string().trim().min(1).max(PARTY_ADDRESS_MAX),
     isPrimary: z.boolean(),
     note: z.string().max(PARTY_NOTE_MAX).nullable().optional(),
-  }).strict()).max(PARTY_OWN_CONTACTS_MAX),
+  }).strict()).max(PARTY_OWN_CONTACTS_MAX + PARTY_ONEC_CONTACTS_MAX),
 }).strict();
 
 const phoneType = z.enum(['mobile', 'work', 'home', 'fax']);
@@ -64,8 +68,8 @@ export class ClientContactsController {
   @Get('client-contacts') @RequirePermissions(['clients.contacts.view'])
   async index(@Query() query: Record<string, unknown>, @Req() request: RequestWithCurrentUser) {
     const parsed = parseListQuery(query);
-    const { items, total } = await this.list.list(parsed);
     const user = actor(request).user;
+    const { items, total } = await this.list.list(parsed, user.permissions.includes(CLIENT_ONEC_DATA_VIEW));
     return {
       items, total, page: parsed.page, pageSize: parsed.pageSize,
       kinds: this.contacts.kindsNow('client'),
@@ -76,8 +80,8 @@ export class ClientContactsController {
 
   @ApiOperation({ summary: 'One client of the list (after a save or a conflict)' })
   @Get('client-contacts/:clientId') @RequirePermissions(['clients.contacts.view'])
-  async one(@Param('clientId') clientId: string) {
-    return this.rowOf(parseId(clientId));
+  async one(@Param('clientId') clientId: string, @Req() request: RequestWithCurrentUser) {
+    return this.rowOf(parseId(clientId), actor(request).user);
   }
 
   @ApiOperation({ summary: 'Replace the emails and messengers of a client from the list (version compare-and-swap)' })
@@ -90,7 +94,7 @@ export class ClientContactsController {
     await this.contacts.replace('client', id,
       parsed.data.version, parsed.data.contacts.map((contact) => ({ ...contact, kind: contact.kind as never, note: contact.note ?? null })),
       user, requestId, CLIENT_CONTACTS_SCREEN_SOURCE);
-    return this.rowOf(id);
+    return this.rowOf(id, user);
   }
 
   // `result` is the stored answer of the command (a repeat after a lost answer gets the same one); `row` is the client now.
@@ -105,11 +109,11 @@ export class ClientContactsController {
     const id = parseId(clientId);
     const { user, requestId } = actor(request);
     const result = await this.phones.replaceSet({ currentUser: user, clientId: id, dto: parsed.data, requestId, source: CLIENT_CONTACTS_SCREEN_SOURCE });
-    return { result, row: await this.rowOf(id) };
+    return { result, row: await this.rowOf(id, user) };
   }
 
-  private async rowOf(clientId: number) {
-    const row = await this.list.row(clientId);
+  private async rowOf(clientId: number, user: CurrentUser) {
+    const row = await this.list.row(clientId, user.permissions.includes(CLIENT_ONEC_DATA_VIEW));
     if (!row) throw new ApiError(404, 'CLIENT_NOT_FOUND', 'Клиент не найден');
     return row;
   }

@@ -173,3 +173,12 @@ export function newIdempotencyKey(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
   return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
 }
+
+/** A contact of the merge preview as a line: a copy from 1C has no value and returns by the 1C link. */
+export function droppedContactLine(contact: { kind: string; value: string | null; origin?: 'erp' | 'onec' }):
+  { text: string; note: string; strike: boolean } {
+  if (contact.origin === 'onec' || contact.value == null) {
+    return { text: 'контакт из 1С', note: '— удалится, вернётся по связи с 1С', strike: false };
+  }
+  return { text: `${contact.kind}: ${contact.value}`, note: '— уже есть', strike: true };
+}

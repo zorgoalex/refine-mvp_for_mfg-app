@@ -12,14 +12,14 @@ describe('1C contacts passes of suppliers', () => {
     let first = true;
     const repository = {
       targets: async () => [1],
-      sync: async (_supplierId: number, ctx: SyncContext) => {
+      syncOwner: async (_party: string, _supplierId: number, ctx: SyncContext) => {
         seen.push({ trigger: ctx.trigger, correlationId: ctx.correlationId });
         if (first) { first = false; await paused; }
         return { status: 'unchanged', added: 0, removed: 0, updated: 0, skipped: 0, contactsState: 'available' };
       },
       recordPass: async () => undefined,
     } as unknown as SupplierOnecContactsRepository;
-    const config = { get: () => true } as unknown as ConfigService<never, true>;
+    const config = { get: (key: string) => key === 'BACKEND_PARTY_CONTACTS_ONEC_SYNC' } as unknown as ConfigService<never, true>;
     const service = new SupplierOnecContactsService(config as never, repository, {} as OnecEtlEvents);
 
     const running = service.pass('hourly', 'corr-hourly');
@@ -36,5 +36,29 @@ describe('1C contacts passes of suppliers', () => {
       { trigger: 'hourly', correlationId: 'corr-hourly-2' },
       { trigger: 'published', correlationId: 'corr-run-c' },
     ]);
+  });
+
+  it('with the client flag a pass goes over suppliers, then clients; each kind keeps its own pass state', async () => {
+    const seen: string[] = [];
+    const passes: string[] = [];
+    const repository = {
+      targets: async (party: string) => (party === 'supplier' ? [1] : [7, 8]),
+      syncOwner: async (party: string, id: number) => {
+        seen.push(`${party}:${id}`);
+        return { status: 'unchanged', added: 0, removed: 0, updated: 0, skipped: 0, contactsState: 'available' };
+      },
+      recordPass: async (_trigger: string, _startedAt: Date, counts: { processed: number }, _error: string | null, party: string) => {
+        passes.push(`${party}:${counts.processed}`);
+      },
+    } as unknown as SupplierOnecContactsRepository;
+    const both = new SupplierOnecContactsService({ get: () => true } as never, repository, {} as OnecEtlEvents);
+    await both.pass('hourly');
+    expect(seen).toEqual(['supplier:1', 'client:7', 'client:8']);
+    expect(passes).toEqual(['supplier:1', 'client:2']);
+    seen.length = 0;
+    const clientsOnly = new SupplierOnecContactsService({ get: (key: string) => key === 'BACKEND_CLIENT_ONEC_CONTACTS_SYNC' } as never, repository, {} as OnecEtlEvents);
+    await clientsOnly.pass('hourly');
+    expect(seen).toEqual(['client:7', 'client:8']);
+    await expect(clientsOnly.syncSupplier(1, {} as never, 'r', 'manual')).rejects.toMatchObject({ code: 'PARTY_CONTACTS_ONEC_SYNC_OFF' });
   });
 });

@@ -17,6 +17,6 @@ import { SupplierOnecContactsService } from './supplier-onec-contacts.service';
   imports: [DatabaseModule, PermissionsModule, OnecAgentModule],
   controllers: [PartyContactsController, ClientOnecDocumentsController],
   providers: [PartyContactsRepository, SupplierCounterpartyRepository, SupplierOnecContactsRepository, SupplierOnecContactsService, ClientCounterpartyRepository, ClientOnecDocumentsService, PermissionsGuard],
-  exports: [PartyContactsRepository, SupplierCounterpartyRepository, ClientCounterpartyRepository],
+  exports: [PartyContactsRepository, SupplierCounterpartyRepository, ClientCounterpartyRepository, SupplierOnecContactsService],
 })
 export class PartyContactsModule {}

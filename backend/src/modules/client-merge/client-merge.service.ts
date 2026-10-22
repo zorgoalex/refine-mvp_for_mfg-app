@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { auditService } from '../../common/audit/audit.service';
 import { ApiError } from '../../common/errors/api-error';
@@ -12,6 +12,7 @@ import { readableOrderIds } from '../../permissions/policies/order-read-visibili
 import { orderReadVisibilityIsRestricted } from '../../permissions/policies/order-read-scope-sql';
 import { recordTransition, type MemberRef } from '../integration-duplicates/duplicate-transitions';
 import { ClientCounterpartyRepository } from '../party-contacts/client-counterparty.repository';
+import { SupplierOnecContactsService } from '../party-contacts/supplier-onec-contacts.service';
 import {
   LOCK_ATTEMPTS, MAX_ORDERS, SOURCE, obstacle, type MergeContext, type Obstacle, type ObstacleCode,
 } from './client-merge';
@@ -50,6 +51,7 @@ export class ClientMergeService implements OnModuleInit, OnModuleDestroy {
     @Inject(ConfigService) private readonly config: ConfigService<BackendEnv, true>,
     @Inject(DatabaseService) private readonly database: DatabaseService,
     @Inject(ClientCounterpartyRepository) private readonly links: ClientCounterpartyRepository,
+    @Optional() @Inject(SupplierOnecContactsService) private readonly onecContacts?: SupplierOnecContactsService,
   ) {}
 
   enabled(): boolean {
@@ -167,6 +169,8 @@ export class ClientMergeService implements OnModuleInit, OnModuleDestroy {
     }
     // The clients of deadlines of the moved orders are copies: aligned now, one row per transaction (and by the maintenance).
     await this.alignAfterCommit(outcome.movedOrderIds);
+    // A 1C link that moved to the survivor brings its contacts of 1C (K4b) — in the background, the hourly pass repeats it.
+    this.onecContacts?.syncClientsSoon([command.survivorId], user, requestId);
     // The answer (also of a repeat) is built now, by the current rights of the reader: counts of orders it may not see are not given.
     const view = await this.get(user, Number(outcome.response.mergeId));
     return { mergeId: view.mergeId, caseId: view.caseId, survivorId: view.survivor.clientId, mergedId: view.merged.clientId, counts: view.counts };
@@ -314,7 +318,12 @@ export class ClientMergeService implements OnModuleInit, OnModuleDestroy {
       },
       contacts: {
         moved: contacts.move.map((c) => ({ contactId: c.contactId, kind: c.kind, value: fullPhones ? c.value : '•••' })),
-        dropped: contacts.drop.map((d) => ({ contactId: d.contact.contactId, kind: d.contact.kind, value: fullPhones ? d.contact.value : '•••' })),
+        // A copy of 1C contacts (K4b) is never shown here, whatever the rights: it goes, and the sync brings it by the link.
+        dropped: contacts.drop.map((d) => ({
+          contactId: d.contact.contactId, kind: d.contact.kind, origin: d.contact.origin,
+          value: d.contact.origin !== 'erp' ? null : fullPhones ? d.contact.value : '•••',
+        })),
+        onecCopiesDropped: contacts.drop.filter((d) => d.contact.origin !== 'erp').length,
         total: contacts.total,
       },
       warnings,
@@ -415,6 +424,8 @@ export class ClientMergeService implements OnModuleInit, OnModuleDestroy {
     }
     await this.alignAfterCommit(outcome.orderIds);
     const view = await this.get(user, mergeId);
+    // Both clients' copies of 1C contacts follow their links again (K4b) — in the background.
+    this.onecContacts?.syncClientsSoon([view.survivor.clientId, view.merged.clientId], user, requestId);
     return { mergeId, status: view.status, report: view.undoReport };
   }
 

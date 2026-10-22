@@ -67,7 +67,12 @@ describe('client ↔ 1C counterparty model', () => {
 
   it('the client forms no longer carry the 1C key: it is changed only by the card command', () => {
     for (const file of ['./create.tsx', './edit.tsx']) expect(read(file)).not.toMatch(/name="ref_key_1c"/);
-    expect(read('./edit.tsx')).toMatch(/<ClientCounterpartyCard clientId=\{Number\(id\) \|\| null\} editable=\{can\("clients\.update"\)\} canChoose=\{canChooseCounterparty\(can\)\} \/>/);
+    expect(read('./edit.tsx')).toMatch(/<ClientCounterpartyCard clientId=\{Number\(id\) \|\| null\} editable=\{can\("clients\.update"\)\} canChoose=\{canChooseCounterparty\(can\)\}/);
+    // K4b: a link change reloads the contacts (the copy of the previous counterparty is gone) and waits for unsaved edits.
+    expect(read('./edit.tsx')).toMatch(/onContactsChanged=\{contactsChanged\} onContactsSettle=\{contactsSettle\} contactsDirty=\{contactsDirty\} onBusyChange=\{setCounterpartyBusy\} \/>/);
+    // The later read waits for unsaved edits (no timer reloads the contacts by itself).
+    expect(read('./edit.tsx')).toMatch(/deferredReloadNow\(reloadPending, contactsDirty, onecSyncBusy \|\| counterpartyBusy\)/);
+    expect(read('./ClientCounterpartyCard.tsx')).not.toMatch(/setTimeout\(onContactsChanged/);
     expect(read('./show.tsx')).toMatch(/<ClientCounterpartyCard [^>]*editable=\{false\} \/>/);
     expect(read('./ClientCounterpartyCard.tsx')).not.toMatch(/from 'antd'[^;]*\bTooltip\b/);
   });

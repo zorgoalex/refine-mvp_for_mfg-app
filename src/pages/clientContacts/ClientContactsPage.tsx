@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Input, Radio, Space, Typography } from 'antd';
+import { Alert, Button, Input, Radio, Space, Tag, Typography } from 'antd';
 import { EditOutlined, FilterFilled, ReloadOutlined, StarFilled } from '@ant-design/icons';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { ColumnType } from 'antd/es/table';
@@ -126,6 +126,7 @@ export function ClientContactsPage() {
                 style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {'phoneId' in value ? value.phoneNumber : formatContact(value)}
                 {value.isPrimary && values.length > 1 ? <StarFilled style={{ color: '#faad14', marginLeft: 4, fontSize: 11 }} /> : null}
+                {'origin' in value && value.origin === 'onec' ? <Tag color="blue" style={{ marginInlineStart: 4 }}>из 1С</Tag> : null}
                 {'note' in value && value.note ? <Typography.Text type="secondary" style={{ fontSize: 12 }}> · {value.note}</Typography.Text> : null}
               </span>
             ))}

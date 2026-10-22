@@ -56,7 +56,10 @@ function normalizeMessenger(kind: 'whatsapp' | 'viber' | 'instagram' | 'other', 
   return words;
 }
 
-/** A contact as stored (what the set command starts from). `available` — a row from 1C whose 1C data may be shown now. */
+/**
+ * A contact as stored (what the set command starts from). `available` — a row from 1C that may be shown now, to this reader
+ * (a client's copy: by `clients.onec_data.view` and its current link too).
+ */
 export interface StoredContact {
   contactId: number;
   kind: PartyContactKind;
@@ -99,9 +102,15 @@ export function planContactSet(
   const byId = new Map(stored.map((row) => [row.contactId, row]));
   const named = new Set<number>();
   for (const line of input) {
-    if (!PARTY_CONTACT_KINDS.includes(line.kind) || !kinds.includes(line.kind)) {
+    const namedRow = line.contactId === null ? undefined : byId.get(line.contactId);
+    // A line naming a row of 1C may be of a kind the owner does not keep itself (a client's phone or address from 1C).
+    const copyLine = namedRow?.origin === 'onec' && namedRow.kind === line.kind;
+    if (!PARTY_CONTACT_KINDS.includes(line.kind) || (!kinds.includes(line.kind) && !copyLine)) {
       throw new ApiError(422, PARTY_CONTACT_CODES.invalid, owner === 'клиента'
         ? 'Телефоны клиента ведутся в списке телефонов клиента' : 'Этот вид контакта здесь не ведётся', { kind: line.kind });
+    }
+    if (copyLine && !kinds.includes(line.kind) && line.isPrimary) {
+      throw new ApiError(422, PARTY_CONTACT_CODES.invalid, 'Контакт из 1С этого вида не может быть основным', { kind: line.kind });
     }
     if (line.contactId === null) continue;
     if (named.has(line.contactId)) throw new ApiError(422, PARTY_CONTACT_CODES.invalid, 'Один контакт указан в наборе дважды');

@@ -11,6 +11,8 @@ import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder"
 import { Form, Input, Checkbox, notification, Spin, Radio, Typography } from "antd";
 import { ClientPhonesSection } from "./components/ClientPhonesSection";
 import { ClientCounterpartyCard } from "./ClientCounterpartyCard";
+import { ClientOnecContactsStatus } from "./ClientOnecContactsStatus";
+import { deferredReloadNow } from "./clientOnecContactsModel";
 import { canChooseCounterparty } from "./clientCounterpartyModel";
 import { ContactsCard } from "../../components/contacts/ContactsCard";
 import { CLIENT_CONTACTS } from "../../components/contacts/partyContactsSources";
@@ -33,6 +35,20 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
   const [deletedPhones, setDeletedPhones] = useState<number[]>([]);
   const [phonesLoaded, setPhonesLoaded] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  // A sync with 1C changes the contacts: the contacts block re-reads them; unsaved edits hold the sync back.
+  const [contactsToken, setContactsToken] = useState(0);
+  const [contactsDirty, setContactsDirty] = useState(false);
+  const [onecSyncBusy, setOnecSyncBusy] = useState(false);
+  const [counterpartyBusy, setCounterpartyBusy] = useState(false);
+  const contactsChanged = useCallback(() => setContactsToken((token) => token + 1), []);
+  // The contacts of a new counterparty arrive a little later: read again then — but never over unsaved edits.
+  const [reloadPending, setReloadPending] = useState(false);
+  const contactsSettle = useCallback(() => setReloadPending(true), []);
+  useEffect(() => {
+    if (!deferredReloadNow(reloadPending, contactsDirty, onecSyncBusy || counterpartyBusy)) return;
+    setReloadPending(false);
+    contactsChanged();
+  }, [reloadPending, contactsDirty, onecSyncBusy, counterpartyBusy, contactsChanged]);
 
   // Fetch client phones
   const { data: phonesData, isLoading: phonesLoading, refetch: refetchPhones } = useList<ClientPhone>({
@@ -189,11 +205,17 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
         />
       )}
       <div style={{ marginTop: 12 }}>
-        <ContactsCard ownerId={Number(id) || null} editable={can("clients.update")} source={CLIENT_CONTACTS} />
+        <ContactsCard ownerId={Number(id) || null} editable={can("clients.update")} source={CLIENT_CONTACTS} reloadToken={contactsToken}
+          onDirtyChange={setContactsDirty} locked={onecSyncBusy || counterpartyBusy} />
+        <div style={{ marginTop: 8 }}>
+          <ClientOnecContactsStatus clientId={Number(id) || null} canSync={canChooseCounterparty(can)} contactsDirty={contactsDirty}
+            onContactsChanged={contactsChanged} onBusyChange={setOnecSyncBusy} reloadToken={contactsToken} />
+        </div>
       </div>
       {/* Сопоставление с контрагентом 1С — отдельной командой, вне формы клиента. */}
       <div style={{ marginTop: 12 }}>
-        <ClientCounterpartyCard clientId={Number(id) || null} editable={can("clients.update")} canChoose={canChooseCounterparty(can)} />
+        <ClientCounterpartyCard clientId={Number(id) || null} editable={can("clients.update")} canChoose={canChooseCounterparty(can)}
+          onContactsChanged={contactsChanged} onContactsSettle={contactsSettle} contactsDirty={contactsDirty} onBusyChange={setCounterpartyBusy} />
       </div>
     </Edit>
   );

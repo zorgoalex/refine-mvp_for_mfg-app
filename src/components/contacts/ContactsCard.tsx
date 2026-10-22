@@ -5,7 +5,7 @@ import type { EmployeeContact, EmployeeContactInput, EmployeeContactKind } from 
 import { isApiError } from '../../api/apiError';
 import {
   EMPLOYEE_CONTACT_KIND_LABELS, EMPLOYEE_CONTACTS_MAX,
-  addDraftRow, contactValueMaxLength, changeDraftKind, isContactsApiMissing, contactsToDraft, draftToInput, formatContact, removeDraftRow, setDraftPrimary, sortContacts,
+  addDraftRow, contactValueMaxLength, changeDraftKind, isContactsApiMissing, isForeignCopy, contactsToDraft, draftToInput, formatContact, removeDraftRow, setDraftPrimary, sortContacts,
   type EmployeeContactDraft,
 } from './contactsModel';
 
@@ -91,7 +91,7 @@ export const ContactsCard: React.FC<Props> = ({ ownerId, editable, source, reloa
 
   const save = async () => {
     if (!ownerId || !data) return;
-    const body = draftToInput(rows);
+    const body = draftToInput(rows, data?.kinds ?? source.kinds);
     if ('error' in body) { message.error(body.error); return; }
     setSaving(true);
     try {
@@ -127,7 +127,7 @@ export const ContactsCard: React.FC<Props> = ({ ownerId, editable, source, reloa
               <Space key={contact.contactId} size={8} wrap>
                 <Typography.Text type="secondary">{EMPLOYEE_CONTACT_KIND_LABELS[contact.kind]}</Typography.Text>
                 <Typography.Text copyable>{formatContact(contact)}</Typography.Text>
-                {contact.isPrimary ? <Tag color="gold">основной</Tag> : null}
+                {contact.isPrimary && !(contact.origin === 'onec' && !kinds.includes(contact.kind)) ? <Tag color="gold">основной</Tag> : null}
                 {contact.origin === 'onec' ? FROM_ONEC_TAG : null}
                 {contact.note ? <Typography.Text type="secondary">{contact.note}</Typography.Text> : null}
               </Space>
@@ -154,8 +154,10 @@ export const ContactsCard: React.FC<Props> = ({ ownerId, editable, source, reloa
             <Typography.Text style={{ flex: '1 1 200px', minWidth: 0 }}>
               {formatContact({ kind: row.kind, value: row.value, valueNormalized: row.value })} {FROM_ONEC_TAG}
             </Typography.Text>
-            <Checkbox disabled={busy} checked={row.isPrimary} onChange={() => change(setDraftPrimary(rows, row.rowKey))}>
-              {row.isPrimary ? <><StarFilled style={{ color: '#faad14' }} /> основной</> : 'основной'}
+            {/* The owner keeps no such kind itself (a client's phone, address): the copy is never «основной». */}
+            <Checkbox disabled={busy || isForeignCopy(row, kinds)} checked={row.isPrimary && !isForeignCopy(row, kinds)}
+              onChange={() => change(setDraftPrimary(rows, row.rowKey))}>
+              {row.isPrimary && !isForeignCopy(row, kinds) ? <><StarFilled style={{ color: '#faad14' }} /> основной</> : 'основной'}
             </Checkbox>
           </div>
         ) : (

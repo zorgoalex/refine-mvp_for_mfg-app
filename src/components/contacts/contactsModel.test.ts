@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../api/apiError';
 import {
   isContactsApiMissing,
-  addDraftRow, changeDraftKind, contactsToDraft, draftToInput, formatContact, removeDraftRow, setDraftPrimary, sortContacts,
+  addDraftRow, changeDraftKind, contactsToDraft, draftToInput, formatContact, isForeignCopy, removeDraftRow, setDraftPrimary, sortContacts,
 } from './contactsModel';
 
 const contacts = [
@@ -79,5 +79,34 @@ describe('contacts that came from 1C and addresses', () => {
     const own = Array.from({ length: 20 }, (_, index) => ({ contactId: 100 + index, kind: 'email' as const, value: `u${index}@t.kz`,
       valueNormalized: `u${index}@t.kz`, isPrimary: index === 0, note: null }));
     expect('contacts' in draftToInput(contactsToDraft([...own, ...fromOnec]))).toBe(true);
+  });
+});
+
+describe('copies from 1C of a kind the owner does not keep (a client phone, address)', () => {
+  const clientKinds = ['email', 'telegram'] as const;
+  const copies = [
+    { contactId: 7, kind: 'phone' as const, value: '+7 (701) 555-11-01', valueNormalized: '77015551101', isPrimary: true, note: null, origin: 'onec' as const },
+    { contactId: 8, kind: 'address' as const, value: 'Алматы, ул. Тестовая, 1', valueNormalized: 'алматы', isPrimary: false, note: null, origin: 'onec' as const },
+    { contactId: 9, kind: 'email' as const, value: 'x@t.kz', valueNormalized: 'x@t.kz', isPrimary: false, note: null, origin: 'onec' as const },
+  ];
+
+  it('knows which copy is read-only', () => {
+    const rows = contactsToDraft(copies);
+    expect(rows.map((row) => isForeignCopy(row, clientKinds))).toEqual([true, true, false]);
+    expect(rows.map((row) => isForeignCopy(row, ['phone', 'email', 'telegram', 'address']))).toEqual([false, false, false]);
+    expect(isForeignCopy({ fromOnec: false, kind: 'phone' }, clientKinds)).toBe(false);
+  });
+
+  it('never sends isPrimary for such a copy, keeps id and value, and lets an email copy be primary', () => {
+    let rows = contactsToDraft(copies);
+    rows = setDraftPrimary(rows, rows[2].rowKey);
+    const body = draftToInput(rows, clientKinds);
+    expect(body).toEqual({ contacts: [
+      { contactId: 7, kind: 'phone', value: '+7 (701) 555-11-01', isPrimary: false, note: null },
+      { contactId: 8, kind: 'address', value: 'Алматы, ул. Тестовая, 1', isPrimary: false, note: null },
+      { contactId: 9, kind: 'email', value: 'x@t.kz', isPrimary: true, note: null },
+    ] });
+    // a supplier keeps phones itself: nothing changes for it
+    expect('contacts' in draftToInput(contactsToDraft(copies)) && draftToInput(contactsToDraft(copies)).contacts[0].isPrimary).toBe(true);
   });
 });

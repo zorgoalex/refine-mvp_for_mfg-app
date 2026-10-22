@@ -83,14 +83,26 @@ export function changeDraftKind(rows: readonly EmployeeContactDraft[], key: stri
   return [...without.slice(0, index), moved, ...without.slice(index)];
 }
 
-/** The command body; an empty value is a local error (the backend validates the rest). */
-export function draftToInput(rows: readonly EmployeeContactDraft[]): { contacts: EmployeeContactInput[] } | { error: string } {
+/**
+ * A copy from 1C of a kind this owner does not keep itself (a client's phone or address) is read-only and never
+ * «основной»: the backend answers 422 for such a line with isPrimary.
+ */
+export function isForeignCopy(row: Pick<EmployeeContactDraft, 'fromOnec' | 'kind'>, kinds: readonly EmployeeContactKind[]): boolean {
+  return row.fromOnec && !kinds.includes(row.kind);
+}
+
+/**
+ * The command body; an empty value is a local error (the backend validates the rest). `kinds` — the kinds the owner
+ * keeps: the copies of other kinds go back as they are (same id and value) and never primary.
+ */
+export function draftToInput(rows: readonly EmployeeContactDraft[], kinds?: readonly EmployeeContactKind[]): { contacts: EmployeeContactInput[] } | { error: string } {
   if (rows.filter((row) => !row.fromOnec).length > EMPLOYEE_CONTACTS_MAX) return { error: `Не больше ${EMPLOYEE_CONTACTS_MAX} своих контактов` };
   if (rows.some((row) => !row.value.trim())) return { error: 'Заполните значение каждого контакта или удалите пустую строку' };
   if (rows.some((row) => row.kind === 'other' && !row.note.trim())) return { error: 'У контакта «Другое» укажите подпись (например, VK)' };
   return {
     contacts: rows.map((row) => ({
-      contactId: row.contactId, kind: row.kind, value: row.value.trim(), isPrimary: row.isPrimary,
+      contactId: row.contactId, kind: row.kind, value: row.value.trim(),
+      isPrimary: kinds && isForeignCopy(row, kinds) ? false : row.isPrimary,
       note: row.note.trim() ? row.note.trim() : null,
     })),
   };

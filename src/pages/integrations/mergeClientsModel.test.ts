@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DuplicateMemberDetail } from '../../api/integrationDuplicatesApiTypes';
 import {
-  canConfirmMerge, canMergeCase, confirmText, countLines, defaultSurvivorId, memberOrderCount, mergeErrorInfo,
+  canConfirmMerge, canMergeCase, confirmText, countLines, defaultSurvivorId, droppedContactLine, memberOrderCount, mergeErrorInfo,
   mergeableMembers, obstaclesFromDetails, resolveMergedId, warningLabel,
 } from './mergeClientsModel';
 
@@ -78,5 +78,19 @@ describe('merge clients model', () => {
   it('reads obstacles from error details', () => {
     expect(obstaclesFromDetails({ obstacles: [{ code: 'a', message: 'Нельзя' }, { nope: 1 }] })).toEqual([{ code: 'a', message: 'Нельзя' }]);
     expect(obstaclesFromDetails(undefined)).toEqual([]);
+  });
+});
+
+describe('droppedContactLine', () => {
+  it('shows an ERP duplicate with its value struck out', () => {
+    expect(droppedContactLine({ kind: 'email', value: 'a@b.kz', origin: 'erp' })).toEqual({ text: 'email: a@b.kz', note: '— уже есть', strike: true });
+  });
+  it('shows a copy from 1C without a value, never «null»', () => {
+    for (const line of [droppedContactLine({ kind: 'phone', value: null, origin: 'onec' }), droppedContactLine({ kind: 'email', value: null })]) {
+      expect(line.text).toBe('контакт из 1С');
+      expect(line.note).toBe('— удалится, вернётся по связи с 1С');
+      expect(line.strike).toBe(false);
+      expect(`${line.text}${line.note}`).not.toContain('null');
+    }
   });
 });

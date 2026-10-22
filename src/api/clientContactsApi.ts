@@ -23,6 +23,8 @@ export interface ClientContactsContact {
   valueNormalized: string;
   isPrimary: boolean;
   note: string | null;
+  /** `onec` — a read-only copy from the linked 1C counterparty (only for readers with `clients.onec_data.view`). */
+  origin?: 'erp' | 'onec';
 }
 
 export interface ClientContactsRow {

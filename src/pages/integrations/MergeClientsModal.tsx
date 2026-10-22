@@ -11,6 +11,7 @@ import {
   canConfirmMerge,
   confirmText,
   defaultSurvivorId,
+  droppedContactLine,
   mergeErrorInfo,
   mergeableMembers,
   newIdempotencyKey,
@@ -286,11 +287,14 @@ export function MergeClientsModal({ open, card, onClose, onMerged, onCaseChanged
                 <Descriptions.Item label="Контакты">
                   {preview.contacts.moved.length === 0 && preview.contacts.dropped.length === 0 && '—'}
                   {preview.contacts.moved.map((contact) => <div key={contact.contactId}>{contact.kind}: {contact.value}</div>)}
-                  {preview.contacts.dropped.map((contact) => (
-                    <div key={contact.contactId}>
-                      <Text delete>{contact.kind}: {contact.value}</Text> <Text type="secondary">— уже есть</Text>
-                    </div>
-                  ))}
+                  {preview.contacts.dropped.map((contact) => {
+                    const line = droppedContactLine(contact);
+                    return (
+                      <div key={contact.contactId}>
+                        <Text delete={line.strike}>{line.text}</Text> <Text type="secondary">{line.note}</Text>
+                      </div>
+                    );
+                  })}
                 </Descriptions.Item>
               </Descriptions>
             </div>

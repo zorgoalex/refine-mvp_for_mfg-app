@@ -1126,6 +1126,7 @@ paths:
       tags: [Party contacts]
       operationId: getClientContacts
       summary: 'Contacts of a client with the set version (emails and Telegram accounts; phones stay in client phones)'
+      description: 'Copies of the linked 1C counterparty (origin onec: phones, emails, addresses; read-only) are returned only to readers with clients.onec_data.view, while the 1C data may be used and for the current link of the client.'
       security: [{bearerAuth: []}]
       x-permissions: [clients.view]
       parameters:
@@ -1139,7 +1140,7 @@ paths:
       tags: [Party contacts]
       operationId: replaceClientContacts
       summary: 'Replace the contacts of a client (emails and Telegram accounts; phones stay in client phones)'
-      description: 'Version compare-and-swap on the set (also for an empty one). A contact with contactId keeps its id; missing ones are deleted. One primary per kind (the first by default). Audited with masks only. The owner row itself is not updated.'
+      description: 'Version compare-and-swap on the set (also for an empty one). A contact with contactId keeps its id; missing ones are deleted. One primary per kind (the first by default). Audited with masks only. The owner row itself is not updated. A line naming a copy of 1C may only move its place (a copied phone is never primary); copies not named stay; a copy hidden from the user with the value of one of their lines is deleted.'
       security: [{bearerAuth: []}]
       x-permissions: [clients.update]
       parameters:
@@ -1465,6 +1466,22 @@ paths:
         '409': {description: 'CLIENT_MERGE_UNDO_BLOCKED | CLIENT_MERGE_UNDO_STALE | CLIENT_MERGE_ALREADY_UNDONE | CLIENT_MERGE_BUSY | IDEMPOTENCY_IN_PROGRESS'}
         '410': {description: 'CLIENT_MERGE_UNDO_EXPIRED'}
         '422': {description: 'VALIDATION_FAILED | IDEMPOTENCY_KEY_REUSED'}
+  /api/v1/clients/{id}/contacts/onec-sync:
+    post:
+      tags: [Party contacts]
+      operationId: syncClientContactsFromOnec
+      summary: 'Sync the contacts of a client with its 1C counterparty now'
+      description: 'Uses the loaded 1C data (BACKEND_CLIENT_ONEC_CONTACTS_SYNC; off — 409 PARTY_CONTACTS_ONEC_SYNC_OFF). Returns the sync outcome, the contacts of the client (with the copies of 1C) and the state of the copy.'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.update, clients.onec_data.view]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: 'Outcome, contacts and state', content: {application/json: {schema: {type: object, required: [outcome, contacts], properties: {outcome: {type: object}, contacts: {$ref: '#/components/schemas/PartyContacts'}, onec: {type: object, nullable: true}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'CLIENT_NOT_FOUND'}
+        '409': {description: 'PARTY_CONTACTS_ONEC_SYNC_OFF'}
   /api/v1/suppliers/{id}/contacts/onec-sync:
     post:
       tags: [Party contacts]
@@ -32542,6 +32559,8 @@ components:
         available: {type: boolean, description: 'Counterparties of 1C are loaded'}
         dataHidden: {type: boolean, description: 'Phones and BIN/IIN are left out: the reader has no clients.onec_data.view'}
         counterparty: {allOf: [{$ref: '#/components/schemas/OnecCounterpartyCard'}], nullable: true}
+        onecSyncEnabled: {type: boolean, description: 'The sync of 1C contacts of clients is on (BACKEND_CLIENT_ONEC_CONTACTS_SYNC); the card offers «Сверить с 1С»'}
+        onec: {type: object, nullable: true, description: 'State of the copy of 1C contacts for the current link (last sync, contactsState, skipped); null without clients.onec_data.view or before the first sync'}
     EmployeeContacts:
       type: object
       required: [employeeId, version, contacts]

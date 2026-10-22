@@ -29,7 +29,7 @@ export interface PartyConfig {
   kinds: readonly PartyContactKind[];
   /** Kinds of `kinds` that are taken only while BACKEND_CLIENT_CONTACT_EXTRA_KINDS is on. */
   extraKinds: readonly PartyContactKind[];
-  /** Contacts of the linked 1C counterparty come in by the sync (suppliers only for now). */
+  /** Contacts of the linked 1C counterparty come in by the sync (suppliers K4a, clients K4b — phones and addresses of a client only from 1C). */
   onec: boolean;
   view: PermissionName;
   manage: PermissionName;
@@ -52,7 +52,7 @@ export const PARTY_CONFIG: Record<PartyKind, PartyConfig> = {
     notFoundCode: 'VENDOR_NOT_FOUND', notFoundText: 'Производитель не найден', ownerGenitive: 'производителя',
   },
   client: {
-    kind: 'client', table: 'client_contacts', idColumn: 'client_id', ownerTable: 'clients', kinds: ['email', 'telegram', ...CLIENT_EXTRA_CONTACT_KINDS], extraKinds: CLIENT_EXTRA_CONTACT_KINDS, onec: false,
+    kind: 'client', table: 'client_contacts', idColumn: 'client_id', ownerTable: 'clients', kinds: ['email', 'telegram', ...CLIENT_EXTRA_CONTACT_KINDS], extraKinds: CLIENT_EXTRA_CONTACT_KINDS, onec: true,
     view: 'clients.view', manage: 'clients.update', auditEvent: 'client.contacts.updated',
     notFoundCode: 'CLIENT_NOT_FOUND', notFoundText: 'Клиент не найден', ownerGenitive: 'клиента',
   },

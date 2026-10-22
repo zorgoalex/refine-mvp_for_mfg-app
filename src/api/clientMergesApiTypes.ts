@@ -36,7 +36,10 @@ export interface MergePreview {
   };
   contacts: {
     moved: Array<{ contactId: number; kind: string; value: string }>;
-    dropped: Array<{ contactId: number; kind: string; value: string }>;
+    /** A copy from 1C (`origin: 'onec'`) has no value: it returns by the 1C link. */
+    dropped: Array<{ contactId: number; kind: string; value: string | null; origin?: 'erp' | 'onec' }>;
+    /** How many copies from 1C of the merged client are dropped. */
+    onecCopiesDropped?: number;
     total: number;
   };
   warnings: MergeWarningCode[];

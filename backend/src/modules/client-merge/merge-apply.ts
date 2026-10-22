@@ -56,19 +56,35 @@ export function planPhones(state: PairState): PhonePlan {
   return plan;
 }
 
-/** Contacts: the same (kind, normalized value) is dropped from the merged client; 1C copies are dropped (their sync brings them back). */
+/**
+ * Contacts: the same (kind, normalized value) as the survivor's own row is dropped from the merged client; 1C copies of the
+ * merged client are dropped (their sync brings them back by the link). A survivor's 1C copy with the value of a merged
+ * client's own row is dropped and the own row moves (K4b: the user's value must not depend on a link to 1C); when that
+ * copy was the survivor's «основной» of its kind and no own row of the survivor is, the moved row becomes it.
+ */
 export function planContacts(state: PairState): ContactPlan {
   const own = state.contacts.filter((c) => c.clientId === state.survivor.clientId);
+  const ownErp = own.filter((c) => c.origin === 'erp');
   const theirs = state.contacts.filter((c) => c.clientId === state.merged.clientId);
   const plan: ContactPlan = { move: [], drop: [], primary: [], total: 0 };
+  const survivorCopies: ContactState[] = [];
   for (const contact of theirs) {
     if (contact.origin !== 'erp') { plan.drop.push({ contact, match: null }); continue; }
-    const match = own.find((c) => c.kind === contact.kind && c.valueNormalized === contact.valueNormalized);
-    if (match) plan.drop.push({ contact, match });
-    else plan.move.push(contact);
+    const match = ownErp.find((c) => c.kind === contact.kind && c.valueNormalized === contact.valueNormalized);
+    if (match) { plan.drop.push({ contact, match }); continue; }
+    plan.move.push(contact);
+    const copy = own.find((c) => c.origin !== 'erp' && c.kind === contact.kind && c.valueNormalized === contact.valueNormalized);
+    if (copy) { plan.drop.push({ contact: copy, match: contact }); survivorCopies.push(copy); }
+  }
+  // «Основной» of the survivor after the drops: its own rows keep theirs; a dropped copy hands its flag to the moved row.
+  const survivorHas = (kind: string) => own.some((c) => c.kind === kind && c.isPrimary && !survivorCopies.includes(c));
+  for (const copy of survivorCopies.filter((c) => c.isPrimary)) {
+    if (survivorHas(copy.kind)) continue;
+    const moved = plan.move.find((c) => c.kind === copy.kind && c.valueNormalized === copy.valueNormalized)!;
+    plan.primary.push({ contactId: moved.contactId, kind: copy.kind });
   }
   for (const kind of new Set(theirs.filter((c) => c.isPrimary && c.origin === 'erp').map((c) => c.kind))) {
-    if (own.some((c) => c.kind === kind && c.isPrimary)) continue;
+    if (survivorHas(kind) || plan.primary.some((p) => p.kind === kind)) continue;
     const former = theirs.find((c) => c.kind === kind && c.isPrimary)!;
     const dropped = plan.drop.find((d) => d.contact.contactId === former.contactId);
     plan.primary.push({ contactId: dropped?.match ? dropped.match.contactId : former.contactId, kind });
@@ -82,6 +98,10 @@ export const contactsOverLimit = (plan: ContactPlan) => plan.total > MAX_CONTACT
 const phoneRow = (p: PhoneState) => ({ clientId: p.clientId, phoneNumber: p.number, phoneType: p.type, isPrimary: p.isPrimary, refKey1c: p.ref });
 const contactRow = (c: ContactState) => ({
   clientId: c.clientId, kind: c.kind, value: c.value, valueNormalized: c.valueNormalized, isPrimary: c.isPrimary, note: c.note, position: c.position, origin: c.origin,
+  // A 1C copy: what an undo needs to give it back to the same link (K4b); erased with the journal after the undo term.
+  ...(c.origin !== 'erp' ? {
+    onecSourceId: c.onecSourceId, onecSnapshotVersion: c.onecSnapshotVersion, onecSyncedAt: c.onecSyncedAt, refKey1c: c.onecRefKey1c,
+  } : {}),
 });
 
 export interface AppliedMerge {

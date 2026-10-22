@@ -13,14 +13,25 @@ interface Props {
   editable: boolean;
   /** clients.update and clients.onec_data.view: may search and choose a counterparty. Defaults to `editable`. */
   canChoose?: boolean;
+  /** The link changed: the contacts from 1C of the previous counterparty are gone, the new ones come with the sync. */
+  onContactsChanged?: () => void;
+  /** A few seconds after a new link: the background sync has likely brought the new contacts (the page reads them when it may). */
+  onContactsSettle?: () => void;
+  /** The contacts block has unsaved edits: a link change would reload it over them, so it waits. */
+  contactsDirty?: boolean;
+  /** A link change is in flight: the contacts block takes no edits meanwhile. */
+  onBusyChange?: (busy: boolean) => void;
 }
+
+/** The contacts of the new counterparty come with a sync in the background after the link: the page reads them again then. */
+const SYNC_SETTLE_MS = 3000;
 
 /**
  * «Контрагент 1С» of a client: one counterparty for a client, one client for a counterparty. The link is
  * changed only by the backend command (checked against the loaded 1C data, audited); the form of the client
  * no longer carries the key.
  */
-export const ClientCounterpartyCard: React.FC<Props> = ({ clientId, editable, canChoose = editable }) => {
+export const ClientCounterpartyCard: React.FC<Props> = ({ clientId, editable, canChoose = editable, onContactsChanged, onContactsSettle, contactsDirty = false, onBusyChange }) => {
   const choosing = editable && canChoose;
   const [link, setLink] = useState<ClientLink | null>(null);
   const [suggestions, setSuggestions] = useState<ClientCounterparty[]>([]);
@@ -31,6 +42,10 @@ export const ClientCounterpartyCard: React.FC<Props> = ({ clientId, editable, ca
   const [saving, setSaving] = useState(false);
   const [searching, setSearching] = useState(false);
   const searchRef = useRef(0);
+  useEffect(() => { onBusyChange?.(saving); }, [saving, onBusyChange]);
+  // The «settled» signal of a link change: dropped when the card goes or shows another client.
+  const settleRef = useRef<number | null>(null);
+  useEffect(() => () => { if (settleRef.current !== null) window.clearTimeout(settleRef.current); settleRef.current = null; }, [clientId]);
 
   const load = useCallback(async () => {
     if (!clientId) return;
@@ -72,10 +87,15 @@ export const ClientCounterpartyCard: React.FC<Props> = ({ clientId, editable, ca
   useEffect(() => { if (choosing) void suggest(); }, [choosing, suggest]);
 
   const change = async (refKey1c: string | null) => {
-    if (!clientId || !link || saving) return;
+    if (!clientId || !link || saving || contactsDirty) return;
     setSaving(true);
     try {
       setLink(await partyContactsApi.setClientCounterparty(clientId, { refKey1c, expectedRefKey1c: link.refKey1c }));
+      onContactsChanged?.();
+      if (refKey1c && onContactsSettle) {
+        if (settleRef.current !== null) window.clearTimeout(settleRef.current);
+        settleRef.current = window.setTimeout(() => { settleRef.current = null; onContactsSettle(); }, SYNC_SETTLE_MS);
+      }
       setChoice(null);
       setFound([]);
       message.success(refKey1c ? 'Клиент сопоставлен с контрагентом 1С' : 'Сопоставление с контрагентом 1С снято');
@@ -153,10 +173,10 @@ export const ClientCounterpartyCard: React.FC<Props> = ({ clientId, editable, ca
                       title={confirmText}
                       okText={link.refKey1c ? 'Заменить' : 'Сопоставить'}
                       cancelText="Отмена"
-                      disabled={saving}
+                      disabled={saving || contactsDirty}
                       onConfirm={() => { void change(item.refKey1c); }}
                     >
-                      <Button size="small" type="primary" disabled={saving}>{link.refKey1c ? 'Заменить на этого' : 'Сопоставить'}</Button>
+                      <Button size="small" type="primary" disabled={saving || contactsDirty}>{link.refKey1c ? 'Заменить на этого' : 'Сопоставить'}</Button>
                     </Popconfirm>
                   )]}
                 >
@@ -175,7 +195,7 @@ export const ClientCounterpartyCard: React.FC<Props> = ({ clientId, editable, ca
               showSearch
               allowClear
               filterOption={false}
-              disabled={saving}
+              disabled={saving || contactsDirty}
               loading={searching}
               style={{ minWidth: 420 }}
               placeholder="Найти контрагента 1С: название, код, БИН/ИИН или телефон"
@@ -189,12 +209,15 @@ export const ClientCounterpartyCard: React.FC<Props> = ({ clientId, editable, ca
               title={confirmText}
               okText={link.refKey1c ? 'Заменить' : 'Сопоставить'}
               cancelText="Отмена"
-              disabled={!choice || saving}
+              disabled={!choice || saving || contactsDirty}
               onConfirm={() => { void change(choice); }}
             >
-              <Button type="primary" disabled={!choice || saving} loading={saving}>{link.refKey1c ? 'Заменить' : 'Сопоставить'}</Button>
+              <Button type="primary" disabled={!choice || saving || contactsDirty} loading={saving}>{link.refKey1c ? 'Заменить' : 'Сопоставить'}</Button>
             </Popconfirm>
           </Space>
+        ) : null}
+        {editable && contactsDirty ? (
+          <Typography.Text type="warning">Сначала сохраните или отмените правку контактов: смена контрагента меняет контакты из 1С.</Typography.Text>
         ) : null}
         {editable && !canChoose && link?.available ? (
           <Typography.Text type="secondary">Чтобы выбрать контрагента, нужно право «Клиенты: данные контрагента 1С».</Typography.Text>
@@ -207,10 +230,10 @@ export const ClientCounterpartyCard: React.FC<Props> = ({ clientId, editable, ca
             title="Снять сопоставление с контрагентом 1С?"
             okText="Снять"
             cancelText="Отмена"
-            disabled={saving}
+            disabled={saving || contactsDirty}
             onConfirm={() => { void change(null); }}
           >
-            <Button danger disabled={saving}>Снять сопоставление</Button>
+            <Button danger disabled={saving || contactsDirty}>Снять сопоставление</Button>
           </Popconfirm>
         ) : null}
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>

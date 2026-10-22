@@ -29,6 +29,8 @@ export interface PhoneState {
 export interface ContactState {
   contactId: number; clientId: number; kind: string; value: string; valueNormalized: string; isPrimary: boolean; note: string | null;
   position: number; origin: string;
+  /** A copy of 1C contacts (K4b): its source, snapshot and sync time as stored, and the key of the profile it was made for. */
+  onecSourceId: number | null; onecSnapshotVersion: string | null; onecSyncedAt: string | null; onecRefKey1c: string | null;
 }
 export interface MappingState { clientId: number; bitrixObject: string; bitrixId: string | null; status: string }
 
@@ -102,11 +104,16 @@ export async function readPhones(db: DatabaseClient, clientIds: number[], lock: 
 
 export async function readContacts(db: DatabaseClient, clientIds: number[], lock: boolean): Promise<ContactState[]> {
   return (await db.query<Record<string, unknown>>(
-    `SELECT c.contact_id, c.client_id, c.kind, c.value, c.value_normalized, c.is_primary, c.note, c.position, c.origin
+    `SELECT c.contact_id, c.client_id, c.kind, c.value, c.value_normalized, c.is_primary, c.note, c.position, c.origin,
+            c.onec_source_id, c.onec_snapshot_version::text AS onec_snapshot_version, c.onec_synced_at::text AS onec_synced_at,
+            (SELECT lower(p.ref_key_1c::text) FROM party_onec_profiles p
+              WHERE p.party_kind = 'client' AND p.party_id = c.client_id AND p.source_id = c.onec_source_id) AS onec_ref
        FROM client_contacts c WHERE c.client_id = ANY($1::bigint[]) ORDER BY c.contact_id ${lock ? 'FOR UPDATE OF c' : ''}`, [clientIds])).rows
     .map((r) => ({
       contactId: toNum(r.contact_id), clientId: toNum(r.client_id), kind: String(r.kind), value: String(r.value), valueNormalized: String(r.value_normalized),
       isPrimary: r.is_primary === true, note: toNullStr(r.note), position: toNum(r.position), origin: String(r.origin),
+      onecSourceId: toNullNum(r.onec_source_id), onecSnapshotVersion: toNullStr(r.onec_snapshot_version), onecSyncedAt: toNullStr(r.onec_synced_at),
+      onecRefKey1c: toNullStr(r.onec_ref),
     }));
 }
 
