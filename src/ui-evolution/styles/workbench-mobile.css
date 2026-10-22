@@ -278,14 +278,17 @@
 }
 
 :root[data-ui-variant="workbench"] .wb-paysheet .ant-drawer-content {
+  max-height: 92vh;
+  max-height: 92dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border-radius: 24px 24px 0 0;
   background: var(--evo-surface);
 }
 
 :root[data-ui-variant="workbench"] .wb-paysheet .ant-drawer-body {
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 8px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+  overflow: visible;
+  padding: 8px 16px 0;
 }
 
 :root[data-ui-variant="workbench"] .wb-paysheet__body {
@@ -380,6 +383,7 @@
 
 :root[data-ui-variant="workbench"] .wb-paysheet__seg {
   display: flex;
+  justify-content: flex-start;
   flex-wrap: wrap;
   gap: 4px;
   padding: 4px;
@@ -389,8 +393,8 @@
 }
 
 :root[data-ui-variant="workbench"] .wb-paysheet__seg button {
-  flex: 1 1 auto;
-  min-height: 44px;
+  flex: 0 1 auto;
+  min-height: 40px;
   padding: 0 12px;
   border: 0;
   border-radius: 9px;
@@ -444,9 +448,17 @@
   margin-top: 3px;
 }
 
+/* кнопки прилипают к низу листа: при длинном списке способов оплаты прокручивается содержимое, а не они */
 :root[data-ui-variant="workbench"] .wb-paysheet__acts {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
   display: flex;
   gap: 10px;
+  margin: 0 -16px;
+  padding: 10px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: var(--evo-surface);
+  box-shadow: 0 -1px 0 var(--evo-border);
 }
 
 :root[data-ui-variant="workbench"] .wb-paysheet__acts .ant-btn {

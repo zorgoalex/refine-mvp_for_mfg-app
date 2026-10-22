@@ -327,13 +327,13 @@ export const WorkbenchQuickPaymentSheet: React.FC<WorkbenchQuickPaymentSheetProp
           </div>
         ) : null}
 
+        <button type="button" className="wb-link wb-paysheet__full" onClick={onOpenFullForm} disabled={submitting}>
+          Открыть полную форму платежей
+        </button>
         <div className="wb-paysheet__acts">
           <Button onClick={onClose} disabled={submitting}>Отмена</Button>
           <Button type="primary" onClick={submit} loading={submitting || phase === 'syncing'} disabled={!canSubmit}>Добавить платёж</Button>
         </div>
-        <button type="button" className="wb-link wb-paysheet__full" onClick={onOpenFullForm} disabled={submitting}>
-          Открыть полную форму платежей
-        </button>
       </div>
     </Drawer>
   );

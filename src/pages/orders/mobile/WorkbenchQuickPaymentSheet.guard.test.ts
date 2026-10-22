@@ -12,7 +12,8 @@ describe('workbench quick payment sheet wiring', () => {
     expect(sheetSource).toContain('rootClassName="wb-paysheet"');
     expect(sheetSource).not.toMatch(/\sclassName="wb-paysheet"/);
     expect(mobileCss).toMatch(/\.wb-paysheet \.ant-drawer-content-wrapper \{[^}]*max-height: 92dvh;/);
-    expect(mobileCss).toMatch(/\.wb-paysheet \.ant-drawer-body \{[^}]*overflow-y: auto;/);
+    expect(mobileCss).toMatch(/\.wb-paysheet \.ant-drawer-content \{[^}]*max-height: 92dvh;[^}]*overflow-y: auto;/);
+    expect(mobileCss).toMatch(/\.wb-paysheet__acts \{[^}]*position: sticky;[^}]*bottom: 0;/);
   });
 
   it('writes through the payments resource only (dataProvider → POST /payments)', () => {
