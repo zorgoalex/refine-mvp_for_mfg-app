@@ -1454,12 +1454,13 @@ async function updateBackendClientPhoneIfEnabled(
   return { data: mapBackendClientPhoneToLegacyRow(phone) };
 }
 
-async function deleteBackendClientPhoneIfEnabled(resource: string, id: number | string) {
+async function deleteBackendClientPhoneIfEnabled(resource: string, id: number | string, meta?: AnyObject) {
   if (!shouldUseBackendClientPhoneMutation(resource)) {
     return null;
   }
 
-  const response = await clientPhonesApi.delete(Number(id));
+  const clientId = Number(meta?.clientId);
+  const response = await clientPhonesApi.delete(Number(id), Number.isSafeInteger(clientId) && clientId > 0 ? clientId : undefined);
   return { data: { phone_id: response.phoneId } };
 }
 
@@ -2066,7 +2067,7 @@ export const dataProvider = (_apiUrl: string) => {
         return backendPayment;
       }
 
-      const backendClientPhone = await deleteBackendClientPhoneIfEnabled(resource, id);
+      const backendClientPhone = await deleteBackendClientPhoneIfEnabled(resource, id, meta);
       if (backendClientPhone) {
         return backendClientPhone;
       }

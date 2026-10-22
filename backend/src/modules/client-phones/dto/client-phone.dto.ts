@@ -48,6 +48,8 @@ export interface UpdateClientPhoneRequestDto {
 
 export interface DeleteClientPhoneRequestDto {
   idempotencyKey: string;
+  /** The client the form showed the phone at: another owner under the locks (a merge moved it) is a conflict. */
+  clientId?: number;
 }
 
 /** A phone of the client as the contacts screen saw it (the set command compares the whole set). */
