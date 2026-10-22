@@ -16,6 +16,7 @@ import { EmployeesModule } from './modules/employees/employees.module';
 import { PartyContactsModule } from './modules/party-contacts/party-contacts.module';
 import { ClientContactsModule } from './modules/client-contacts/client-contacts.module';
 import { IntegrationDuplicatesModule } from './modules/integration-duplicates/integration-duplicates.module';
+import { ClientMergeModule } from './modules/client-merge/client-merge.module';
 import { CncTelegramModule } from './modules/cnc-telegram/cnc-telegram.module';
 import { CrmSyncModule } from './modules/crm-sync/crm-sync.module';
 import { BazisModule } from './modules/bazis/bazis.module';
@@ -67,6 +68,7 @@ import { OnecSyncModule } from './modules/onec-sync/onec-sync.module';
     PartyContactsModule,
     ClientContactsModule,
     IntegrationDuplicatesModule,
+    ClientMergeModule,
     CncTelegramModule,
     CrmSyncModule,
     BazisModule,

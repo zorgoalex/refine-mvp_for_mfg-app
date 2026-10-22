@@ -28,6 +28,8 @@ tags:
     description: Контакты поставщиков, производителей и клиентов; связь поставщика с контрагентом 1С
   - name: Integration duplicates
     description: Журнал дублей интеграций (ERP, Bitrix24, 1С)
+  - name: Client merges
+    description: Объединение клиентов-дублей из журнала дублей и его отмена
   - name: Client screen
     description: Настройки экрана клиента — зеркала заказа на втором мониторе
   - name: Catalog
@@ -1354,6 +1356,115 @@ paths:
         '409': {description: 'CLIENT_PHONES_STALE | CLIENT_PHONE_DUPLICATE | IDEMPOTENCY_KEY_REUSED | IDEMPOTENCY_IN_PROGRESS'}
         '422': {description: 'VALIDATION_ERROR | CLIENT_PHONE_SET_INVALID'}
         '503': {description: 'CLIENT_PHONES_DISABLED'}
+  /api/v1/integration-duplicates/{caseId}/merge-preview:
+    post:
+      tags: [Client merges]
+      operationId: previewClientMerge
+      summary: 'What a merge of two clients of a case would move, drop and refuse'
+      description: 'Groups, orders (only the visible ones are listed), phones and contacts after the merge, warnings, obstacles and a preview token (a fingerprint of the state). 404 CLIENT_MERGE_DISABLED without the flag.'
+      security: [{bearerAuth: []}]
+      x-permissions: [integrations.duplicates.view, clients.view, clients.merge]
+      parameters:
+        - {name: caseId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [survivorId, mergedId], properties: {survivorId: {type: integer, minimum: 1}, mergedId: {type: integer, minimum: 1}}}
+      responses:
+        '200': {description: 'The preview', content: {application/json: {schema: {type: object}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'DUPLICATE_CASE_NOT_FOUND | CLIENT_NOT_FOUND | CLIENT_MERGE_DISABLED'}
+        '422': {description: 'VALIDATION_FAILED | CLIENT_MERGE_NOT_CLIENTS | NOT_CASE_MEMBERS'}
+  /api/v1/integration-duplicates/{caseId}/merge:
+    post:
+      tags: [Client merges]
+      operationId: mergeClients
+      summary: 'Merge the merged client into the survivor'
+      description: 'One transaction: groups, orders, phones, contacts and the 1C link move; the merged client is archived with a redirect. The preview token must still match (409 CLIENT_MERGE_PREVIEW_STALE); obstacles give 409 CLIENT_MERGE_BLOCKED with the list. A repeat with the same idempotency key returns the first answer. Audited (client.merged, order.client_changed per order); domain event client.merged.'
+      security: [{bearerAuth: []}]
+      x-permissions: [integrations.duplicates.view, clients.view, clients.merge]
+      parameters:
+        - {name: caseId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [survivorId, mergedId, expectedCaseVersion, previewToken, idempotencyKey], properties: {survivorId: {type: integer, minimum: 1}, mergedId: {type: integer, minimum: 1}, expectedCaseVersion: {type: integer, minimum: 0}, previewToken: {type: string, pattern: '^[0-9a-f]{64}$'}, idempotencyKey: {type: string, minLength: 8, maxLength: 200}}}
+      responses:
+        '200': {description: 'The merge', content: {application/json: {schema: {type: object, required: [mergeId, caseId, survivorId, mergedId, counts], properties: {mergeId: {type: integer}, caseId: {type: integer}, survivorId: {type: integer}, mergedId: {type: integer}, counts: {type: object}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'DUPLICATE_CASE_NOT_FOUND | CLIENT_NOT_FOUND | CLIENT_MERGE_DISABLED'}
+        '409': {description: 'CLIENT_MERGE_BLOCKED | CLIENT_MERGE_PREVIEW_STALE | DUPLICATE_CASE_CHANGED | CLIENT_MERGE_BUSY | IDEMPOTENCY_IN_PROGRESS'}
+        '422': {description: 'VALIDATION_FAILED | IDEMPOTENCY_KEY_REUSED | CLIENT_MERGE_NOT_CLIENTS'}
+  /api/v1/client-merges:
+    get:
+      tags: [Client merges]
+      operationId: listClientMerges
+      summary: 'Merges of a client (as the survivor or the merged one) and the client a merged one lives on in'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.view]
+      parameters:
+        - {name: clientId, in: query, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: 'Merges', content: {application/json: {schema: {type: object, required: [clientId, mergedInto, merges], properties: {clientId: {type: integer}, mergedInto: {type: object, nullable: true}, merges: {type: array, items: {type: object}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'CLIENT_NOT_FOUND'}
+  /api/v1/client-merges/{mergeId}:
+    get:
+      tags: [Client merges]
+      operationId: getClientMerge
+      summary: 'One merge'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.view]
+      parameters:
+        - {name: mergeId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: 'The merge', content: {application/json: {schema: {type: object}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'CLIENT_MERGE_NOT_FOUND'}
+  /api/v1/client-merges/{mergeId}/undo-preview:
+    post:
+      tags: [Client merges]
+      operationId: previewClientMergeUndo
+      summary: 'What an undo of a merge would return now and what it would leave (with reasons)'
+      description: 'Works also with the merge flag off. Obstacles, skipped rows and a preview token.'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.view, clients.merge]
+      parameters:
+        - {name: mergeId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: 'The undo preview', content: {application/json: {schema: {type: object}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'CLIENT_MERGE_NOT_FOUND'}
+  /api/v1/client-merges/{mergeId}/undo:
+    post:
+      tags: [Client merges]
+      operationId: undoClientMerge
+      summary: 'Undo a merge within its term'
+      description: 'Returns what did not change since the merge (a group only with the same orders), reports the rest. The preview token must still match (409 CLIENT_MERGE_UNDO_STALE). Audited (client.merge_undone, order.client_changed); domain event client.merge_undone.'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.view, clients.merge]
+      parameters:
+        - {name: mergeId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [previewToken, idempotencyKey], properties: {previewToken: {type: string, pattern: '^[0-9a-f]{64}$'}, idempotencyKey: {type: string, minLength: 8, maxLength: 200}}}
+      responses:
+        '200': {description: 'The undo', content: {application/json: {schema: {type: object, required: [mergeId, status, report], properties: {mergeId: {type: integer}, status: {type: string}, report: {type: object}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'CLIENT_MERGE_NOT_FOUND'}
+        '409': {description: 'CLIENT_MERGE_UNDO_BLOCKED | CLIENT_MERGE_UNDO_STALE | CLIENT_MERGE_ALREADY_UNDONE | CLIENT_MERGE_BUSY | IDEMPOTENCY_IN_PROGRESS'}
+        '410': {description: 'CLIENT_MERGE_UNDO_EXPIRED'}
+        '422': {description: 'VALIDATION_FAILED | IDEMPOTENCY_KEY_REUSED'}
   /api/v1/suppliers/{id}/contacts/onec-sync:
     post:
       tags: [Party contacts]
@@ -23958,6 +24069,7 @@ components:
         - references.quick_create
         - integrations.duplicates.view
         - integrations.duplicates.resolve
+        - clients.merge
         - bitrix24.requests.view_all
         - bitrix24.requests.view_assigned
         - groups.view_history

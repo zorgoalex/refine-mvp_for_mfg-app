@@ -442,6 +442,14 @@ export const apiRoutes = {
     command: (caseId: number, action: 'dismiss' | 'external' | 'reopen') =>
       backendApiPath(`/integration-duplicates/${caseId}/${action}`),
   },
+  clientMerges: {
+    mergePreview: (caseId: number) => backendApiPath(`/integration-duplicates/${caseId}/merge-preview`),
+    merge: (caseId: number) => backendApiPath(`/integration-duplicates/${caseId}/merge`),
+    list: backendApiPath('/client-merges'),
+    byId: (mergeId: number) => backendApiPath(`/client-merges/${mergeId}`),
+    undoPreview: (mergeId: number) => backendApiPath(`/client-merges/${mergeId}/undo-preview`),
+    undo: (mergeId: number) => backendApiPath(`/client-merges/${mergeId}/undo`),
+  },
   employees: {
     contacts: (employeeId: number) => backendApiPath(`/employees/${employeeId}/contacts`),
     contactsList: backendApiPath('/employee-contacts'),

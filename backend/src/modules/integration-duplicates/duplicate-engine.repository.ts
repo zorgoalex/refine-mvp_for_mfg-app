@@ -291,7 +291,8 @@ export class DuplicateEngineRepository {
       let status = found.status;
       let reopened: string | null = null;
       let restored = false;
-      if (active < 2 && status !== 'resolved') status = 'resolved';
+      // A case closed by a merge of its clients stays merged (a terminal state, as resolved); a new record opens it again.
+      if (active < 2 && status !== 'resolved' && status !== 'merged') status = 'resolved';
       else if (active >= 2 && newcomers > 0 && status !== 'open') { status = 'open'; reopened = 'new_member'; }
       else if (active >= 2 && status === 'resolved') {
         // The same members matching again: the decision of the user comes back; without one the case opens again.

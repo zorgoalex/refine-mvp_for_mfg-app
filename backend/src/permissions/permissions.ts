@@ -230,6 +230,11 @@ export const PERMISSIONS = [
   'clients.contacts.view',
   /** Change them in that list. */
   'clients.contacts.manage',
+
+  // Merge of duplicate clients (D1 of the journal of duplicates, user decision 2026-10-22; migration 268: superadmin,
+  // admin, top manager). Appended.
+  /** Merge two clients of a case of the journal (orders, groups, phones, contacts, the 1C link move) and undo a merge. */
+  'clients.merge',
 ] as const;
 
 export type PermissionName = (typeof PERMISSIONS)[number];
@@ -300,6 +305,7 @@ export const ROLE_PERMISSIONS = {
     'integrations.duplicates.resolve',
     'clients.contacts.view',
     'clients.contacts.manage',
+    'clients.merge',
 
     'bitrix24.requests.view',
     'bitrix24.requests.view_all',

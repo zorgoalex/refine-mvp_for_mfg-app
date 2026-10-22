@@ -66,6 +66,15 @@ describe('apiRoutes', () => {
     expect(apiRoutes.orders.resourceProcurementBulk).toBe('/api/v1/orders/resource-procurement/bulk');
   });
 
+  it('exposes client merge routes', () => {
+    expect(apiRoutes.clientMerges.mergePreview(5)).toBe('/api/v1/integration-duplicates/5/merge-preview');
+    expect(apiRoutes.clientMerges.merge(5)).toBe('/api/v1/integration-duplicates/5/merge');
+    expect(apiRoutes.clientMerges.list).toBe('/api/v1/client-merges');
+    expect(apiRoutes.clientMerges.byId(7)).toBe('/api/v1/client-merges/7');
+    expect(apiRoutes.clientMerges.undoPreview(7)).toBe('/api/v1/client-merges/7/undo-preview');
+    expect(apiRoutes.clientMerges.undo(7)).toBe('/api/v1/client-merges/7/undo');
+  });
+
   it('exposes the client screen settings route', () => {
     expect(apiRoutes.clientScreen.settings).toBe('/api/v1/client-screen/settings');
   });

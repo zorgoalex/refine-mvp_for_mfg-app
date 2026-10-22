@@ -45,6 +45,7 @@ export type PermissionName =
   | 'integrations.duplicates.resolve'
   | 'clients.contacts.view'
   | 'clients.contacts.manage'
+  | 'clients.merge'
   | 'finance.analytics.view'
   | 'payments.onec.view'
   | 'payments.onec.manage'

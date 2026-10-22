@@ -326,6 +326,12 @@ export const envSchema = z
     // работает и при выключенном поиске. Ключ дел — HMAC с секретом BACKEND_INTEGRATION_DUPLICATES_KEY (≥ 32 символа).
     BACKEND_INTEGRATION_DUPLICATES: booleanFromEnv.default(false),
     BACKEND_INTEGRATION_DUPLICATES_KEY: z.union([z.string().min(32).max(256), emptyTrimmedStringFromEnv]).optional(),
+    // Объединение клиентов из журнала дублей (D1): предпросмотр и «Соединить». Отмена и история работают и при выключенном
+    // флаге. Включать на stage только после правок обратной синхронизации Bitrix24 (перенаправление объединённых).
+    BACKEND_CLIENT_MERGE: booleanFromEnv.default(false),
+    // События объединения в очередь CRM (crm.sync.client.merged|merge_undone) — только когда потребитель crm-sync
+    // зарегистрирован (иначе неизвестный тип уйдёт в failed).
+    BACKEND_CLIENT_MERGE_CRM_EVENTS: booleanFromEnv.default(false),
     BACKEND_ENABLE_PDF_IMPORT_LAYOUT_PATTERNS: booleanFromEnv.default(false),
     BACKEND_STATUS_AUTOMATION: booleanFromEnv.default(false),
     BACKEND_ENABLE_NOTIFICATION_ENGINE: booleanFromEnv.default(false),

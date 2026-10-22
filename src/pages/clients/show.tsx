@@ -1,4 +1,5 @@
 import { Table } from '../../ui/tooltipDelay';
+import { useState } from "react";
 import { useShow, useList, IResourceComponentsProps } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
 import { Typography, Badge, Row, Col, Divider, Tag, Space, Tabs } from "antd";
@@ -15,6 +16,9 @@ import { ClientOrdersTab } from "./ClientOrdersTab";
 import { ClientOnecDocumentsTab } from "./ClientOnecDocumentsTab";
 import { canSeeClientOnecDocuments } from "./clientOnecDocumentsModel";
 import { can } from "../../utils/permissions";
+import { useClientMergeHistory } from "./useClientMergeHistory";
+import { MergedClientBanner } from "./MergedClientBanner";
+import { ClientMergesBlock } from "./ClientMergesBlock";
 
 const { Title, Text } = Typography;
 
@@ -29,7 +33,7 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
   useCurrentRecordTabTitle(record);
 
   // Fetch client phones
-  const { data: phonesData, isLoading: phonesLoading } = useList<ClientPhone>({
+  const { data: phonesData, isLoading: phonesLoading, refetch: refetchPhones } = useList<ClientPhone>({
     resource: "client_phones",
     filters: [
       {
@@ -72,10 +76,21 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
   ];
 
   const clientId = Number(record?.client_id) || null;
+  const { history: mergeHistory, reload: reloadMerges } = useClientMergeHistory(clientId);
+  // An undo of a merge changes the client, its phones, contacts, 1C link and orders: everything on the card is read again
+  // (the tabs are remounted, so their own loaded state goes too).
+  const [refreshKey, setRefreshKey] = useState(0);
+  const reloadAfterMerge = () => {
+    reloadMerges();
+    void queryResult.refetch();
+    void refetchPhones();
+    setRefreshKey((key) => key + 1);
+  };
   // «Основное» — сведения, контакты и сопоставление с 1С; «Документы ERP» — заказы клиента и итог по ним;
   // «Документы 1С» — отдельная вкладка сопоставленного контрагента со своим итогом (итоги не складываются).
   const main = (
     <>
+      <MergedClientBanner history={mergeHistory} clientId={clientId} />
       <Title level={5}>Основная информация</Title>
       <Row gutter={[16, 16]}>
         <Col span={8}>
@@ -157,11 +172,14 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
       </Row>
       <Divider />
       <Row gutter={[16, 16]}><Col span={8}><ReferenceSortOrderShow value={record?.sort_order} /></Col></Row>
+      <Divider />
+      <ClientMergesBlock history={mergeHistory} onChanged={reloadAfterMerge} />
     </>
   );
   return (
     <Show isLoading={isLoading} title="Просмотр Клиента">
       <Tabs
+        key={refreshKey}
         defaultActiveKey="main"
         items={[
           { key: 'main', label: 'Основное', children: main },
