@@ -9,7 +9,7 @@ const app = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
 
 describe('«Платежи → Поступления 1С» guards', () => {
   it('shows the tab only with the 1C flag and both permissions; otherwise the screen is the plain payments list', () => {
-    expect(page).toMatch(/featureFlags\.useBackendOnec && can\('payments\.onec\.view'\) && can\('payments\.view'\)/);
+    expect(page).toMatch(/featureFlags\.useBackendOnec && can\('payments\.onec\.view'\) && can\('payments\.view'\) && can\('orders\.view_financials'\)/);
     expect(page).toMatch(/if \(!canSeeOnecReceiptsTab\(\)\) return <PaymentList \{\.\.\.props\} \/>;/);
     expect(page).toContain('destroyInactiveTabPane');
   });

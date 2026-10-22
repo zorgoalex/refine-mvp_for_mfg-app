@@ -19,6 +19,14 @@ describe('240 payment ↔ 1C receipt matches migration', () => {
     ]);
   });
 
+  it('takes permissions_state first, before any table or catalog write (lock order of authorization changes)', () => {
+    const lock = sql.indexOf('SELECT version FROM public.permissions_state WHERE id = true FOR UPDATE;');
+    expect(lock).toBeGreaterThan(sql.indexOf('BEGIN;'));
+    expect(lock).toBeLessThan(sql.indexOf('CREATE TABLE'));
+    expect(lock).toBeLessThan(sql.indexOf('INSERT INTO'));
+    expect(sql.indexOf("SET LOCAL lock_timeout = '5s';")).toBeLessThan(lock);
+  });
+
   it('an active match keeps its payment: SET NULL on a physical delete breaks the CHECK, a removed match lets it go', () => {
     expect(sql).toContain('payment_id BIGINT NULL REFERENCES public.payments(payment_id) ON DELETE SET NULL');
     expect(sql).toContain("CONSTRAINT chk_pom_active_payment CHECK (removed_at IS NOT NULL OR kind <> 'matched' OR payment_id IS NOT NULL)");

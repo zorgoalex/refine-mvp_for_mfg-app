@@ -17320,7 +17320,7 @@ paths:
         - {bearerAuth: []}
       x-permission: payments.onec.view
       description: >-
-        Requires payments.onec.view and payments.view; rows are limited by the payment scope of the user (own/all by
+        Requires payments.onec.view, payments.view and orders.view_financials (amounts of ERP orders and payments); rows are limited by the payment scope of the user (own/all by
         the order's creator/manager); rows without a resolved ERP order are returned only for the scope «all».
         Enabled by BACKEND_ONEC_PAYMENT_MATCHING_VIEW.
       parameters:

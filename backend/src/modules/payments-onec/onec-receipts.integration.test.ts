@@ -404,12 +404,18 @@ describe.skipIf(!url)('1C incoming payments — read model, real PostgreSQL', { 
       policyScopes: { payments: { view, create: 'own', update: 'own', delete: 'own' } } as never,
     });
     const service = (viewEnabled: boolean) => new OnecReceiptsService({ read: repo, settings: () => ({ viewEnabled, series: SERIES }), auditClient: database });
-    const full = ['payments.onec.view', 'payments.view'];
+    const full = ['payments.onec.view', 'payments.view', 'orders.view_financials'];
     await expect(service(false).list(user(full, 'own'), { page: 1, pageSize: 10 }, 'req-off')).rejects.toMatchObject({ statusCode: 503, code: 'ONEC_PAYMENT_MATCHING_DISABLED' });
     const denied = async (requestId: string) => (await db.query(
       `SELECT event, status_code, metadata_json->>'action' AS action FROM audit_log WHERE request_id = $1`, [requestId])).rows;
     await expect(service(true).list(user(['payments.view'], 'own'), { page: 1, pageSize: 10 }, `${tag}-d1`)).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
     expect(await denied(`${tag}-d1`)).toEqual([{ event: 'payments.onec_denied', status_code: 'missing_permission', action: 'list' }]);
+    // Both payment rights without the financial one: amounts must not leak through the list or the card.
+    const noFinancials = ['payments.onec.view', 'payments.view'];
+    await expect(service(true).list(user(noFinancials, 'all'), { page: 1, pageSize: 10 }, `${tag}-f1`)).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+    expect(await denied(`${tag}-f1`)).toEqual([{ event: 'payments.onec_denied', status_code: 'missing_permission', action: 'list' }]);
+    await expect(service(true).getCard(user(noFinancials, 'all'), 1, `${tag}-f2`)).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+    expect(await denied(`${tag}-f2`)).toEqual([{ event: 'payments.onec_denied', status_code: 'missing_permission', action: 'card' }]);
     await expect(service(true).getCard(user(full, 'none'), 1, `${tag}-d2`)).rejects.toMatchObject({ statusCode: 403 });
     expect(await denied(`${tag}-d2`)).toEqual([{ event: 'payments.onec_denied', status_code: 'scope_none', action: 'card' }]);
     const allowed = await service(true).list(user(full, 'own'), { page: 1, pageSize: 100, search: `${tag}-scope` }, `${tag}-ok`);

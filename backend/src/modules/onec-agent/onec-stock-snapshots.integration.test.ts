@@ -101,7 +101,7 @@ suite('1C stock snapshots at a date — the queue and the port (isolated Postgre
       CREATE TABLE audit_log(LIKE public.audit_log INCLUDING ALL);
       CREATE TABLE audit_log_related_entity(LIKE public.audit_log_related_entity INCLUDING ALL);`);
     for (const file of ['193_onec_agent_foundation.sql', '196_onec_agent_commands.sql', '198_onec_etl.sql', '200_onec_etl_snapshots_revocation.sql',
-      '247_onec_agent_expected_silence.sql', '250_onec_stock_snapshots.sql']) {
+      '247_onec_agent_expected_silence.sql', '250_onec_stock_snapshots.sql', '262_onec_alert_episodes.sql']) {
       await pool.query(readFileSync(new URL(`../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     // The zone of the 1C base comes with migration 216 (documents); only this column of it is needed here.
