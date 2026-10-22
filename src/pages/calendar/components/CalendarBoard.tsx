@@ -1129,7 +1129,9 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
                 const dayOrders = productionOnly
                   ? allDayOrders.filter((order) =>
                       (order.order_details?.length ?? 0) > 0 ||
-                      (order.passedProductionCodes?.length ?? 0) > 0)
+                      (order.passedProductionCodes?.length ?? 0) > 0 ||
+                      // Card letters are marks only; an order without details and marks still has its stage.
+                      order.production_status_id != null)
                   : allDayOrders;
 
                 return (
