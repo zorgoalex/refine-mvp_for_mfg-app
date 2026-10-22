@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { CutJobItemDto } from '../../cut/dto/cut.dto';
 import {
@@ -12,14 +13,16 @@ import {
 import type { CncTelegramCutLayoutDto } from '../dto/cnc-telegram.dto';
 import { buildSvgRenderSnapshot, buildSvgSheetPlacements } from './pg-cnc-telegram-repository';
 
+const repoRoot = fileURLToPath(new URL('../../../../../', import.meta.url));
+
 const roundTrip = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 /** Real worker output for the SVG fixtures (the same path the import takes). */
 function layoutOf(file: string): CncTelegramCutLayoutDto {
   return JSON.parse(execFileSync('python3', ['-c',
     'import json,sys;from pathlib import Path;from cnc_telegram_worker.vector import parse_svg_cut_layout,layout_to_dict;print(json.dumps(layout_to_dict(parse_svg_cut_layout(Path(sys.argv[1])))))',
-    resolve('tests/fixtures/svg-source-priority', file)], {
-    env: { ...process.env, PYTHONPATH: resolve('cnc-telegram-worker') }, encoding: 'utf8',
+    resolve(repoRoot, 'tests/fixtures/svg-source-priority', file)], {
+    env: { ...process.env, PYTHONPATH: resolve(repoRoot, 'cnc-telegram-worker') }, encoding: 'utf8',
   }));
 }
 
