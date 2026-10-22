@@ -38,6 +38,15 @@ export function searchDigits(text: string): string {
   return digits.length === 11 && digits.startsWith('8') ? `7${digits.slice(1)}` : digits;
 }
 
+/**
+ * Fragments to look for: the digits as typed and, for a start of a number typed with 8 (8701…, at least 4 digits), the
+ * same start with 7 — «8701» finds «+7 701 …» too, «812» stays only itself.
+ */
+export function searchDigitVariants(text: string): string[] {
+  const digits = searchDigits(text);
+  return digits.length >= 4 && digits.length < 11 && digits.startsWith('8') ? [digits, `7${digits.slice(1)}`] : [digits];
+}
+
 /** Text for ILIKE: wildcards of the user are literal. */
 export function likePattern(text: string): string {
   return `%${text.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
@@ -87,6 +96,7 @@ export class ClientContactsListRepository {
       const text = param(likePattern(query.q));
       const lower = param(likePattern(query.q.toLowerCase()));
       const digits = searchDigits(query.q);
+      const variants = searchDigitVariants(query.q);
       const alternatives = [
         `c.client_name::text ILIKE ${text}`,
         `EXISTS (SELECT 1 FROM client_contacts cc WHERE cc.client_id = c.client_id
@@ -94,11 +104,13 @@ export class ClientContactsListRepository {
         `EXISTS (SELECT 1 FROM client_phones cp WHERE cp.client_id = c.client_id AND cp.phone_number ILIKE ${text})`,
       ];
       if (digits.length >= 3) {
-        const pattern = param(likePattern(digits));
-        alternatives.push(`EXISTS (SELECT 1 FROM client_phones cp WHERE cp.client_id = c.client_id
-           AND (${PHONE_DIGITS} LIKE ${pattern} OR ${PHONE_NATIONAL} LIKE ${pattern}))`);
-        alternatives.push(`EXISTS (SELECT 1 FROM client_contacts cc WHERE cc.client_id = c.client_id
-           AND cc.kind IN ('whatsapp', 'viber') AND cc.value_normalized LIKE ${pattern})`);
+        for (const variant of variants) {
+          const pattern = param(likePattern(variant));
+          alternatives.push(`EXISTS (SELECT 1 FROM client_phones cp WHERE cp.client_id = c.client_id
+             AND (${PHONE_DIGITS} LIKE ${pattern} OR ${PHONE_NATIONAL} LIKE ${pattern}))`);
+          alternatives.push(`EXISTS (SELECT 1 FROM client_contacts cc WHERE cc.client_id = c.client_id
+             AND cc.kind IN ('whatsapp', 'viber') AND cc.value_normalized LIKE ${pattern})`);
+        }
       }
       where.push(`(${alternatives.join(' OR ')})`);
     }
@@ -114,10 +126,10 @@ export class ClientContactsListRepository {
       else if (column === 'phone' || column === 'whatsapp' || column === 'viber') {
         const digits = searchDigits(filter.text);
         if (digits) {
-          const pattern = param(likePattern(digits));
+          const patterns = searchDigitVariants(filter.text).map((variant) => param(likePattern(variant)));
           where.push(exists(column === 'phone'
-            ? ` AND (${PHONE_DIGITS} LIKE ${pattern} OR ${PHONE_NATIONAL} LIKE ${pattern})`
-            : ` AND cc.value_normalized LIKE ${pattern}`));
+            ? ` AND (${patterns.map((pattern) => `${PHONE_DIGITS} LIKE ${pattern} OR ${PHONE_NATIONAL} LIKE ${pattern}`).join(' OR ')})`
+            : ` AND (${patterns.map((pattern) => `cc.value_normalized LIKE ${pattern}`).join(' OR ')})`));
         } else {
           const text = param(likePattern(filter.text));
           where.push(exists(column === 'phone' ? ` AND cp.phone_number ILIKE ${text}` : ` AND (cc.value ILIKE ${text} OR cc.note ILIKE ${text})`));

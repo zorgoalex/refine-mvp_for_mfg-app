@@ -112,15 +112,18 @@ export function ClientContactsPage() {
       const values = columnValues(row, column);
       const editable = canManage && (column !== 'phone' || data?.phonesEditable !== false);
       const pencil = editable ? (
-        <Button type="text" size="small" icon={<EditOutlined />} style={{ color: 'var(--ant-color-text-tertiary, #8c8c8c)' }}
+        <Button type="text" size="small" icon={<EditOutlined />} style={{ color: 'var(--ant-color-text-tertiary, #8c8c8c)', flexShrink: 0 }}
           aria-label={`Изменить: ${COLUMN_TITLES[column]}`} onClick={() => setEditing({ clientId: row.client.id, column })} />
       ) : null;
       if (!values.length) return pencil ?? <Typography.Text type="secondary">—</Typography.Text>;
       return (
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 2, minWidth: 0 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: '1 1 auto', overflow: 'hidden' }}>
             {values.map((value) => (
-              <span key={'phoneId' in value ? `p${value.phoneId}` : `c${value.contactId}`} style={{ whiteSpace: 'nowrap' }}>
+              // A long value ends with «…» inside the cell (never under the pencil); the whole value is in the title.
+              <span key={'phoneId' in value ? `p${value.phoneId}` : `c${value.contactId}`}
+                title={'phoneId' in value ? value.phoneNumber : [formatContact(value), value.note].filter(Boolean).join(' · ')}
+                style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {'phoneId' in value ? value.phoneNumber : formatContact(value)}
                 {value.isPrimary && values.length > 1 ? <StarFilled style={{ color: '#faad14', marginLeft: 4, fontSize: 11 }} /> : null}
                 {'note' in value && value.note ? <Typography.Text type="secondary" style={{ fontSize: 12 }}> · {value.note}</Typography.Text> : null}

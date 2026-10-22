@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../common/errors/api-error';
 import { parkedNumber, planPhoneSet, samePhoneSet } from '../client-phones/adapters/pg-client-phone-repository';
 import type { ClientPhoneDto } from '../client-phones/dto/client-phone.dto';
-import { likePattern, searchDigits } from './client-contacts-list.repository';
+import { likePattern, searchDigitVariants, searchDigits } from './client-contacts-list.repository';
 import { parseListQuery } from './client-contacts.controller';
 
 const codeOf = (call: () => unknown) => {
@@ -29,6 +29,11 @@ describe('«Контакты клиентов» list query', () => {
     expect(searchDigits('8 701 555 01 01')).toBe('77015550101');
     expect(searchDigits('+7 (701) 555')).toBe('7701555');
     expect(likePattern('50%_a\\b')).toBe('%50\\%\\_a\\\\b%');
+    // a start of a number typed with 8 also finds the numbers written +7 …; a short fragment stays itself
+    expect(searchDigitVariants('8701')).toEqual(['8701', '7701']);
+    expect(searchDigitVariants('8 701 555')).toEqual(['8701555', '7701555']);
+    expect(searchDigitVariants('812')).toEqual(['812']);
+    expect(searchDigitVariants('87015550101')).toEqual(['77015550101']);
   });
 });
 

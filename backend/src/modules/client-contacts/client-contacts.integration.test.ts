@@ -261,6 +261,9 @@ describe.skipIf(!databaseUrl)('«Контакты клиентов»: list, cont
     it('finds by name, by any value or label, by a phone fragment or a full number in either spelling', async () => {
       expect(await names({ q: 'иванов' })).toEqual(['Тест Иванов']);
       expect(await names({ q: '812' })).toEqual(['Тест Иванов']);
+      // «8 727 222» is the start of «8 727 222 33 44» (raw digits) and «+7 705 000» is found by «8705» typed with 8
+      expect(await names({ q: '8705' })).toEqual(['Тест Дом']);
+      expect(await names({ filters: { phone: { mode: 'contains', text: '8701' } } })).toEqual(['Тест Иванов']);
       expect(await names({ q: '8 727 222 33 44' })).toEqual(['Тест Дом']);
       expect(await names({ q: '+77272223344' })).toEqual(['Тест Дом']);
       expect(await names({ q: '999 00' })).toEqual(['Тест Иванов']);
