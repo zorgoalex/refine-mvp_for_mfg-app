@@ -4,7 +4,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Tag, Space, Typography, Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
-import { StarOutlined, EyeOutlined, PhoneOutlined, WalletOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, StarOutlined, EyeOutlined, PhoneOutlined, WalletOutlined } from '@ant-design/icons';
 import { useList } from '../../../../query/orderLifecycleQueries';
 import { useNavigate } from 'react-router-dom';
 import { formatNumber } from '../../../../utils/numberFormat';
@@ -28,6 +28,7 @@ import { buildOrderHeaderMaterialSummaryItems } from '../../orderMaterialsSummar
 import type { OrderHdfDetail } from '../../../../types/orders';
 import { useOptionalUiVariant } from '../../../../ui-variant/UiVariantProvider';
 import { orderDeadlineHint, orderStatusTone, paymentStatusTone } from '../../orderListWorkbench';
+import { initials as clientInitials } from './OrderShowWorkbenchSide';
 
 const { Text } = Typography;
 
@@ -454,6 +455,14 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
         <div className="wb-order-head__top">
           <div className="wb-order-head__identity">
             <div className="wb-order-head__title">
+              {/* телефон (мокап 22): «Назад» вместо хлебных крошек; на компьютере скрыта стилями */}
+              <Button
+                className="wb-order-head__back"
+                type="text"
+                aria-label="Назад к заказам"
+                icon={<ArrowLeftOutlined />}
+                onClick={() => navigate('/orders')}
+              />
               <h1 className="wb-order-head__number">Заказ {record?.order_name || ''}</h1>
               {statusPills}
               <span className="wb-order-head__priority" title="Приоритет">
@@ -465,6 +474,9 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
               </span>
             </div>
             <div className="wb-order-head__meta">
+              <span className="wb-avatar wb-order-head__avatar" aria-hidden>
+                {clientInitials(record?.client_name || '') || '—'}
+              </span>
               {record?.client_id ? (
                 <Dropdown
                   menu={{ items: clientMenuItems }}

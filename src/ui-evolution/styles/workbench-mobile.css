@@ -476,3 +476,185 @@
   align-self: center;
   font-size: 14px;
 }
+
+/* Мобильная карточка заказа (мокап 22, экран 2) */
+:root[data-ui-variant="workbench"] .wb-order-head__back,
+:root[data-ui-variant="workbench"] .wb-order-head__avatar {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-order-crumbs {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-order-head__back {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  margin-left: -10px;
+  flex: none;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-order-head__title {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-order-head__avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-order-head__meta {
+  align-items: center;
+}
+
+/* действия шапки — одна строка с прокруткой; «Добавить платёж» уже в нижней панели */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-order-head__actions {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 -16px;
+  padding: 2px 16px 4px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-order-head__actions > * {
+  flex: none;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-order-head:has(.wb-mactions__btn--primary) .wb-head-pay {
+  display: none;
+}
+
+/* ход производства на телефоне — лента сверху вниз */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-order-flow--open .wb-order-flow__sub {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-production-flow__stages {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-production-flow__stage {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  padding: 10px 0 10px 22px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  position: relative;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-production-flow__stage::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 16px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-production-flow__stage::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 30px;
+  bottom: -14px;
+  width: 2px;
+  background: var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-production-flow__stage:last-child::after {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-production-flow__stage[data-empty='true']::before {
+  background: var(--evo-surface);
+  box-shadow: inset 0 0 0 2px var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-production-flow__name {
+  font-size: 15px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-production-flow__count {
+  font-size: 13px;
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-production-flow__bar {
+  grid-column: 1 / -1;
+}
+
+/* «Оплаты (N)»: после деталей, до боковых карточек (строка 10 сетки карточки) */
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-msec {
+  grid-column: 1;
+  grid-row: 10;
+  margin-top: 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-msec summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 0 14px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-msec summary::-webkit-details-marker {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-msec__count {
+  color: var(--evo-text-secondary);
+  font-weight: 500;
+}
+
+:root[data-ui-variant="workbench"] .wb-msec__chevron {
+  margin-left: auto;
+  color: var(--evo-text-secondary);
+  transition: transform 0.15s;
+}
+
+:root[data-ui-variant="workbench"] .wb-msec details[open] .wb-msec__chevron {
+  transform: rotate(180deg);
+}
+
+:root[data-ui-variant="workbench"] .wb-msec__body {
+  display: flex;
+  flex-direction: column;
+  padding: 0 14px 12px;
+  font-size: 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-msec__line {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-msec__line small {
+  display: block;
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-msec__line b {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-msec__line--empty {
+  color: var(--evo-text-secondary);
+}

@@ -16,8 +16,8 @@ describe('order card under the NewLine variant', () => {
     expect(show).toContain(': visibleOrderInfoTabs;');
   });
 
-  it('keeps «Ход производства» collapsed by default', () => {
-    expect(show).toContain('const [workbenchFlowOpen, setWorkbenchFlowOpen] = useState(false);');
+  it('keeps «Ход производства» collapsed by default on a computer, open on a phone (mockup 22)', () => {
+    expect(show).toContain('const [workbenchFlowOpen, setWorkbenchFlowOpen] = useState(() => isWorkbench && isMobile);');
     expect(show).toContain('aria-expanded={workbenchFlowOpen}');
   });
 

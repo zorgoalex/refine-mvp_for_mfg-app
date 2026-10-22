@@ -21,7 +21,7 @@ const formatPhone = (phone: string): string => {
   return phone;
 };
 
-const initials = (name: string): string => name
+export const initials = (name: string): string => name
   .split(/\s+/)
   .filter(Boolean)
   .slice(0, 2)

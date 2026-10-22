@@ -108,6 +108,7 @@ import { OrderCatalogLinesTable } from './components/OrderCatalogLinesTable';
 import { useIsMobile } from '../../hooks/useDeviceTier';
 import { DetailCardList } from './mobile/DetailCardList';
 import { WorkbenchQuickPaymentSheet } from './mobile/WorkbenchQuickPaymentSheet';
+import { WorkbenchOrderPaymentsSection } from './mobile/WorkbenchOrderPaymentsSection';
 import { quickPaymentRemaining } from './mobile/workbenchQuickPaymentModel';
 import { refetchFresh } from './mobile/freshRefetch';
 import type { DetailCardLookups } from './mobile/detailCardModel';
@@ -1408,7 +1409,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   }, [activationRevision, orderRealtimeEnabled, ordinaryReadActive, record?.order_id, refreshLiveDetailProductionStatuses]);
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const workbenchChromeBottom = useWorkspaceChromeBottom();
-  const [workbenchFlowOpen, setWorkbenchFlowOpen] = useState(false);
+  // на телефоне NewLine (мокап 22) ход производства открыт сразу
+  const [workbenchFlowOpen, setWorkbenchFlowOpen] = useState(() => isWorkbench && isMobile);
   // «NewLine»: the right column can be folded to give the details table the full width (per browser).
   const [workbenchSideCollapsed, setWorkbenchSideCollapsed] = useState(() => {
     try {
@@ -3353,7 +3355,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     </Button>
   ) : null;
   const workbenchPaymentButton = openAddPayment ? (
-    <Button icon={<WalletOutlined />} onClick={openAddPayment}>Добавить платёж</Button>
+    <Button className="wb-head-pay" icon={<WalletOutlined />} onClick={openAddPayment}>Добавить платёж</Button>
   ) : null;
   // NewLine: the same «Отправить заказ» also stays at hand in the sticky order bar
   const workbenchBarSendAction = isWorkbench ? orderSendAction : null;
@@ -3950,6 +3952,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   </div>
                 ) : null}
               </section>
+              {isMobile && canViewFinancials ? (
+                <WorkbenchOrderPaymentsSection payments={payments as Record<string, unknown>[]} />
+              ) : null}
               <Tooltip title={workbenchSideCollapsed ? 'Показать боковую панель' : 'Свернуть боковую панель'} placement="left">
                 <button
                   type="button"
