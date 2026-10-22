@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Descriptions, Drawer, Modal, Radio, Space, Spin, Tag, Timeline, Typography, message } from 'antd';
 import { Link } from 'react-router-dom';
+import { can } from '../../utils/permissions';
 import { ApiError, isApiError } from '../../api/apiError';
 import { integrationDuplicatesApi } from '../../api/integrationDuplicatesApi';
 import type { DuplicateCaseDetail, DuplicateMemberDetail } from '../../api/integrationDuplicatesApiTypes';
@@ -24,6 +25,8 @@ import {
   userText,
   viaLabel,
 } from './duplicatesModel';
+import { MergeClientsModal } from './MergeClientsModal';
+import { canMergeCase } from './mergeClientsModel';
 
 const { Text } = Typography;
 
@@ -90,6 +93,7 @@ export function DuplicateDrawer({ caseId, canResolve, onSelectCase, onClose, onC
   const [pending, setPending] = useState<CommandAction | null>(null);
   const [reason, setReason] = useState<DuplicateReason | null>(null);
   const [saving, setSaving] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
   // Only the answer of the latest load of the case shown may land: a late answer of the previous case is dropped.
   const generation = useRef(0);
   const shownCaseId = useRef<number | null>(caseId);
@@ -114,6 +118,7 @@ export function DuplicateDrawer({ caseId, canResolve, onSelectCase, onClose, onC
   useEffect(() => {
     setPending(null);
     setReason(null);
+    setMergeOpen(false);
     // The card of the previous case never stays on screen with the new title (its buttons would act on it).
     setCard(null);
     if (caseId == null) {
@@ -163,8 +168,10 @@ export function DuplicateDrawer({ caseId, canResolve, onSelectCase, onClose, onC
     }
   };
 
-  const footer = card && actions && (actions.dismiss || actions.external || actions.reopen) ? (
+  const showMerge = Boolean(card && ready && canMergeCase(card, can('clients.merge') && can('clients.view')));
+  const footer = card && actions && (showMerge || actions.dismiss || actions.external || actions.reopen) ? (
     <Space>
+      {showMerge && <Button type="primary" danger onClick={() => setMergeOpen(true)}>Соединить</Button>}
       {actions.dismiss && <Button onClick={() => setPending('dismiss')}>Не дубль</Button>}
       {actions.external && <Button onClick={() => setPending('external')}>Исправить в 1С</Button>}
       {actions.reopen && <Button onClick={() => setPending('reopen')}>Открыть снова</Button>}
@@ -275,6 +282,19 @@ export function DuplicateDrawer({ caseId, canResolve, onSelectCase, onClose, onC
           <Text>{pending ? ACTION_TEXT[pending].title : ''}?</Text>
         )}
       </Modal>
+      <MergeClientsModal
+        open={mergeOpen && showMerge}
+        card={card}
+        onClose={() => setMergeOpen(false)}
+        onMerged={() => {
+          if (shownCaseId.current != null) void load(shownCaseId.current);
+          onChanged();
+        }}
+        onCaseChanged={() => {
+          if (shownCaseId.current != null) void load(shownCaseId.current);
+          onChanged();
+        }}
+      />
     </Drawer>
   );
 }

@@ -316,7 +316,7 @@ describe('permissions foundation', () => {
 
   it('keeps the journal of duplicates permissions in the OpenAPI PermissionName enum, for top manager and above only', () => {
     const contractPermissions = readPermissionNameEnum(readOpenApiContract());
-    for (const permission of ['integrations.duplicates.view', 'integrations.duplicates.resolve'] as const) {
+    for (const permission of ['integrations.duplicates.view', 'integrations.duplicates.resolve', 'clients.merge'] as const) {
       expect(contractPermissions).toContain(permission);
       for (const role of ['superadmin', 'admin', 'top_manager'] as const) expect(can(role, permission)).toBe(true);
       for (const role of ['manager', 'operator', 'worker', 'packer', 'viewer', 'onec_operator'] as const) expect(can(role, permission)).toBe(false);

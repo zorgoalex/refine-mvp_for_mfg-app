@@ -17,7 +17,8 @@ export const DUPLICATE_VIAS = ['erp_manual', 'bitrix_inbound', 'onec_publication
 export type DuplicateVia = (typeof DUPLICATE_VIAS)[number];
 
 export type DuplicateAction =
-  | 'detected' | 'member_joined' | 'member_left' | 'dismissed' | 'marked_external' | 'reopened' | 'resolved' | 'source_refreshed';
+  | 'detected' | 'member_joined' | 'member_left' | 'dismissed' | 'marked_external' | 'reopened' | 'resolved' | 'source_refreshed'
+  | 'merged' | 'merge_undone';
 
 /** The sets of 1C with revocation and the personal data term a key may be read from. */
 export type RevocableEntity = 'counterparty_phones' | 'counterparty_contacts';

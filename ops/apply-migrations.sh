@@ -2661,6 +2661,18 @@ probe_file() {
       "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.client_contacts'::regclass AND conname IN ('client_contacts_kind_check', 'client_contacts_check'));" \
       "SELECT (SELECT count(*) FROM permissions_catalog WHERE permission_name IN ('clients.contacts.view', 'clients.contacts.manage') AND is_active) = 2;" \
       "SELECT (SELECT count(*) FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'top_manager' AND rp.permission_name IN ('clients.contacts.view', 'clients.contacts.manage')) = 2;" ;;
+    # 268: merge of duplicate clients — merges, their journal, redirects, guard triggers of client references, the Bitrix
+    # request invariant accepting the mapping of a merged client, clients.merge.
+    268_client_merges*) probe_all \
+      "$(q_tbl client_merges)" \
+      "$(q_tbl client_merge_items)" \
+      "$(q_tbl client_merge_redirects)" \
+      "$(q_idx uq_client_merges_merged_done)" \
+      "SELECT to_regprocedure('public.client_merge_guard()') IS NOT NULL AND to_regprocedure('public.client_merge_clients_guard()') IS NOT NULL AND to_regprocedure('public.client_merge_mapping_erp_ids(bigint)') IS NOT NULL;" \
+      "SELECT (SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal AND tgname LIKE 'trg_client_merge_guard_%') = 7;" \
+      "$(q_trg ctrg_client_merge_redirects_bitrix_requests)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'validate_bitrix24_incoming_request_link' AND prosrc LIKE '%client_merge_mapping_erp_ids%');" \
+      "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'top_manager' AND rp.permission_name = 'clients.merge');" ;;
     # 244: permissions of the 1C counterparty data in the client card (manager and above).
     244_client_onec_permissions*) probe_all \
       "SELECT (SELECT count(*) FROM permissions_catalog WHERE permission_name IN ('clients.onec_data.view','clients.onec_documents.view') AND is_active) = 2;" \
@@ -3056,7 +3068,7 @@ verify_applied_effect() {
     193_onec_agent_foundation*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|243_supplier_contacts_onec*|245_onec_operator_role*|246_clients_analytics_view_real_orders*|247_onec_agent_expected_silence*|244_client_onec_permissions*|248_authorization_snapshot*|249_role_checks_to_permissions*|251_whatsapp_calendar_send_permission*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|255_crm_sync_paid_payment_operations*|253_references_quick_create_permission*|256_doweling_order_version_triggers*|257_status_automation_clear_details_action*|258_financial_projections*|259_payment_audit_capture*|260_crm_sync_payment_notifications*|261_whatsapp_notification_deliveries*|262_onec_alert_episodes*|263_mandatory_balloons_delivery_checks*|264_onec_alert_notifications*|265_onec_alert_whatsapp*|266_order_stage_marks_from_details*|240_payment_onec_matches*|250_onec_stock_snapshots*|241_client_screen_settings*|267_integration_duplicates*|270_bitrix24_assignment_channel*|269_client_contacts_screen*)
+    231_cut_result_render_v2*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|243_supplier_contacts_onec*|245_onec_operator_role*|246_clients_analytics_view_real_orders*|247_onec_agent_expected_silence*|244_client_onec_permissions*|248_authorization_snapshot*|249_role_checks_to_permissions*|251_whatsapp_calendar_send_permission*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|255_crm_sync_paid_payment_operations*|253_references_quick_create_permission*|256_doweling_order_version_triggers*|257_status_automation_clear_details_action*|258_financial_projections*|259_payment_audit_capture*|260_crm_sync_payment_notifications*|261_whatsapp_notification_deliveries*|262_onec_alert_episodes*|263_mandatory_balloons_delivery_checks*|264_onec_alert_notifications*|265_onec_alert_whatsapp*|266_order_stage_marks_from_details*|240_payment_onec_matches*|250_onec_stock_snapshots*|241_client_screen_settings*|267_integration_duplicates*|268_client_merges*|270_bitrix24_assignment_channel*|269_client_contacts_screen*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

@@ -26,7 +26,9 @@ export interface TransitionContext {
 }
 
 /** Transitions a consumer may rely on; `source_refreshed` only keeps the 1C dependency fresh and is not announced. */
-const ANNOUNCED: ReadonlySet<DuplicateAction> = new Set(['detected', 'member_joined', 'member_left', 'dismissed', 'marked_external', 'reopened', 'resolved']);
+const ANNOUNCED: ReadonlySet<DuplicateAction> = new Set([
+  'detected', 'member_joined', 'member_left', 'dismissed', 'marked_external', 'reopened', 'resolved', 'merged', 'merge_undone',
+]);
 
 /**
  * One transition of a case: its history row, the audit row and (for announced transitions) the domain event, all in

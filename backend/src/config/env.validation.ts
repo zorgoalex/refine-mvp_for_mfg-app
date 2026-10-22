@@ -308,6 +308,12 @@ export const envSchema = z
     // работает и при выключенном поиске. Ключ дел — HMAC с секретом BACKEND_INTEGRATION_DUPLICATES_KEY (≥ 32 символа).
     BACKEND_INTEGRATION_DUPLICATES: booleanFromEnv.default(false),
     BACKEND_INTEGRATION_DUPLICATES_KEY: z.union([z.string().min(32).max(256), emptyTrimmedStringFromEnv]).optional(),
+    // Объединение клиентов из журнала дублей (D1): предпросмотр и «Соединить». Отмена и история работают и при выключенном
+    // флаге. Включать на stage только после правок обратной синхронизации Bitrix24 (перенаправление объединённых).
+    BACKEND_CLIENT_MERGE: booleanFromEnv.default(false),
+    // События объединения в очередь CRM (crm.sync.client.merged|merge_undone) — только когда потребитель crm-sync
+    // зарегистрирован (иначе неизвестный тип уйдёт в failed).
+    BACKEND_CLIENT_MERGE_CRM_EVENTS: booleanFromEnv.default(false),
     // Виды контактов клиента WhatsApp, Viber, Instagram и «Другое» (migration 269). Выключен: новые и изменённые контакты
     // этих видов не принимаются (уже сохранённые остаются и сохраняются без изменений) — шаг перед откатом backend.
     BACKEND_CLIENT_CONTACT_EXTRA_KINDS: booleanFromEnv.default(false),
