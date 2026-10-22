@@ -1,10 +1,11 @@
-import { Inject, Injectable, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
 import { ApiError } from '../common/errors/api-error';
 import type { BackendEnv } from '../config/env.validation';
 import type { DatabaseClient, DatabaseQueryOptions, TransactionClient } from './database.types';
 import { PerformanceQueryTelemetryService } from '../performance/performance-query-telemetry.service';
+import { RequestContextService } from '../common/request-context/request-context.service';
 import { beginTransactionHooks, flushTransactionHooks, discardTransactionHooks } from './transaction-hooks';
 import { enterMdfCommand, discardMdfCommandBoundary, type MdfCommandWriter } from '../modules/mdf-board/application/mdf-command-boundary';
 
@@ -59,6 +60,7 @@ export class DatabaseService implements OnModuleDestroy, DatabaseClient {
   constructor(
     @Inject(ConfigService) private readonly config: ConfigService<BackendEnv, true>,
     private readonly telemetry: PerformanceQueryTelemetryService,
+    @Optional() private readonly requestContexts?: RequestContextService,
   ) {
     this.queryTimeoutMs = this.config.get('DATABASE_QUERY_TIMEOUT_MS', { infer: true });
     const connectionString = this.config.get('DATABASE_URL', { infer: true });
@@ -123,6 +125,12 @@ export class DatabaseService implements OnModuleDestroy, DatabaseClient {
       if (isolation) await client.query(`SET TRANSACTION ISOLATION LEVEL ${isolation.toUpperCase()}`);
       if (options.mdf) await enterMdfCommand(client, options.mdf);
       beginTransactionHooks(client);
+      // Transaction-local: database triggers that write audit (migration 266)
+      // correlate it with the HTTP request; pooled connections never keep it.
+      const requestId = this.requestContexts?.get()?.requestId;
+      if (requestId && requestId !== 'req_unknown') {
+        await client.query("SELECT set_config('erp.request_id', $1, true)", [requestId]);
+      }
       const result = await handler(client);
       await flushTransactionHooks(client);
       await client.query('COMMIT');

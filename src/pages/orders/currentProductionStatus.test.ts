@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildStageMarksSignature,
   buildActiveProductionStatusCodeMap,
   resolveActiveProductionEventCodes,
-  resolveCurrentProductionStatusCodes,
+  resolveOrderStageCodes,
 } from './currentProductionStatus';
 
 describe('resolveActiveProductionEventCodes', () => {
@@ -36,47 +37,35 @@ describe('resolveActiveProductionEventCodes', () => {
   });
 });
 
-describe('resolveCurrentProductionStatusCodes', () => {
-  it('returns exactly the current configured status code', () => {
-    expect(resolveCurrentProductionStatusCodes({
-      statusId: 7,
-      statusName: 'Закатан',
-      statusIdToCode: new Map([[7, 'laminated'], [8, 'packed']]),
-    })).toEqual(['laminated']);
+describe('resolveOrderStageCodes', () => {
+  it('returns unique backend order marks and ignores blanks and non-strings', () => {
+    expect(resolveOrderStageCodes(['cut', ' cut ', '', null, 42, 'drawn'])).toEqual(['cut', 'drawn']);
+    expect(resolveOrderStageCodes(undefined)).toEqual([]);
+    expect(resolveOrderStageCodes('cut')).toEqual([]);
   });
 
-  it('falls back to the current status name when the id is unavailable', () => {
-    expect(resolveCurrentProductionStatusCodes({
-      statusName: 'Распилен',
-      statusIdToCode: new Map(),
-    })).toEqual(['cut']);
+  it('prefers loaded event codes, including an explicit empty set', () => {
+    expect(resolveOrderStageCodes(['cut'], ['drawn'])).toEqual(['drawn']);
+    expect(resolveOrderStageCodes(['cut'], [])).toEqual([]);
+  });
+});
+
+describe('buildStageMarksSignature', () => {
+  const details = [{ detail_id: 1, production_status_id: 16 }, { detail_id: 2, production_status_id: 6 }];
+  const hdf = [{ order_hdf_detail_id: 7, production_status_id: 16 }];
+
+  it('changes when an ordinary detail changes stage', () => {
+    expect(buildStageMarksSignature(details, hdf))
+      .not.toBe(buildStageMarksSignature([details[0], { detail_id: 2, production_status_id: 7 }], hdf));
   });
 
-  it('does not display historical stages for an unknown current status', () => {
-    expect(resolveCurrentProductionStatusCodes({
-      statusId: 999,
-      statusName: null,
-      statusIdToCode: new Map([[7, 'laminated']]),
-    })).toEqual([]);
+  it('changes when only an HDF detail changes stage', () => {
+    expect(buildStageMarksSignature(details, hdf))
+      .not.toBe(buildStageMarksSignature(details, [{ order_hdf_detail_id: 7, production_status_id: 19 }]));
   });
 
-  it('combines events, the order status, and unique detail statuses', () => {
-    expect(resolveCurrentProductionStatusCodes({
-      statusId: 2,
-      statusName: 'Распилен',
-      statusIdToCode: new Map([[1, 'drawn'], [2, 'cut']]),
-      passedCodes: ['drawn'],
-      detailStatuses: [
-        { statusId: 2, statusName: 'Распилен' },
-        { statusId: 2, statusName: 'Распилен' },
-      ],
-    })).toEqual(['drawn', 'cut']);
-  });
-
-  it('returns a shared detail status only once', () => {
-    expect(resolveCurrentProductionStatusCodes({
-      statusIdToCode: new Map([[2, 'cut']]),
-      detailStatuses: Array.from({ length: 4 }, () => ({ statusId: 2 })),
-    })).toEqual(['cut']);
+  it('is stable for the same stages', () => {
+    expect(buildStageMarksSignature(details.map((d) => ({ ...d })), hdf.map((d) => ({ ...d }))))
+      .toBe(buildStageMarksSignature(details, hdf));
   });
 });

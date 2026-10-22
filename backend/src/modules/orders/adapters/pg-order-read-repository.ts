@@ -646,17 +646,8 @@ export class PgOrderReadRepository
             SELECT pse.production_status_id
             FROM production_status_events pse
             WHERE pse.order_id = o.order_id
-            UNION
-            SELECT o.production_status_id
-            WHERE o.production_status_id IS NOT NULL
-            UNION
-            SELECT od.production_status_id
-            FROM order_details od
-            WHERE od.order_id = o.order_id
-              AND od.delete_flag = false
-              AND od.production_status_id IS NOT NULL
           ) actual_statuses
-          INNER JOIN production_statuses ps ON ps.production_status_id = actual_statuses.production_status_id
+          INNER JOIN production_statuses ps ON ps.production_status_id = actual_statuses.production_status_id AND ps.is_active = true
           GROUP BY ps.production_status_code
         ) statuses
       ) production_projection ON true
@@ -771,17 +762,8 @@ export class PgOrderReadRepository
               SELECT pse.production_status_id
               FROM production_status_events pse
               WHERE pse.order_id = o.order_id
-              UNION
-              SELECT o.production_status_id
-              WHERE o.production_status_id IS NOT NULL
-              UNION
-              SELECT od.production_status_id
-              FROM order_details od
-              WHERE od.order_id = o.order_id
-                AND od.delete_flag = false
-                AND od.production_status_id IS NOT NULL
             ) actual_statuses
-            INNER JOIN production_statuses ps ON ps.production_status_id = actual_statuses.production_status_id
+            INNER JOIN production_statuses ps ON ps.production_status_id = actual_statuses.production_status_id AND ps.is_active = true
             GROUP BY ps.production_status_code
           ) statuses
         ) AS passed_production_status_codes,

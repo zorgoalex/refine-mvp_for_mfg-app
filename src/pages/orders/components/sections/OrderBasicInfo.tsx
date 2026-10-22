@@ -1,5 +1,4 @@
 import { Table } from '../../../../ui/tooltipDelay';
-import { OrderProductionSummary } from '../../../../components/OrderProductionSummary';
 // Order Basic Info Section
 // Row 1: Client, Order Name, Order Date
 // Row 2: Order Status, Payment Status, Manager, Priority
@@ -520,7 +519,6 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
                   disabled={productionStatusPending}
                   allowClear={!featureFlags.useBackendProductionActions}
                 />
-                <OrderProductionSummary order={header} />
               </div>
             </Form.Item>
           </Col>

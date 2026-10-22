@@ -37,7 +37,7 @@ describe('order show finance action wiring', () => {
   it('shows only the current production status in the view summary', () => {
     expect(orderPrimaryResourceSource).toContain("'production_status_id'");
     expect(orderPrimaryResourceSource).toContain("'production_status_name'");
-    expect(showHeaderSource).toContain('resolveCurrentProductionStatusCodes');
+    expect(showHeaderSource).toContain('resolveOrderStageCodes');
     expect(showHeaderSource).toContain('currentProductionStatusCodes');
     expect(showHeaderSource).not.toContain('productionEventsData');
   });
