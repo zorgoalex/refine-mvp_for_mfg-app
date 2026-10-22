@@ -511,13 +511,24 @@
 }
 
 /* действия шапки — одна строка с прокруткой; «Добавить платёж» уже в нижней панели */
+/* шапка не шире экрана: строка действий прокручивается внутри, а не растягивает страницу */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-order-head,
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-order-head__top,
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-order-head__identity {
+  min-width: 0;
+  max-width: 100%;
+}
+
 :root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-order-head__actions {
+  flex: 1 1 100%;
   flex-wrap: nowrap;
   justify-content: flex-start;
+  min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
   scrollbar-width: none;
-  margin: 0 -16px;
-  padding: 2px 16px 4px;
+  margin: 0;
+  padding: 2px 0 4px;
 }
 
 :root[data-ui-variant="workbench"] .evolution-shell--wb-phone .wb-order-head__actions > * {
@@ -590,6 +601,25 @@
 
 :root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-production-flow__bar {
   grid-column: 1 / -1;
+}
+
+/* пустые этапы — короче и без полоски */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-production-flow__stage[data-empty='true'] {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-production-flow__stage[data-empty='true']::before {
+  top: 12px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-production-flow__stage[data-empty='true']::after {
+  top: 26px;
+  bottom: -10px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-production-flow__stage[data-empty='true'] .order-production-flow__bar {
+  display: none;
 }
 
 /* «Оплаты (N)»: после деталей, до боковых карточек (строка 10 сетки карточки) */
