@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { orderProductionSummaryLabel, productionSummaryFromDetails, orderProductionBadge } from './orderProductionSummary';
+import { orderProductionSummaryLabel, productionSummaryFromDetails } from './orderProductionSummary';
 
 describe('informative ordinary-detail production summary', () => {
   it.each([
@@ -21,21 +21,5 @@ describe('informative ordinary-detail production summary', () => {
       { production_status_id: 6 }, { production_status_id: null, delete_flag: true },
       { production_status_id: null },
     ])).toEqual({ production_detail_count: 2, production_unassigned_count: 1, production_distinct_status_count: 1 });
-  });
-  it.each([
-    { ids: [6, 7], label: 'Закатан', mixed: true },
-    { ids: [6, 6], label: 'Закатан', mixed: false },
-    { ids: [6, null], label: 'Без статуса', mixed: true },
-    { ids: [null, null], label: 'Без статуса', mixed: false },
-    { ids: [], label: 'Нет деталей', mixed: false },
-  ])('compact badge for $ids keeps composition in its description', ({ ids, label, mixed }) => {
-    const summary = { production_status_name: 'Закатан',
-      ...productionSummaryFromDetails(ids.map(production_status_id => ({ production_status_id }))) };
-    expect(orderProductionBadge(summary)).toEqual({ label, mixed, description: orderProductionSummaryLabel(summary) });
-  });
-  it('does not paint an unverified scalar as mixed or uniform', () => {
-    expect(orderProductionBadge({ productionStatusName: 'Закатан' })).toEqual({
-      label: 'Не проверен', mixed: false, description: 'Состав не проверен',
-    });
   });
 });

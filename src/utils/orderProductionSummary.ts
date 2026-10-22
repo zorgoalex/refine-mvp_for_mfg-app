@@ -21,22 +21,7 @@ export function orderProductionSummaryLabel(order: OrderProductionSummaryInput):
   });
 }
 
-/** Compact visual label; the full explanation stays in the tooltip/export. */
-export function orderProductionBadge(order: OrderProductionSummaryInput) {
-  const total = order.productionDetailCount ?? order.production_detail_count;
-  const missing = order.productionUnassignedCount ?? order.production_unassigned_count;
-  const distinct = order.productionDistinctStatusCount ?? order.production_distinct_status_count;
-  const name = order.productionStatusName ?? order.production_status_name;
-  const verified = total !== undefined && missing !== undefined && distinct !== undefined;
-  return {
-    label: !verified ? 'Не проверен' : total === 0 ? 'Нет деталей'
-      : missing > 0 ? 'Без статуса' : name || 'Без статуса',
-    mixed: verified && total > 0 && (distinct > 1 || (missing > 0 && missing < total)),
-    description: orderProductionSummaryLabel(order),
-  };
-}
-
-/** Used by the live order detail view: SSE detail updates must not leave the badge stale. */
+/** Composition counts of the active ordinary details (deleted ones excluded). */
 export function productionSummaryFromDetails(
   details: readonly { production_status_id?: number | null; delete_flag?: boolean | null }[],
 ) {

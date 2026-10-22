@@ -12,7 +12,6 @@ import {
 import { useNavigate, useLocation } from "react-router-dom";
 import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
-import { OrderProductionSummary } from "../../components/OrderProductionSummary";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 
 const { Title, Text, Link } = Typography;
@@ -344,19 +343,6 @@ export const PaymentsAnalyticsShow: React.FC<IResourceComponentsProps> = () => {
             <Statistic
               title="Статус заказа"
               value={record?.order_status_name || "—"}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={8} md={6} lg={4}>
-          <Card size="small" className="stat-normal">
-            <Statistic
-              title="Статус производства"
-              formatter={() => <OrderProductionSummary order={{
-                production_status_name: record?.production_status_name,
-                production_detail_count: record?.production_detail_count,
-                production_unassigned_count: record?.production_unassigned_count,
-                production_distinct_status_count: record?.production_distinct_status_count,
-              }} />}
             />
           </Card>
         </Col>

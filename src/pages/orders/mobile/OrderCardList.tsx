@@ -1,7 +1,8 @@
 import React from 'react';
 import { Card, List, Tag, Typography } from 'antd';
 import { StarFilled } from '@ant-design/icons';
-import { OrderProductionSummary } from '../../../components/OrderProductionSummary';
+import { ProductionStagesDisplay } from '../../../components/ProductionStagesDisplay';
+import { resolveOrderStageCodes } from '../currentProductionStatus';
 import type { TablePaginationConfig } from 'antd';
 import {
   buildOrderCardModel,
@@ -18,6 +19,13 @@ export interface OrderCardListProps {
   onOpen: (id: number) => void;
   showFinancials?: boolean;
   statusColors?: Partial<OrderCardStatusColorMaps>;
+  /** Order-level stage marks by order id (legacy Hasura read path); backend rows carry their own. */
+  passedCodesByOrderId?: Readonly<Record<number, string[]>>;
+  productionWorkflowDisplay?: {
+    displayOrderCodes?: string[];
+    codeToLetter?: Record<string, string>;
+    codeToName?: Record<string, string>;
+  };
 }
 
 const statusTag = (kind: OrderCardStatusKind, label: string, backgroundColor: string) => (
@@ -54,7 +62,10 @@ export const buildOrderCardPagination = (
   };
 };
 
-export const OrderCardList: React.FC<OrderCardListProps> = ({ rows, loading, pagination, onPaginationChange, onOpen, showFinancials = true, statusColors }) => (
+export const OrderCardList: React.FC<OrderCardListProps> = ({
+  rows, loading, pagination, onPaginationChange, onOpen, showFinancials = true, statusColors,
+  passedCodesByOrderId, productionWorkflowDisplay,
+}) => (
   <List
     dataSource={rows as Record<string, unknown>[]}
     loading={loading}
@@ -83,7 +94,13 @@ export const OrderCardList: React.FC<OrderCardListProps> = ({ rows, loading, pag
           <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {m.statusTag && statusTag('order', m.statusTag, m.statusTagColor)}
             {m.paymentTag && statusTag('payment', m.paymentTag, m.paymentTagColor)}
-            <OrderProductionSummary order={row} />
+            <ProductionStagesDisplay
+              passedCodes={resolveOrderStageCodes(row.passed_production_status_codes, passedCodesByOrderId?.[Number(row.order_id)])}
+              displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
+              codeToLetter={productionWorkflowDisplay?.codeToLetter}
+              codeToName={productionWorkflowDisplay?.codeToName}
+              fontSize={11}
+            />
           </div>
           {m.amountLine && (
             <Typography.Text strong style={{ display: 'block', marginTop: 6 }}>{m.amountLine}</Typography.Text>

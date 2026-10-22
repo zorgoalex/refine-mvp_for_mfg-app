@@ -1,9 +1,8 @@
 // Order Header Summary (Read-only)
-import { OrderProductionSummary } from '../../../../components/OrderProductionSummary';
 // Compact minimalist design - 3 rows with minimal padding
 // Right-click to open context menu for status changes
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Tag, Space, Typography } from 'antd';
 import { StarOutlined } from '@ant-design/icons';
 import { useList, useOne } from '../../../../query/orderLifecycleQueries';
@@ -27,6 +26,7 @@ import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitiv
 import { collectOrderBasisProjects } from './orderBasisProjects';
 import { buildOrderHeaderMaterialSummaryItems } from '../../orderMaterialsSummary';
 import {
+  buildStageMarksSignature,
   buildActiveProductionStatusCodeMap,
   resolveActiveProductionEventCodes,
 } from '../../currentProductionStatus';
@@ -45,6 +45,20 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
   const productionStatusEvents = useProductionStatusEvent({
     orderId: header.order_id,
   });
+  // Detail and HDF stages set and clear the order marks in the database: a saved
+  // order (new version) or changed stages re-read them.
+  const stageMarksSignature = useMemo(
+    () => `${header.version ?? ''}|${buildStageMarksSignature(details, hdfDetails)}`,
+    [details, hdfDetails, header.version],
+  );
+  const stageMarksSignatureRef = useRef(stageMarksSignature);
+  const { refetch: refetchStageMarks } = productionStatusEvents;
+  useEffect(() => {
+    if (stageMarksSignatureRef.current === stageMarksSignature) return;
+    stageMarksSignatureRef.current = stageMarksSignature;
+    // refetch ignores `enabled`: never load unfiltered events for a new order.
+    if (header.order_id) refetchStageMarks();
+  }, [header.order_id, refetchStageMarks, stageMarksSignature]);
   const businessDetails = useMemo(
     () => businessOrderDetails(details),
     [details],
@@ -444,7 +458,6 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
               {header.order_date ? dayjs(header.order_date).format('DD.MM.YYYY') : '—'}
               {' → '}
               {header.planned_completion_date ? dayjs(header.planned_completion_date).format('DD.MM.YYYY') : '—'}
-              <OrderProductionSummary order={header} />
               {passedProductionCodes.length > 0 ? (
                 <ProductionStagesDisplay
                   passedCodes={passedProductionCodes}
@@ -617,7 +630,6 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
             {header.planned_completion_date ? dayjs(header.planned_completion_date).format('DD.MM.YYYY') : '—'}
           </Text>
           {/* Production stages display */}
-          <OrderProductionSummary order={header} />
           {passedProductionCodes.length > 0 && (
             <>
               <span style={{ color: 'var(--app-border)' }}>|</span>
