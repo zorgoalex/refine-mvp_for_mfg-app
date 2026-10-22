@@ -629,6 +629,31 @@ export class PgBitrix24ReverseRepository {
         return clientId;
       }
 
+      // A merged client (migration 268) keeps its contact as an alias of the survivor: Bitrix edits of that contact
+      // (name, phones, the «неактивен» line that would reactivate it) are not applied. Read after the client key, so a
+      // merge that committed while this event waited is seen.
+      const survivorId = mapping ? await mergeSurvivorOf(tx, clientId) : null;
+      if (mapping && survivorId !== null) {
+        if (exact) {
+          await tx.query(
+            `UPDATE crm_sync_mapping
+                SET last_bitrix_hash=$4, last_bitrix_updated_at=$5, last_synced_at=now(), updated_at=now()
+              WHERE entity_type='client' AND erp_id=$1 AND bitrix_object=$2 AND bitrix_id=$3`,
+            [String(clientId), snapshot.objectType, snapshot.bitrixId, snapshot.normalizedHash, snapshot.bitrixUpdatedAt],
+          );
+        }
+        await recordMergedClientSkipped(tx, this.audit, {
+          mergedClientId: clientId,
+          survivorId,
+          requestId,
+          operation: 'upsert',
+          bitrixObject: snapshot.objectType,
+          bitrixId: snapshot.bitrixId,
+        });
+        await enqueueUnresolvedDealsForCounterparty(tx, snapshot.objectType, snapshot.bitrixId);
+        return clientId;
+      }
+
       if (mapping) {
         const result = await tx.query(
           `UPDATE clients
@@ -725,6 +750,19 @@ export class PgBitrix24ReverseRepository {
         [objectType, bitrixId],
       );
       if (!mapping) return false;
+      // A merged client stays as the merge left it: no deactivation, its mapping is not marked deleted.
+      const survivorId = await mergeSurvivorOf(tx, Number(mapping.erpId));
+      if (survivorId !== null) {
+        await recordMergedClientSkipped(tx, this.audit, {
+          mergedClientId: Number(mapping.erpId),
+          survivorId,
+          requestId,
+          operation: 'archive',
+          bitrixObject: objectType,
+          bitrixId,
+        });
+        return false;
+      }
       await tx.query('UPDATE clients SET is_active=false WHERE client_id=$1', [mapping.erpId]);
       await tx.query(
         `UPDATE crm_sync_mapping
@@ -759,6 +797,29 @@ export class PgBitrix24ReverseRepository {
     return this.db.transaction(async (tx) => {
       await assertInboundOwnership(tx, requestId, lockToken);
       await lockAggregate(tx, `deal:${snapshot.bitrixId}`);
+      const dealClient = await resolveDealClient(tx, snapshot);
+      snapshot = { ...snapshot, clientId: dealClient.clientId };
+      const noteRedirect = async (orderId: number | null): Promise<void> => {
+        if (dealClient.mergedClientId === null || dealClient.clientId === null) return;
+        await this.audit.record(tx, {
+          event: 'crm_sync.reverse.merged_client_redirected',
+          entityType: 'client',
+          entityId: dealClient.mergedClientId,
+          actorUserId: null,
+          requestId,
+          source: 'bitrix24',
+          relatedClientId: dealClient.mergedClientId,
+          relatedOrderId: orderId,
+          relatedEntities: [{ entityType: 'client', entityId: dealClient.clientId }],
+          after: { clientId: dealClient.clientId },
+          metadata: {
+            survivorId: dealClient.clientId,
+            bitrixDealId: snapshot.bitrixId,
+            bitrixObject: snapshot.counterpartyObjectType,
+            bitrixId: snapshot.counterpartyBitrixId,
+          },
+        });
+      };
       await setReverseOrigin(tx);
       await refreshDealAuthorship(tx, snapshot);
       const exact = await this.readMapping(
@@ -1023,6 +1084,7 @@ export class PgBitrix24ReverseRepository {
           return { requestId: linkedRequestId, erpOrderId: mapping.erpId };
         }
         const requestIsActive = restoredFromArchive || linkedRequestRow?.state === 'active';
+        if (linkedRequestId !== null && requestIsActive) await noteRedirect(Number(mapping.erpId));
         let linkedRequestVersion: number | null = null;
         if (linkedRequestId !== null) {
           const managerId = materialization
@@ -1257,6 +1319,7 @@ export class PgBitrix24ReverseRepository {
       }
 
       if (materialization && snapshot.clientId !== null) {
+        await noteRedirect(null);
         return materializeCrmRequestOrder(
           tx,
           this.audit,
@@ -1290,6 +1353,7 @@ export class PgBitrix24ReverseRepository {
         return { requestId: Number(existingRow.request_id), erpOrderId: null };
       }
 
+      await noteRedirect(null);
       const result = await tx.query<{
         request_id: string | number;
         version: number;
@@ -5719,6 +5783,72 @@ export async function touchAssignmentRemote(
   refId: string,
 ): Promise<void> {
   await db.query('SELECT bitrix24_assignment_touch_remote($1, $2, $3)', [bitrixObject, bitrixId, refId]);
+}
+
+/** The client a merged client lives on in (`client_merge_redirects`, migration 268; chains are flat), or null. */
+async function mergeSurvivorOf(tx: TransactionClient, clientId: number): Promise<number | null> {
+  const result = await tx.query<{ survivor_id: string | number }>(
+    'SELECT survivor_id FROM client_merge_redirects WHERE merged_client_id=$1',
+    [clientId],
+  );
+  return result.rows[0] ? Number(result.rows[0].survivor_id) : null;
+}
+
+/**
+ * The ERP client of a deal, read under the key of its counterparty (taken after the deal key: the order deal → client
+ * → rows; a merge takes client keys → rows and never a deal key). A deal on the contact of a merged client belongs to
+ * the survivor. Without a counterparty, the client the processor found through the origin order is kept.
+ */
+async function resolveDealClient(
+  tx: TransactionClient,
+  snapshot: ReverseDealSnapshot,
+): Promise<{ clientId: number | null; mergedClientId: number | null }> {
+  let clientId = snapshot.clientId;
+  if (snapshot.counterpartyObjectType && snapshot.counterpartyBitrixId) {
+    await lockAggregate(tx, `client:${snapshot.counterpartyObjectType}:${snapshot.counterpartyBitrixId}`);
+    const mapping = await tx.query<{ erp_id: string }>(
+      `SELECT erp_id FROM crm_sync_mapping
+        WHERE entity_type='client' AND bitrix_object=$1 AND bitrix_id=$2
+        LIMIT 1`,
+      [snapshot.counterpartyObjectType, snapshot.counterpartyBitrixId],
+    );
+    clientId = mapping.rows[0] ? Number(mapping.rows[0].erp_id) : null;
+  }
+  if (clientId === null) return { clientId: null, mergedClientId: null };
+  const survivorId = await mergeSurvivorOf(tx, clientId);
+  return survivorId === null
+    ? { clientId, mergedClientId: null }
+    : { clientId: survivorId, mergedClientId: clientId };
+}
+
+async function recordMergedClientSkipped(
+  tx: TransactionClient,
+  audit: AuditService,
+  input: {
+    mergedClientId: number;
+    survivorId: number;
+    requestId: string;
+    operation: 'upsert' | 'archive';
+    bitrixObject: string;
+    bitrixId: string;
+  },
+): Promise<void> {
+  await audit.record(tx, {
+    event: 'crm_sync.reverse.merged_client_skipped',
+    entityType: 'client',
+    entityId: input.mergedClientId,
+    actorUserId: null,
+    requestId: input.requestId,
+    source: 'bitrix24',
+    relatedClientId: input.mergedClientId,
+    relatedEntities: [{ entityType: 'client', entityId: input.survivorId }],
+    metadata: {
+      survivorId: input.survivorId,
+      operation: input.operation,
+      bitrixObject: input.bitrixObject,
+      bitrixId: input.bitrixId,
+    },
+  });
 }
 
 async function lockAggregate(tx: TransactionClient, key: string): Promise<void> {

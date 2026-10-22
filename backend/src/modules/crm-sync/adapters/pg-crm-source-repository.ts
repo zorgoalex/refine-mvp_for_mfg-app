@@ -44,9 +44,10 @@ export class PgCrmSourceRepository implements CrmSourcePort {
 
   async getClientById(id: string): Promise<ClientRow | null> {
     const { rows } = await this.db.query(
-      `SELECT client_id, client_name, person_type, notes, is_active
-         FROM clients
-        WHERE client_id = $1`,
+      `SELECT c.client_id, c.client_name, c.person_type, c.notes, c.is_active, r.survivor_id
+         FROM clients c
+         LEFT JOIN client_merge_redirects r ON r.merged_client_id = c.client_id
+        WHERE c.client_id = $1`,
       [id],
     );
     if (!rows.length) return null;
@@ -64,12 +65,19 @@ export class PgCrmSourceRepository implements CrmSourcePort {
       personType: r.person_type === 'legal' ? 'legal' : 'individual',
       notes: r.notes ?? null,
       isActive: Boolean(r.is_active),
+      mergedIntoClientId: r.survivor_id == null ? null : String(r.survivor_id),
       phones: phonesResult.rows.map((phone): ClientPhoneRow => ({
         phoneNumber: String(phone.phone_number),
         phoneType: normalizePhoneType(phone.phone_type),
         isPrimary: Boolean(phone.is_primary),
       })),
     };
+  }
+
+  async getClientMergeStatus(mergeId: string): Promise<'done' | 'undone' | null> {
+    const { rows } = await this.db.query('SELECT status FROM client_merges WHERE merge_id = $1', [mergeId]);
+    const status = rows[0]?.status;
+    return status === 'done' || status === 'undone' ? status : null;
   }
 
   async getOrderById(id: string): Promise<OrderRow | null> {
@@ -159,9 +167,13 @@ export class PgCrmSourceRepository implements CrmSourcePort {
     return Boolean(rows[0]?.has_orders);
   }
 
+  /** Backfill clients; a merged client (migration 268) lives on in its survivor and gets no counterparty of its own. */
   async listClientIds(afterId: string, limit: number): Promise<string[]> {
     const { rows } = await this.db.query(
-      `SELECT client_id FROM clients WHERE client_id > $1 ORDER BY client_id ASC LIMIT $2`,
+      `SELECT c.client_id FROM clients c
+        WHERE c.client_id > $1
+          AND NOT EXISTS (SELECT 1 FROM client_merge_redirects r WHERE r.merged_client_id = c.client_id)
+        ORDER BY c.client_id ASC LIMIT $2`,
       [afterId, limit],
     );
     return rows.map((r) => String(r.client_id));

@@ -38,7 +38,7 @@ const intent = {
 } as SyncIntent;
 
 function harness(writerOwned: boolean) {
-  const tx = { query: vi.fn() } as unknown as TransactionClient;
+  const tx = { query: vi.fn().mockResolvedValue({ rows: [] }) } as unknown as TransactionClient;
   const db = {
     transaction: vi.fn(async (handler) => handler(tx)),
   } as unknown as DatabaseService;

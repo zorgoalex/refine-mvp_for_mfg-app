@@ -38,8 +38,17 @@ export interface Bitrix24ApiPort {
   /** Payment notifications: absent in dry-run and unconfigured clients. Creates are never retried on a lost answer. */
   addDealComment?(dealId: string, comment: string): Promise<string>;
   listDealComments?(dealId: string, createdFrom: Date): Promise<Bitrix24CommentPage>;
+  /** Comments in the timeline of a contact or a company (client merges): same rules as the deal ones. */
+  addTimelineComment?(entityType: Bitrix24TimelineEntity, entityId: string, comment: string): Promise<string>;
+  listTimelineComments?(
+    entityType: Bitrix24TimelineEntity,
+    entityId: string,
+    createdFrom: Date,
+  ): Promise<Bitrix24CommentPage>;
   notifyUser?(userId: string, message: string): Promise<void>;
 }
+
+export type Bitrix24TimelineEntity = 'deal' | 'contact' | 'company';
 
 /** Comments of a deal created since a moment; `complete` is false when not every page could be read. */
 export interface Bitrix24CommentPage {
@@ -558,9 +567,21 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
   }
 
   async addDealComment(dealId: string, comment: string): Promise<string> {
+    return this.addTimelineComment('deal', dealId, comment);
+  }
+
+  async listDealComments(dealId: string, createdFrom: Date): Promise<Bitrix24CommentPage> {
+    return this.listTimelineComments('deal', dealId, createdFrom);
+  }
+
+  async addTimelineComment(
+    entityType: Bitrix24TimelineEntity,
+    entityId: string,
+    comment: string,
+  ): Promise<string> {
     // A lost answer may hide a created comment: never repeated here (networkRetry=false).
     const id = await this.call<number | string>('crm.timeline.comment.add', {
-      fields: { ENTITY_ID: Number(dealId), ENTITY_TYPE: 'deal', COMMENT: comment },
+      fields: { ENTITY_ID: Number(entityId), ENTITY_TYPE: entityType, COMMENT: comment },
     }, false);
     if ((typeof id !== 'number' && typeof id !== 'string') || !/^[1-9][0-9]*$/.test(String(id))) {
       throw this.unexpected('crm.timeline.comment.add', id);
@@ -568,13 +589,17 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
     return String(id);
   }
 
-  async listDealComments(dealId: string, createdFrom: Date): Promise<Bitrix24CommentPage> {
+  async listTimelineComments(
+    entityType: Bitrix24TimelineEntity,
+    entityId: string,
+    createdFrom: Date,
+  ): Promise<Bitrix24CommentPage> {
     const comments: Array<{ id: string; comment: string }> = [];
     const seen = new Set<string>();
     let start = 0;
     for (let page = 0; page < DEAL_COMMENT_PAGE_LIMIT; page += 1) {
       const { result, next } = await this.callPage<Array<Record<string, unknown>>>('crm.timeline.comment.list', {
-        filter: { ENTITY_ID: Number(dealId), ENTITY_TYPE: 'deal', '>=CREATED': createdFrom.toISOString() },
+        filter: { ENTITY_ID: Number(entityId), ENTITY_TYPE: entityType, '>=CREATED': createdFrom.toISOString() },
         select: ['ID', 'ENTITY_ID', 'ENTITY_TYPE', 'CREATED', 'COMMENT'],
         order: { ID: 'ASC' },
         start,
@@ -582,7 +607,7 @@ export class Bitrix24ApiClient implements Bitrix24ApiPort {
       if (!Array.isArray(result)) return { comments, complete: false };
       for (const row of result) {
         const id = String(row?.ID ?? '');
-        if (!/^[1-9][0-9]*$/.test(id) || String(row.ENTITY_ID) !== String(Number(dealId))) continue;
+        if (!/^[1-9][0-9]*$/.test(id) || String(row.ENTITY_ID) !== String(Number(entityId))) continue;
         if (seen.has(id)) continue;
         seen.add(id);
         comments.push({ id, comment: typeof row.COMMENT === 'string' ? row.COMMENT : '' });
