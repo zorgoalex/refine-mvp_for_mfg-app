@@ -286,6 +286,11 @@ test.describe('Calendar frontend', () => {
             },
         );
         db.order_details[0].production_status_id = 4;
+        // Card letters are the order stage marks (production_status_events).
+        db.production_status_events.push(
+            { event_id: 1, order_id: 201, production_status_id: 4 },
+            { event_id: 2, order_id: 201, production_status_id: 5 },
+        );
 
         await setupWorkflowMockApi(page, db, {
             runtimeConfig: { backendOrdersRead: true },
