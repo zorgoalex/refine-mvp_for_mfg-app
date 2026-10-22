@@ -121,13 +121,16 @@ export function ClientContactsPage() {
           <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: '1 1 auto', overflow: 'hidden' }}>
             {values.map((value) => (
               // A long value ends with «…» inside the cell (never under the pencil); the whole value is in the title.
+              // A copy from 1C: its mark comes first and never shrinks, so a long value cut with «…» cannot hide it.
               <span key={'phoneId' in value ? `p${value.phoneId}` : `c${value.contactId}`}
-                title={'phoneId' in value ? value.phoneNumber : [formatContact(value), value.note].filter(Boolean).join(' · ')}
-                style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {'phoneId' in value ? value.phoneNumber : formatContact(value)}
-                {value.isPrimary && values.length > 1 ? <StarFilled style={{ color: '#faad14', marginLeft: 4, fontSize: 11 }} /> : null}
-                {'origin' in value && value.origin === 'onec' ? <Tag color="blue" style={{ marginInlineStart: 4 }}>из 1С</Tag> : null}
-                {'note' in value && value.note ? <Typography.Text type="secondary" style={{ fontSize: 12 }}> · {value.note}</Typography.Text> : null}
+                title={'phoneId' in value ? value.phoneNumber : [formatContact(value), value.note, value.origin === 'onec' ? 'из 1С' : null].filter(Boolean).join(' · ')}
+                style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+                {'origin' in value && value.origin === 'onec' ? <Tag color="blue" style={{ marginInlineEnd: 4, flexShrink: 0 }}>1С</Tag> : null}
+                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+                  {'phoneId' in value ? value.phoneNumber : formatContact(value)}
+                  {value.isPrimary && values.length > 1 ? <StarFilled style={{ color: '#faad14', marginLeft: 4, fontSize: 11 }} /> : null}
+                  {'note' in value && value.note ? <Typography.Text type="secondary" style={{ fontSize: 12 }}> · {value.note}</Typography.Text> : null}
+                </span>
               </span>
             ))}
           </div>
