@@ -8,7 +8,6 @@ import { LoginMethodNotAllowedError } from '../auth.errors';
 import type { AuthUserRecord } from '../auth.types';
 import type { WorkosIdentity } from './workos-api.client';
 import { WorkosAuthService, type WorkosAuthServicePorts } from './workos-auth.service';
-import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import { staticAuthorizationSnapshot } from '../../../permissions/testing/static-authorization-snapshot';
 
 const IDENTITY: WorkosIdentity = {
