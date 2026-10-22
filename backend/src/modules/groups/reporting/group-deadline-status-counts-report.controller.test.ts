@@ -1,7 +1,9 @@
-import { DECORATORS } from '@nestjs/swagger';
 import { describe, expect, it } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { GroupDeadlineStatusCountsReportController } from './group-deadline-status-counts-report.controller';
+
+// @nestjs/swagger metadata keys; the DECORATORS constant is not public in every installed version.
+const DECORATORS = { API_RESPONSE: 'swagger/apiResponse', API_SECURITY: 'swagger/apiSecurity' } as const;
 
 describe('GroupDeadlineStatusCountsReportController', () => {
   it('fails closed when groups API is disabled', async () => {
