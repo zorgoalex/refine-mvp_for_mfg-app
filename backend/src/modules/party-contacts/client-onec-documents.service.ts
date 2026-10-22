@@ -8,8 +8,7 @@ import type { CurrentUser } from '../../permissions/current-user';
 import { appendOrderReadVisibilitySql } from '../../permissions/policies/order-read-scope-sql';
 import { policyScopeSetsForUser } from '../../permissions/policies/scope';
 import { scalarScope } from '../../permissions/policies/scope-sets';
-import { clientOrderReadScope } from '../clients-read/application/client-list-facts.service';
-import type { ClientOrderReadScope } from '../clients-read/application/client-list-facts.types';
+import { clientOrderReadScope, type ClientOrderReadScope } from './client-order-read-scope';
 import { erpOrderOfOnecOrderSql } from '../payments-onec/domain/onec-order-link-sql';
 import { ClientCounterpartyRepository } from './client-counterparty.repository';
 
