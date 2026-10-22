@@ -111,10 +111,42 @@ export function firstBathSheetMaterialId(options: CutSheetTypeOption[]): number 
   )?.sheetMaterialTypeId ?? null;
 }
 
-interface CutProfileMutations {
+interface CutTextureDirectionMutations {
+  setTextureDirection(cutJobId: number, textureDirection: CutTextureDirection, version: number): Promise<CutJobDto>;
+  setRotationAllowed(cutJobId: number, rotationAllowed: boolean, version: number): Promise<CutJobDto>;
+}
+
+/**
+ * A textured direction («вдоль/поперёк полотна») turns «Поворот разрешён» off by
+ * default. Only a real change of direction does this, so a later manual re-check
+ * of the box survives re-applying the same direction. Rotation is switched off
+ * BEFORE the direction is saved: if the second command fails, the job keeps its
+ * old direction with rotation already off, and picking the direction again
+ * completes the change instead of short-circuiting on an unchanged value.
+ */
+export async function applyCutTextureDirection(input: {
+  currentJob: CutJobDto;
+  textureDirection: CutTextureDirection;
+  mutations: CutTextureDirectionMutations;
+  onUpdated?: (job: CutJobDto) => void;
+}): Promise<CutJobDto> {
+  const { currentJob, textureDirection, mutations, onUpdated } = input;
+  if (currentJob.textureDirection === textureDirection) return currentJob;
+  let updated = currentJob;
+  if (textureDirection !== 'none' && updated.rotationAllowed) {
+    updated = await mutations.setRotationAllowed(updated.cutJobId, false, updated.version);
+    onUpdated?.(updated);
+  }
+  if (updated.textureDirection !== textureDirection) {
+    updated = await mutations.setTextureDirection(updated.cutJobId, textureDirection, updated.version);
+    onUpdated?.(updated);
+  }
+  return updated;
+}
+
+interface CutProfileMutations extends CutTextureDirectionMutations {
   setProfile(cutJobId: number, profileId: number | null, version: number): Promise<CutJobDto>;
   setName?(cutJobId: number, name: string, version: number): Promise<CutJobDto>;
-  setTextureDirection(cutJobId: number, textureDirection: CutTextureDirection, version: number): Promise<CutJobDto>;
   setSplitByMaterial(cutJobId: number, value: boolean, version: number): Promise<CutJobDto>;
   setCombineFilms(cutJobId: number, value: boolean, version: number): Promise<CutJobDto>;
   setSheetMaterial(cutJobId: number, sheetMaterialTypeId: number | null, version: number): Promise<CutJobDto>;
@@ -153,12 +185,13 @@ export async function applyCutProfileSelection(input: {
     currentJob.version,
   ));
   const profileTextureDirection = textureDirectionForCutProfile(paramProfileId, profiles);
-  if (profileTextureDirection !== null && updated.textureDirection !== profileTextureDirection) {
-    updated = publish(await mutations.setTextureDirection(
-      updated.cutJobId,
-      profileTextureDirection,
-      updated.version,
-    ));
+  if (profileTextureDirection !== null) {
+    updated = await applyCutTextureDirection({
+      currentJob: updated,
+      textureDirection: profileTextureDirection,
+      mutations,
+      onUpdated: publish,
+    });
   }
   if (!isVacuumTableProfile(paramProfileId, profiles)) {
     updated = await syncProfileDrivenName(updated);

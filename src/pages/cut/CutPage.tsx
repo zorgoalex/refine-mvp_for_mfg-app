@@ -38,6 +38,7 @@ import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfil
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
 import {
   applyCutProfileSelection,
+  applyCutTextureDirection,
   cutJobNameFirstWord,
   isVacuumTableProfile,
   resolveCutJobLayoutKind,
@@ -1662,6 +1663,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             setProfile: cutApi.setProfile,
             ...(syncProfileDrivenName ? { setName: cutApi.setName } : {}),
             setTextureDirection: cutApi.setTextureDirection,
+            setRotationAllowed: cutApi.setRotationAllowed,
             setSplitByMaterial: cutApi.setSplitByMaterial,
             setCombineFilms: cutApi.setCombineFilms,
             setSheetMaterial: cutApi.setSheetMaterial,
@@ -1762,10 +1764,20 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       const targetJobId = job.cutJobId;
       setBusy(true);
       try {
-        const updated = await cutApi.setTextureDirection(job.cutJobId, textureDirection, job.version);
+        await applyCutTextureDirection({
+          currentJob: job,
+          textureDirection,
+          mutations: {
+            setTextureDirection: cutApi.setTextureDirection,
+            setRotationAllowed: cutApi.setRotationAllowed,
+          },
+          onUpdated: (updated) => {
+            if (!canPublishCutWrite(writeToken, targetJobId)) return;
+            setJob(updated);
+            applyPdfTemplateState(updated);
+          },
+        });
         if (!canPublishCutWrite(writeToken, targetJobId)) return;
-        setJob(updated);
-        applyPdfTemplateState(updated);
         void loadJobs();
       } catch (error) {
         if (canPublishCutWrite(writeToken, targetJobId)) handleError(error, 'Не удалось сохранить направление текстуры');
@@ -4829,7 +4841,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Text type="secondary">Направление текстуры</Text>
-                    <Tooltip title="Информационное поле для карт раскроя PDF. На расчёт не влияет.">
+                    <Tooltip title="Подпись для карт раскроя PDF. При выборе «вдоль полотна» или «поперёк полотна» снимается «Поворот разрешён» — включить его можно обратно вручную.">
                       <Select<CutTextureDirection>
                         size="small"
                         style={{ width: 160 }}
