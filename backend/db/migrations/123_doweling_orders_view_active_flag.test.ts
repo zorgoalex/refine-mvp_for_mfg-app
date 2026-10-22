@@ -1,9 +1,8 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const sql = readFileSync(new URL('./123_doweling_orders_view_active_flag.sql', import.meta.url), 'utf8');
-const runner = readFileSync(resolve(process.cwd(), 'ops/apply-migrations.sh'), 'utf8');
+const runner = readFileSync(new URL('../../../ops/apply-migrations.sh', import.meta.url), 'utf8');
 
 describe('123_doweling_orders_view_active_flag migration', () => {
   it('exposes inactive doweling rows and the active flag to the UI', () => {

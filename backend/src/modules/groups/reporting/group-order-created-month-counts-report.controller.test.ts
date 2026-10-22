@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { DECORATORS } from '@nestjs/swagger/dist/constants';
+import { DECORATORS } from '@nestjs/swagger';
 import { describe, expect, it } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { GroupOrderCreatedMonthCountsReportController } from './group-order-created-month-counts-report.controller';
