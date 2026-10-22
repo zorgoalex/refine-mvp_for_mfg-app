@@ -3715,6 +3715,11 @@ export class PgBitrix24ReverseRepository {
     }));
   }
 
+  /** An inbound change of a deal/contact/company: the assignment channel re-checks it if it owns the object. */
+  async touchAssignment(objectType: string, bitrixId: string, inboundEventId: string): Promise<void> {
+    await touchAssignmentRemote(this.db, objectType, bitrixId, `inbound:${inboundEventId}`);
+  }
+
   async upsertUserMapping(input: {
     bitrixUserId: string;
     erpUserId: number;
@@ -3724,74 +3729,112 @@ export class PgBitrix24ReverseRepository {
     actorRole: string;
     auditRequestId: string;
   }): Promise<Record<string, unknown>> {
-    await this.db.transaction(async (tx) => {
-      await lockAggregate(tx, `responsible-map:${input.bitrixUserId}`);
-      const target = await tx.query(
-        `SELECT 1 FROM users
-          WHERE user_id=$1 AND is_active=true AND is_service_account=false`,
-        [input.erpUserId],
-      );
-      if (target.rowCount !== 1) {
-        throw notFound(
-          'BITRIX24_MAPPING_USER_NOT_FOUND',
-          'ERP mapping target must be an active non-service user',
+    try {
+      await this.db.transaction(async (tx) => {
+        await lockAggregate(tx, `responsible-map:${input.bitrixUserId}`);
+        const target = await tx.query(
+          `SELECT 1 FROM users
+            WHERE user_id=$1 AND is_active=true AND is_service_account=false`,
+          [input.erpUserId],
+        );
+        if (target.rowCount !== 1) {
+          throw notFound(
+            'BITRIX24_MAPPING_USER_NOT_FOUND',
+            'ERP mapping target must be an active non-service user',
+          );
+        }
+        const current = await tx.query<{
+          mapping_id: string | number;
+          erp_user_id: string | number;
+          is_active: boolean;
+        }>(
+          `SELECT mapping_id, erp_user_id, is_active
+             FROM bitrix24_user_mapping
+            WHERE bitrix_user_id=$1
+            ORDER BY is_active DESC, mapping_id DESC
+            LIMIT 1
+            FOR UPDATE`,
+          [input.bitrixUserId],
+        );
+        const before = current.rows[0];
+        if (
+          before &&
+          Number(before.erp_user_id) === input.erpUserId &&
+          before.is_active === input.active
+        ) {
+          return;
+        }
+        if (input.active) {
+          // One active Bitrix24 user per ERP user (migration 270): ERP derives the deal's responsible user from it.
+          const taken = await tx.query<{ bitrix_user_id: string }>(
+            `SELECT bitrix_user_id FROM bitrix24_user_mapping
+              WHERE erp_user_id=$1 AND is_active=true AND bitrix_user_id<>$2
+              LIMIT 1`,
+            [input.erpUserId, input.bitrixUserId],
+          );
+          if (taken.rows[0]) {
+            throw conflict(
+              'BITRIX24_MAPPING_ERP_USER_TAKEN',
+              `ERP user is already mapped to Bitrix24 user ${taken.rows[0].bitrix_user_id}; deactivate that mapping first`,
+            );
+          }
+        }
+        const saved = before
+          ? await tx.query<{ mapping_id: string | number }>(
+              `UPDATE bitrix24_user_mapping
+                  SET erp_user_id=$2, is_active=$3, updated_by=$4, updated_at=now()
+                WHERE mapping_id=$1
+                RETURNING mapping_id`,
+              [before.mapping_id, input.erpUserId, input.active, input.actorUserId],
+            )
+          : await tx.query<{ mapping_id: string | number }>(
+              `INSERT INTO bitrix24_user_mapping (
+                 bitrix_user_id, erp_user_id, is_active, created_by, updated_by
+               ) VALUES ($1,$2,$3,$4,$4)
+               RETURNING mapping_id`,
+              [input.bitrixUserId, input.erpUserId, input.active, input.actorUserId],
+            );
+        // Everything the old and the new ERP user are responsible for is re-checked by the assignment channel.
+        const fanout = await tx.query<{ fanout_id: string | null }>(
+          `SELECT bitrix24_assignment_enqueue_fanout($1::bigint, $2::bigint[], $3::bigint, $4) AS fanout_id`,
+          [
+            saved.rows[0].mapping_id,
+            [...new Set([before ? Number(before.erp_user_id) : null, input.erpUserId].filter((id): id is number => id !== null))],
+            input.actorUserId,
+            input.auditRequestId,
+          ],
+        );
+        await this.audit.record(tx, {
+          event: 'bitrix24.user_mapping_upserted',
+          entityType: 'bitrix24_user_mapping',
+          entityId: Number(saved.rows[0].mapping_id),
+          actorUserId: input.actorUserId,
+          actorUsername: input.actorUsername,
+          actorRole: input.actorRole,
+          requestId: input.auditRequestId,
+          source: 'backend-bitrix24',
+          before: before
+            ? { erpUserId: Number(before.erp_user_id), active: before.is_active }
+            : null,
+          after: {
+            bitrixUserId: input.bitrixUserId,
+            erpUserId: input.erpUserId,
+            active: input.active,
+          },
+          metadata: { assignmentFanoutId: fanout.rows[0]?.fanout_id ?? null },
+        });
+      });
+    } catch (error) {
+      // Two requests mapping different Bitrix24 users to one ERP user at once: the unique index stops the second one.
+      if ((error as { code?: string; constraint?: string }).code === '23505'
+        && (error as { constraint?: string }).constraint === 'uq_bitrix24_user_mapping_active_erp_user') {
+        throw conflict(
+          'BITRIX24_MAPPING_ERP_USER_TAKEN',
+          'ERP user is already mapped to another Bitrix24 user; deactivate that mapping first',
         );
       }
-      const current = await tx.query<{
-        mapping_id: string | number;
-        erp_user_id: string | number;
-        is_active: boolean;
-      }>(
-        `SELECT mapping_id, erp_user_id, is_active
-           FROM bitrix24_user_mapping
-          WHERE bitrix_user_id=$1
-          ORDER BY is_active DESC, mapping_id DESC
-          LIMIT 1
-          FOR UPDATE`,
-        [input.bitrixUserId],
-      );
-      const before = current.rows[0];
-      if (
-        before &&
-        Number(before.erp_user_id) === input.erpUserId &&
-        before.is_active === input.active
-      ) {
-        return;
-      }
-      const saved = before
-        ? await tx.query<{ mapping_id: string | number }>(
-            `UPDATE bitrix24_user_mapping
-                SET erp_user_id=$2, is_active=$3, updated_by=$4, updated_at=now()
-              WHERE mapping_id=$1
-              RETURNING mapping_id`,
-            [before.mapping_id, input.erpUserId, input.active, input.actorUserId],
-          )
-        : await tx.query<{ mapping_id: string | number }>(
-            `INSERT INTO bitrix24_user_mapping (
-               bitrix_user_id, erp_user_id, is_active, created_by, updated_by
-             ) VALUES ($1,$2,$3,$4,$4)
-             RETURNING mapping_id`,
-            [input.bitrixUserId, input.erpUserId, input.active, input.actorUserId],
-          );
-      await this.audit.record(tx, {
-        event: 'bitrix24.user_mapping_upserted',
-        entityType: 'bitrix24_user_mapping',
-        entityId: Number(saved.rows[0].mapping_id),
-        actorUserId: input.actorUserId,
-        actorUsername: input.actorUsername,
-        actorRole: input.actorRole,
-        requestId: input.auditRequestId,
-        source: 'backend-bitrix24',
-        before: before
-          ? { erpUserId: Number(before.erp_user_id), active: before.is_active }
-          : null,
-        after: {
-          bitrixUserId: input.bitrixUserId,
-          erpUserId: input.erpUserId,
-          active: input.active,
-        },
-      });
-    });
+      throw error;
+    }
     const mappings = await this.listUserMappings();
     return mappings.find((mapping) =>
       mapping.bitrixUserId === input.bitrixUserId && mapping.active === input.active)
@@ -5666,6 +5709,16 @@ async function assertInboundOwnership(
   if (result.rowCount !== 1) {
     throw new Error('Bitrix24 reverse event ownership lost');
   }
+}
+
+/** Re-check of the responsible user of an object the assignment channel owns (migration 270); 0 when it is off. */
+export async function touchAssignmentRemote(
+  db: Pick<DatabaseClient, 'query'>,
+  bitrixObject: string,
+  bitrixId: string,
+  refId: string,
+): Promise<void> {
+  await db.query('SELECT bitrix24_assignment_touch_remote($1, $2, $3)', [bitrixObject, bitrixId, refId]);
 }
 
 async function lockAggregate(tx: TransactionClient, key: string): Promise<void> {

@@ -17,6 +17,7 @@ import { Bitrix24SyncConsumer } from '../src/modules/crm-sync/application/bitrix
 import { Bitrix24PaidPaymentGuard } from '../src/modules/crm-sync/application/bitrix24-paid-payment-guard';
 import { PgCrmSyncPaidPaymentOperationRepository } from '../src/modules/crm-sync/adapters/pg-crm-sync-paid-payment-operation-repository';
 import { Bitrix24ApiClient, NoopBitrix24ApiClient } from '../src/modules/crm-sync/adapters/bitrix24-api-client';
+import { assignmentOwnership } from '../src/modules/crm-sync/assignment/pg-bitrix24-assignment-repository';
 import { AuditService } from '../src/common/audit/audit.service';
 import {
   runBackfill,
@@ -261,6 +262,8 @@ const consumer = new Bitrix24SyncConsumer({
   options: effectiveConfig,
   durablePaymentCreates: !dryRun,
   paidPayments,
+  // Same rule as the relay: `assignedById` of objects the assignment channel owns is not overwritten.
+  assignment: assignmentOwnership(dbShim),
 });
 
 // ---------------------------------------------------------------------------
