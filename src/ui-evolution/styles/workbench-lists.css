@@ -1,6 +1,12 @@
 /* «NewLine»: обычные экраны-списки (класс `wb-list` на обёртке страницы): таблица в карточке,
    плотные строки, одна тонкая линия, без «зебры». Только оформление. */
 
+/* antd 5.0.5 красит отсортированный заголовок полупрозрачным colorFillSecondary: у закреплённой колонки
+   сквозь него видны уехавшие под неё заголовки. Любая таблица NewLine; в `wb-list` фон ниже задан свой. */
+:root[data-ui-variant="workbench"] .ant-table-thead > tr > th.ant-table-column-sort:is(.ant-table-cell-fix-left, .ant-table-cell-fix-right) {
+  background: var(--evo-surface-muted);
+}
+
 :root[data-ui-variant="workbench"] .wb-list .ant-table-wrapper {
   overflow: hidden;
   border: 1px solid var(--evo-border);
