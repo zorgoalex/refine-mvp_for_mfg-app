@@ -111,22 +111,24 @@ export function ClientContactsPage() {
     render: (_: unknown, row) => {
       const values = columnValues(row, column);
       const editable = canManage && (column !== 'phone' || data?.phonesEditable !== false);
+      const pencil = editable ? (
+        <Button type="text" size="small" icon={<EditOutlined />} style={{ color: 'var(--ant-color-text-tertiary, #8c8c8c)' }}
+          aria-label={`Изменить: ${COLUMN_TITLES[column]}`} onClick={() => setEditing({ clientId: row.client.id, column })} />
+      ) : null;
+      if (!values.length) return pencil ?? <Typography.Text type="secondary">—</Typography.Text>;
       return (
-        <Space direction="vertical" size={0} style={{ minWidth: 0 }}>
-          {values.map((value) => (
-            <Typography.Text key={'phoneId' in value ? `p${value.phoneId}` : `c${value.contactId}`} copyable={{ text: 'phoneId' in value ? value.phoneNumber : value.value }}>
-              {'phoneId' in value ? value.phoneNumber : formatContact(value)}
-              {'note' in value && value.note ? <Typography.Text type="secondary"> · {value.note}</Typography.Text> : null}
-              {value.isPrimary && values.length > 1 ? <StarFilled style={{ color: '#faad14', marginLeft: 4 }} /> : null}
-            </Typography.Text>
-          ))}
-          {editable ? (
-            <Button type="link" size="small" icon={<EditOutlined />} style={{ padding: 0, height: 'auto' }}
-              aria-label={`Изменить: ${COLUMN_TITLES[column]}`} onClick={() => setEditing({ clientId: row.client.id, column })}>
-              {values.length ? null : 'добавить'}
-            </Button>
-          ) : values.length ? null : <Typography.Text type="secondary">—</Typography.Text>}
-        </Space>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 2, minWidth: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            {values.map((value) => (
+              <span key={'phoneId' in value ? `p${value.phoneId}` : `c${value.contactId}`} style={{ whiteSpace: 'nowrap' }}>
+                {'phoneId' in value ? value.phoneNumber : formatContact(value)}
+                {value.isPrimary && values.length > 1 ? <StarFilled style={{ color: '#faad14', marginLeft: 4, fontSize: 11 }} /> : null}
+                {'note' in value && value.note ? <Typography.Text type="secondary" style={{ fontSize: 12 }}> · {value.note}</Typography.Text> : null}
+              </span>
+            ))}
+          </div>
+          {pencil}
+        </div>
       );
     },
   });
