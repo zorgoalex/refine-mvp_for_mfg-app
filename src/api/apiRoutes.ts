@@ -112,6 +112,10 @@ export const apiRoutes = {
     whatsappSends: (orderId: number) => backendApiPath(`/orders/${orderId}/whatsapp-sends`),
     whatsappSendClientContacts: (orderId: number) => backendApiPath(`/orders/${orderId}/whatsapp-sends/client-contacts`),
   },
+  paymentsOnec: {
+    receipts: backendApiPath('/payments/onec-receipts'),
+    receipt: (lineId: number) => backendApiPath(`/payments/onec-receipts/${lineId}`),
+  },
   orderDetails: {
     productionStageEvent: (detailId: number, productionStatusId: number) =>
       backendApiPath(`/order-details/${detailId}/production-stage-events/${productionStatusId}`),
@@ -378,6 +382,7 @@ export const apiRoutes = {
     supplierFromCounterparty: backendApiPath('/suppliers/from-counterparty'),
     clientCounterparty: (clientId: number) => backendApiPath(`/clients/${clientId}/counterparty`),
     clientCounterpartyCandidates: (clientId: number) => backendApiPath(`/clients/${clientId}/counterparty-candidates`),
+    clientOnecDocuments: (clientId: number) => backendApiPath(`/clients/${clientId}/onec-documents`),
     clientCounterpartyMatches: backendApiPath('/client-counterparty-matches'),
     clientCounterpartyMatchesConfirm: backendApiPath('/client-counterparty-matches/confirm'),
   },

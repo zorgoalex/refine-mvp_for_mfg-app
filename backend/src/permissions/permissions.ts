@@ -67,6 +67,8 @@ export const PERMISSIONS = [
   'payments.delete',
   'finance.view',
   'finance.analytics.view',
+  'payments.onec.view',
+  'payments.onec.manage',
 
   'clients.view',
   'clients.create',
@@ -269,6 +271,8 @@ export const ROLE_PERMISSIONS = {
     'payments.update',
     'payments.delete',
     'finance.view',
+    'payments.onec.view',
+    'payments.onec.manage',
     'finance.analytics.view',
 
     'clients.view',
@@ -373,6 +377,8 @@ export const ROLE_PERMISSIONS = {
     'payments.update',
     'payments.delete',
     'finance.view',
+    'payments.onec.view',
+    'payments.onec.manage',
 
     'clients.view',
     'clients.create',

@@ -56,6 +56,7 @@ import {
   onecMatchStatusColor,
   onecMatchStatusLabel,
   onecMatchSummaryBreakdownLabel,
+  onecManagedEntityText,
 } from './onecFormat';
 import type { OnecAgentConfiguration, OnecEtlEntity, OnecPublishedAgentConfiguration } from './onecApi.types';
 
@@ -882,3 +883,13 @@ describe('ожидаемое ежедневное молчание агента'
     expect(normalizeExpectedSilence(undefined)).toBeNull();
   });
 });
+
+describe('ERP-managed entities of the configuration', () => {
+  it('tells the state and the moment of the stock snapshot set', () => {
+    const path = "AccumulationRegister_ЗапасыНаСкладах/Balance(Period=datetime'2026-09-26T10:14:00',Dimensions='Организация,Номенклатура')";
+    expect(onecManagedEntityText({ entityCode: 'stock_balances_at', enabled: true, oDataPath: path })).toBe('stock_balances_at: включён — срез на 26.09.2026 10:14:00');
+    expect(onecManagedEntityText({ entityCode: 'stock_balances_at', enabled: false, oDataPath: path })).toBe('stock_balances_at: выключен — срез на 26.09.2026 10:14:00');
+    expect(onecManagedEntityText({ entityCode: 'other', enabled: false, oDataPath: null })).toBe('other: выключен');
+  });
+});
+

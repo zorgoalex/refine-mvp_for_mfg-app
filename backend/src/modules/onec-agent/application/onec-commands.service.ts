@@ -537,6 +537,31 @@ export class OnecCommandsService {
     });
   }
 
+  /**
+   * Cancels a command on behalf of a module of ERP (no user): only what an operator could cancel — `queued`, or
+   * `leased` with an expired lease. In the caller's transaction; audited as a system action when it really
+   * happened. Returns false when the command is no longer cancellable (nothing is written then).
+   */
+  async cancelBySystem(tx: DatabaseClient, commandId: string, actorName: string, context: { requestId: string; correlationId: string | null; reason: string }): Promise<boolean> {
+    const cancelled = await this.commands.cancel(tx, commandId, null);
+    if (!cancelled) return false;
+    await this.audit.bySystem(
+      tx,
+      actorName,
+      context.requestId,
+      {
+        event: 'onec.command.cancelled',
+        entityType: 'onec_agent_command',
+        entityId: commandId,
+        after: { commandType: cancelled.commandType, reason: context.reason },
+        statusField: 'status',
+        statusCode: 'cancelled',
+      },
+      { agentId: cancelled.agentId, sourceId: cancelled.sourceId, commandId, correlationId: context.correlationId },
+    );
+    return true;
+  }
+
   async list(query: { agentId?: string; status?: string; commandType?: string; limit?: string }) {
     this.runtime.requireEnabled();
     const limit = Math.min(Math.max(Number(query.limit ?? 100) || 100, 1), 500);

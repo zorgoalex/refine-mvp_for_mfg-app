@@ -12,6 +12,7 @@ const ROOT = join(__dirname, '..');
 const PATTERN = /\b(ROLE_POLICIES|ROLE_PERMISSIONS|getPermissionsForRole)\b|\brole_permissions\b|\brole_policy_scopes\b/;
 
 const ALLOWED: Record<string, string> = {
+  'modules/payments-onec/domain/onec-receipts.ts': 'comment only',
   'permissions/permissions.ts': 'static matrix definition and seed defaults',
   'permissions/permissions.service.ts': 'roles matrix administration and seeding',
   'permissions/policies/role-policies.ts': 'static scope defaults',

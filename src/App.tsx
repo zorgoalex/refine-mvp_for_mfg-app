@@ -141,7 +141,7 @@ const PaymentTypeCreate = lazy(async () => ({ default: (await import("./pages/pa
 const PaymentTypeEdit = lazy(async () => ({ default: (await import("./pages/payment_types/edit")).PaymentTypeEdit }));
 const PaymentTypeShow = lazy(async () => ({ default: (await import("./pages/payment_types/show")).PaymentTypeShow }));
 
-const PaymentList = lazy(async () => ({ default: (await import("./pages/payments/list")).PaymentList }));
+const PaymentsPage = lazy(async () => ({ default: (await import("./pages/payments/PaymentsPage")).PaymentsPage }));
 const PaymentCreate = lazy(async () => ({ default: (await import("./pages/payments/create")).PaymentCreate }));
 const PaymentEdit = lazy(async () => ({ default: (await import("./pages/payments/edit")).PaymentEdit }));
 const PaymentShow = lazy(async () => ({ default: (await import("./pages/payments/show")).PaymentShow }));
@@ -1010,7 +1010,7 @@ const ThemedApp = () => {
                     <Route path="show/:id" element={<UnitShow />} />
                   </Route>
                   <Route path="/payments" element={<FinancialRoute><Outlet /></FinancialRoute>}>
-                    <Route index element={<PaymentList />} />
+                    <Route index element={<PaymentsPage />} />
                     <Route path="create" element={<PaymentCreate />} />
                     <Route path="edit/:id" element={<PaymentEdit />} />
                     <Route path="show/:id" element={<PaymentShow />} />

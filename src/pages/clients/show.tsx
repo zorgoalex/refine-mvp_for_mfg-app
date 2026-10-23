@@ -1,7 +1,7 @@
 import { Table } from '../../ui/tooltipDelay';
 import { useShow, useList, IResourceComponentsProps } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
-import { Typography, Badge, Row, Col, Divider, Tag, Space } from "antd";
+import { Typography, Badge, Row, Col, Divider, Tag, Space, Tabs } from "antd";
 import { PhoneOutlined, StarFilled } from "@ant-design/icons";
 import { ClientPhone, PhoneType, PHONE_TYPE_LABELS } from "../../types/clients";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
@@ -11,6 +11,9 @@ import { CLIENT_PERSON_TYPE_LABELS, ClientPersonType } from "../../types/clients
 import { ContactsCard } from "../../components/contacts/ContactsCard";
 import { CLIENT_CONTACTS } from "../../components/contacts/partyContactsSources";
 import { ClientCounterpartyCard } from "./ClientCounterpartyCard";
+import { ClientOnecDocumentsTab } from "./ClientOnecDocumentsTab";
+import { canSeeClientOnecDocuments } from "./clientOnecDocumentsModel";
+import { can } from "../../utils/permissions";
 
 const { Title, Text } = Typography;
 
@@ -67,8 +70,10 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
     },
   ];
 
-  return (
-    <Show isLoading={isLoading} title="Просмотр Клиента">
+  const clientId = Number(record?.client_id) || null;
+  // «Основное» — сведения, контакты и сопоставление с 1С; «Документы 1С» — документы сопоставленного контрагента.
+  const main = (
+    <>
       <Title level={5}>Основная информация</Title>
       <Row gutter={[16, 16]}>
         <Col span={8}>
@@ -150,6 +155,20 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
       </Row>
       <Divider />
       <Row gutter={[16, 16]}><Col span={8}><ReferenceSortOrderShow value={record?.sort_order} /></Col></Row>
+    </>
+  );
+  return (
+    <Show isLoading={isLoading} title="Просмотр Клиента">
+      <Tabs
+        defaultActiveKey="main"
+        items={[
+          { key: 'main', label: 'Основное', children: main },
+          // «Документы 1С»: условие показа и компонент — в файлах вкладки (clientOnecDocumentsModel, ClientOnecDocumentsTab).
+          ...(canSeeClientOnecDocuments(can)
+            ? [{ key: 'onec-documents', label: 'Документы 1С', children: <ClientOnecDocumentsTab clientId={clientId} /> }]
+            : []),
+        ]}
+      />
     </Show>
   );
 };

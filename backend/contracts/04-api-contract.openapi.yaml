@@ -1214,6 +1214,32 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '409': {description: 'SUPPLIER_NAME_TAKEN (details.supplierId)'}
         '422': {description: 'SUPPLIER_COUNTERPARTY_UNKNOWN or VALIDATION_ERROR'}
+  /api/v1/clients/{clientId}/onec-documents:
+    get:
+      tags: [Party contacts]
+      operationId: listClientOnecDocuments
+      summary: '1C documents of the counterparty of a client within the order visibility of the user, with totals (client card, tab «Документы 1С»; read-only)'
+      description: >-
+        Customer orders, shipments, money receipts and refunds of the 1C counterparty the client is linked to; purchase documents are never included.
+        Requires clients.view, clients.onec_documents.view and orders.view (checked by the service; a refusal is audited as clients.onec_documents_denied).
+        Rows, counts and sums follow the order visibility of the user: every document for the scope «all»; for «own» only a document that refers
+        to at least one 1C customer order and every order it refers to resolves (manual link, otherwise the number series rule) to an ERP order
+        of the user's own (creator or manager), and no live line of it is left without an order — so refunds, documents that involve another manager's order and payments with a line of unknown belonging are not shown; any other scope is refused.
+        Amounts of rows and `summary` are present only with orders.view_financials. `summary` counts posted documents only, per currency;
+        balance = shipped − received + refunded. These totals are 1C data and are never added to the ERP orders totals.
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.view, clients.onec_documents.view, orders.view]
+      parameters:
+        - {name: clientId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: group, in: query, required: false, schema: {type: string, enum: [orders, shipments, receipts, refunds]}}
+        - {name: page, in: query, required: false, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: pageSize, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200': {description: "{linked, counterparty{refKey1c, name}|null, data[{id, group, kind, number, date, state: posted|not_posted|deleted|missing, orderStateName, responsibleName, erpOrders[{orderId, orderName}], amount?, currency?}], pagination{page, pageSize, total, totalPages}, scope: all|own, groups{orders, shipments, receipts, refunds}, summary?[{currency, ordered, shipped, received, refunded, balance}]}"}
+        '400': {description: 'VALIDATION_FAILED'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {description: 'Permission denied (audited as clients.onec_documents_denied)'}
+        '404': {description: 'CLIENT_NOT_FOUND'}
   /api/v1/clients/{id}/counterparty:
     get:
       tags: [Party contacts]
@@ -17284,6 +17310,50 @@ paths:
         '403': {description: Permission denied}
         '404': {description: Agent not found}
         '503': {description: 1C integration is disabled}
+  /api/v1/payments/onec-receipts:
+    get:
+      tags:
+        - Payments
+      operationId: listOnecReceipts
+      summary: "1C customer receipts and refunds with the state of their matching against ERP order payments (read-only)"
+      security:
+        - {bearerAuth: []}
+      x-permission: payments.onec.view
+      description: >-
+        Requires payments.onec.view, payments.view and orders.view_financials (amounts of ERP orders and payments); rows are limited by the payment scope of the user (own/all by
+        the order's creator/manager); rows without a resolved ERP order are returned only for the scope «all».
+        Enabled by BACKEND_ONEC_PAYMENT_MATCHING_VIEW.
+      parameters:
+        - {name: page, in: query, required: false, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: pageSize, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: group, in: query, required: false, schema: {type: string, enum: [review, to_create, matched, dismissed, no_erp_order, refunds, other]}, description: State group (counter filter)}
+        - {name: kind, in: query, required: false, schema: {type: string, enum: [receipts, refunds]}}
+        - {name: dateFrom, in: query, required: false, schema: {type: string, format: date}}
+        - {name: dateTo, in: query, required: false, schema: {type: string, format: date}}
+        - {name: search, in: query, required: false, schema: {type: string, maxLength: 100}, description: "Document number, counterparty, 1C order number or ERP order name (substring)"}
+      responses:
+        '200': {description: "{data[], pagination, counters{group: n}, capabilities{commands}}; a row carries state, reason, onecOrder, erpOrder, match, payment ({hidden: true} when the payment is outside the user's scope) and an opaque stateToken; amounts are NUMERIC strings"}
+        '400': {description: Invalid filter}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as payments.onec_denied)"}
+        '503': {description: "ONEC_PAYMENT_MATCHING_DISABLED — the feature or the 1C integration is off"}
+  /api/v1/payments/onec-receipts/{lineId}:
+    get:
+      tags:
+        - Payments
+      operationId: getOnecReceipt
+      summary: "One 1C receipt/refund line: order link, candidate payments of the ERP order, refunds, paid by 1C, match history"
+      security:
+        - {bearerAuth: []}
+      x-permission: payments.onec.view
+      parameters:
+        - {name: lineId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: "{line, candidates[] (with paymentToken), refunds[], onecPaid, history[], capabilities}"}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as payments.onec_denied)"}
+        '404': {description: "ONEC_RECEIPT_NOT_FOUND — no such line or it is outside the user's payment scope"}
+        '503': {description: "ONEC_PAYMENT_MATCHING_DISABLED — the feature or the 1C integration is off"}
   /api/v1/onec/incidents:
     get:
       tags:
@@ -17957,6 +18027,38 @@ paths:
         '403': {description: Permission denied}
         '503': {description: 1C integration is disabled}
         '409': {description: "Not revoked or data not purged yet"}
+  /api/v1/onec/sources/{sourceId}/stock-snapshots/remove-set:
+    post:
+      tags:
+        - 1C integration
+      operationId: removeOnecStockSnapshotSet
+      summary: "Take the ERP-managed stock snapshot set out of the published configuration (before a rollback of the backend image)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.manage
+      parameters:
+        - {name: sourceId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      description: >-
+        Publishes the configuration without the service set `stock_balances_at` and marks the slot of the source
+        `removed`. Allowed only with BACKEND_ONEC_STOCK_SNAPSHOTS=false and an idle slot; safe to repeat (the second call
+        changes nothing). Needed before rolling the backend image back to a version that does not know the set: its
+        validator does not accept the path with `Period`. The first snapshot after re-enabling brings the set back.
+      responses:
+        '200':
+          description: The version without the set, or nothing to do
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [configVersion, changed]
+                properties:
+                  configVersion: {type: integer, nullable: true}
+                  changed: {type: boolean}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {description: Source has no agent}
+        '409': {description: "ONEC_STOCK_SNAPSHOTS_ENABLED (switch the flag off first), ONEC_STOCK_SNAPSHOT_SLOT_BUSY (a snapshot is being read or the set is being switched off) or ONEC_CONFIG_PUBLISH_BLOCKED"}
+        '503': {description: 1C integration is disabled}
   /api/v1/onec/sources/{sourceId}/rebaseline:
     post:
       tags:
@@ -20286,6 +20388,130 @@ paths:
         '404': {description: WAREHOUSE_NOT_FOUND}
         '409': {description: 'ONEC_COMPENSATION_SUPERSEDED (прерванный откат, а расход снова включён), IDEMPOTENCY_IN_PROGRESS не возвращается — прерванный откат продолжается; ONEC_COMPENSATION_CONFIRM_REQUIRED — приход 1С включён или на складе есть применённое с плюсом, а тело запроса не содержит includesReceipts: true (ничего не изменено)'}
         '422': {description: IDEMPOTENCY_KEY_REUSED}
+  /api/v1/inventory/onec-snapshots:
+    get:
+      tags: [Inventory]
+      operationId: listInventoryOnecSnapshots
+      summary: 1C stock snapshots at a date — capabilities and a page of snapshots (newest first)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: status, in: query, required: false, schema: {type: string, enum: [requested, config_published, syncing, ready, failed]}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200}}
+      responses:
+        '200': {description: '{readAvailable, commandsAvailable, reason: MODULE_DISABLED|SOURCE_NOT_CONFIGURED|AGENT_TOO_OLD|null, items: [{id, sourceId, currentSource, baseRef, momentLocal, momentUtc, timeZone, status, waitReason, errorCode, requestedBy, requestedAt, updatedAt, readAt, readyAt, rowsCount, queuePosition, activeAhead}], total}; readAvailable=false — срезы не подключены (items пуст); commandsAvailable=false — история читается, новые срезы не запрашиваются'}
+        '404': {description: Склад выключен}
+    post:
+      tags: [Inventory]
+      operationId: requestInventoryOnecSnapshot
+      summary: Request a 1C stock snapshot at a moment; the existing ready or active snapshot of the same moment is returned unless force
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [momentLocal]
+              properties:
+                momentLocal: {type: string, pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$', description: 'Местное время базы 1С; движения ровно в этот момент в срез не входят'}
+                force: {type: boolean, description: 'Всегда новый срез (например, документы проведены задним числом)'}
+      responses:
+        '200': {description: 'Срез (существующий или поставленный в очередь); готовность — опросом GET'}
+        '403': {description: 'FORBIDDEN; отказ записывается в аудит (inventory.onec_snapshot_command_denied)'}
+        '409': {description: 'ONEC_STOCK_SNAPSHOTS_UNAVAILABLE — новые срезы сейчас не запрашиваются (details.reason)'}
+        '422': {description: 'VALIDATION_ERROR — момент в будущем, неверный ключ запроса'}
+  /api/v1/inventory/onec-snapshots/{snapshotId}:
+    get:
+      tags: [Inventory]
+      operationId: getInventoryOnecSnapshot
+      summary: A 1C stock snapshot with its warehouses matched to ERP warehouses by the 1C key
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: '{snapshot, warehouses: [{warehouseRefKey, warehouseId, name, rows, quantityTotal}]}; warehouses пуст, пока срез не ready; warehouseId null — склад 1С не заведён в ERP'}
+        '404': {description: ONEC_STOCK_SNAPSHOT_NOT_FOUND (нет или удалён)}
+    delete:
+      tags: [Inventory]
+      operationId: deleteInventoryOnecSnapshot
+      summary: Delete a ready or failed 1C stock snapshot, or cancel a queued one
+      security: [{bearerAuth: []}]
+      x-permission: inventory.manage
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      responses:
+        '204': {description: Удалён (строки среза удалены) или отменён}
+        '403': {description: 'FORBIDDEN; отказ записывается в аудит'}
+        '404': {description: ONEC_STOCK_SNAPSHOT_NOT_FOUND}
+        '409': {description: ONEC_STOCK_SNAPSHOT_IN_PROGRESS — срез сейчас читается из 1С}
+  /api/v1/inventory/onec-snapshots/{snapshotId}/comparable:
+    get:
+      tags: [Inventory]
+      operationId: listInventoryOnecSnapshotComparable
+      summary: Ready snapshots of the same 1C base (sourceId + baseRef) a snapshot can be compared with, newest first
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: search, in: query, required: false, schema: {type: string, maxLength: 50}, description: 'Номер среза или дата ДД.ММ.ГГГГ ЧЧ:ММ'}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200}}
+      responses:
+        '200': {description: '{items: [snapshot], total}; база фильтруется до пагинации — исторические срезы одной базы находятся независимо от числа более новых срезов'}
+        '404': {description: ONEC_STOCK_SNAPSHOT_NOT_FOUND}
+  /api/v1/inventory/onec-snapshots/{snapshotId}/stock:
+    get:
+      tags: [Inventory]
+      operationId: getInventoryOnecSnapshotStock
+      summary: Stock of a 1C snapshot by material tabs for the chosen ERP warehouses (film is shown as a 1C item)
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: warehouseIds, in: query, required: false, schema: {type: string}, description: 'До 50 id складов ERP через запятую; пусто — все склады среза, включая склады 1С без пары в ERP'}
+        - {name: group, in: query, required: false, schema: {type: string}, description: 'all | film | film_unlinked | no_type | unlinked | material:<id>'}
+        - {name: categoryKey, in: query, required: false, schema: {type: string}, description: 'Ключ категории 1С или none'}
+        - {name: search, in: query, required: false, schema: {type: string, maxLength: 200}}
+        - {name: nonZero, in: query, required: false, schema: {type: boolean}}
+        - {name: negative, in: query, required: false, schema: {type: boolean}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 40000}, description: 'До 40000 — всё представление одним запросом (выгрузка из одного снимка данных)'}
+      responses:
+        '200': {description: '{snapshot, warehouses: [{warehouseId, name}], other: null, tabs, categories, total, items: [{source: 1c, group, groupLabel, itemRefKey, code, name, unitName, categoryKey, categoryName, quantity, otherQuantity: null, delta: null, sheetMaterialTypeId, ambiguousLink}]}; количество — сумма строк регистра по позиции на выбранных складах; чтение — одна транзакция REPEATABLE READ READ ONLY'}
+        '404': {description: 'ONEC_STOCK_SNAPSHOT_NOT_FOUND, WAREHOUSE_NOT_FOUND'}
+        '409': {description: 'ONEC_STOCK_SNAPSHOT_NOT_READY, WAREHOUSE_UNLINKED (склад ERP без ключа 1С)'}
+  /api/v1/inventory/onec-snapshots/{snapshotId}/compare:
+    get:
+      tags: [Inventory]
+      operationId: compareInventoryOnecSnapshot
+      summary: Compare a 1C snapshot (A) with the current 1C stock or another snapshot (B); delta = B − A
+      security: [{bearerAuth: []}]
+      x-permission: inventory.view
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: with, in: query, required: true, schema: {type: string}, description: 'current или id другого среза'}
+        - {name: warehouseIds, in: query, required: false, schema: {type: string}, description: 'Как у stock; при with=current пусто — все активные склады ERP с ключом 1С'}
+        - {name: changedOnly, in: query, required: false, schema: {type: boolean}, description: 'Только позиции с разницей'}
+        - {name: group, in: query, required: false, schema: {type: string}}
+        - {name: categoryKey, in: query, required: false, schema: {type: string}}
+        - {name: search, in: query, required: false, schema: {type: string, maxLength: 200}}
+        - {name: nonZero, in: query, required: false, schema: {type: boolean}}
+        - {name: negative, in: query, required: false, schema: {type: boolean}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 40000}, description: 'До 40000 — всё представление одним запросом (выгрузка из одного снимка данных)'}
+      responses:
+        '200': {description: 'Как stock, плюс other: {kind: current, asOf} | {kind: snapshot, snapshot}; у строк quantity (A), otherQuantity (B), delta = B − A; позиция только с одной стороны — с другой 0'}
+        '400': {description: 'VALIDATION_FAILED — нет with, срез сравнивается сам с собой'}
+        '404': {description: 'ONEC_STOCK_SNAPSHOT_NOT_FOUND, WAREHOUSE_NOT_FOUND'}
+        '409': {description: 'ONEC_SNAPSHOT_HISTORICAL — срез прежней базы 1С не сравнивается с текущими остатками; ONEC_SNAPSHOT_SOURCE_MISMATCH — срезы разных баз (baseRef); ONEC_SNAPSHOT_COMPARE_UNAVAILABLE — текущие остатки 1С доступны не по всем складам (details.warehouses с причинами; нули не подставляются); ONEC_STOCK_SNAPSHOT_NOT_READY'}
   /api/v1/orders/{orderId}/sheet-stock:
     get:
       tags: [Inventory]
@@ -22263,6 +22489,8 @@ components:
         - payments.delete
         - finance.view
         - finance.analytics.view
+        - payments.onec.view
+        - payments.onec.manage
         - clients.view
         - clients.create
         - clients.update

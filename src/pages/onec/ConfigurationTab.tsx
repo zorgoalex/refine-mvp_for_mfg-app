@@ -38,6 +38,7 @@ import {
   onecStableStringify,
   onecConfigWritable,
   onecIsCurrentResponse,
+  onecManagedEntityText,
   onecStripSourceGeneration,
   ONEC_ETL_ENTITY_PRESETS,
   ONEC_ETL_ENTITY_PRESET_LABELS,
@@ -341,6 +342,21 @@ export function ConfigurationTab({ agents, canManage }: ConfigurationTabProps) {
               type="warning"
               showIcon
               message="Публикация заблокирована до первого heartbeat агента после восстановления"
+            />
+          )}
+          {(configState.managedEntities ?? []).length > 0 && (
+            <Alert
+              type="info"
+              showIcon
+              message="Служебные наборы ERP"
+              description={
+                <>
+                  Этими наборами управляет ERP (срезы остатков на дату): в черновике их нет, изменить их здесь нельзя, в каждую публикацию они попадают сами.
+                  {(configState.managedEntities ?? []).map((entity) => (
+                    <div key={entity.entityCode}>{onecManagedEntityText(entity)}</div>
+                  ))}
+                </>
+              }
             />
           )}
           {staleDraft && (

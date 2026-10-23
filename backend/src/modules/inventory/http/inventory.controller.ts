@@ -1,9 +1,11 @@
-import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser, RequestWithCurrentUser } from '../../../permissions/current-user';
 import { InventoryOnecProjectionService } from '../application/inventory-onec-projection.service';
+import { InventoryOnecSnapshotsService, type SnapshotStockFilter } from '../application/inventory-onec-snapshots.service';
+import type { StockSnapshotStatus } from '../application/onec-snapshots.port';
 import { InventoryService } from '../application/inventory.service';
 import type { CommandContext, StockDocKind } from '../application/inventory.types';
 
@@ -110,6 +112,40 @@ function stockGroup(group: string | undefined, categoryKey: string | undefined):
   return { group: value, categoryKey: categoryKey.toLowerCase() };
 }
 
+const SNAPSHOT_STATUSES: readonly StockSnapshotStatus[] = ['requested', 'config_published', 'syncing', 'ready', 'failed'];
+/** Момент среза — местное время базы 1С без пояса (пояс знает владелец порта). */
+const snapshotRequestSchema = z.object({
+  momentLocal: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/),
+  force: z.boolean().optional(),
+}).strict();
+/** Наибольшая страница просмотра/сравнения среза: объединение позиций двух срезов предельного размера. */
+const SNAPSHOT_VIEW_MAX = 40_000;
+const SNAPSHOT_CATEGORY = /^(none|name:.{1,200}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+/** Фильтр просмотра среза: склады ERP (до 50 через запятую; пусто — все склады среза), вкладка, категория, поиск. */
+function snapshotStockFilter(query: Record<string, string | undefined>): SnapshotStockFilter {
+  const group = query.group === undefined || query.group === '' ? 'all' : query.group;
+  if (!STOCK_GROUP.test(group)) throw new ApiError(400, 'VALIDATION_FAILED', 'Некорректная группа', { field: 'group' });
+  const categoryKey = query.categoryKey === undefined || query.categoryKey === '' ? null : query.categoryKey;
+  if (categoryKey !== null && !SNAPSHOT_CATEGORY.test(categoryKey)) {
+    throw new ApiError(400, 'VALIDATION_FAILED', 'Некорректная категория 1С', { field: 'categoryKey' });
+  }
+  const parts = query.warehouseIds === undefined || query.warehouseIds === '' ? [] : query.warehouseIds.split(',');
+  if (parts.length > 50) throw new ApiError(400, 'VALIDATION_FAILED', 'Слишком много складов', { field: 'warehouseIds' });
+  const warehouseIds = parts.map((part) => {
+    const value = parseId(part, 'warehouseIds');
+    if (value > 32767) throw new ApiError(404, 'WAREHOUSE_NOT_FOUND', 'Склад не найден', { warehouseId: value });
+    return value;
+  });
+  return {
+    warehouseIds, group, categoryKey: categoryKey === null ? null : categoryKey.toLocaleLowerCase('ru'),
+    search: query.search?.trim().slice(0, 200) || null,
+    nonZero: query.nonZero === 'true', negative: query.negative === 'true', changedOnly: query.changedOnly === 'true',
+    // До двух лимитов среза одной страницей: выгрузка читает всё представление одним запросом (одним снимком БД).
+    ...paging(query.offset, query.limit, SNAPSHOT_VIEW_MAX),
+  };
+}
+
 function paging(offset: string | undefined, limit: string | undefined, max: number): { offset: number; limit: number } {
   const o = offset === undefined ? 0 : Number(offset);
   const l = limit === undefined ? Math.min(100, max) : Number(limit);
@@ -126,6 +162,7 @@ export class InventoryController {
   constructor(
     @Inject(InventoryService) private readonly inventory: InventoryService,
     @Inject(InventoryOnecProjectionService) private readonly projection: InventoryOnecProjectionService,
+    @Inject(InventoryOnecSnapshotsService) private readonly snapshots: InventoryOnecSnapshotsService,
   ) {}
 
   @ApiOperation({ operationId: 'listInventoryWarehouses', summary: 'Active warehouses' })
@@ -351,6 +388,80 @@ export class InventoryController {
     // Клиент подтверждает, что знает: откат снимает и поступления 1С (старый клиент этого поля не шлёт).
     const includesReceipts = typeof body === 'object' && body !== null && (body as { includesReceipts?: unknown }).includesReceipts === true;
     return this.projection.compensate(this.ctx(request, key), parsedId, { includesReceipts });
+  }
+
+  @ApiOperation({ operationId: 'listInventoryOnecSnapshots', summary: '1C stock snapshots at a date: capabilities and a page of snapshots' })
+  @ApiResponse({ status: 200, description: '{readAvailable, commandsAvailable, reason, items, total}' })
+  @Get('inventory/onec-snapshots')
+  onecSnapshots(@Req() request: RequestWithCurrentUser, @Query() query: Record<string, string | undefined>) {
+    this.snapshots.assertEnabled();
+    const status = query.status === undefined || query.status === '' ? null : query.status;
+    if (status !== null && !(SNAPSHOT_STATUSES as readonly string[]).includes(status)) {
+      throw new ApiError(400, 'VALIDATION_FAILED', 'Некорректный статус', { field: 'status' });
+    }
+    return this.snapshots.list(this.user(request), { status: status as StockSnapshotStatus | null, ...paging(query.offset, query.limit, 200) });
+  }
+
+  @ApiOperation({ operationId: 'requestInventoryOnecSnapshot', summary: 'Request a 1C stock snapshot at a moment (or get the existing one of that moment)' })
+  @ApiResponse({ status: 200, description: 'The snapshot: existing or queued' })
+  @ApiResponse({ status: 409, description: 'ONEC_STOCK_SNAPSHOTS_UNAVAILABLE' })
+  @ApiResponse({ status: 422, description: 'VALIDATION_ERROR: malformed or future moment' })
+  @Post('inventory/onec-snapshots')
+  @HttpCode(200)
+  requestOnecSnapshot(@Req() request: RequestWithCurrentUser, @Headers('idempotency-key') key: string | undefined, @Body() body: unknown) {
+    this.snapshots.assertEnabled();
+    const input = parse(snapshotRequestSchema, body);
+    return this.snapshots.request(this.ctx(request, key), { momentLocal: input.momentLocal, force: input.force === true });
+  }
+
+  @ApiOperation({ operationId: 'getInventoryOnecSnapshot', summary: 'A 1C stock snapshot with its warehouses matched to ERP warehouses' })
+  @ApiResponse({ status: 200, description: '{snapshot, warehouses}' })
+  @ApiResponse({ status: 404, description: 'ONEC_STOCK_SNAPSHOT_NOT_FOUND' })
+  @Get('inventory/onec-snapshots/:snapshotId')
+  onecSnapshot(@Req() request: RequestWithCurrentUser, @Param('snapshotId') snapshotId: string) {
+    this.snapshots.assertEnabled();
+    return this.snapshots.card(this.user(request), parseId(snapshotId, 'snapshotId'));
+  }
+
+  @ApiOperation({ operationId: 'getInventoryOnecSnapshotStock', summary: 'Stock of a 1C snapshot by material tabs for the chosen ERP warehouses' })
+  @ApiResponse({ status: 200, description: 'Tabs, categories and a page of rows' })
+  @ApiResponse({ status: 409, description: 'ONEC_STOCK_SNAPSHOT_NOT_READY, WAREHOUSE_UNLINKED' })
+  @Get('inventory/onec-snapshots/:snapshotId/stock')
+  onecSnapshotStock(@Req() request: RequestWithCurrentUser, @Param('snapshotId') snapshotId: string, @Query() query: Record<string, string | undefined>) {
+    this.snapshots.assertEnabled();
+    return this.snapshots.stockOf(this.user(request), parseId(snapshotId, 'snapshotId'), snapshotStockFilter(query));
+  }
+
+  @ApiOperation({ operationId: 'compareInventoryOnecSnapshot', summary: 'Compare a 1C snapshot with the current 1C stock or with another snapshot (delta = other − snapshot)' })
+  @ApiResponse({ status: 200, description: 'Rows with quantity, otherQuantity and delta' })
+  @ApiResponse({ status: 409, description: 'ONEC_SNAPSHOT_HISTORICAL, ONEC_SNAPSHOT_SOURCE_MISMATCH, ONEC_SNAPSHOT_COMPARE_UNAVAILABLE, ONEC_STOCK_SNAPSHOT_NOT_READY' })
+  @Get('inventory/onec-snapshots/:snapshotId/compare')
+  onecSnapshotCompare(@Req() request: RequestWithCurrentUser, @Param('snapshotId') snapshotId: string, @Query() query: Record<string, string | undefined>) {
+    this.snapshots.assertEnabled();
+    if (query.with === undefined || query.with === '') throw new ApiError(400, 'VALIDATION_FAILED', 'Не указано, с чем сравнивать', { field: 'with' });
+    const other = query.with === 'current' ? 'current' as const : parseId(query.with, 'with');
+    return this.snapshots.compare(this.user(request), parseId(snapshotId, 'snapshotId'), other, snapshotStockFilter(query));
+  }
+
+  @ApiOperation({ operationId: 'listInventoryOnecSnapshotComparable', summary: 'Ready snapshots of the same 1C base a snapshot can be compared with' })
+  @ApiResponse({ status: 200, description: '{items, total}' })
+  @ApiResponse({ status: 404, description: 'ONEC_STOCK_SNAPSHOT_NOT_FOUND' })
+  @Get('inventory/onec-snapshots/:snapshotId/comparable')
+  onecSnapshotComparable(@Req() request: RequestWithCurrentUser, @Param('snapshotId') snapshotId: string, @Query() query: Record<string, string | undefined>) {
+    this.snapshots.assertEnabled();
+    return this.snapshots.comparable(this.user(request), parseId(snapshotId, 'snapshotId'), {
+      search: query.search?.trim().slice(0, 50) || null, ...paging(query.offset, query.limit, 200),
+    });
+  }
+
+  @ApiOperation({ operationId: 'deleteInventoryOnecSnapshot', summary: 'Delete a 1C stock snapshot (or cancel a queued one)' })
+  @ApiResponse({ status: 204, description: 'Deleted' })
+  @ApiResponse({ status: 409, description: 'ONEC_STOCK_SNAPSHOT_IN_PROGRESS' })
+  @Delete('inventory/onec-snapshots/:snapshotId')
+  @HttpCode(204)
+  async deleteOnecSnapshot(@Req() request: RequestWithCurrentUser, @Headers('idempotency-key') key: string | undefined, @Param('snapshotId') snapshotId: string): Promise<void> {
+    this.snapshots.assertEnabled();
+    await this.snapshots.remove(this.ctx(request, key), parseId(snapshotId, 'snapshotId'));
   }
 
   @ApiOperation({ operationId: 'getOrderSheetStock', summary: 'Stock of the sheet materials used by an order, from 1C balances (no reservation)' })
