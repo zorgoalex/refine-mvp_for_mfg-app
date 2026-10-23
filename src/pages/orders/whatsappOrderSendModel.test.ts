@@ -192,6 +192,11 @@ describe('runOrderSend', () => {
     expect(stale?.text).toContain('выберите его заново');
     const other = await runOrderSend({ ...base, storage, send: async () => { throw apiError(409, 'ORDER_SEND_DISABLED'); } });
     expect(other?.refreshRecipients).toBeUndefined();
+    // K4b-2: the 1C phone is no longer available (the feature off, the right revoked): say so and reload the phones.
+    const onec = await runOrderSend({ ...base, target: { kind: 'client', onecContactId: 31, phoneToken: 'd'.repeat(64) }, storage,
+      send: async () => { throw apiError(409, 'ORDER_SEND_ONEC_PHONE_UNAVAILABLE', { final: true }); } });
+    expect(onec).toMatchObject({ type: 'warning', refreshRecipients: true });
+    expect(onec?.text).toContain('из 1С сейчас недоступна');
   });
 
   it('one pending slot per recipient and form: a lost answer is settled first, whichever phone is picked next', async () => {
@@ -219,6 +224,33 @@ describe('runOrderSend', () => {
     }
     // Another employee recipient is another slot.
     expect(pendingOrderSendKey(77, { kind: 'employee', recipientKey: 'e1' }, 'order_pdf')).not.toBe(pendingOrderSendKey(77, { kind: 'employee', recipientKey: 'e2' }, 'order_pdf'));
+  });
+
+  it('K4b-2: a lost 1C-phone command is settled first whichever phone is picked next, and is stored so an older interface never replays it', async () => {
+    const T = 'd'.repeat(64);
+    const onec = { kind: 'client' as const, onecContactId: 31, phoneToken: T };
+    for (const next of [{ kind: 'client' as const }, { kind: 'client' as const, phoneId: 12, phoneToken: 'e'.repeat(64) },
+      { kind: 'client' as const, onecContactId: 32, phoneToken: 'f'.repeat(64) }]) {
+      const storage = memoryStorage();
+      await runOrderSend({ ...base, target: onec, send: async () => { throw apiError(500, 'INTERNAL_ERROR'); }, storage });
+      const raw = JSON.parse(storage.getItem(pendingOrderSendKey(77, onec, 'order_pdf')) as string);
+      expect(raw.payload.target).toEqual({ ...onec, phoneId: 'onec' });
+      // The parser of the interface before K4b-2 (a copy): it does not replay such a record as a default send.
+      expect(legacyStoredTarget(raw.payload.target)).toBeNull();
+      const send = vi.fn(async () => ok);
+      await runOrderSend({ ...base, target: next, send, storage });
+      const body = (send.mock.calls[0] as unknown as [number, { target: unknown; idempotencyKey: string }])[1];
+      expect(body).toMatchObject({ target: onec, idempotencyKey: raw.payload.idempotencyKey });
+      expect(send).toHaveBeenCalledTimes(1);
+    }
+    // A 1C record without its token, or with fields of a newer interface, is not restored at all — never downgraded.
+    for (const target of [{ kind: 'client', phoneId: 'onec', onecContactId: 31 }, { kind: 'client', onecContactId: 31, phoneToken: T },
+      { kind: 'client', phoneId: 12, phoneToken: T, recipientSource: 'x' }]) {
+      const storage = memoryStorage();
+      storage.setItem(pendingOrderSendKey(77, { kind: 'client' }, 'order_pdf'), JSON.stringify({ actorId: '11', orderId: 77, ambiguous: true,
+        payload: { target, form: 'order_pdf', idempotencyKey: '11111111-1111-4111-8111-111111111111' } }));
+      expect(readPendingOrderSend(77, { kind: 'client' }, 'order_pdf', '11', storage)).toBeNull();
+    }
   });
 
   it('drops the key on a first-attempt refusal (cooldown) and keeps it after an ambiguous attempt', async () => {
@@ -374,3 +406,16 @@ describe('queue texts', () => {
     expect(orderSendErrorToast(apiError(422, 'ORDER_SEND_TOO_LONG')).text).toContain('20 изображений');
   });
 });
+
+/** `storedTarget` for a client as it was before K4b-2 (a1f53a08), kept to prove old tabs never downgrade a 1C command. */
+function legacyStoredTarget(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+  const id = (field: unknown) => (typeof field === 'number' && Number.isInteger(field) && field > 0 ? field : undefined);
+  const token = (field: unknown) => (typeof field === 'string' && /^[0-9a-f]{64}$/.test(field) ? field : undefined);
+  if (record.kind !== 'client') return null;
+  const phoneId = id(record.phoneId);
+  const phoneToken = token(record.phoneToken);
+  if (record.phoneId != null && phoneId === undefined) return null;
+  return phoneId === undefined ? { kind: 'client' } : { kind: 'client', phoneId, ...(phoneToken ? { phoneToken } : {}) };
+}

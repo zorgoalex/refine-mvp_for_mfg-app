@@ -79,6 +79,13 @@ function sameTarget(a: unknown, b: OrderSendTarget): boolean {
 }
 
 const TOKEN_PATTERN = /^[0-9a-f]{64}$/;
+const ONEC_STORED_PHONE = 'onec';
+const CLIENT_TARGET_FIELDS = new Set(['kind', 'phoneId', 'phoneToken', 'onecContactId']);
+
+/** The target as it is stored: a phone from 1C carries `phoneId: 'onec'` (see storedTarget). */
+function targetToStore(target: OrderSendTarget): unknown {
+  return target.kind === 'client' && target.onecContactId !== undefined ? { ...target, phoneId: ONEC_STORED_PHONE } : target;
+}
 
 /** The target of a stored command, field by field (storage is not trusted); null when it is not a valid target. */
 function storedTarget(value: unknown): OrderSendTarget | null {
@@ -87,6 +94,17 @@ function storedTarget(value: unknown): OrderSendTarget | null {
   const id = (field: unknown) => (typeof field === 'number' && Number.isInteger(field) && field > 0 ? field : undefined);
   const token = (field: unknown) => (typeof field === 'string' && TOKEN_PATTERN.test(field) ? field : undefined);
   if (record.kind === 'client') {
+    // Only the fields of a client choice; anything else is a command of a newer interface — never replayed as a
+    // send to the default phone.
+    if (Object.keys(record).some((field) => !CLIENT_TARGET_FIELDS.has(field))) return null;
+    // K4b-2: a phone from 1C is stored as `phoneId: 'onec'` — an older interface reads that as no valid target and
+    // never replays it to the default phone; this one restores the exact choice with its token, or nothing.
+    if (record.phoneId === ONEC_STORED_PHONE) {
+      const onecContactId = id(record.onecContactId);
+      const onecToken = token(record.phoneToken);
+      return onecContactId !== undefined && onecToken ? { kind: 'client', onecContactId, phoneToken: onecToken } : null;
+    }
+    if (record.onecContactId != null) return null;
     const phoneId = id(record.phoneId);
     const phoneToken = token(record.phoneToken);
     if (record.phoneId != null && phoneId === undefined) return null;
@@ -133,7 +151,8 @@ function readPendingSlot(slot: string, orderId: number, target: OrderSendTarget,
 }
 
 export function persistPendingOrderSend(request: PendingOrderSend, storage: StorageLike | null = defaultStorage()): boolean {
-  return writeRecord(pendingOrderSendKey(request.orderId, request.payload.target, request.payload.form), request, storage);
+  const stored = { ...request, payload: { ...request.payload, target: targetToStore(request.payload.target) } };
+  return writeRecord(pendingOrderSendKey(request.orderId, request.payload.target, request.payload.form), stored, storage);
 }
 
 /** Clears the pending record; with `idempotencyKey`, only if it is still that command's record. */
@@ -179,6 +198,7 @@ const CODE_TEXTS: Record<string, { type: OrderSendToastType; text: string }> = {
   ORDER_SEND_FORM_NOT_ALLOWED: { type: 'warning', text: 'Эта форма больше не разрешена для получателя. Обновите страницу.' },
   ORDER_SEND_FINANCIALS_REQUIRED: { type: 'warning', text: 'Для этой формы нужен доступ к финансовым данным' },
   ORDER_SEND_CHAT_UNKNOWN: { type: 'warning', text: 'Этот чат убран из настроек. Обновите страницу.' },
+  ORDER_SEND_ONEC_PHONE_UNAVAILABLE: { type: 'warning', text: 'Отправка на телефон клиента из 1С сейчас недоступна. Выберите другой телефон.' },
   ORDER_SEND_PHONE_CHANGED: { type: 'warning', text: 'Телефон получателя изменился. Список телефонов обновлён — выберите его заново.' },
   ORDER_SEND_PHONE_CHOICE_UNAVAILABLE: { type: 'warning', text: 'Выбор телефона клиента сейчас недоступен. Отправьте на основной телефон.' },
   ORDER_SEND_RECIPIENT_UNKNOWN: { type: 'warning', text: 'Этот сотрудник убран из настроек. Обновите страницу.' },
@@ -352,7 +372,7 @@ export type OrderSendRunResult = OrderSendToast & {
 };
 
 const STALE_RECIPIENT_CODES = new Set(['ORDER_SEND_PHONE_CHANGED', 'ORDER_SEND_PHONE_CHOICE_UNAVAILABLE', 'CLIENT_PHONE_MISSING', 'EMPLOYEE_CONTACT_MISSING',
-  'ORDER_SEND_RECIPIENT_UNKNOWN']);
+  'ORDER_SEND_RECIPIENT_UNKNOWN', 'ORDER_SEND_ONEC_PHONE_UNAVAILABLE']);
 
 /**
  * A refusal the server has recorded against the command's key (`details.final`): the command is not committed

@@ -322,6 +322,9 @@ export const envSchema = z
     // Контакты клиентов из 1С (K4b, migration 271): телефоны, email и адреса связанного контрагента 1С в контактах клиента.
     // Выключить и удалить копии (runbook) перед откатом backend ниже K4b.
     BACKEND_CLIENT_ONEC_CONTACTS_SYNC: booleanFromEnv.default(false),
+    // Отправка заказа клиенту на его телефон из 1С (K4b-2, migration 272). Выключен: меню не предлагает телефоны 1С, команда
+    // с ним — окончательный отказ, ждущие такие отправки отменяются до WhatsApp — шаг перед откатом backend ниже K4b-2.
+    BACKEND_ORDER_SEND_CLIENT_ONEC_PHONE: booleanFromEnv.default(false),
     // Виды контактов клиента WhatsApp, Viber, Instagram и «Другое» (migration 269). Выключен: новые и изменённые контакты
     // этих видов не принимаются (уже сохранённые остаются и сохраняются без изменений) — шаг перед откатом backend.
     BACKEND_CLIENT_CONTACT_EXTRA_KINDS: booleanFromEnv.default(false),

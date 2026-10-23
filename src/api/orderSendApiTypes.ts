@@ -136,12 +136,20 @@ export interface OrderSendClientContact {
   token: string;
 }
 
-/** Phones of one order's client (GET /orders/:id/whatsapp-sends/client-contacts). */
-export interface OrderSendClientContacts { clientId: number | null; contacts: OrderSendClientContact[] }
+/** A phone of the order client from 1C (K4b-2): a copy of the linked 1C counterparty's contact, masked. */
+export interface OrderSendClientOnecContact {
+  onecContactId: number;
+  masked: string;
+  /** Opaque: «this 1C copy is this number». */
+  token: string;
+}
+
+/** Phones of one order's client (GET /orders/:id/whatsapp-sends/client-contacts); `onecContacts` — a newer backend only. */
+export interface OrderSendClientContacts { clientId: number | null; contacts: OrderSendClientContact[]; onecContacts?: OrderSendClientOnecContact[] }
 
 export type OrderSendTarget =
   /** `phoneId` — one of the client's phones, always with the token the contacts list gave for it; omitted = the default one. */
-  { kind: 'client'; phoneId?: number; phoneToken?: string }
+  { kind: 'client'; phoneId?: number; phoneToken?: string; /** A phone from 1C instead of `phoneId`, with its token. */ onecContactId?: number }
   | { kind: 'chat'; chatKey: string }
   /** `contactId` — one of the employee's phones; omitted = the primary one. */
   | { kind: 'employee'; recipientKey: string; contactId?: number; /** The token the menu gave for this contact. */ contactToken?: string };

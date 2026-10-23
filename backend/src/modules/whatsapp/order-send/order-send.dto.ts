@@ -44,7 +44,9 @@ const phoneTokenSchema = z.string().regex(/^[0-9a-f]{64}$/);
 const sendInput = z.object({
   target: z.discriminatedUnion('kind', [
     // A chosen phone always comes with the token of the number the menu showed.
-    z.object({ kind: z.literal('client'), phoneId: z.number().int().positive().nullable().optional(), phoneToken: phoneTokenSchema.nullable().optional() }).strict(),
+    // A chosen phone (own or, K4b-2, a 1C copy `onecContactId`) always comes with the token of the number the menu showed.
+    z.object({ kind: z.literal('client'), phoneId: z.number().int().positive().nullable().optional(),
+      onecContactId: z.number().int().positive().nullable().optional(), phoneToken: phoneTokenSchema.nullable().optional() }).strict(),
     z.object({ kind: z.literal('chat'), chatKey: z.string().uuid() }).strict(),
     z.object({ kind: z.literal('employee'), recipientKey: z.string().uuid(), contactId: z.number().int().positive().nullable().optional(),
       contactToken: phoneTokenSchema.nullable().optional() }).strict(),
@@ -89,8 +91,11 @@ export function parseOrderSendCommand(value: unknown): { target: OrderSendTarget
   if (!parsed.success) throw validation(parsed.error);
   const target = parsed.data.target;
   // A chosen client phone always comes with the token of the number the menu showed, and never without the phone.
-  if (target.kind === 'client' && (target.phoneId == null) !== (target.phoneToken == null)) {
-    throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос', { issues: [{ path: 'target.phoneToken', message: 'phoneId and phoneToken go together' }] });
+  if (target.kind === 'client' && target.phoneId != null && target.onecContactId != null) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос', { issues: [{ path: 'target.onecContactId', message: 'phoneId or onecContactId, not both' }] });
+  }
+  if (target.kind === 'client' && (target.phoneId == null && target.onecContactId == null) !== (target.phoneToken == null)) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос', { issues: [{ path: 'target.phoneToken', message: 'a chosen phone and phoneToken go together' }] });
   }
   if (target.kind === 'employee' && target.contactToken != null && target.contactId == null) {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный запрос', { issues: [{ path: 'target.contactToken', message: 'contactToken needs contactId' }] });

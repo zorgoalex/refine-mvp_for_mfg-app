@@ -1,11 +1,17 @@
 import { createHash, randomInt, randomUUID } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
+import type { BackendEnv } from '../../../config/env.validation';
 import type { CurrentUser } from '../../../permissions/current-user';
+import {
+  ONEC_PHONE_SEND_MARGIN_MS, checkQueuedClientOnecPhone, clientOnecPhoneUsable, hasClientOnecData, lockClientOnecPhone, onecPhoneBusy,
+} from './client-onec-phone';
+import { clientOnecCopyVisible } from '../../party-contacts/client-onec-visibility';
 import { CLIENT_PHONE_SQL } from './forms/order-form-data';
 import { maskGroup, maskPhone, normalizeClientPhone } from './order-send-phone';
 import { deliveryAllowedAt, estimateQueue, nextAllowed, type QueueEstimate } from './order-send-queue';
@@ -44,6 +50,8 @@ export interface SendRow extends QueryResultRow {
   text_length?: number | null; text_edited?: boolean | null; template_id?: string | null; template_version?: number | null;
   supplier_request_number?: string | null; supplier_name?: string | null;
   client_phone_id?: string | null;
+  /** K4b-2 (schema 272): the 1C copy of a client phone chosen in the command. */
+  client_onec_contact_id?: string | null;
   recipient_key?: string | null; employee_id?: string | null; employee_contact_id?: string | null; recipient_fingerprint?: string | null;
   employee_name?: string | null;
   phone_normalized: string | null; recipient_masked: string; file_key: string | null; sha256: string | null; size_bytes: number | null;
@@ -77,6 +85,8 @@ export interface ResolvedClient {
   clientId: number;
   /** The client_phones row chosen in the command; null = the default rule (primary, else the smallest). */
   phoneId: number | null;
+  /** K4b-2: the 1C copy (client_contacts) chosen in the command instead of a client_phones row. */
+  onecContactId: number | null;
   phoneNormalized: string;
   fingerprint: string;
 }
@@ -130,7 +140,18 @@ export class OrderSendRepository {
   /** Parts of already purged sends cleared per retention run (the backlog pass; tests lower it). */
   purgeBacklogLimit = 2000;
 
-  constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
+  /** K4b-2 switch for tests; null = BACKEND_ORDER_SEND_CLIENT_ONEC_PHONE. */
+  clientOnecPhoneOverride: boolean | null = null;
+
+  constructor(
+    @Inject(DatabaseService) private readonly database: DatabaseService,
+    @Optional() @Inject(ConfigService) private readonly config?: ConfigService<BackendEnv, true>,
+  ) {}
+
+  /** Sends to a phone of the client from 1C (K4b-2): offered, accepted and delivered only while this is on. */
+  clientOnecPhoneEnabled(): boolean {
+    return this.clientOnecPhoneOverride ?? this.config?.get('BACKEND_ORDER_SEND_CLIENT_ONEC_PHONE', { infer: true }) === true;
+  }
 
   /** The next delivery may start at last + threshold + a random delay within the window. */
   private nextDeliveryAt(start: Date, intervalMinutes: number, windowMinutes: number): Date {
@@ -387,7 +408,7 @@ export class OrderSendRepository {
     /** An employee recipient: resolved under the locks before the guards (its fingerprint is the identity). */
     employee?: { recipientKey: string; contactId: number | null; contactToken?: string | null } | null;
     /** The client target: the chosen phone of the order's client (null = the default rule) and the token of the number the menu showed. */
-    client?: { phoneId: number | null; phoneToken?: string | null } | null;
+    client?: { phoneId: number | null; onecContactId?: number | null; phoneToken?: string | null } | null;
     /** Who asks and under which request: a final refusal is audited in the transaction that records it. */
     actor?: CurrentUser; requestId?: string;
     /** Same order, recipient and form: the latest such send must not be unknown unless confirmed by its id. */
@@ -419,7 +440,8 @@ export class OrderSendRepository {
       employee = params.employee
         ? await this.resolveEmployee(tx, settings, params.employee.recipientKey, params.employee.contactId, params.employee.contactToken ?? null) : null;
       client = params.client && params.orderId !== undefined
-        ? await this.resolveClient(tx, settings, params.orderId, params.client.phoneId, params.client.phoneToken ?? null) : null;
+        ? await this.resolveClient(tx, settings, params.orderId, params.client.phoneId, params.client.phoneToken ?? null,
+          params.client.onecContactId ?? null, params.actor ?? null) : null;
       // Who «the same recipient» is: the chat, or the employee or the client on this very number (a fingerprint
       // that survives retention and a change of the primary contact or of the settings row). A client send made
       // before fingerprints existed counts as the same recipient when it went to this number or its number is
@@ -475,24 +497,28 @@ export class OrderSendRepository {
           ...(employeeId !== null ? { relatedEntities: [{ entityType: 'employee', entityId: Number(employeeId) }] } : {}),
           metadata: { final: true, targetKind: params.employee ? 'employee' : params.chatKey ? 'chat' : 'client', chatKey: params.chatKey,
             recipientKey: params.employee?.recipientKey ?? null, employeeId: employeeId === null ? null : Number(employeeId),
-            clientPhoneId: params.client?.phoneId ?? null, form: params.form ?? null, errorCode: error.code, source: 'order_card' },
+            clientPhoneId: params.client?.phoneId ?? null,
+            ...(params.client?.onecContactId != null ? { clientOnecContactId: params.client.onecContactId, phoneSource: 'onec' } : {}), form: params.form ?? null, errorCode: error.code, source: 'order_card' },
         });
         return { refusal: new ApiError(error.statusCode, error.code, error.message, { ...(error.details ?? {}), final: true }) };
       }
       const send = await params.prepare(tx, { settings, chat, employee, client });
       // A send without a chosen phone never names client_phone_id: the column is written only for a chosen phone.
       // (Both releases need migration 237 anyway — the ledger of final refusals comes with it.)
+      // The same for a chosen 1C copy (K4b-2, schema 272): client_onec_contact_id is named only for it.
       const chosenPhone = send.client?.phoneId ?? null;
+      const chosenOnec = send.client?.onecContactId ?? null;
+      const chosenColumn = chosenPhone !== null ? ', client_phone_id' : chosenOnec !== null ? ', client_onec_contact_id' : '';
       const row = (await tx.query<SendRow>(`INSERT INTO whatsapp_order_sends (send_id, order_id, client_id, actor_id, request_id, idempotency_key,
           fingerprint, target_kind, chat_key, form_code, destination_chat_id, phone_normalized, recipient_masked, file_key, sha256, size_bytes,
-          file_name, caption, queue_expires_at, parts_total, recipient_key, employee_id, employee_contact_id, recipient_fingerprint${chosenPhone === null ? '' : ', client_phone_id'})
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24${chosenPhone === null ? '' : ',$25'}) RETURNING *`, [
+          file_name, caption, queue_expires_at, parts_total, recipient_key, employee_id, employee_contact_id, recipient_fingerprint${chosenColumn})
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24${chosenColumn ? ',$25' : ''}) RETURNING *`, [
         send.sendId, send.orderId, send.clientId, numericId(send.actor.id), send.requestId, send.idempotencyKey, send.fingerprint, send.targetKind,
         send.chatKey, send.form, send.destinationChatId, send.phoneNormalized, send.recipientMasked, send.fileKey, send.sha256, send.sizeBytes,
         send.fileName, send.caption, new Date(Date.now() + ORDER_SEND_QUEUE_TTL_MS), 1 + send.parts.length,
         send.employee?.recipient.recipient_key ?? null, send.employee ? Number(send.employee.recipient.employee_id) : null,
         send.employee?.contactId ?? null, send.employee?.fingerprint ?? send.client?.fingerprint ?? null,
-        ...(chosenPhone === null ? [] : [chosenPhone]),
+        ...(chosenPhone !== null ? [chosenPhone] : chosenOnec !== null ? [chosenOnec] : []),
       ])).rows[0];
       for (const [index, part] of send.parts.entries()) {
         await tx.query(`INSERT INTO whatsapp_order_send_parts (send_id, part_no, file_key, sha256, size_bytes) VALUES ($1, $2, $3, $4, $5)`,
@@ -795,12 +821,13 @@ export class OrderSendRepository {
    * so its client cannot change before the command commits. Null when the order is not there («prepare» says so).
    */
   async resolveClient(tx: TransactionClient, settings: SettingsRow, orderId: number, phoneId: number | null,
-    phoneToken_: string | null = null): Promise<ResolvedClient | null> {
+    phoneToken_: string | null = null, onecContactId: number | null = null, actor: CurrentUser | null = null): Promise<ResolvedClient | null> {
     const order = (await tx.query<{ client_id: string | null }>(`SELECT client_id FROM orders
       WHERE order_id = $1 AND delete_flag = false AND deleted_at IS NULL FOR SHARE`, [orderId])).rows[0];
     if (!order) return null;
     if (order.client_id === null) throw new ApiError(409, 'CLIENT_PHONE_MISSING', 'У клиента заказа нет телефона');
     const clientId = Number(order.client_id);
+    if (onecContactId !== null) return this.resolveClientOnecPhone(tx, settings, clientId, onecContactId, phoneToken_, actor);
     let raw: string | null;
     if (phoneId === null) {
       raw = (await tx.query<{ client_phone: string | null }>(CLIENT_PHONE_SQL, [clientId])).rows[0]?.client_phone ?? null;
@@ -823,17 +850,60 @@ export class OrderSendRepository {
     if (phoneId !== null && phoneToken_ !== phoneToken(settings.identity_salt, 'client', phoneId, phoneNormalized)) {
       throw new ApiError(409, 'ORDER_SEND_PHONE_CHANGED', 'Телефон получателя изменился; обновите страницу и выберите его заново');
     }
-    return { clientId, phoneId, phoneNormalized, fingerprint: clientFingerprint(settings.identity_salt, clientId, phoneNormalized) };
+    return { clientId, phoneId, onecContactId: null, phoneNormalized, fingerprint: clientFingerprint(settings.identity_salt, clientId, phoneNormalized) };
+  }
+
+  /**
+   * K4b-2: the 1C copy chosen in the command, after the order (FOR SHARE): client FOR UPDATE → the copy → its 1C set
+   * (client-onec-phone.ts), under a bounded lock wait (a held lock → busy, the command may be repeated). The feature off
+   * or the user without the 1C data right → a final refusal; the copy gone or not usable for 60 s more → «no such phone».
+   */
+  private async resolveClientOnecPhone(tx: TransactionClient, settings: SettingsRow, clientId: number, contactId: number,
+    token: string | null, actor: CurrentUser | null): Promise<ResolvedClient> {
+    if (!this.clientOnecPhoneEnabled() || !actor || !hasClientOnecData(actor)) {
+      throw new ApiError(409, 'ORDER_SEND_ONEC_PHONE_UNAVAILABLE', FINAL_REFUSAL_TEXT.ORDER_SEND_ONEC_PHONE_UNAVAILABLE);
+    }
+    await tx.query("SET LOCAL lock_timeout = '5s'");
+    let copy;
+    try {
+      await tx.query('SELECT 1 FROM clients WHERE client_id = $1 FOR UPDATE', [clientId]);
+      copy = await lockClientOnecPhone(tx, clientId, contactId);
+      if (copy && !(await clientOnecPhoneUsable(tx, copy, ONEC_PHONE_SEND_MARGIN_MS))) copy = null;
+    } catch (error) {
+      throw onecPhoneBusy(error) ?? error;
+    }
+    await tx.query('SET LOCAL lock_timeout TO DEFAULT');
+    if (!copy) throw new ApiError(409, 'CLIENT_PHONE_MISSING', 'Этого телефона у клиента больше нет; обновите страницу');
+    const phoneNormalized = copy.value_normalized;
+    if (token !== phoneToken(settings.identity_salt, 'client-onec', contactId, phoneNormalized)) {
+      throw new ApiError(409, 'ORDER_SEND_PHONE_CHANGED', 'Телефон получателя изменился; обновите страницу и выберите его заново');
+    }
+    return { clientId, phoneId: null, onecContactId: contactId, phoneNormalized,
+      fingerprint: clientFingerprint(settings.identity_salt, clientId, phoneNormalized) };
+  }
+
+  /**
+   * The intent check of a queued send to a 1C phone (the worker's verifier, after it loaded the actor and share-locked
+   * the order): the same rules as the command, with the author's current rights.
+   */
+  async verifyClientOnecPhone(tx: TransactionClient, current: SendRow, actor: CurrentUser): Promise<OrderSendCancelReason | null> {
+    const check = await checkQueuedClientOnecPhone(tx, {
+      enabled: this.clientOnecPhoneEnabled(), actor, orderId: Number(current.order_id), clientId: current.client_id,
+      contactId: Number(current.client_onec_contact_id), phoneNormalized: current.phone_normalized, marginMs: ONEC_PHONE_SEND_MARGIN_MS,
+    });
+    return check.ok ? null : check.reason;
   }
 
   /** Phones of the order's client for the card menu: only the ones a send can go to, masked, the primary first. */
-  async clientContacts(orderId: number): Promise<{ clientId: number | null;
-    contacts: Array<{ phoneId: number; masked: string; isPrimary: boolean; isDefault: boolean; token: string }> }> {
+  async clientContacts(orderId: number, reader: CurrentUser | null = null): Promise<{ clientId: number | null;
+    contacts: Array<{ phoneId: number; masked: string; isPrimary: boolean; isDefault: boolean; token: string }>;
+    /** K4b-2: phones of the client from 1C, apart from `contacts` (an older menu never builds a target from them). */
+    onecContacts: Array<{ onecContactId: number; masked: string; token: string }> }> {
     const order = (await this.database.query<{ client_id: string | null }>(`SELECT client_id FROM orders
       WHERE order_id = $1 AND delete_flag = false AND deleted_at IS NULL`, [orderId])).rows[0];
-    if (!order || order.client_id === null) return { clientId: null, contacts: [] };
+    if (!order || order.client_id === null) return { clientId: null, contacts: [], onecContacts: [] };
     // The compatible release offers no phones to choose: the card then sends by the default rule.
-    if (!this.clientPhoneChoice) return { clientId: Number(order.client_id), contacts: [] };
+    if (!this.clientPhoneChoice) return { clientId: Number(order.client_id), contacts: [], onecContacts: [] };
     const rows = (await this.database.query<{ phone_id: string; phone_number: string; is_primary: boolean | null }>(
       `SELECT phone_id, phone_number, is_primary FROM client_phones WHERE client_id = $1 ORDER BY is_primary DESC NULLS LAST, phone_id`, [order.client_id])).rows;
     const salt = (await this.settingsRow(this.database, false)).identity_salt;
@@ -851,7 +921,22 @@ export class OrderSendRepository {
       contacts.push({ phoneId, masked: maskPhone(normalized), isPrimary: row.is_primary === true, isDefault: row.phone_number === byDefault,
         token: phoneToken(salt, 'client', phoneId, normalized) });
     }
-    return { clientId: Number(order.client_id), contacts };
+    // Phones of 1C: only while the feature is on, for a reader with the 1C data right, by the visibility rule of K4b
+    // (the current link, usable 1C data, not one of the client's own numbers); one entry per number.
+    const onecContacts: Array<{ onecContactId: number; masked: string; token: string }> = [];
+    if (this.clientOnecPhoneEnabled() && reader && hasClientOnecData(reader)) {
+      const copies = (await this.database.query<{ contact_id: string; value_normalized: string }>(`SELECT c.contact_id, c.value_normalized
+        FROM client_contacts c WHERE c.client_id = $1 AND c.origin = 'onec' AND c.kind = 'phone' AND ${clientOnecCopyVisible('c', true)}
+        ORDER BY c.position, c.contact_id`, [order.client_id])).rows;
+      for (const copy of copies) {
+        if (seen.has(copy.value_normalized)) continue;
+        seen.add(copy.value_normalized);
+        const onecContactId = Number(copy.contact_id);
+        onecContacts.push({ onecContactId, masked: maskPhone(copy.value_normalized),
+          token: phoneToken(salt, 'client-onec', onecContactId, copy.value_normalized) });
+      }
+    }
+    return { clientId: Number(order.client_id), contacts, onecContacts };
   }
 
   async chat(tx: DatabaseClient, chatKey: string): Promise<ChatRow | null> {
@@ -911,7 +996,11 @@ export class OrderSendRepository {
       ...(employee ? { relatedEntities: [{ entityType: 'employee', entityId: employee }] } : {}),
       metadata: {
         sendId: row.send_id, targetKind: row.target_kind, chatKey: row.chat_key, recipientMasked: row.recipient_masked, form: row.form_code,
-        ...(employee ? { employeeId: employee } : {}), source: 'order_card', ...transition,
+        ...(employee ? { employeeId: employee } : {}),
+        // K4b-2: where the client number came from (a 1C copy is named by its id, never by its value).
+        ...(row.target_kind === 'client' ? row.client_onec_contact_id != null
+          ? { phoneSource: 'onec', clientOnecContactId: Number(row.client_onec_contact_id) } : { phoneSource: 'erp' } : {}),
+        source: 'order_card', ...transition,
       },
     });
   }
@@ -988,6 +1077,8 @@ function sendSelect() {
  * release makes no such sends). They are raised before anything is written and are recorded with the key.
  */
 export const FINAL_REFUSAL_CODES = new Set(['ORDER_SEND_PHONE_CHANGED', 'ORDER_SEND_PHONE_CHOICE_UNAVAILABLE', 'CLIENT_PHONE_MISSING',
+  // K4b-2: a 1C phone while the feature is off or without the right to 1C data.
+  'ORDER_SEND_ONEC_PHONE_UNAVAILABLE',
   'EMPLOYEE_CONTACT_MISSING', 'ORDER_SEND_RECIPIENT_UNKNOWN', 'ORDER_SEND_CHAT_UNKNOWN',
   // «The previous send of this form ended unknown»: the command is closed with its key. The repeat the user
   // confirms is another command, so a late copy of this one never becomes a send after that repeat went out.
@@ -1004,6 +1095,7 @@ const FINAL_REFUSAL_TEXT: Record<string, string> = {
   ORDER_SEND_PHONE_CHANGED: 'Телефон получателя изменился; обновите страницу и выберите его заново',
   ORDER_SEND_PHONE_CHOICE_UNAVAILABLE: 'Выбор телефона клиента сейчас недоступен; отправьте на основной телефон',
   CLIENT_PHONE_MISSING: 'У клиента заказа нет этого телефона',
+  ORDER_SEND_ONEC_PHONE_UNAVAILABLE: 'Отправка на телефон клиента из 1С сейчас недоступна; выберите другой телефон',
   EMPLOYEE_CONTACT_MISSING: 'У сотрудника нет этого телефона',
   ORDER_SEND_RECIPIENT_UNKNOWN: 'Этого сотрудника больше нет в настройках; обновите страницу',
   ORDER_SEND_CHAT_UNKNOWN: 'Этого чата больше нет в настройках; обновите страницу',
@@ -1026,7 +1118,7 @@ export function finalRefusal(code: string): ApiError {
  * What the menu hands out with a masked phone and the command brings back: «this contact row is this number».
  * Opaque (salted), so it reveals nothing; a row edited after the menu was built no longer matches.
  */
-export function phoneToken(salt: string, owner: 'client' | 'employee' | 'supplier', contactId: number, phoneNormalized: string): string {
+export function phoneToken(salt: string, owner: 'client' | 'client-onec' | 'employee' | 'supplier', contactId: number, phoneNormalized: string): string {
   return createHash('sha256').update(`${salt}phone-token:${owner}:${contactId}:${phoneNormalized}`).digest('hex');
 }
 

@@ -170,3 +170,33 @@ describe('a chosen phone of the client in the card menu', () => {
     expect(describeOrderWhatsAppSend(menu(), { kind: 'client' }, 'order_pdf', clientContacts).targetLabel).toBe('клиенту');
   });
 });
+
+describe('a phone of the client from 1C in the card menu (K4b-2)', () => {
+  const own = [{ phoneId: 11, masked: '7701***2060', isPrimary: true, isDefault: true, token: 't11' }];
+  const onec = [{ onecContactId: 31, masked: '7701***0011', token: 'o31' }];
+
+  it('with a 1C phone the client item is a submenu of every phone: own first, then «из 1С»; never the default send', () => {
+    const items = buildOrderWhatsAppMenuItems(menu({ chats: [] }), { hasClientPhone: true, clientContacts: own, clientOnecContacts: onec });
+    expect(items[0]).toMatchObject({ key: 'wa-send:group:client-phones', label: 'Отправить клиенту в WhatsApp' });
+    expect(items[0].children?.map((child) => child.label)).toEqual(['7701***2060 (основной)', '7701***0011 (из 1С)']);
+    expect(items[0].children?.[1].children?.map((child) => child.key)).toEqual([
+      'wa-send:client-onec:31:production_pdf', 'wa-send:client-onec:31:order_pdf']);
+    // No own phone at all: the 1C phone is still offered (as a chosen one).
+    const onlyOnec = buildOrderWhatsAppMenuItems(menu({ chats: [] }), { hasClientPhone: false, clientContacts: [], clientOnecContacts: onec });
+    expect(onlyOnec[0].children?.map((child) => child.label)).toEqual(['7701***0011 (из 1С)']);
+    expect(JSON.stringify(onlyOnec)).not.toContain('wa-send:client:');
+    // Still loading: the client item waits.
+    const loading = buildOrderWhatsAppMenuItems(menu({ chats: [] }), { hasClientPhone: false, clientOnecContacts: onec, clientContactsLoading: true });
+    expect(loading[0]).toMatchObject({ disabled: true, title: 'Загружаются телефоны клиента' });
+  });
+
+  it('round-trips the 1C key, sends with its token, names it in the toast; a 1C phone gone from the list sends nothing', () => {
+    const target = { kind: 'client' as const, onecContactId: 31 };
+    expect(parseOrderWhatsAppKey(orderWhatsAppItemKey(target, 'order_pdf'))).toEqual({ target, form: 'order_pdf' });
+    expect(parseOrderWhatsAppKey('wa-send:client-onec:x:order_pdf')).toBeNull();
+    expect(withPhoneToken(target, menu(), own, onec)).toEqual({ kind: 'client', onecContactId: 31, phoneToken: 'o31' });
+    expect(withPhoneToken({ kind: 'client', onecContactId: 32 }, menu(), own, onec)).toBeNull();
+    expect(withPhoneToken(target, menu(), own)).toBeNull();
+    expect(describeOrderWhatsAppSend(menu(), target, 'order_pdf', own, onec).targetLabel).toBe('клиенту (7701***0011, из 1С)');
+  });
+});

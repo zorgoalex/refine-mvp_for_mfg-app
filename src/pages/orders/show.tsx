@@ -1646,7 +1646,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const [orderSendRefresh, setOrderSendRefresh] = useState(0);
   const orderSendMenu = useOrderSendMenu(canExportOrders && (!featureFlags.useBackendPermissions || can('orders.view')), orderSendRefresh);
   // Телефоны клиента этого заказа — только когда клиенту вообще можно что-то отправить.
-  const { contacts: orderClientContacts, loading: orderClientContactsLoading } = useOrderClientContacts(
+  const { contacts: orderClientContacts, onecContacts: orderClientOnecContacts, loading: orderClientContactsLoading } = useOrderClientContacts(
     Boolean(orderSendMenu?.enabled && orderSendMenu.client.forms.length > 0),
     Number(record?.order_id) || null, Number(record?.client_id) || null, orderSendRefresh,
   );
@@ -1655,11 +1655,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     const parsed = parseOrderWhatsAppKey(key);
     const orderId = Number(record?.order_id);
     if (!parsed || !orderSendMenu || !Number.isFinite(orderId) || orderSendBusy.has(key)) return;
-    const { targetLabel, formTitle } = describeOrderWhatsAppSend(orderSendMenu, parsed.target, parsed.form, orderClientContacts);
+    const { targetLabel, formTitle } = describeOrderWhatsAppSend(orderSendMenu, parsed.target, parsed.form, orderClientContacts, orderClientOnecContacts);
     // Who sends: captured before the command, so a re-login while it runs cannot take over its result.
     const owner = currentOwner();
     // Выбранный телефон уходит вместе с меткой номера, который показало меню; выбора уже нет в списках — не отправляем.
-    const target = withPhoneToken(parsed.target, orderSendMenu, orderClientContacts);
+    const target = withPhoneToken(parsed.target, orderSendMenu, orderClientContacts, orderClientOnecContacts);
     if (!target) { message.warning('Список получателей обновился — выберите получателя заново'); return; }
     setOrderSendBusy((keys) => new Set(keys).add(key));
     void runOrderSend({
@@ -3171,7 +3171,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     : visibleOrderInfoTabs.find((tab) => tab.panel === activeInfoPanel)?.label;
   const orderWhatsAppItems = canExportOrders && !deletedOrder
     ? buildOrderWhatsAppMenuItems(orderSendMenu, {
-      hasClientPhone: Boolean(clientPhone), clientContacts: orderClientContacts, clientContactsLoading: orderClientContactsLoading,
+      hasClientPhone: Boolean(clientPhone), clientContacts: orderClientContacts, clientOnecContacts: orderClientOnecContacts, clientContactsLoading: orderClientContactsLoading,
       sending: orderSendBusy, icon: <WhatsAppOutlined />,
     })
     : [];

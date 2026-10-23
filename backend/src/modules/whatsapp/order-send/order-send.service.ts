@@ -23,7 +23,7 @@ const REFUSALS = new Set(['ORDER_SEND_ALREADY_QUEUED', 'ORDER_SEND_QUEUE_FULL', 
   'ORDER_SEND_FINANCIALS_REQUIRED', 'ORDER_SEND_CHAT_UNKNOWN', 'CLIENT_PHONE_MISSING', 'CLIENT_PHONE_INVALID', 'ORDER_SEND_STORAGE_FULL',
   'ORDER_SEND_RENDER_FAILED', 'ORDER_SEND_FILE_TOO_LARGE', 'PERMISSION_DENIED', 'ORDER_NOT_FOUND', 'ORDER_SEND_PREVIOUS_UNKNOWN',
   'ORDER_SEND_RECIPIENT_UNKNOWN', 'ORDER_SEND_CHANNEL_UNSUPPORTED', 'EMPLOYEE_INACTIVE', 'EMPLOYEE_CONTACT_MISSING',
-  'ORDER_SEND_PHONE_CHANGED', 'ORDER_SEND_PHONE_CHOICE_UNAVAILABLE']);
+  'ORDER_SEND_PHONE_CHANGED', 'ORDER_SEND_PHONE_CHOICE_UNAVAILABLE', 'ORDER_SEND_ONEC_PHONE_UNAVAILABLE']);
 
 @Injectable()
 export class OrderSendService {
@@ -97,7 +97,7 @@ export class OrderSendService {
   /** Phones of the order's client the card can send to (masks only; the same access as the sends of the order). */
   async clientContacts(orderId: number, actor: CurrentUser) {
     await this.assertOrderAccess(orderId, actor);
-    return this.repository.clientContacts(orderId);
+    return this.repository.clientContacts(orderId, actor);
   }
 
   async listForOrder(orderId: number, actor: CurrentUser): Promise<{ sends: OrderSendView[] }> {
@@ -128,7 +128,8 @@ export class OrderSendService {
             chatKey: input.target.kind === 'chat' ? input.target.chatKey : null,
             employee: input.target.kind === 'employee' ? { recipientKey: input.target.recipientKey, contactId: input.target.contactId ?? null,
               contactToken: input.target.contactToken ?? null } : null,
-            client: input.target.kind === 'client' ? { phoneId: input.target.phoneId ?? null, phoneToken: input.target.phoneToken ?? null } : null,
+            client: input.target.kind === 'client' ? { phoneId: input.target.phoneId ?? null, onecContactId: input.target.onecContactId ?? null,
+              phoneToken: input.target.phoneToken ?? null } : null,
             orderId, form: input.form, confirmAfterUnknown: input.confirmAfterUnknown ?? null,
             prepare: async (tx, decision): Promise<NewSend> => {
               const data = await readOrderFormData(tx, orderId);

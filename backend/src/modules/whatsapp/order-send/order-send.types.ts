@@ -70,7 +70,9 @@ export const SUPPLIER_SEND_PERMISSIONS: readonly PermissionName[] = ['procuremen
 export const ORDER_SEND_SUPPLIER_REQUESTS = true;
 export type OrderSendTarget =
   /** `phoneId` — one of the client's phones (default: primary, else the smallest), with the token the menu gave for it. */
-  { kind: 'client'; phoneId?: number | null; phoneToken?: string | null }
+  { kind: 'client'; phoneId?: number | null; phoneToken?: string | null;
+    /** K4b-2: a phone of the client from 1C (a copy in client_contacts) instead of `phoneId`, with the token of its number. */
+    onecContactId?: number | null }
   | { kind: 'chat'; chatKey: string }
   /** An employee from the settings; `contactId` — one of his phones (default: the primary one). */
   | { kind: 'employee'; recipientKey: string; contactId?: number | null; /** The token the menu gave for this contact. */ contactToken?: string | null };

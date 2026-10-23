@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ApiError } from '../../api/apiError';
 import { authSession } from '../../api/authSession';
 import { orderSendApi } from '../../api/orderSendApi';
-import type { OrderSendClientContact, OrderSendMenu } from '../../api/orderSendApiTypes';
+import type { OrderSendClientContact, OrderSendClientContacts, OrderSendClientOnecContact, OrderSendMenu } from '../../api/orderSendApiTypes';
 
 /** A fetched menu is reused for this long; the settings block drops it right after a save. */
 export const ORDER_SEND_MENU_TTL_MS = 60_000;
@@ -84,9 +84,9 @@ export function clientContactsKey(userId: string, orderId: number | null | undef
 
 /** Takes an answer only if it is for the key the card shows now and for the same client. */
 export function acceptClientContacts(currentKey: string | null, requestedKey: string, requestedClientId: number,
-  answer: { clientId: number | null; contacts: OrderSendClientContact[] }): OrderSendClientContact[] | null {
+  answer: OrderSendClientContacts): { contacts: OrderSendClientContact[]; onecContacts: OrderSendClientOnecContact[] } | null {
   if (currentKey !== requestedKey || answer.clientId !== requestedClientId) return null;
-  return answer.contacts;
+  return { contacts: answer.contacts, onecContacts: Array.isArray(answer.onecContacts) ? answer.onecContacts : [] };
 }
 
 /**
@@ -94,19 +94,20 @@ export function acceptClientContacts(currentKey: string | null, requestedKey: st
  * any failure: the menu then offers the default send to the primary phone, as before.
  */
 export function useOrderClientContacts(allowed: boolean, orderId: number | null | undefined, clientId: number | null | undefined,
-  refreshKey = 0): { contacts: OrderSendClientContact[]; loading: boolean } {
+  refreshKey = 0): { contacts: OrderSendClientContact[]; onecContacts: OrderSendClientOnecContact[]; loading: boolean } {
   const key = allowed ? clientContactsKey(String(authSession.getUser()?.id ?? ''), orderId, clientId) : null;
-  const [state, setState] = useState<{ key: string; refreshKey: number; contacts: OrderSendClientContact[] } | null>(null);
+  const [state, setState] = useState<{ key: string; refreshKey: number; contacts: OrderSendClientContact[];
+    onecContacts: OrderSendClientOnecContact[] } | null>(null);
 
   useEffect(() => {
     if (!key || !orderId || !clientId) return undefined;
     let current: string | null = key;
     orderSendApi.clientContacts(orderId).then((answer) => {
-      const contacts = acceptClientContacts(current, key, clientId, answer);
-      if (contacts) setState({ key, refreshKey, contacts });
+      const accepted = acceptClientContacts(current, key, clientId, answer);
+      if (accepted) setState({ key, refreshKey, ...accepted });
     }).catch(() => {
       // An older backend or a failure: no phones known — the default send stays available.
-      if (current === key) setState({ key, refreshKey, contacts: [] });
+      if (current === key) setState({ key, refreshKey, contacts: [], onecContacts: [] });
     });
     return () => { current = null; };
   }, [key, orderId, clientId, refreshKey]);
@@ -115,5 +116,5 @@ export function useOrderClientContacts(allowed: boolean, orderId: number | null 
   // way the client item waits: offering the default send meanwhile would let the same number be sent to twice
   // (once by default, once from the list).
   const ready = Boolean(key && state?.key === key && state.refreshKey === refreshKey);
-  return { contacts: ready && state ? state.contacts : [], loading: Boolean(key) && !ready };
+  return { contacts: ready && state ? state.contacts : [], onecContacts: ready && state ? state.onecContacts : [], loading: Boolean(key) && !ready };
 }

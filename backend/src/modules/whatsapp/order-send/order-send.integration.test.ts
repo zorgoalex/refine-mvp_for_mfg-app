@@ -22,6 +22,9 @@ import { OrderSendRepository } from './order-send.repository';
 import { OrderSendService } from './order-send.service';
 import { OrderSendWorker } from './order-send-worker.service';
 import { MySendsRepository } from '../my-sends/my-sends.repository';
+import { OnecCatalogReader } from '../../onec-agent/onec-catalog-reader';
+import type { OnecRuntimeConfigService } from '../../onec-agent/onec-runtime-config.service';
+import { SupplierOnecContactsRepository } from '../../party-contacts/supplier-onec-contacts.repository';
 import type { OrderSendSettingsInput } from './order-send.types';
 
 // Real PostgreSQL in an isolated schema: set WHATSAPP_BROADCAST_TEST_DATABASE_URL (or TEST_DATABASE_URL).
@@ -819,7 +822,7 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
     it('lists the phones of the order client for the menu: masks only, the primary first, unreadable and repeated numbers left out', async () => {
       const [primary, second] = await clientPhones([PRIMARY, SECOND, 'офис 12-34', `+7${PHONE_DIGITS}`]);
       const contacts = await service.clientContacts(9001, admin);
-      expect(contacts).toEqual({ clientId: 501, contacts: [
+      expect(contacts).toEqual({ clientId: 501, onecContacts: [], contacts: [
         { phoneId: primary, masked: `7${PHONE_DIGITS.slice(0, 3)}***${PHONE_DIGITS.slice(-4)}`, isPrimary: true, isDefault: true, token: expect.stringMatching(/^[0-9a-f]{64}$/) },
         { phoneId: second, masked: '7777***4567', isPrimary: false, isDefault: false, token: expect.stringMatching(/^[0-9a-f]{64}$/) },
       ] });
@@ -1086,6 +1089,350 @@ describe.skipIf(!databaseUrl)('order send from the order card (PostgreSQL, isola
       await q(`UPDATE client_phones SET is_primary = (phone_number = $1) WHERE client_id = 501`, [SECOND]);
       await worker.work();
       expect(await row(byDefault.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_changed' });
+    });
+  });
+
+  // ---- K4b-2: a phone of the client from 1C (a copy in client_contacts) as the recipient.
+  describe('a phone of the client from 1C (K4b-2)', () => {
+    const SRC = 7;
+    const REF = '00000000-0000-4000-8000-000000000501';
+    const ONEC_DIGITS = '7019990011';
+    const ONEC = `7${ONEC_DIGITS}`;
+    const onecAdmin: CurrentUser = { ...admin, permissions: [...FULL, 'clients.onec_data.view'] as PermissionName[] };
+    let checks: string[] = [];
+    const migration = async (name: string) => (await (await import('node:fs/promises'))
+      .readFile(new URL(`../../../../db/migrations/${name}.sql`, import.meta.url), 'utf8')).replaceAll('public.', '');
+
+    beforeAll(async () => {
+      await q(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS ref_key_1c uuid;
+        ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS phone varchar(50); ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS ref_key_1c uuid;
+        CREATE TABLE IF NOT EXISTS vendors(vendor_id smallint PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS onec_etl_mirror_rows(source_id bigint, entity_code text, source_key text, deleted boolean NOT NULL DEFAULT false,
+          data jsonb NOT NULL, missing_in_source_at timestamptz);
+        CREATE TABLE IF NOT EXISTS onec_etl_entity_state(source_id bigint NOT NULL, entity_code text NOT NULL, revoked_at timestamptz,
+          snapshot_version timestamptz, snapshot_rejected_reason text, PRIMARY KEY (source_id, entity_code));
+        INSERT INTO permissions_catalog(permission_name) VALUES ('clients.onec_data.view') ON CONFLICT DO NOTHING;
+        CREATE TABLE IF NOT EXISTS client_merge_redirects(merged_client_id bigint PRIMARY KEY, survivor_id bigint NOT NULL, merge_id bigint);
+        CREATE TABLE IF NOT EXISTS outbox_events(outbox_event_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), event_type text NOT NULL,
+          aggregate_type text NOT NULL, aggregate_id text NOT NULL, payload_json jsonb NOT NULL, idempotency_key text UNIQUE,
+          created_at timestamptz NOT NULL DEFAULT clock_timestamp());`);
+      for (const name of ['236_party_contacts', '242_supplier_phone_contact_sync', '243_supplier_contacts_onec']) await q(await migration(name));
+      // The inline checks of 236 that 269 replaces (its permissions part needs tables this suite does not have).
+      await q(`ALTER TABLE client_contacts DROP CONSTRAINT IF EXISTS client_contacts_kind_check;
+        ALTER TABLE client_contacts DROP CONSTRAINT IF EXISTS client_contacts_check`);
+      for (const name of ['271_client_contacts_onec', '272_whatsapp_order_send_client_onec_phone']) await q(await migration(name));
+    }, 60_000);
+
+    beforeEach(async () => {
+      repository.clientPhoneChoice = true;
+      repository.clientOnecPhoneOverride = true;
+      worker.onecCallDeadlineMs = 10_000;
+      checks = [];
+      checkBehaviour = async (phone) => { checks.push(phone); return { exists: true, chatId: `${phone}@c.us` }; };
+      await clientPhones([PRIMARY]);
+    });
+    afterEach(async () => {
+      repository.clientOnecPhoneOverride = null;
+      await q(`DELETE FROM client_contacts WHERE client_id = 501`);
+      await q(`UPDATE clients SET ref_key_1c = NULL WHERE client_id = 501`);
+    });
+
+    /** Client 501 linked to a 1C counterparty whose set holds one phone (the 1C data `age` old); the copy's id. */
+    const linkOnec = async (age = '0 seconds', value = ONEC) => {
+      await q(`UPDATE clients SET ref_key_1c = $1 WHERE client_id = 501`, [REF]);
+      const snapshot = (await q<{ v: Date }>(`INSERT INTO onec_etl_entity_state(source_id, entity_code, snapshot_version)
+        VALUES ($1, 'counterparty_contacts', now() - $2::interval)
+        ON CONFLICT (source_id, entity_code) DO UPDATE SET revoked_at = NULL, snapshot_version = EXCLUDED.snapshot_version RETURNING snapshot_version v`,
+      [SRC, age])).rows[0].v;
+      await q(`INSERT INTO party_onec_profiles(party_kind, party_id, source_id, ref_key_1c, counterparty_state, contacts_state, snapshot_version)
+        VALUES ('client', 501, $1, $2, 'active', 'available', $3)
+        ON CONFLICT (party_kind, party_id) DO UPDATE SET source_id = EXCLUDED.source_id, ref_key_1c = EXCLUDED.ref_key_1c,
+          snapshot_version = EXCLUDED.snapshot_version`, [SRC, REF, snapshot]);
+      await q(`DELETE FROM client_contacts WHERE client_id = 501`);
+      return Number((await q<{ contact_id: string }>(`INSERT INTO client_contacts(client_id, kind, value, value_normalized, origin, onec_source_id,
+          onec_synced_at, onec_snapshot_version) VALUES (501, 'phone', $1, $1, 'onec', $2, now(), $3) RETURNING contact_id`,
+      [value, SRC, snapshot])).rows[0].contact_id);
+    };
+    const toOnec = async (actor: CurrentUser = onecAdmin) => {
+      const contact = (await service.clientContacts(9001, actor)).onecContacts[0];
+      return { kind: 'client', onecContactId: contact.onecContactId, phoneToken: contact.token } as never;
+    };
+    const queueOnec = async () => (await send(9001, { target: await toOnec(), form: 'order_pdf' }, onecAdmin)).send;
+
+    it('the menu lists 1C phones apart, masked, only with the feature on, the right, the current link and not as an own number', async () => {
+      const contactId = await linkOnec();
+      const menu = await service.clientContacts(9001, onecAdmin);
+      expect(menu.onecContacts).toEqual([{ onecContactId: contactId, masked: '7701***0011', token: expect.stringMatching(/^[0-9a-f]{64}$/) }]);
+      // An older menu reads `contacts` only: the 1C phone is not there.
+      expect(menu.contacts.map((item) => item.masked)).not.toContain('7701***0011');
+      expect(JSON.stringify(menu)).not.toContain(ONEC_DIGITS);
+      expect((await service.clientContacts(9001, admin)).onecContacts).toEqual([]);
+      repository.clientOnecPhoneOverride = false;
+      expect((await service.clientContacts(9001, onecAdmin)).onecContacts).toEqual([]);
+      repository.clientOnecPhoneOverride = true;
+      // Another link: the copy of the previous counterparty is not offered.
+      await q(`UPDATE clients SET ref_key_1c = '00000000-0000-4000-8000-000000000999' WHERE client_id = 501`);
+      expect((await service.clientContacts(9001, onecAdmin)).onecContacts).toEqual([]);
+      // The same number among the client's own phones: offered once, as the own phone.
+      await linkOnec();
+      await clientPhones([PRIMARY, '8 701 999 00 11']);
+      const both = await service.clientContacts(9001, onecAdmin);
+      expect(both.onecContacts).toEqual([]);
+      expect(both.contacts.map((item) => item.masked)).toContain('7701***0011');
+    });
+
+    it('sends to the 1C phone: the copy is named, the number checked under its 1C data and delivered; audit has the source, not the number', async () => {
+      const contactId = await linkOnec();
+      const view = await queueOnec();
+      expect(view.recipientMasked).toBe('7701***0011');
+      expect(await row(view.sendId)).toMatchObject({ client_onec_contact_id: String(contactId), client_phone_id: null, phone_normalized: ONEC });
+      await worker.work();
+      expect(await row(view.sendId)).toMatchObject({ state: 'sent', destination_chat_id: `${ONEC}@c.us` });
+      expect(checks).toEqual([ONEC]);
+      const audit = (await q(`SELECT metadata_json FROM audit_log WHERE entity_id = $1 AND event = 'whatsapp.order_send.requested'`, [view.sendId])).rows[0];
+      expect(audit.metadata_json).toMatchObject({ phoneSource: 'onec', clientOnecContactId: contactId });
+      expect(JSON.stringify((await q(`SELECT metadata_json FROM audit_log WHERE entity_id = $1`, [view.sendId])).rows)).not.toContain(ONEC_DIGITS);
+    });
+
+    it('the command: a token of another kind, both choices, the feature off or no right are refused; off/no right are final with the key', async () => {
+      const contactId = await linkOnec();
+      const [own] = await clientPhones([PRIMARY]);
+      const ownToken = (await service.clientContacts(9001, admin)).contacts.find((item) => item.phoneId === own)!.token;
+      expect(await code(send(9001, { target: { kind: 'client', onecContactId: contactId, phoneToken: ownToken } as never, form: 'order_pdf' }, onecAdmin)))
+        .toBe('ORDER_SEND_PHONE_CHANGED');
+      expect(await code(Promise.resolve().then(() => parseOrderSendCommand({ target: { kind: 'client', phoneId: own, onecContactId: contactId,
+        phoneToken: ownToken }, form: 'order_pdf', idempotencyKey: randomUUID() })))).toBe('VALIDATION_ERROR');
+      expect(await code(Promise.resolve().then(() => parseOrderSendCommand({ target: { kind: 'client', onecContactId: contactId },
+        form: 'order_pdf', idempotencyKey: randomUUID() })))).toBe('VALIDATION_ERROR');
+      const target = await toOnec();
+      const idempotencyKey = randomUUID();
+      repository.clientOnecPhoneOverride = false;
+      expect(await code(send(9001, { target, form: 'order_pdf', idempotencyKey }, onecAdmin))).toBe('ORDER_SEND_ONEC_PHONE_UNAVAILABLE');
+      repository.clientOnecPhoneOverride = true;
+      // The same key later, with the feature on: the recorded refusal, never a send.
+      expect(await code(send(9001, { target, form: 'order_pdf', idempotencyKey }, onecAdmin))).toBe('ORDER_SEND_ONEC_PHONE_UNAVAILABLE');
+      expect(await code(send(9001, { target, form: 'order_pdf' }, admin))).toBe('ORDER_SEND_ONEC_PHONE_UNAVAILABLE');
+      expect((await q(`SELECT count(*)::int n FROM whatsapp_order_send_refusals WHERE error_code = 'ORDER_SEND_ONEC_PHONE_UNAVAILABLE'`)).rows[0].n).toBe(2);
+      expect((await q(`SELECT count(*)::int n FROM whatsapp_order_sends`)).rows[0].n).toBe(0);
+    });
+
+    it('a lost answer is replayed after the feature is off; 1C data about to expire are not queued', async () => {
+      await linkOnec();
+      const target = await toOnec();
+      const idempotencyKey = randomUUID();
+      const first = (await send(9001, { target, form: 'order_pdf', idempotencyKey }, onecAdmin)).send;
+      repository.clientOnecPhoneOverride = false;
+      expect((await send(9001, { target, form: 'order_pdf', idempotencyKey }, onecAdmin)).send.sendId).toBe(first.sendId);
+      repository.clientOnecPhoneOverride = true;
+      await q(`DELETE FROM whatsapp_order_sends`);
+      // 30 days minus 30 s: still shown, but less than a minute left — refused as gone.
+      await linkOnec('30 days -30 seconds');
+      expect(await code(send(9001, { target: await toOnec(), form: 'order_pdf' }, onecAdmin))).toBe('CLIENT_PHONE_MISSING');
+    });
+
+    it('before WAHA: feature off, revoked 1C data, lost right or a dropped link cancel the send with no WAHA call', async () => {
+      await linkOnec();
+      const off = await queueOnec();
+      repository.clientOnecPhoneOverride = false;
+      await worker.work();
+      expect(await row(off.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'disabled' });
+      repository.clientOnecPhoneOverride = true;
+
+      const revoked = await queueOnec();
+      await q(`UPDATE onec_etl_entity_state SET revoked_at = now() WHERE source_id = $1`, [SRC]);
+      await worker.work();
+      expect(await row(revoked.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_removed' });
+
+      await linkOnec();
+      const right = await queueOnec();
+      await q(`DELETE FROM role_permissions WHERE role_id = 1 AND permission_name = 'clients.onec_data.view'`);
+      await worker.work();
+      expect(await row(right.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'permission_revoked' });
+      await q(`INSERT INTO role_permissions(role_id, permission_name) VALUES (1, 'clients.onec_data.view')`);
+
+      const unlinked = await queueOnec();
+      await q(`UPDATE clients SET ref_key_1c = NULL WHERE client_id = 501`);
+      await q(`DELETE FROM client_contacts WHERE client_id = 501 AND origin = 'onec'`);
+      await worker.work();
+      expect(await row(unlinked.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_removed' });
+      expect(checks).toEqual([]);
+      expect(sent).toHaveLength(0);
+    });
+
+    it('a link change waiting on the check is serialized; the check after it sees no copy and calls no WAHA', async () => {
+      await linkOnec();
+      const view = await queueOnec();
+      const holder = await pool.connect();
+      await holder.query(`SET search_path="${schema}",public`);
+      await holder.query('BEGIN');
+      // As setLink: the client first, then its copies go.
+      await holder.query('SELECT 1 FROM clients WHERE client_id = 501 FOR NO KEY UPDATE');
+      const delivery = worker.work();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await holder.query(`UPDATE clients SET ref_key_1c = NULL WHERE client_id = 501`);
+      await holder.query(`DELETE FROM client_contacts WHERE client_id = 501 AND origin = 'onec'`);
+      await holder.query('COMMIT');
+      holder.release();
+      await delivery;
+      expect(await row(view.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_removed' });
+      expect(checks).toEqual([]);
+    });
+
+    it('1C data that expire while the check waits for its locks are not used (the wall clock, not the transaction start)', async () => {
+      // 12 s of the 30 days left when the check starts; it waits 3 s for the client — less than its 10 s margin then.
+      await linkOnec('30 days -70 seconds');
+      const view = await queueOnec();
+      await linkOnec('30 days -12 seconds');
+      const holder = await pool.connect();
+      await holder.query(`SET search_path="${schema}",public`);
+      await holder.query('BEGIN');
+      await holder.query('SELECT 1 FROM clients WHERE client_id = 501 FOR NO KEY UPDATE');
+      const copy = (await q<{ contact_id: string }>(`SELECT contact_id FROM client_contacts WHERE client_id = 501 AND origin = 'onec'`)).rows[0].contact_id;
+      await q(`UPDATE whatsapp_order_sends SET client_onec_contact_id = $2 WHERE send_id = $1`, [view.sendId, copy]);
+      const delivery = worker.work();
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      await holder.query('COMMIT');
+      holder.release();
+      await delivery;
+      expect(await row(view.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_removed' });
+      expect(checks).toEqual([]);
+    }, 20_000);
+
+    it('a late WAHA answer postpones without a destination or an intent; the next attempt re-checks and cancels after a revocation', async () => {
+      await linkOnec();
+      const view = await queueOnec();
+      worker.onecCallDeadlineMs = 200;
+      checkBehaviour = async (phone) => { checks.push(phone); await new Promise((resolve) => setTimeout(resolve, 600)); return { exists: true, chatId: `${phone}@c.us` }; };
+      await worker.work();
+      expect(await row(view.sendId)).toMatchObject({ state: 'queued', destination_chat_id: null, lock_token: null });
+      expect(checks).toEqual([ONEC]);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await q(`UPDATE onec_etl_entity_state SET revoked_at = now() WHERE source_id = $1`, [SRC]);
+      await q(`UPDATE whatsapp_order_sends SET next_attempt_at = now() WHERE send_id = $1`, [view.sendId]);
+      await worker.work();
+      expect(await row(view.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_removed' });
+      expect(checks).toEqual([ONEC]);
+      expect(sent).toHaveLength(0);
+    });
+
+    it('at the intent: the copy changed after the number check → changed; the 1C data revoked → removed; nothing is sent', async () => {
+      const contactId = await linkOnec();
+      const changed = await queueOnec();
+      await q(`UPDATE whatsapp_order_sends SET destination_chat_id = $2 WHERE send_id = $1`, [changed.sendId, `${ONEC}@c.us`]);
+      await q(`UPDATE client_contacts SET value = '77019990022', value_normalized = '77019990022' WHERE contact_id = $1`, [contactId]);
+      await worker.work();
+      expect(await row(changed.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_changed' });
+      await linkOnec();
+      const revoked = await queueOnec();
+      await q(`UPDATE whatsapp_order_sends SET destination_chat_id = $2 WHERE send_id = $1`, [revoked.sendId, `${ONEC}@c.us`]);
+      await q(`UPDATE onec_etl_entity_state SET revoked_at = now() WHERE source_id = $1`, [SRC]);
+      await worker.work();
+      expect(await row(revoked.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_removed' });
+      expect(sent).toHaveLength(0);
+    });
+
+    /** A connection of its own in the test schema (for a second writer that must wait). */
+    const second = async () => {
+      const connection = await pool.connect();
+      await connection.query(`SET search_path="${schema}",public`);
+      return connection;
+    };
+    const pgCode = (promise: Promise<unknown>) => promise.then(() => 'ok', (error: unknown) => (error as { code?: string }).code ?? String(error));
+    const until = async (condition: () => boolean) => {
+      for (let i = 0; i < 100 && !condition(); i += 1) await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(condition()).toBe(true);
+    };
+
+    it('while the WAHA check is unanswered a link change and a revocation wait; after they commit the intent cancels before delivery', async () => {
+      await linkOnec();
+      const view = await queueOnec();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      checkBehaviour = async (phone) => { checks.push(phone); await gate; return { exists: true, chatId: `${phone}@c.us` }; };
+      const delivery = worker.work();
+      const probe = await second();
+      const writer = await second();
+      let revoked = false;
+      let revocation: Promise<void> = Promise.resolve();
+      try {
+        await until(() => checks.length === 1);
+        // A link change (setLink takes the client first) cannot start while the check holds the client.
+        await probe.query('BEGIN');
+        await probe.query("SET LOCAL lock_timeout = '200ms'");
+        expect(await pgCode(probe.query('SELECT 1 FROM clients WHERE client_id = 501 FOR NO KEY UPDATE'))).toBe('55P03');
+        await probe.query('ROLLBACK');
+        // A revocation of the 1C set waits for the check, then commits before the intent.
+        revocation = writer.query('UPDATE onec_etl_entity_state SET revoked_at = now() WHERE source_id = $1', [SRC]).then(() => { revoked = true; });
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(revoked).toBe(false);
+      } finally {
+        // Whatever failed above: open the gate, let the worker and the writer finish, free both connections.
+        release();
+        await delivery.catch(() => undefined);
+        await revocation.catch(() => undefined);
+        await probe.query('ROLLBACK').catch(() => undefined);
+        probe.release();
+        writer.release();
+      }
+      expect(revoked).toBe(true);
+      expect(await row(view.sendId)).toMatchObject({ state: 'cancelled', cancel_reason: 'recipient_removed' });
+      expect(checks).toEqual([ONEC]);
+      expect(sent).toHaveLength(0);
+    });
+
+    it('the K4b sync of the client and commands to its 1C phone run together without a deadlock', async () => {
+      const reader = new OnecCatalogReader(database, { get: () => ({ enabled: true }) } as unknown as OnecRuntimeConfigService);
+      (reader as unknown as { available: () => Promise<void> }).available = async () => undefined;
+      const sync = new SupplierOnecContactsRepository(database, reader);
+      await linkOnec();
+      await q(`INSERT INTO onec_etl_entity_state(source_id, entity_code, snapshot_version) VALUES ($1, 'counterparties', now())
+        ON CONFLICT (source_id, entity_code) DO UPDATE SET revoked_at = NULL, snapshot_version = now()`, [SRC]);
+      await q(`DELETE FROM onec_etl_mirror_rows`);
+      await q(`INSERT INTO onec_etl_mirror_rows(source_id, entity_code, source_key, data) VALUES ($1, 'counterparties', $2, $3::jsonb),
+        ($1, 'counterparty_contacts', $4, $5::jsonb)`, [SRC, REF,
+        JSON.stringify({ Description: 'Тест Клиент', Code: 'К-501', ИдентификационныйНомер: '880101300123', Покупатель: true, IsFolder: false }),
+        `${REF}:1`, JSON.stringify({ Ref_Key: REF, LineNumber: '1', Тип: 'Телефон', НомерТелефона: '+7 701 999 00 11' })]);
+      await sync.syncClient(501, { trigger: 'hourly', requestId: `req-${randomUUID()}`, correlationId: 'corr-k4b2', actor: null });
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const target = await toOnec();
+        const [synced, outcome] = await Promise.all([
+          sync.syncClient(501, { trigger: 'hourly', requestId: `req-${randomUUID()}`, correlationId: 'corr-k4b2', actor: null }),
+          code(send(9001, { target, form: 'order_pdf' }, onecAdmin)),
+        ]);
+        expect(synced.status).toBeDefined();
+        expect(outcome).toBe('ok');
+        await q(`DELETE FROM whatsapp_order_sends`);
+      }
+      await q(`DELETE FROM onec_etl_mirror_rows`);
+    }, 30_000);
+
+    it('a command waiting too long for the client answers BUSY (retryable): nothing is written, the key is not refused', async () => {
+      await linkOnec();
+      const target = await toOnec();
+      const holder = await second();
+      const idempotencyKey = randomUUID();
+      let outcome: string;
+      try {
+        await holder.query('BEGIN');
+        await holder.query('SELECT 1 FROM clients WHERE client_id = 501 FOR UPDATE');
+        outcome = await code(send(9001, { target, form: 'order_pdf', idempotencyKey }, onecAdmin));
+      } finally {
+        await holder.query('ROLLBACK').catch(() => undefined);
+        holder.release();
+      }
+      expect(outcome).toBe('ORDER_SEND_BUSY');
+      expect((await q(`SELECT count(*)::int n FROM whatsapp_order_send_refusals`)).rows[0].n).toBe(0);
+      expect((await q(`SELECT count(*)::int n FROM whatsapp_order_sends`)).rows[0].n).toBe(0);
+      // The same key, once the client is free: the send is made.
+      expect((await send(9001, { target, form: 'order_pdf', idempotencyKey }, onecAdmin)).send.recipientMasked).toBe('7701***0011');
+    }, 20_000);
+
+    it('a send names an own phone or a 1C copy, never both (migration 272)', async () => {
+      await linkOnec();
+      const view = await queueOnec();
+      const [own] = await clientPhones([PRIMARY]);
+      expect(await code(q(`UPDATE whatsapp_order_sends SET client_phone_id = $2 WHERE send_id = $1`, [view.sendId, own])))
+        .toContain('chk_whatsapp_order_sends_client_choice');
     });
   });
 

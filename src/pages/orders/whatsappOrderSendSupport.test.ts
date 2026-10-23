@@ -52,7 +52,7 @@ describe('client phones of the order card', () => {
     expect(clientContactsKey('8', 9001, 501)).not.toBe(keyA);
     // Opened order A, moved on to B before A answered: A's phones never reach B's menu.
     expect(acceptClientContacts(keyB, keyA, 501, { clientId: 501, contacts })).toBeNull();
-    expect(acceptClientContacts(keyA, keyA, 501, { clientId: 501, contacts })).toEqual(contacts);
+    expect(acceptClientContacts(keyA, keyA, 501, { clientId: 501, contacts })).toEqual({ contacts, onecContacts: [] });
     // The order got another client while the request was in flight.
     expect(acceptClientContacts(keyA, keyA, 501, { clientId: 502, contacts })).toBeNull();
     expect(acceptClientContacts(null, keyA, 501, { clientId: 501, contacts })).toBeNull();

@@ -8,7 +8,9 @@ describe('order card WhatsApp send wiring', () => {
     expect(show).toContain('buildOrderWhatsAppMenuItems(orderSendMenu');
     expect(show).toMatch(/useOrderSendMenu\(canExportOrders && \(!featureFlags\.useBackendPermissions \|\| can\('orders\.view'\)\), orderSendRefresh\)/);
     // A chosen phone is sent with the token of the number the menu showed, and nothing is sent when the choice is gone.
-    expect(show).toMatch(/const target = withPhoneToken\(parsed\.target, orderSendMenu, orderClientContacts\);\s*if \(!target\) \{[^}]*return; \}/);
+    // K4b-2: a phone from 1C goes with its own token from the separate list.
+    expect(show).toMatch(/const target = withPhoneToken\(parsed\.target, orderSendMenu, orderClientContacts, orderClientOnecContacts\);\s*if \(!target\) \{[^}]*return; \}/);
+    expect(show).toContain('clientOnecContacts: orderClientOnecContacts');
     expect(show).toMatch(/orderWhatsAppItems = canExportOrders && !deletedOrder/);
   });
 

@@ -6,13 +6,14 @@ import { WhatsAppRuntimeConfigService } from '../whatsapp-runtime-config.service
 import { WhatsAppTechnicalLogService } from '../whatsapp-technical-log.service';
 import { canSendOrder, OrderSendActors, readAccessSubject } from './order-send-actors';
 import { OrderSendFileStore } from './order-send-file-store';
+import { ONEC_PHONE_CHECK_MARGIN_MS, checkQueuedClientOnecPhone } from './client-onec-phone';
 import { normalizeClientPhone } from './order-send-phone';
 import { OrderSendRepository, knownForms, type SendIntent, type SendRow } from './order-send.repository';
 import {
   ORDER_FORM_MIME, ORDER_SEND_SUPPORTED_CHANNELS, SUPPLIER_TEXT_FORM, isDeliverableForm, orderForm,
   type OrderFormCode, type OrderSendCancelReason, type OrderSendRuntime,
 } from './order-send.types';
-import { SupplierSendRepository } from './supplier-send.repository';
+import { ONEC_LOCKED_CALL_MS, SupplierSendRepository, withDeadline } from './supplier-send.repository';
 
 /** WAHA refused the request itself (validation, unsupported): nothing was sent. */
 const DEFINITE_REJECTIONS = new Set([400, 404, 405, 415, 422, 501]);
@@ -28,6 +29,8 @@ const WAHA_RETRY_MS = 60_000;
 export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
   /** Time of the gate, TTL and intent: read after the intent locks are held, never the iteration start. */
   clock: () => Date = () => new Date();
+  /** How long the locks of a 1C phone are held for the WAHA number check (K4b-2); tests lower it. */
+  onecCallDeadlineMs = ONEC_LOCKED_CALL_MS;
   private working = false;
   private cleaning = false;
   private timers: NodeJS.Timeout[] = [];
@@ -111,6 +114,12 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
         return;
       }
     }
+    // K4b-2: a send to a 1C phone of the client, while the feature is off (a step before a rollback), never reaches WAHA.
+    const onecPhone = row.target_kind === 'client' && row.client_onec_contact_id != null;
+    if (onecPhone && !this.repository.clientOnecPhoneEnabled()) {
+      await this.repository.finishBeforeIntent(row.send_id, { state: 'cancelled', reason: 'disabled' });
+      return;
+    }
     if ((row.target_kind === 'client' || row.target_kind === 'employee' || supplier) && !row.destination_chat_id) {
       if (!row.phone_normalized) {
         await this.repository.finishBeforeIntent(row.send_id, { state: 'failed', errorCode: 'ORDER_SEND_PAYLOAD_MISSING' });
@@ -119,11 +128,18 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
       try {
         const phone = row.phone_normalized;
         // A supplier phone that is gone, or came from 1C data that may no longer be used, never reaches WAHA.
+        // A 1C phone of the client: only while it may still be used by its author (K4b-2).
+        let refused: OrderSendCancelReason | null = null;
         const check = supplier
           ? await (this.suppliers as SupplierSendRepository).whileContactUsable(row, () => this.waha.checkPhone(phone))
-          : await this.waha.checkPhone(phone);
+          : onecPhone
+            ? await this.whileClientOnecPhoneUsable(row, () => this.waha.checkPhone(phone)).then((outcome) => {
+              if ('reason' in outcome) { refused = outcome.reason; return null; }
+              return outcome.value;
+            })
+            : await this.waha.checkPhone(phone);
         if (check === null) {
-          await this.repository.finishBeforeIntent(row.send_id, { state: 'cancelled', reason: 'recipient_removed' });
+          await this.repository.finishBeforeIntent(row.send_id, { state: 'cancelled', reason: refused ?? 'recipient_removed' });
           return;
         }
         if (!check.exists || !check.chatId) {
@@ -182,6 +198,7 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
         return this.repository.verifyEmployeeRecipient(tx, current);
       }
       if (!knownForms(settings.client_forms).includes(formCode)) return 'form_not_allowed';
+      if (current.client_onec_contact_id != null) return this.repository.verifyClientOnecPhone(tx, current, actor);
       // A phone chosen in the command must still be that phone of the order's client; otherwise the default rule.
       const client = await this.repository.currentClientPhone(tx, Number(current.order_id),
         current.client_phone_id == null ? null : Number(current.client_phone_id));
@@ -203,6 +220,30 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       await this.repository.settle(row.send_id, intent.token, failure(error));
     }
+  }
+
+  /**
+   * The number check of WAHA for a send to a 1C phone of the client (K4b-2), made only while the phone may be used:
+   * under the locks of client-onec-phone.ts (author → order → client → copy → 1C set) the author still may send the
+   * order and see 1C data, the order still has this client, the copy is there with the same number and its 1C data
+   * stay usable for ONEC_PHONE_CHECK_MARGIN_MS more by the wall clock. The rule holds when the request is made: the
+   * locks are held at most ONEC_LOCKED_CALL_MS (a later answer fails this attempt — the send is postponed, nothing is
+   * stored, the next attempt checks everything again); a request WAHA already got cannot be taken back.
+   */
+  private async whileClientOnecPhoneUsable<T>(row: SendRow, call: () => Promise<T>):
+    Promise<{ value: T } | { reason: OrderSendCancelReason }> {
+    return this.database.transaction(async (tx) => {
+      await tx.query("SET LOCAL lock_timeout = '5s'");
+      const actor = await this.actors.load(tx, row.actor_id);
+      const subject = await readAccessSubject(tx, Number(row.order_id), true);
+      if (!actor || !subject || !canSendOrder(actor, subject, row.form_code as OrderFormCode)) return { reason: 'permission_revoked' as const };
+      const check = await checkQueuedClientOnecPhone(tx, {
+        enabled: this.repository.clientOnecPhoneEnabled(), actor, orderId: Number(row.order_id), clientId: row.client_id,
+        contactId: Number(row.client_onec_contact_id), phoneNormalized: row.phone_normalized, marginMs: ONEC_PHONE_CHECK_MARGIN_MS,
+      });
+      if (!check.ok) return { reason: check.reason };
+      return { value: await withDeadline(call(), this.onecCallDeadlineMs) };
+    });
   }
 
   /**
