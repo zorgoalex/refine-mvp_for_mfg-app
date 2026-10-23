@@ -30,17 +30,43 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
   });
 }
 
+// PostgreSQL rejects SET TRANSACTION ISOLATION LEVEL after the first query;
+// COMMIT/ROLLBACK end the transaction and need no setup.
+const SKIPS_DEFERRED = /^\s*(SET\s+TRANSACTION|COMMIT|ROLLBACK)\b/i;
+
 class PgTransactionClient implements TransactionClient {
+  private deferred?: { text: string; params: readonly unknown[] };
+
   constructor(
     readonly raw: PoolClient,
     private readonly defaultTimeoutMs: number,
     private readonly telemetry: PerformanceQueryTelemetryService,
   ) {}
 
+  // Runs right before the handler's first query that is not SET TRANSACTION,
+  // so handlers can still choose their isolation level first.
+  deferUntilFirstQuery(text: string, params: readonly unknown[]): void {
+    this.deferred = { text, params };
+  }
+
   query<T extends QueryResultRow = QueryResultRow>(
     text: string,
     params: readonly unknown[] = [],
     options: DatabaseQueryOptions = {},
+  ): Promise<QueryResult<T>> {
+    const deferred = this.deferred;
+    if (!deferred || SKIPS_DEFERRED.test(text)) return this.run<T>(text, params, options);
+    this.deferred = undefined;
+    // Both are queued on the connection now, in order; the result is the handler's.
+    const setup = this.run(deferred.text, deferred.params, {});
+    const result = this.run<T>(text, params, options);
+    return Promise.all([setup, result]).then(([, value]) => value);
+  }
+
+  private run<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    params: readonly unknown[],
+    options: DatabaseQueryOptions,
   ): Promise<QueryResult<T>> {
     return this.telemetry.measure(text, () =>
       withTimeout(
@@ -129,7 +155,7 @@ export class DatabaseService implements OnModuleDestroy, DatabaseClient {
       // correlate it with the HTTP request; pooled connections never keep it.
       const requestId = this.requestContexts?.get()?.requestId;
       if (requestId && requestId !== 'req_unknown') {
-        await client.query("SELECT set_config('erp.request_id', $1, true)", [requestId]);
+        client.deferUntilFirstQuery("SELECT set_config('erp.request_id', $1, true)", [requestId]);
       }
       const result = await handler(client);
       await flushTransactionHooks(client);
