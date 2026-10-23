@@ -321,14 +321,61 @@ describe('NotificationRuleEngineService.processEvent', () => {
     }
   });
 
-  it('uses a safe default template built only from whitelisted fields when templates are null', () => {
-    const c = ctx({ orderId: 321, orderStatusId: 40, eventType: 'order.status_changed' });
-    const r = rule({ titleTemplate: null, messageTemplate: null });
+  it('builds a Russian default text with the order number and status names when templates are empty', () => {
+    const c = ctx({
+      orderId: 321,
+      orderStatusId: 40,
+      eventType: 'order.status_changed',
+      orderName: '1258тест',
+      orderStatusName: 'В работе',
+      previousOrderStatusName: 'Новый',
+    });
 
-    const { title, message } = renderNotificationText(r, c);
+    for (const r of [rule({ titleTemplate: null, messageTemplate: null }), rule({ titleTemplate: '', messageTemplate: '  ' })]) {
+      const { title, message } = renderNotificationText(r, c);
+      expect(title).toBe('Заказ 1258тест: статус заказа «В работе»');
+      expect(message).toBe('Заказ 1258тест: статус заказа изменён с «Новый» на «В работе».');
+    }
+  });
 
-    expect(title).toBe('Order 321 — order.status_changed');
-    expect(message).toBe('Order 321 event order.status_changed (status 40)');
+  it('uses production and payment status names for their events', () => {
+    const empty = rule({ titleTemplate: null, messageTemplate: null });
+    const production = renderNotificationText(empty, ctx({
+      eventType: 'order.production_status_changed',
+      orderName: 'А-17',
+      productionStatusName: 'Раскрой',
+      previousProductionStatusName: null,
+    }));
+    expect(production).toEqual({
+      title: 'Заказ А-17: статус производства «Раскрой»',
+      message: 'Заказ А-17: новый статус производства «Раскрой».',
+    });
+
+    const payment = renderNotificationText(empty, ctx({
+      eventType: 'order.payment_status_changed',
+      orderName: 'А-17',
+      paymentStatusName: 'Оплачено',
+      previousPaymentStatusName: 'Частично',
+    }));
+    expect(payment.message).toBe('Заказ А-17: статус оплаты изменён с «Частично» на «Оплачено».');
+  });
+
+  it('falls back to the order id and a generic text when names are unknown', () => {
+    const { title, message } = renderNotificationText(
+      rule({ titleTemplate: null, messageTemplate: null }),
+      ctx({ orderId: 321, eventType: 'order.status_changed', orderName: null, orderStatusName: null }),
+    );
+    expect(title).toBe('Заказ #321: изменён статус заказа');
+    expect(message).toBe('Заказ #321: изменён статус заказа.');
+  });
+
+  it('interpolates the order number and status names into operator templates', () => {
+    const { title, message } = renderNotificationText(
+      rule({ titleTemplate: 'Заказ {orderName}', messageTemplate: '{previousOrderStatusName} → {orderStatusName}' }),
+      ctx({ orderName: '1258тест', orderStatusName: 'Готов', previousOrderStatusName: 'В работе' }),
+    );
+    expect(title).toBe('Заказ 1258тест');
+    expect(message).toBe('В работе → Готов');
   });
 
   it('processes the deadline envelope as DEADLINE_EXPIRED when ownsDeadline=true (convergence)', async () => {
