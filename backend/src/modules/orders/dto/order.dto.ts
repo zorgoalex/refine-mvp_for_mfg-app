@@ -103,6 +103,26 @@ export interface OrderAuditEventDto {
   createdAt: string;
 }
 
+/**
+ * Order history for everyone who can open the order: a fixed projection of allow-listed
+ * audit events. It never carries audit JSON, request ids, addresses or related entities.
+ */
+export interface OrderHistoryListResponseDto {
+  data: OrderHistoryEventDto[];
+  pagination: PaginationDto;
+}
+
+export interface OrderHistoryEventDto {
+  auditId: string;
+  event: string;
+  createdAt: string;
+  actorName: string | null;
+  entityType: string | null;
+  statusField: string | null;
+  statusName: string | null;
+  stageCode: string | null;
+}
+
 export interface PaginationDto {
   page: number;
   pageSize: number;

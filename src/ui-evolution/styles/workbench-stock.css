@@ -1,0 +1,147 @@
+/* «NewLine»: «Остатки на складах», «Справочник складов» и «Плёнки». Общий вид таблиц — из
+   `workbench-lists.css` (класс `wb-list` на корне экрана); здесь только то, что у этих экранов своё.
+   Только оформление: вкладки, фильтры, действия и колонки остаются теми же. */
+
+/* --- «Остатки на складах» --- */
+:root[data-ui-variant="workbench"] .film-inventory-page > h2.ant-typography {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+:root[data-ui-variant="workbench"] .film-inventory-page > .ant-tabs > .ant-tabs-nav {
+  margin-bottom: 12px;
+}
+
+:root[data-ui-variant="workbench"] .film-inventory-page .ant-tabs-tab {
+  padding: 8px 0;
+  font-weight: 600;
+}
+
+/* таблица сама — карточка, поэтому внешняя карточка вкладки не рисуется */
+:root[data-ui-variant="workbench"] .film-inventory-page .ant-tabs-tabpane > .ant-card {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .film-inventory-page .ant-tabs-tabpane > .ant-card > .ant-card-body {
+  padding: 0;
+}
+
+/* строка «Остатки 1С на …» — тонкая справочная полоса, как в макете */
+:root[data-ui-variant="workbench"] .film-inventory-page .ant-alert-info {
+  padding: 6px 12px;
+  border-color: var(--evo-border);
+  border-radius: var(--evo-radius-md);
+  background: var(--evo-surface-muted);
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+}
+
+:root[data-ui-variant="workbench"] .film-inventory-page .ant-alert-info .ant-alert-icon {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .film-inventory-page .ant-tag,
+:root[data-ui-variant="workbench"] .warehouses-page .ant-tag {
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+/* остаток — главное число строки; ноль приглушён, минус — красным */
+:root[data-ui-variant="workbench"] .wb-list .stock-qty {
+  font-weight: 700;
+}
+
+:root[data-ui-variant="workbench"] .wb-list .stock-qty[data-stock="zero"] {
+  color: var(--evo-text-secondary);
+  font-weight: 400;
+}
+
+:root[data-ui-variant="workbench"] .wb-list .stock-qty[data-stock="negative"] {
+  color: var(--evo-danger);
+}
+
+/* !important: фон строк списка задан с !important (общая «зебра») */
+:root[data-ui-variant="workbench"] .wb-list .ant-table-wrapper .ant-table-tbody > tr.ant-table-row.film-stock-negative:not(.highlighted-row):not(.order-deleted-reference-row) > td,
+:root[data-ui-variant="workbench"] .wb-list .ant-table-wrapper .ant-table-tbody > tr.ant-table-row.film-stock-unresolved:not(.highlighted-row):not(.order-deleted-reference-row) > td {
+  background-color: color-mix(in srgb, var(--evo-danger) 6%, var(--evo-surface)) !important;
+}
+
+:root[data-ui-variant="workbench"] .film-inventory-page .ant-table-summary > tr > td {
+  padding: 8px 12px;
+  border-top: 1px solid var(--evo-border);
+  border-bottom: 0;
+  background: var(--evo-surface-muted);
+  font-size: 12.5px;
+}
+
+/* --- «Справочник складов» --- */
+:root[data-ui-variant="workbench"] .warehouses-page.ant-card {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .warehouses-page > .ant-card-head {
+  min-height: 0;
+  margin-bottom: 12px;
+  padding: 0;
+  border-bottom: 0;
+}
+
+:root[data-ui-variant="workbench"] .warehouses-page > .ant-card-head .ant-card-head-title {
+  padding: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+:root[data-ui-variant="workbench"] .warehouses-page > .ant-card-head .ant-card-extra {
+  padding: 0;
+}
+
+:root[data-ui-variant="workbench"] .warehouses-page > .ant-card-body {
+  padding: 0;
+}
+
+/* --- «Плёнки» --- */
+/* шапка и пагинация списка липкие: обёртка таблицы не должна обрезать содержимое */
+:root[data-ui-variant="workbench"] .films-list.wb-list .ant-table-wrapper {
+  overflow: visible;
+}
+
+:root[data-ui-variant="workbench"] .films-list .films-list__head {
+  background: var(--evo-canvas);
+}
+
+:root[data-ui-variant="workbench"] .films-list.wb-list .ant-table-wrapper .ant-table-thead > tr > th,
+:root[data-ui-variant="workbench"] .films-list.wb-list .ant-table-wrapper .ant-table-tbody > tr > td {
+  padding-inline: 8px;
+}
+
+:root[data-ui-variant="workbench"] .films-list.wb-list .ant-table-wrapper .ant-table-thead > tr:first-child > th:first-child {
+  border-start-start-radius: var(--evo-radius-lg);
+}
+
+:root[data-ui-variant="workbench"] .films-list.wb-list .ant-table-wrapper .ant-table-thead > tr:first-child > th:last-child {
+  border-start-end-radius: var(--evo-radius-lg);
+}
+
+:root[data-ui-variant="workbench"] .films-list.wb-list .ant-table-wrapper .ant-table-pagination.ant-pagination {
+  padding: 8px 12px;
+  border-top: 1px solid var(--evo-border);
+  border-radius: 0 0 var(--evo-radius-lg) var(--evo-radius-lg);
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .films-list .films-list__name {
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .films-list .films-list__key {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+}

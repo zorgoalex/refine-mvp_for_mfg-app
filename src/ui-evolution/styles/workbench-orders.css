@@ -1,0 +1,2709 @@
+/* «NewLine»: список заказов и карточка заказа. Только представление —
+   тот же JSX, те же колонки, действия и настройки, что в остальных вариантах.
+   Все правила — под :root[data-ui-variant="workbench"]. */
+
+:root[data-ui-variant="workbench"] {
+  --wb-tone-green-bg: #e6f4ec;
+  --wb-tone-amber-bg: #fbf0dc;
+  --wb-tone-red-bg: #fbe9e8;
+  --wb-tone-gray-bg: #eef0f4;
+}
+
+:root[data-ui-variant="workbench"][data-theme="dark"] {
+  --wb-tone-green-bg: #173326;
+  --wb-tone-amber-bg: #3a2c10;
+  --wb-tone-red-bg: #3d1d1c;
+  --wb-tone-gray-bg: #222a36;
+}
+
+/* ================= Список заказов ================= */
+
+:root[data-ui-variant="workbench"] .orders-table .ant-table-thead > tr > th {
+  background: var(--evo-surface-muted);
+  color: var(--evo-text-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .orders-table .ant-table-tbody > tr > td {
+  padding-block: 7px;
+  border-bottom-color: var(--evo-border);
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .orders-table td.orders-col {
+  font-size: 12.5px;
+  line-height: 1.3;
+}
+
+:root[data-ui-variant="workbench"] .orders-table td.orders-col--order-name {
+  white-space: nowrap;
+  color: var(--evo-text);
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .orders-table td.orders-col--order-name > span {
+  letter-spacing: 0 !important;
+}
+
+:root[data-ui-variant="workbench"] .orders-table td.orders-col--amount {
+  color: var(--evo-text);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .orders-table td.orders-col--order-date,
+:root[data-ui-variant="workbench"] .orders-table td.orders-col--planned-date,
+:root[data-ui-variant="workbench"] .orders-table td.orders-col--payment-date {
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .orders-table td.orders-col--planned-date {
+  color: var(--evo-text);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .orders-table td.orders-col--client {
+  color: var(--evo-text);
+  font-weight: 500;
+  hyphens: manual;
+}
+
+/* статусы — пилюли с точкой (текст + цвет, не только цвет) */
+:root[data-ui-variant="workbench"] .wb-pill {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 9px 2px 20px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--wb-tone-gray-bg);
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-pill::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 9px;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+:root[data-ui-variant="workbench"] .wb-pill[data-tone="active"] {
+  background: var(--evo-primary-soft);
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-pill[data-tone="ready"] {
+  background: var(--wb-tone-green-bg);
+  color: var(--evo-success);
+}
+
+:root[data-ui-variant="workbench"] .wb-pill[data-tone="warning"] {
+  background: var(--wb-tone-amber-bg);
+  color: var(--evo-warning);
+}
+
+:root[data-ui-variant="workbench"] .wb-pill[data-tone="danger"] {
+  background: var(--wb-tone-red-bg);
+  color: var(--evo-danger);
+}
+
+/* срок: дата и подсказка «через N дн.» */
+:root[data-ui-variant="workbench"] .wb-deadline {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.25;
+}
+
+:root[data-ui-variant="workbench"] .wb-deadline > small {
+  color: var(--evo-text-secondary);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+:root[data-ui-variant="workbench"] .wb-deadline[data-tone="warning"],
+:root[data-ui-variant="workbench"] .wb-deadline[data-tone="warning"] > small {
+  color: var(--evo-warning);
+}
+
+:root[data-ui-variant="workbench"] .wb-deadline[data-tone="danger"],
+:root[data-ui-variant="workbench"] .wb-deadline[data-tone="danger"] > small {
+  color: var(--evo-danger);
+}
+
+/* остальные «статусные» значения занимают всю ширину колонки, а не 45px */
+:root[data-ui-variant="workbench"] .orders-table .orders-status-value {
+  max-width: 100%;
+}
+
+/* буквы этапов в списке: 9px из общей разметки слишком мелко */
+:root[data-ui-variant="workbench"] .orders-table td.production-status .production-stages {
+  font-size: 11px !important;
+}
+
+/* действия в строке — тихие, проявляются при наведении */
+:root[data-ui-variant="workbench"] .orders-table .ant-table-cell-fix-right .ant-btn {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .orders-table .ant-table-cell-fix-right .ant-btn:hover {
+  border-color: var(--evo-border);
+  background: var(--evo-surface);
+  color: var(--evo-primary);
+}
+
+/* пагинация и панель над таблицей: читаемый размер вместо 10px */
+:root[data-ui-variant="workbench"] .orders-table .ant-pagination {
+  margin: 8px 0;
+  gap: 2px;
+}
+
+:root[data-ui-variant="workbench"] .orders-table .ant-pagination .ant-pagination-item,
+:root[data-ui-variant="workbench"] .orders-table .ant-pagination .ant-pagination-prev,
+:root[data-ui-variant="workbench"] .orders-table .ant-pagination .ant-pagination-next,
+:root[data-ui-variant="workbench"] .orders-table .ant-pagination .ant-pagination-jump-prev,
+:root[data-ui-variant="workbench"] .orders-table .ant-pagination .ant-pagination-jump-next {
+  min-width: 24px;
+  height: 24px;
+  border-radius: var(--evo-radius-sm);
+  font-size: 12px;
+  line-height: 22px;
+}
+
+:root[data-ui-variant="workbench"] .orders-table .ant-pagination .ant-pagination-item a,
+:root[data-ui-variant="workbench"] .orders-table .ant-pagination .ant-pagination-prev button,
+:root[data-ui-variant="workbench"] .orders-table .ant-pagination .ant-pagination-next button {
+  min-width: 24px;
+  height: 24px;
+  font-size: 12px;
+  line-height: 22px;
+}
+
+:root[data-ui-variant="workbench"] .orders-table .ant-pagination .ant-pagination-item-active {
+  border-color: transparent;
+  background: var(--evo-primary-soft);
+}
+
+:root[data-ui-variant="workbench"] .orders-table .ant-pagination .ant-pagination-options,
+:root[data-ui-variant="workbench"] .orders-table .ant-pagination .ant-select-selector {
+  min-height: 24px !important;
+  height: 24px !important;
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .orders-filter-card .ant-form-item {
+  margin-bottom: 12px;
+}
+
+:root[data-ui-variant="workbench"] .orders-filter-card .ant-form-item-label > label {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ================= Сводка производства (список, карточка) ================= */
+
+:root[data-ui-variant="workbench"] .order-production-summary {
+  border-radius: 999px;
+  background: var(--wb-tone-gray-bg);
+  color: var(--evo-text-secondary);
+  font-weight: 550;
+}
+
+/* «смешанный» состав: прежняя двухцветная заливка приглушена до двух тихих тонов */
+:root[data-ui-variant="workbench"] .order-production-summary[data-mixed='true'] {
+  background: linear-gradient(90deg, var(--wb-progress-done) 50%, var(--wb-progress-start) 50%);
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .order-production-summary[data-mixed='true'] .order-production-summary__text {
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--evo-text);
+}
+
+/* ================= Карточка заказа ================= */
+
+/* --- каркас страницы: свои крошки и шапка, стандартная шапка Refine скрыта --- */
+:root[data-ui-variant="workbench"] .ant-card:has(> .ant-card-body .order-show-page--workbench) {
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .ant-card:has(> .ant-card-body .order-show-page--workbench) > .ant-card-body {
+  padding: 0;
+}
+
+:root[data-ui-variant="workbench"] .evolution-screen-frame:has(.order-show-page--workbench) .ant-page-header-heading,
+:root[data-ui-variant="workbench"] .evolution-screen-frame:has(.order-show-page--workbench) .ant-page-header > .ant-breadcrumb {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .evolution-screen-frame:has(.order-show-page--workbench) .ant-page-header {
+  padding: 0;
+}
+
+:root[data-ui-variant="workbench"] .evolution-screen-frame:has(.order-show-page--workbench) .ant-page-header-content {
+  padding-top: 0;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench {
+  display: grid;
+  /* основная колонка | линия-ручка правой колонки | правая колонка */
+  grid-template-columns: minmax(0, 1fr) 32px 300px;
+  /* строки 1–9 — по содержимому; высоту правой колонки забирает последняя */
+  grid-template-rows: repeat(9, auto) 1fr;
+  column-gap: 0;
+  align-items: start;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > * {
+  grid-column: 1;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .order-show-sticky-sentinel {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-bar-slot {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-crumbs {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+/* обёртка прежней «липкой» стопки растворена: её части — отдельные строки сетки */
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .order-show-summary-tabs-sticky {
+  display: contents;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-summary-tabs-sticky > .order-show-header {
+  grid-column: 1 / -1;
+  grid-row: 3;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-flow {
+  grid-row: 4;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .ant-card {
+  grid-row: 5;
+  margin-bottom: 16px !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-summary-tabs-sticky > .order-show-tabs-shell {
+  grid-column: 1;
+  grid-row: 6;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-summary-tabs-sticky > .order-show-details-toolbar {
+  grid-column: 1;
+  grid-row: 7;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .order-show-info-panel {
+  grid-row: 8;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .order-show-details-section {
+  grid-row: 9;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side {
+  grid-column: 3;
+  grid-row: 4 / 11;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* колонка «прилипает» только на высоком экране, иначе её низ был бы недоступен */
+@media (min-width: 1241px) and (min-height: 880px) {
+  :root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side {
+    position: sticky;
+    top: calc(var(--wb-order-sticky-top) + var(--wb-order-bar-height) + 12px);
+  }
+}
+
+@media (max-width: 1240px) {
+  :root[data-ui-variant="workbench"] .order-show-page--workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side {
+    grid-column: 1;
+    grid-row: 11;
+    position: static;
+    margin-top: 16px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  :root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+:root[data-ui-variant="workbench"] .wb-panel {
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+  box-shadow: var(--evo-shadow);
+}
+
+/* --- крошки --- */
+:root[data-ui-variant="workbench"] .wb-order-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 10px;
+  color: var(--evo-text-secondary);
+  font-size: 13px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-crumbs a {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-crumbs a:hover {
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-crumbs .anticon {
+  font-size: 10px;
+  color: var(--evo-border-strong);
+}
+
+/* --- сжатая шапка: появляется, когда основная ушла под верхнюю панель --- */
+:root[data-ui-variant="workbench"] .wb-order-bar-slot {
+  position: sticky;
+  top: var(--wb-order-sticky-top);
+  z-index: 20;
+  height: 0;
+  margin: 0 -24px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar-slot[data-on="true"] {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar {
+  height: var(--wb-order-bar-height);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 24px;
+  /* липкая строка — белая, с чётким контуром: её видно поверх любого содержимого */
+  border-bottom: 1px solid var(--wb-sticky-line);
+  background: var(--evo-surface);
+  box-shadow: var(--wb-sticky-shadow);
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar__title {
+  font-size: 16px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar__meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--evo-text-secondary);
+  font-size: 13.5px;
+  text-overflow: ellipsis;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar__fact {
+  flex: 0 0 auto;
+  padding-left: 10px;
+  border-left: 1px solid var(--evo-border);
+  color: var(--evo-text-secondary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar__fact b {
+  color: var(--evo-text);
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar__fact [data-tone="warning"] {
+  color: var(--evo-warning);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar__fact [data-tone="ready"] {
+  color: var(--evo-success);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar__meta {
+  flex: 0 1 auto;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar__spacer {
+  flex: 1 1 auto;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar .ant-btn {
+  height: 30px;
+  padding-inline: 12px;
+  font-size: 13px;
+}
+
+/* --- шапка страницы --- */
+:root[data-ui-variant="workbench"] .wb-order-head {
+  margin-bottom: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 24px;
+  flex-wrap: wrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__identity {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 420px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__number {
+  margin: 0;
+  color: var(--evo-text);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-pill--lg {
+  padding: 3px 11px 3px 22px;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+:root[data-ui-variant="workbench"] .wb-pill--lg::before {
+  left: 10px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__priority {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--evo-text-secondary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 0;
+  min-width: 0;
+  color: var(--evo-text-secondary);
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__client {
+  color: var(--evo-text);
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__meta-item {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__meta-item::before {
+  content: '·';
+  margin: 0 10px;
+  color: var(--evo-border-strong);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__meta-item--plain {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__meta-item--plain::before {
+  content: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__meta-item--plain a {
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__meta-item strong {
+  color: var(--evo-text);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__actions .ant-btn:not(.ant-btn-icon-only) {
+  padding-inline: 14px;
+  font-weight: 600;
+}
+
+/* --- плитки показателей --- */
+:root[data-ui-variant="workbench"] .wb-order-head__tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  overflow: hidden;
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+  box-shadow: var(--evo-shadow);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__tile {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 9px 14px 10px;
+  /* разделители без двойных линий при переносе плиток */
+  box-shadow: 1px 0 0 var(--evo-border), 0 1px 0 var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__label {
+  color: var(--evo-text-secondary);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__value {
+  overflow: hidden;
+  color: var(--evo-text);
+  font-size: 15.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__value:has(.wb-order-head__of) {
+  white-space: normal;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__amount {
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__of {
+  white-space: nowrap;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__value--text {
+  font-size: 14px;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__material {
+  color: var(--wb-material-color);
+}
+
+/* чёрный «МДФ 16» из общей палитры материалов в тёмной теме не виден */
+:root[data-ui-variant="workbench"] .wb-order-head__material[style*="#000000"] {
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 10px;
+  color: var(--evo-text-secondary);
+  font-size: 11.5px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__sub > span {
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__sub [data-tone="danger"] {
+  color: var(--evo-danger);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__sub [data-tone="warning"] {
+  color: var(--evo-warning);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__sub [data-tone="ready"] {
+  color: var(--evo-success);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__bar {
+  height: 4px;
+  margin: 2px 0 1px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--wb-progress-track);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__bar > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--evo-success);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__bar[data-tone="warning"] > i {
+  background: #e0a030;
+}
+
+:root[data-ui-variant="workbench"] .wb-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--evo-primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-link:hover {
+  text-decoration: underline;
+}
+
+/* --- «Ход производства»: спойлер, по умолчанию свёрнут --- */
+:root[data-ui-variant="workbench"] .wb-order-flow {
+  margin-bottom: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-flow__summary {
+  width: 100%;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--evo-radius-lg);
+  background: none;
+  color: var(--evo-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-flow__summary:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: -2px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-flow__summary h2 {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.2;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-flow__chevron {
+  color: var(--evo-text-secondary);
+  font-size: 10px;
+  transition: transform 150ms ease;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-flow--open .wb-order-flow__chevron {
+  transform: rotate(90deg);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-flow__sub {
+  display: inline-flex;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-flow__body {
+  padding: 8px 14px 14px;
+}
+
+/* --- панель с вкладками: «Детали» и секции заказа --- */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-tabs-shell {
+  margin-bottom: 0;
+  padding: 0 10px;
+  border-radius: var(--evo-radius-lg) var(--evo-radius-lg) 0 0;
+  background: var(--evo-surface);
+  box-shadow: var(--evo-shadow);
+  clip-path: inset(-2px -2px 0 -2px);
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-info-tabs {
+  gap: 2px;
+  border-bottom: 1px solid var(--evo-border) !important;
+  overflow-x: auto !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-info-tab {
+  flex: 0 0 auto !important;
+  height: 46px !important;
+  margin-bottom: -1px !important;
+  padding: 0 12px !important;
+  border: 0 !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  background: none !important;
+  color: var(--evo-text-secondary) !important;
+  font-family: inherit;
+  font-size: 14px !important;
+  font-weight: 550 !important;
+  gap: 7px !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-info-tab:hover {
+  color: var(--evo-text) !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-info-tab:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: -2px;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-info-tab[aria-selected="true"] {
+  border-bottom-color: var(--evo-primary) !important;
+  color: var(--evo-text) !important;
+  font-weight: 650 !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-info-tab > .anticon {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .order-show-info-tab__count {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-summary-tabs-sticky > .order-show-details-toolbar {
+  margin: 0 !important;
+  padding: 10px 14px;
+  border: 0;
+  background: var(--evo-surface);
+  box-shadow: var(--evo-shadow);
+  clip-path: inset(0 -2px 0 -2px);
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-toolbar__title {
+  visibility: hidden;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .order-show-details-section {
+  margin-bottom: 0;
+  padding: 0 0 6px;
+  border-radius: 0 0 var(--evo-radius-lg) var(--evo-radius-lg);
+  background: var(--evo-surface);
+  box-shadow: var(--evo-shadow);
+  clip-path: inset(0 -2px -2px -2px);
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .order-show-info-panel {
+  margin: 0;
+  padding: 16px 18px 18px !important;
+  border: 0 !important;
+  border-radius: 0 0 var(--evo-radius-lg) var(--evo-radius-lg);
+  background: var(--evo-surface) !important;
+  box-shadow: var(--evo-shadow);
+  clip-path: inset(0 -2px -2px -2px);
+}
+
+/* открыта секция — таблица деталей и её панель скрыты, как у вкладок */
+:root[data-ui-variant="workbench"] .order-show-page--workbench-section .order-show-summary-tabs-sticky > .order-show-details-toolbar,
+:root[data-ui-variant="workbench"] .order-show-page--workbench-section > .order-show-details-section {
+  /* у панели таблицы display задан в разметке, поэтому !important */
+  display: none !important;
+}
+
+/* --- таблица деталей --- */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-thead > tr > th {
+  padding: 9px 6px !important;
+  border-inline-end: 0 !important;
+  background: var(--evo-surface) !important;
+  color: var(--evo-text-secondary);
+  font-size: 12px !important;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-tbody > tr > td {
+  padding: 6px 6px !important;
+  line-height: 1.25;
+  border-inline-end: 0 !important;
+  border-bottom-color: var(--evo-border);
+  font-size: 13px !important;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-container,
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-container table {
+  border: 0 !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-tbody > tr.table-row-dark > td,
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-tbody > tr.table-row-light > td {
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-tbody > tr:hover > td {
+  background: var(--app-row-hover) !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-summary > tr > td {
+  padding: 10px 6px !important;
+  border-inline-end: 0 !important;
+  background: var(--evo-surface-muted) !important;
+  font-size: 13px;
+}
+
+/* --- правая колонка --- */
+:root[data-ui-variant="workbench"] .wb-side-card__head {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 16px 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-side-card__head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-side-card__link {
+  padding: 3px 8px;
+  border-radius: var(--evo-radius-sm);
+  color: var(--evo-text-secondary);
+  font-size: 13px;
+  font-weight: 550;
+}
+
+:root[data-ui-variant="workbench"] .wb-side-card__link:hover {
+  background: var(--evo-sidebar-hover);
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-side-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 6px 16px 16px;
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-side-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+:root[data-ui-variant="workbench"] .wb-side-row > .anticon {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-side-row a {
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-side-row small {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-side-row--muted {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-side-row__strong {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+:root[data-ui-variant="workbench"] .wb-side-row__spacer {
+  flex: 1 1 auto;
+}
+
+:root[data-ui-variant="workbench"] .wb-avatar {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--evo-primary-soft);
+  color: var(--evo-primary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-icon-btn {
+  width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--evo-radius-sm);
+  background: none;
+  color: var(--evo-text-secondary);
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-icon-btn:hover {
+  background: var(--evo-sidebar-hover);
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-dates {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px 10px;
+  align-items: center;
+  font-size: 13px;
+}
+
+:root[data-ui-variant="workbench"] .wb-dates__icon {
+  color: var(--evo-border-strong);
+  line-height: 1;
+}
+
+:root[data-ui-variant="workbench"] .wb-dates__icon[data-done="true"] {
+  color: var(--evo-success);
+}
+
+:root[data-ui-variant="workbench"] .wb-dates__icon[data-strong="true"] {
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-dates__label b {
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-dates__label [data-tone="danger"] {
+  color: var(--evo-danger);
+}
+
+:root[data-ui-variant="workbench"] .wb-dates__label [data-tone="warning"] {
+  color: var(--evo-warning);
+}
+
+:root[data-ui-variant="workbench"] .wb-dates__value {
+  color: var(--evo-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-dates__value[data-strong="true"] {
+  color: var(--evo-text);
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-side-card--links .wb-side-card__body {
+  gap: 0;
+  padding-top: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-link-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 -10px;
+  padding: 8px 10px;
+  border-radius: var(--evo-radius-md);
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] a.wb-link-row:hover {
+  background: var(--evo-sidebar-hover);
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-link-row__icon {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-link-row__label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-link-row small {
+  flex: 0 1 auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-notes {
+  color: var(--evo-text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+:root[data-ui-variant="workbench"] .wb-notes--empty {
+  color: var(--evo-border-strong);
+}
+
+/* статус детали — мягкая метка в цвете этапа вместо рамки */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-detail-status-badge {
+  min-height: 20px;
+  padding: 2px 4px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: color-mix(in srgb, currentColor 13%, transparent) !important;
+  /* размер шрифта подбирает сама ячейка по длине названия этапа */
+  font-weight: 600;
+  line-height: 16px !important;
+}
+
+/* ссылки на раскрои в строке детали: мельче основного текста, чтобы строка не росла */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-tbody > tr > td a {
+  font-size: 12px;
+}
+
+/* --- «Дополнительная информация»: материалы сверху, остальное — ровными блоками на всю ширину --- */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional__materials {
+  order: -1;
+  flex: 1 1 100%;
+  min-width: 0;
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  border-top: 0 !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional__summary,
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional__extras {
+  display: contents !important;
+}
+
+/* блоки растягиваются и добирают ширину последней строки — пустых мест не остаётся */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional__summary > div,
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional__extras > * {
+  flex: 1 1 260px;
+  min-width: 0;
+  margin: 0 !important;
+  padding: 12px 14px !important;
+  border: 0 !important;
+  border-radius: var(--evo-radius-md);
+  background: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional__labels {
+  flex-basis: 420px !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional__meta > summary {
+  color: var(--evo-text) !important;
+  font-size: 13px !important;
+}
+
+/* заголовки блоков: один спокойный стиль вместо разноцветных */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional div[style*="font-weight: 600"][style*="font-size: 12px"] {
+  margin-bottom: 8px !important;
+  color: var(--evo-text) !important;
+  font-size: 13px !important;
+  font-weight: 650 !important;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional__title {
+  font-size: 14px !important;
+}
+
+/* файлам и скринам раскроя — вся ширина, чтобы превью шли в ряд, а не столбцом */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional__files {
+  flex-basis: 100% !important;
+}
+
+/* сжатая строка: статусы не обрезаются, сжимается только имя клиента */
+:root[data-ui-variant="workbench"] .wb-order-bar > .wb-pill,
+:root[data-ui-variant="workbench"] .wb-order-bar__title,
+:root[data-ui-variant="workbench"] .wb-order-bar__production {
+  flex: 0 0 auto;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-bar__meta {
+  flex: 0 1 auto;
+  min-width: 48px;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional .order-telegram-screenshots__files {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+/* на средних экранах значок этапа в сжатой строке уступает место составу и оплате */
+@media (max-width: 1560px) {
+  :root[data-ui-variant="workbench"] .wb-order-bar__production {
+    display: none;
+  }
+}
+
+/* --- правая колонка сворачивается в тонкую линию; таблица деталей занимает её место --- */
+:root[data-ui-variant="workbench"] .order-show-page--workbench-wide {
+  grid-template-columns: minmax(0, 1fr) 32px;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side[hidden] {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side-rail {
+  grid-column: 2;
+  grid-row: 4 / 11;
+  align-self: stretch;
+  position: relative;
+  width: 32px;
+  min-height: 120px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+/* сама линия */
+:root[data-ui-variant="workbench"] .wb-order-side-rail::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 14px;
+  width: 4px;
+  border-radius: 4px;
+  background: var(--evo-border);
+  transition: background-color 120ms ease;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-side-rail:hover::before,
+:root[data-ui-variant="workbench"] .wb-order-side-rail:focus-visible::before {
+  background: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-side-rail:focus-visible {
+  outline: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-side-rail__grip {
+  position: sticky;
+  top: calc(var(--wb-order-sticky-top) + var(--wb-order-bar-height) + 16px);
+  z-index: 1;
+  width: 24px;
+  height: 48px;
+  margin: 14px 4px 0;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--evo-surface);
+  box-shadow: var(--evo-shadow);
+  color: var(--evo-text-secondary);
+  font-size: 11px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-side-rail:hover .wb-order-side-rail__grip,
+:root[data-ui-variant="workbench"] .wb-order-side-rail:focus-visible .wb-order-side-rail__grip {
+  color: var(--evo-primary);
+  box-shadow: 0 0 0 1px var(--evo-primary);
+}
+
+@media (max-width: 1240px) {
+  /* колонка уходит под таблицу — ручка не нужна, сводка всегда видна */
+  :root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side-rail {
+    display: none;
+  }
+
+  :root[data-ui-variant="workbench"] .order-show-page--workbench > .wb-order-side[hidden] {
+    display: grid;
+  }
+}
+
+/* --- заголовок группы деталей: по чему разбито и значение --- */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .details-grouped .ant-table-tbody > tr.detail-group-separator > td {
+  height: 32px;
+  padding: 6px 10px !important;
+  /* заголовок группы — слева и на месте при горизонтальной прокрутке */
+  text-align: left !important;
+  border-top: 1px solid var(--evo-border);
+  background-color: var(--evo-surface-muted) !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-group-head {
+  position: sticky;
+  left: 10px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 100%;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-group-head__field {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-group-head__field::after {
+  content: ':';
+}
+
+:root[data-ui-variant="workbench"] .wb-group-head__value {
+  overflow: hidden;
+  color: var(--evo-text);
+  font-weight: 650;
+  text-overflow: ellipsis;
+}
+
+:root[data-ui-variant="workbench"] .wb-group-head__count {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- кнопки горизонтальной прокрутки: спокойные, полупрозрачные --- */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .app-table-horizontal-edge-button {
+  width: 36px;
+  height: 36px;
+  background: color-mix(in srgb, var(--evo-primary) 16%, transparent);
+  color: var(--evo-primary);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--evo-primary) 20%, transparent);
+  opacity: 0.7;
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench .app-table-horizontal-edge-button--left[data-visible="false"] {
+  opacity: 0;
+}
+
+/* --- свёрнутый «Ход производства»: коды этапов с числом деталей, намеренно бледно --- */
+:root[data-ui-variant="workbench"] .order-production-flow-codes {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0 9px;
+  color: color-mix(in srgb, var(--evo-text-secondary) 62%, transparent);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .order-production-flow-codes__item {
+  display: inline-flex;
+  gap: 3px;
+}
+
+:root[data-ui-variant="workbench"] .order-production-flow-codes__item b {
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .order-production-flow-codes__item[data-empty="true"] {
+  opacity: 0.5;
+}
+
+/* --- материалы заказа: одна шапка на плёнку и листовые, строки одной высоты --- */
+:root[data-ui-variant="workbench"] .wb-materials {
+  overflow-x: auto;
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-md);
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table th {
+  height: 36px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--evo-border);
+  background: var(--evo-surface-muted);
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: left;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table th:first-child {
+  width: 24%;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table th.wb-materials__num {
+  width: 72px;
+}
+
+/* «Ванны» — самая содержательная колонка: номер и название ванны; «Покрытие» — короткий статус */
+:root[data-ui-variant="workbench"] .wb-materials__table th:nth-child(6) {
+  width: auto;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table th:nth-child(8) {
+  width: 104px;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table td {
+  /* высота рассчитана на две строки текста в ячейке */
+  height: 44px;
+  padding: 3px 10px;
+  border-bottom: 1px solid var(--evo-border);
+  line-height: 1.3;
+  vertical-align: middle;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table tr:last-child > td {
+  border-bottom: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table .wb-materials__num {
+  text-align: right;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__table td[data-negative="true"] {
+  color: var(--evo-danger);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__clamp {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__dash {
+  color: var(--evo-border-strong);
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__section > td {
+  height: 34px;
+  background: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__section-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__section-line b {
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__section-line .ant-typography {
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__total > td {
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__empty > td {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__baths {
+  display: grid;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__bath-numbers,
+:root[data-ui-variant="workbench"] .wb-materials__bath-names {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-materials__bath-names {
+  color: var(--evo-text-secondary);
+  font-size: 11.5px;
+}
+
+/* остальные таблицы вкладки: строки той же высоты, не больше двух строк текста */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-additional .ant-table-tbody > tr > td {
+  height: 44px;
+  padding-block: 3px !important;
+  line-height: 1.3;
+}
+
+/* ================= Форма заказа (создание и редактирование) ================= */
+
+/* страница формы: своя шапка вместо заголовка карточки, панели лежат на холсте */
+:root[data-ui-variant="workbench"] .order-form-card--workbench.ant-card {
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .order-form-card--workbench.ant-card > .ant-card-body {
+  padding: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__dirty,
+:root[data-ui-variant="workbench"] .wb-order-bar__dirty {
+  position: relative;
+  padding-left: 14px;
+  color: var(--evo-warning);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__dirty::before,
+:root[data-ui-variant="workbench"] .wb-order-bar__dirty::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__meta-item--notes {
+  max-width: 360px;
+  font-style: italic;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__sub--stack {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__sub--stack b {
+  color: var(--evo-text);
+  font-weight: 600;
+}
+
+/* действия формы: обычный размер кнопок, «Сохранить» — последней */
+:root[data-ui-variant="workbench"] .wb-order-head__actions .order-form-action {
+  height: 32px !important;
+  padding: 0 14px !important;
+  font-size: 14px !important;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__actions .order-form-action.ant-btn-icon-only {
+  width: 32px;
+  padding: 0 !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__actions .ant-space-item:has(.order-form-action--close) {
+  order: 3;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__actions .ant-space-item:has(.order-form-action--save) {
+  order: 4;
+}
+
+/* гибридная форма: основные разделы — одна страница, редкие — сворачиваемые секции */
+:root[data-ui-variant="workbench"] .wb-form-anchors {
+  /* якоря разделов остаются под сжатой шапкой при прокрутке формы */
+  position: sticky;
+  top: calc(var(--wb-order-sticky-top) + var(--wb-order-bar-height));
+  z-index: 19;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 0 -24px 12px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-anchors[data-stuck="true"] {
+  border-bottom-color: var(--wb-sticky-line);
+  background: var(--evo-surface);
+  box-shadow: var(--wb-sticky-shadow);
+}
+
+/* в форме контур несут якоря — строка заказа над ними отделена тонкой линией */
+:root[data-ui-variant="workbench"] .order-form-page--workbench:has(.wb-form-anchors[data-stuck="true"]) .wb-order-bar {
+  border-bottom-color: var(--evo-border);
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-anchors__item[aria-current="true"] {
+  border-bottom-color: var(--evo-primary);
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-anchors__item {
+  height: 38px;
+  margin-bottom: -1px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--evo-text-secondary);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-anchors__item:hover:not(:disabled) {
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-anchors__item:disabled {
+  color: var(--evo-border-strong);
+  cursor: default;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-anchors__item:focus-visible,
+:root[data-ui-variant="workbench"] .wb-form-section__toggle:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: -2px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section {
+  margin-bottom: 12px;
+  /* при переходе к разделу он встаёт под сжатой шапкой, а не под ней */
+  scroll-margin-top: calc(var(--wb-order-sticky-top) + var(--wb-order-bar-height) + 38px + 10px);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 16px 2px;
+  color: var(--evo-text);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__num {
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--evo-surface-muted);
+  box-shadow: inset 0 0 0 1px var(--evo-border);
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__body {
+  min-width: 0;
+  padding: 10px 16px 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__sub {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__toggle {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--evo-radius-lg);
+  background: none;
+  color: var(--evo-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__toggle .wb-form-section__title {
+  padding: 0;
+  font-size: 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__toggle:disabled {
+  cursor: default;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__toggle:disabled .wb-form-section__title {
+  color: var(--evo-border-strong);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__chevron {
+  color: var(--evo-text-secondary);
+  font-size: 10px;
+  transition: transform 150ms ease;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section--open .wb-form-section__chevron {
+  transform: rotate(90deg);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section__hint {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+}
+
+/* ---------- липкие строки: общий контур ---------- */
+:root[data-ui-variant="workbench"] {
+  --wb-sticky-line: color-mix(in srgb, var(--evo-text) 42%, var(--evo-surface));
+  --wb-sticky-shadow: 0 6px 14px -8px rgba(16, 24, 40, 0.45);
+}
+
+/* липкая шапка таблицы деталей в карточке заказа */
+:root[data-ui-variant="workbench"] .order-show-page--workbench .order-show-details-table .ant-table-sticky-holder {
+  background: var(--evo-surface);
+  border-bottom: 1px solid var(--wb-sticky-line);
+  box-shadow: var(--wb-sticky-shadow);
+}
+
+/* ---------- список заказов: «Базис-проект» в одну строку ---------- */
+:root[data-ui-variant="workbench"] .orders-table td.orders-col--basis-project {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---------- «История» заказа: свой блок с собственной прокруткой ---------- */
+:root[data-ui-variant="workbench"] .order-history {
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-lg, 12px);
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .order-history__summary {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border: 0;
+  background: none;
+  color: var(--evo-text);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .order-history__summary:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: -2px;
+}
+
+:root[data-ui-variant="workbench"] .order-history__chevron {
+  color: var(--evo-text-secondary);
+  font-size: 11px;
+  transition: transform 140ms ease;
+}
+
+:root[data-ui-variant="workbench"] .order-history--open .order-history__chevron {
+  transform: rotate(90deg);
+}
+
+:root[data-ui-variant="workbench"] .order-history__count {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--evo-surface-muted);
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* записи прокручиваются внутри блока и не удлиняют страницу */
+:root[data-ui-variant="workbench"] .order-history__body {
+  max-height: 420px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 16px 14px;
+  border-top: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .order-history__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+:root[data-ui-variant="workbench"] .order-history__item {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--evo-border);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+:root[data-ui-variant="workbench"] .order-history__item:last-child {
+  border-bottom: 0;
+}
+
+:root[data-ui-variant="workbench"] .order-history__time {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .order-history__event {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+
+:root[data-ui-variant="workbench"] .order-history__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+}
+
+:root[data-ui-variant="workbench"] .order-history__head > b {
+  color: var(--evo-text);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .order-history__head > span {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+}
+
+:root[data-ui-variant="workbench"] .order-history__change {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .order-history__change > s {
+  color: var(--evo-text-secondary);
+  opacity: 0.75;
+}
+
+:root[data-ui-variant="workbench"] .order-history__change > b {
+  color: var(--evo-text);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .order-history__notes,
+:root[data-ui-variant="workbench"] .order-history__note {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+}
+
+:root[data-ui-variant="workbench"] .order-history__note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+}
+
+:root[data-ui-variant="workbench"] .order-history__note--error {
+  color: var(--evo-danger, #c0392b);
+}
+
+:root[data-ui-variant="workbench"] .order-history__body > .ant-btn {
+  margin-top: 10px;
+}
+
+/* ---------- вкладка «Раскрой» в заказе: список заданий слева, задание справа ---------- */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split {
+  display: grid !important;
+  grid-template-columns: 212px minmax(0, 1fr);
+  column-gap: 14px;
+  row-gap: 0;
+  align-items: start;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item {
+  grid-column: 2;
+  min-width: 0;
+  margin-bottom: 12px;
+}
+
+/* подбор деталей — во всю ширину над списком и заданием */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:has(> .cut-page-modern__criteria),
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:has(> .cut-operational-filters),
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:has(> h3),
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:has(> .operational-page-header) {
+  grid-column: 1 / -1;
+}
+
+/* полная страница «Раскрой»: список шире (вкладки «Ванны / Раскрои»), список прокручивается сам */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split.cut-page-modern--standalone {
+  /* на своей странице над списком нет строки заказа */
+  --wb-order-bar-height: 0px;
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:has(> .cut-page-modern__jobs) {
+  grid-column: 1;
+  /* начинается под блоками во всю ширину (заголовок, подбор, фильтры), сколько бы их ни было */
+  grid-row: span 80;
+  position: sticky;
+  top: calc(var(--wb-order-sticky-top, 84px) + var(--wb-order-bar-height, 52px) + 12px);
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-page-modern__jobs > .ant-card-head {
+  min-height: 40px;
+  padding: 0 12px;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-page-modern__jobs > .ant-card-head .ant-card-head-title {
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-page-modern__jobs > .ant-card-body {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .wb-cut-jobs__grid {
+  max-height: calc(100vh - var(--wb-order-sticky-top, 84px) - var(--wb-order-bar-height, 52px) - 330px);
+  min-height: 160px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters > .ant-select,
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters > .ant-checkbox-wrapper {
+  grid-column: 1 / -1;
+  width: 100% !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters > .ant-checkbox-wrapper {
+  font-size: 12.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters > .ant-btn {
+  min-height: 30px !important;
+  height: 30px;
+  padding-inline: 8px;
+  font-size: 12.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-empty {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  border: 1px dashed var(--evo-border-strong);
+  border-radius: var(--evo-radius-lg);
+  color: var(--evo-text-secondary);
+  text-align: center;
+}
+
+@media (max-width: 1100px) {
+  :root[data-ui-variant="workbench"] .cut-page-modern--wb-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item,
+  :root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:has(> .cut-page-modern__jobs) {
+    grid-column: 1;
+    grid-row: auto;
+    position: static;
+  }
+}
+
+/* фильтры списка заданий — плотно, чтобы сами задания были видны сразу */
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters .ant-select {
+  height: 28px;
+  font-size: 12.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters .ant-select .ant-select-selector {
+  height: 28px !important;
+  min-height: 28px;
+  padding-inline: 8px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters .ant-select .ant-select-selection-item,
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters .ant-select .ant-select-selection-placeholder {
+  line-height: 26px !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters .ant-select .ant-select-selection-search-input {
+  height: 26px !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__filters > .ant-btn {
+  min-height: 28px !important;
+  height: 28px;
+}
+
+/* ---------- открытое задание раскроя ---------- */
+/* версии расчёта: таблица прокручивается внутри своего блока, а не вылезает за край */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-results-block {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/* заголовок группы раскроя виден всегда: кнопки при нехватке места уходят на следующую строку */
+:root[data-ui-variant="workbench"] .cut-page-modern__group > .ant-card-head .ant-card-head-wrapper {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  padding-block: 6px;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern__group > .ant-card-head .ant-card-head-title {
+  flex: 1 1 auto;
+  min-width: 200px;
+  overflow: visible;
+  white-space: normal;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern__group > .ant-card-head .ant-card-extra {
+  margin-inline-start: auto;
+  max-width: 100%;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern__group > .ant-card-head .ant-card-extra .ant-space {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+/* подписи к переключателям вида листа */
+:root[data-ui-variant="workbench"] .wb-cut-view-label {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+}
+
+/* миниатюра листа — 170px; запас высоты под неё, а не под крупный лист (без пустого поля) */
+:root[data-ui-variant="workbench"] .cut-sheet-preview-item {
+  /* шапка листа + миниатюра 170px: место держится и пока миниатюра перезагружается */
+  min-height: 240px !important;
+}
+
+/* --- «Отправить заказ»: шапка карточки и липкая строка --- */
+:root[data-ui-variant="workbench"] .order-show-page--workbench button[aria-label="Отправить заказ"]:not(:disabled) {
+  border-color: color-mix(in srgb, var(--evo-primary) 34%, var(--evo-border));
+  background: color-mix(in srgb, var(--evo-primary) 8%, var(--evo-surface));
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench button[aria-label="Отправить заказ"]:not(:disabled):hover {
+  border-color: var(--evo-primary);
+  background: color-mix(in srgb, var(--evo-primary) 14%, var(--evo-surface));
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .order-show-page--workbench button[aria-label="Отправить заказ"]:disabled {
+  border-color: var(--evo-border);
+  background: var(--evo-surface);
+  color: var(--evo-text-tertiary, #a3a8b3);
+}
+
+/* Строка «фоновая загрузка заказа» резервировала 24px над карточкой и формой заказа — из-за неё
+   отступ под верхней панелью выглядел увеличенным. В NewLine она живёт в самом отступе оболочки
+   (20px над содержимым) и места не занимает. */
+:root[data-ui-variant="workbench"] .evolution-shell__content [data-order-loading] {
+  min-height: 20px !important;
+  height: 20px;
+  margin-top: -20px;
+  font-size: 12px;
+}
+
+/* === Форма заказа: содержимое разделов (макет 05) ===
+   Каркас формы (шапка, якоря, пронумерованные разделы) задан выше; здесь — поля, панель и таблица
+   деталей, услуги, финансы и платежи внутри разделов. Только оформление. */
+
+/* поля: мелкая спокойная подпись, плотный шаг между строками */
+:root[data-ui-variant="workbench"] .wb-form-section .ant-form-vertical .ant-form-item {
+  margin-bottom: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-form-vertical .ant-form-item-label {
+  padding-bottom: 3px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-form-vertical .ant-form-item-label > label {
+  height: 18px;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-form-item-with-help .ant-form-item-explain {
+  min-height: 12px;
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section textarea.ant-input {
+  min-height: 56px;
+  height: 56px;
+}
+
+/* «Клиент и срок»: плотная вёрстка — поля идут подряд в 5–6 колонок, ширина каждого — под его значение */
+:root[data-ui-variant="workbench"] .wb-form-section .order-basic-form,
+:root[data-ui-variant="workbench"] .wb-form-section .order-dates-form > .ant-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0 12px;
+  margin-inline: 0 !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-basic-form > .ant-row {
+  display: contents;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-basic-form > .ant-row > .ant-col,
+:root[data-ui-variant="workbench"] .wb-form-section .order-dates-form > .ant-row > .ant-col {
+  flex: 1 1 170px;
+  max-width: none;
+  min-width: 0;
+  padding-inline: 0 !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-basic-form > .ant-row > .order-basic-form__field--client {
+  flex: 2 1 260px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-basic-form > .ant-row > .order-basic-form__field--name {
+  flex: 1 1 150px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-basic-form > .ant-row > .order-basic-form__field--order-date {
+  flex: 0 0 138px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-basic-form > .ant-row > .order-basic-form__field--priority {
+  flex: 0 0 96px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-basic-form > .order-basic-form__project > .ant-col {
+  flex: 0 1 150px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-basic-form > .order-basic-form__doweling > .ant-col {
+  flex: 2 1 280px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-basic-form .order-basic-form__doweling .ant-space-vertical {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .wb-form-section__body > .ant-space-vertical {
+  gap: 4px !important;
+}
+
+/* сроки — той же строкой: плановая дата, быстрые сроки с подсказкой, затем фактические даты */
+:root[data-ui-variant="workbench"] .wb-form-section .wb-form-section__sub {
+  margin-top: 4px;
+  padding-top: 10px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-dates-form > .ant-row > .order-dates-form__planned {
+  flex: 0 0 190px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-dates-form > .ant-row > .order-dates-form__fact {
+  flex: 0 0 150px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-dates-form > .ant-row > .order-dates-form__quick {
+  display: flex;
+  flex: 1 1 320px;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 2px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-deadline__relative,
+:root[data-ui-variant="workbench"] .wb-form-deadline__load {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-deadline__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-deadline__chip {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--evo-border);
+  border-radius: 999px;
+  background: var(--evo-surface);
+  color: var(--evo-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-deadline__chip:hover {
+  border-color: var(--evo-border-strong, var(--evo-border));
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-deadline__chip[aria-pressed="true"] {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--evo-primary) 12%, var(--evo-surface));
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-deadline__chip:focus-visible,
+:root[data-ui-variant="workbench"] .wb-form-notes__toggle:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: 2px;
+}
+
+/* примечание — спойлер: свёрнуто, текст виден в строке */
+:root[data-ui-variant="workbench"] .wb-form-notes__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 28px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-notes__toggle {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--evo-text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-notes__chevron {
+  color: var(--evo-text-secondary);
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-notes--open .wb-form-notes__chevron {
+  transform: rotate(90deg);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-notes__label {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-notes__preview {
+  overflow: hidden;
+  min-width: 0;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-notes__preview[data-empty="true"],
+:root[data-ui-variant="workbench"] .wb-form-notes__id {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-notes__id {
+  flex: 0 0 auto;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-notes--open {
+  padding-bottom: 18px;
+}
+
+/* «Детали»: таблица без вложенной карточки, сетка в тонах NewLine */
+:root[data-ui-variant="workbench"] .wb-form-section .order-form-details-section > .ant-card,
+:root[data-ui-variant="workbench"] .wb-form-section .wb-form-section__body > .ant-space > .ant-space-item > .ant-card {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-form-details-section > .ant-card > .ant-card-body,
+:root[data-ui-variant="workbench"] .wb-form-section .wb-form-section__body > .ant-space > .ant-space-item > .ant-card > .ant-card-body {
+  padding: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table {
+  --order-detail-grid-accent: var(--evo-primary);
+  --order-detail-grid-line: var(--evo-border);
+  --order-detail-grid-header: var(--evo-surface-muted);
+  --order-detail-grid-index: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-thead > tr > th {
+  color: var(--evo-text-secondary);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-tbody > tr > td,
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell {
+  height: 28px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-toolbar__content .ant-btn {
+  min-width: 32px;
+  min-height: 32px;
+  height: 32px;
+  border-color: var(--evo-border);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+/* пустые ячейки вертикального стека (места под модальные окна) не дают отступов под таблицей */
+:root[data-ui-variant="workbench"] .wb-form-section .order-form-details-section .ant-space-vertical > .ant-space-item:empty {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper.order-details-table {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-pagination.ant-pagination {
+  margin: 8px 0 0;
+}
+
+/* вторичные «главные» кнопки внутри разделов — мягкий акцент: основная кнопка формы одна, «Сохранить» */
+:root[data-ui-variant="workbench"] .wb-form-section .wb-form-section__body .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous) {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--evo-primary) 12%, var(--evo-surface));
+  box-shadow: none;
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .wb-form-section__body .ant-btn-primary:not(:disabled):not(.ant-btn-dangerous):hover {
+  background: color-mix(in srgb, var(--evo-primary) 20%, var(--evo-surface));
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .app-table-horizontal-edge-button {
+  background: color-mix(in srgb, var(--evo-primary) 14%, var(--evo-surface));
+  color: var(--evo-primary);
+}
+
+/* «Услуги и товары» и платежи: простые таблицы с одной тонкой линией */
+:root[data-ui-variant="workbench"] .wb-form-section .ant-select-lg {
+  min-height: 0 !important;
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-select-lg:not(.ant-select-customize-input) .ant-select-selector {
+  height: 34px;
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-select-lg .ant-select-selection-search-input,
+:root[data-ui-variant="workbench"] .wb-form-section .ant-select-lg .ant-select-selection-placeholder,
+:root[data-ui-variant="workbench"] .wb-form-section .ant-select-lg .ant-select-selection-item {
+  height: 32px;
+  line-height: 32px;
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table {
+  background: transparent;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-thead > tr > th {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--evo-border);
+  background: transparent;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: start;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-thead > tr > th::before {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-tbody > tr > td,
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-summary > tr > td {
+  padding: 7px 10px;
+  border-inline: 0;
+  border-bottom: 1px solid var(--evo-border);
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-container,
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-container table,
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-thead > tr > th {
+  border-inline: 0 !important;
+  border-top: 0 !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-tbody > tr.ant-table-row > td {
+  background-color: transparent !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-tbody > tr.ant-table-row:hover > td {
+  background-color: color-mix(in srgb, var(--evo-primary) 4%, var(--evo-surface)) !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-placeholder > td {
+  padding: 14px 10px;
+  background: transparent !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-placeholder .ant-empty {
+  margin: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-placeholder .ant-empty-image {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) .ant-table-footer {
+  padding: 8px 10px;
+  border-radius: 0;
+  background: transparent;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .ant-table-wrapper:not(.order-details-table) {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* «Финансы»: поля без серой подложки */
+:root[data-ui-variant="workbench"] .wb-form-section .wb-form-section__body > .ant-space > .ant-space-item > div:has(> form.ant-form-small) {
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+/* таблица деталей ближе к макету: спокойная шапка, тонкие горизонтальные линии, вертикальные едва видны */
+/* подписи колонок заданы долями (70–75%) от шрифта ячейки шапки: 14px дают читаемые ~10,5px */
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-thead > tr > th {
+  font-size: 14px;
+}
+
+/* слово в подписи не рвётся посередине («Высот-а») */
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .order-detail-spreadsheet-header {
+  overflow-wrap: normal;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-thead > tr > th,
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-tbody > tr > td,
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-summary > tr > td {
+  border-inline-end-color: color-mix(in srgb, var(--evo-border) 45%, transparent) !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-column-sorter {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table th:hover .ant-table-column-sorter,
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table th.ant-table-column-sort .ant-table-column-sorter {
+  opacity: 1;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-tbody > tr > td,
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell {
+  height: 30px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell[data-order-detail-column-key="detail_number"] {
+  background: transparent !important;
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-tbody > tr.ant-table-row:hover > td {
+  background-color: color-mix(in srgb, var(--evo-primary) 4%, var(--evo-surface)) !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-section .order-details-table .ant-table-summary > tr > td {
+  background: var(--evo-surface-muted) !important;
+  font-weight: 600;
+}
+
+/* подсказки по клавишам под таблицей деталей */
+:root[data-ui-variant="workbench"] .wb-form-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 10px 0 0;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-keys kbd,
+:root[data-ui-variant="workbench"] .wb-form-savebar__kbd {
+  display: inline-block;
+  min-width: 18px;
+  margin-inline-end: 3px;
+  padding: 0 5px;
+  border: 1px solid var(--evo-border);
+  border-radius: 5px;
+  background: var(--evo-surface-muted);
+  color: var(--evo-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* «Финансы»: слева поля и платежи, справа — итог заказа */
+:root[data-ui-variant="workbench"] .wb-form-finance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px 28px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-finance__main {
+  flex: 1 1 620px;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-finance__main > .ant-space-vertical {
+  gap: 12px !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-finance__main > .ant-space > .ant-space-item > div:has(> form.ant-form-small) {
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-finance__main > .ant-space > .ant-space-item > .ant-card {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-finance__main > .ant-space > .ant-space-item > .ant-card > .ant-card-body {
+  padding: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-finance__summary {
+  flex: 0 1 280px;
+  margin: 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-finance__summary > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-finance__summary dt {
+  color: var(--evo-text-secondary);
+  font-weight: 400;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-finance__summary dd {
+  margin: 0;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-finance__summary > div[data-tone="good"] dd {
+  color: var(--evo-success);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-finance__summary > div[data-tone="warn"] dd {
+  color: var(--evo-warning);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-finance__summary > .wb-form-finance__total {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-finance__summary > .wb-form-finance__total dt {
+  color: var(--evo-text);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-finance__summary > .wb-form-finance__total dd {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+/* нижняя панель: состояние, итог и сохранение всегда под рукой */
+:root[data-ui-variant="workbench"] .wb-form-savebar {
+  position: sticky;
+  bottom: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-top: 12px;
+  padding: 10px 16px;
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-lg) var(--evo-radius-lg) 0 0;
+  background: var(--evo-surface);
+  box-shadow: 0 -6px 18px -12px rgb(16 24 40 / 28%);
+  font-size: 13px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-savebar__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-savebar__state::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--evo-success);
+  content: "";
+}
+
+:root[data-ui-variant="workbench"] .wb-form-savebar__state[data-dirty="true"]::before {
+  background: var(--evo-warning);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-savebar__fact {
+  color: var(--evo-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-savebar__fact b {
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-form-savebar__fact .wb-form-savebar__total {
+  font-size: 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-savebar__spacer {
+  flex: 1 1 auto;
+}
+
+:root[data-ui-variant="workbench"] .wb-form-savebar .ant-btn-primary .wb-form-savebar__kbd {
+  margin-inline: 8px 0;
+  border-color: rgb(255 255 255 / 35%);
+  background: rgb(255 255 255 / 16%);
+  color: inherit;
+}
+
+@media (max-width: 900px) {
+  :root[data-ui-variant="workbench"] .wb-form-savebar {
+    flex-wrap: wrap;
+    gap: 8px 14px;
+  }
+}

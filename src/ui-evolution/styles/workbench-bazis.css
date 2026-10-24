@@ -1,0 +1,319 @@
+/* «NewLine»: Базис-проекты. Список — заголовок страницы и одна панель (поиск, отбор, таблица);
+   карточка проекта — заголовок с ревизией и конструктором, ниже вкладки одной панелью. Только оформление. */
+
+/* --- общий заголовок страницы --- */
+:root[data-ui-variant="workbench"] .wb-bz-list__head,
+:root[data-ui-variant="workbench"] .wb-bz-proj__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list__head h1,
+:root[data-ui-variant="workbench"] .wb-bz-proj__name {
+  margin: 0;
+  color: var(--evo-text);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list__sub,
+:root[data-ui-variant="workbench"] .wb-bz-proj__sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 2px 0 0;
+  color: var(--evo-text-secondary);
+  font-size: 13.5px;
+  line-height: 20px;
+}
+
+/* части строки разделены точкой */
+:root[data-ui-variant="workbench"] .wb-bz-list__sub > * + *::before,
+:root[data-ui-variant="workbench"] .wb-bz-proj__sub > * + *::before {
+  content: '·';
+  margin: 0 8px;
+  color: var(--evo-text-secondary);
+}
+
+/* --- список: одна панель --- */
+:root[data-ui-variant="workbench"] .wb-bz-list.ant-space {
+  gap: 14px !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list .bazis-list-modern__card {
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list .bazis-list-modern__card > .ant-card-body {
+  padding: 14px 0 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list .bazis-list-modern__card > .ant-card-body > .ant-space {
+  gap: 12px !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list__search {
+  width: 340px;
+  max-width: 100%;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list .ant-table-wrapper .ant-table {
+  border-top: 1px solid var(--evo-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list .ant-table-thead > tr > th {
+  background: transparent;
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list .ant-table-tbody > tr.ant-table-row > td {
+  height: 52px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list .ant-table-pagination.ant-pagination {
+  margin: 0;
+  padding: 12px 16px;
+  border-top: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list .ant-pagination-total-text {
+  margin-right: auto;
+  color: var(--evo-text-secondary);
+  font-size: 13px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list__project {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list__name {
+  color: var(--evo-text);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list__name:hover {
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list__meta a {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list__meta a:hover {
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list__orders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list__order {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list__order .wb-list__muted {
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-list .wb-list__muted {
+  color: var(--evo-text-secondary);
+}
+
+/* подпись колонки действий — только для экранного чтеца */
+:root[data-ui-variant="workbench"] .wb-bz-list .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ревизии внутри раскрытой строки — на приглушённом фоне */
+:root[data-ui-variant="workbench"] .wb-bz-list .ant-table-expanded-row > td {
+  background: var(--evo-surface-muted);
+}
+
+/* --- карточка проекта --- */
+:root[data-ui-variant="workbench"] .wb-bz-proj {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj__crumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--evo-text-secondary);
+  font-size: 13px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj__crumbs a {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj__crumbs a:hover {
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj__crumbs [aria-current="page"] {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--evo-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj__titles {
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj__title .ant-btn {
+  width: 32px !important;
+  height: 32px !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj__name {
+  overflow-wrap: anywhere;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj__order:hover {
+  text-decoration: underline;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj__actions {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj__field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 260px;
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj__field--revision {
+  width: 340px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj__field > .ant-space {
+  width: 100% !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj__label {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* вкладки и их содержимое — одна панель */
+:root[data-ui-variant="workbench"] .wb-bz-proj .bazis-project-modern-card {
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj .bazis-project-modern-card > .ant-card-body {
+  padding: 0 16px 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj .bazis-project-modern-card > .ant-card-body > .ant-tabs > .ant-tabs-nav {
+  margin: 0 -16px 14px;
+  padding: 0 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj .bazis-project-modern-card > .ant-card-body > .ant-tabs > .ant-tabs-nav .ant-tabs-tab {
+  padding: 12px 4px;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj__tab-count {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+:root[data-ui-variant="workbench"] .wb-bz-proj .ant-tabs-tab-active .wb-bz-proj__tab-count {
+  color: var(--evo-primary);
+}
+
+@media (max-width: 1100px) {
+  :root[data-ui-variant="workbench"] .wb-bz-proj__row {
+    flex-direction: column;
+  }
+
+  :root[data-ui-variant="workbench"] .wb-bz-proj__actions {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+}
+
+@media (max-width: 760px) {
+  :root[data-ui-variant="workbench"] .wb-bz-list__head {
+    flex-wrap: wrap;
+  }
+
+  :root[data-ui-variant="workbench"] .wb-bz-proj__field,
+  :root[data-ui-variant="workbench"] .wb-bz-proj__field--revision {
+    width: 100%;
+  }
+}

@@ -23,6 +23,7 @@ import { LabelsModule } from './modules/labels/labels.module';
 import { SheetMaterialsModule } from './modules/sheet-materials/sheet-materials.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { OrderRealtimeModule } from './modules/order-realtime/order-realtime.module';
+import { ClientsReadModule } from './modules/clients-read/clients-read.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PaymentsOnecModule } from './modules/payments-onec/payments-onec.module';
 import { ProductionActionsModule } from './modules/production-actions/production-actions.module';
@@ -75,6 +76,7 @@ import { MdfBoardModule } from './modules/mdf-board/mdf-board.module';
     HealthModule,
     OrderRealtimeModule,
     OrdersModule,
+    ClientsReadModule,
     PaymentsModule,
     PaymentsOnecModule,
     ProductionActionsModule,

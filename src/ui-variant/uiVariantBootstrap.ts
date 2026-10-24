@@ -1,3 +1,4 @@
+import { ApiError } from '../api/apiError';
 import { authApi } from '../api/authApi';
 import { authSession } from '../api/authSession';
 import { profileApi } from '../api/profileApi';
@@ -7,7 +8,12 @@ import { isTabletDevice } from '../hooks/useDeviceTier';
 import { getStoredTabletMode, setStoredTabletMode } from '../theme/themeStorage';
 import { authStorage } from '../utils/auth';
 import { isModernUiAvailable, isUiVariant, resolveUiVariant, type UiVariant } from './uiVariant';
-import { getStoredUiVariant, setStoredUiVariant } from './uiVariantStorage';
+import {
+  getDeviceUiVariantHint,
+  getStoredUiVariant,
+  setDeviceUiVariantHint,
+  setStoredUiVariant,
+} from './uiVariantStorage';
 
 const DEFAULT_UI_VARIANT_BOOTSTRAP_TIMEOUT_MS = 2500;
 
@@ -28,14 +34,32 @@ export interface UiVariantBootstrapDependencies {
   getTabletModeCached: (userId: string) => boolean | null;
   setTabletModeCached: (userId: string, enabled: boolean) => void;
   isTabletDevice?: () => boolean;
+  /** Device hint for signed-out screens (login); never decides a signed-in shell. */
+  getDeviceHint?: () => UiVariant | null;
+  setDeviceHint?: (variant: UiVariant) => void;
+  /** True only for a confirmed "no session" answer (refresh 401), not for outages. */
+  isSignedOutError?: (error: unknown) => boolean;
   now?: () => number;
   timeoutMs?: number;
+}
+
+let variantFromDeviceHint = false;
+
+/**
+ * True when this document's variant came from the signed-out device hint.
+ * Such a document must not mount the authenticated shell (see
+ * VariantWorkspaceLayout): a session that appears later without a reload
+ * (sign-in in another tab) gets a fresh bootstrap with its own preference.
+ */
+export function isUiVariantFromDeviceHint(): boolean {
+  return variantFromDeviceHint;
 }
 
 export async function resolveInitialUiVariant(
   config: FrontendUiRuntimeConfig | null | undefined,
   dependencies: UiVariantBootstrapDependencies = defaultDependencies(),
 ): Promise<UiVariant> {
+  variantFromDeviceHint = false;
   if (!isModernUiAvailable(config)) return resolveUiVariant(config);
   if ((dependencies.isTabletDevice ?? isTabletDevice)()) return 'evolution';
 
@@ -44,16 +68,31 @@ export async function resolveInitialUiVariant(
     dependencies.timeoutMs ?? DEFAULT_UI_VARIANT_BOOTSTRAP_TIMEOUT_MS
   );
 
+  // Confirmed signed out (no session to restore): the login page follows the
+  // variant last used on this device. A slow or failed restore (timeout,
+  // network, 5xx) is unknown session state and keeps the plain default, so
+  // the hint can never pick the shell of a user whose session comes back.
+  const signedOut = () => {
+    const hint = dependencies.getDeviceHint?.() ?? null;
+    const variant = resolveUiVariant(config, hint ?? undefined);
+    variantFromDeviceHint = hint !== null && variant === hint;
+    return variant;
+  };
+
   try {
     await withinDeadline(dependencies.restoreSession(), deadline, now);
-  } catch {
-    return resolveUiVariant(config);
+  } catch (error) {
+    return dependencies.isSignedOutError?.(error) ? signedOut() : resolveUiVariant(config);
   }
 
   const userId = dependencies.getCurrentUserId();
   if (!userId || !dependencies.hasAccessToken()) {
-    return resolveUiVariant(config);
+    return signedOut();
   }
+  const remember = (variant: UiVariant): UiVariant => {
+    dependencies.setDeviceHint?.(variant);
+    return variant;
+  };
 
   const cached = dependencies.getCached(userId);
   const cachedTabletMode = dependencies.getTabletModeCached(userId);
@@ -76,18 +115,19 @@ export async function resolveInitialUiVariant(
       dependencies.getCurrentUserId() === userId &&
       (confirmedTabletMode === true || (confirmedTabletMode === undefined && cachedTabletMode === true))
     ) {
-      return 'evolution';
+      return remember('evolution');
     }
     if (
       dependencies.getCurrentUserId() === userId &&
       isUiVariant(confirmed)
     ) {
       dependencies.setCached(userId, confirmed);
-      return resolveUiVariant(config, confirmed);
+      return remember(resolveUiVariant(config, confirmed));
     }
+    if (dependencies.getCurrentUserId() !== userId) return resolveUiVariant(config);
     // A successful old/malformed backend response is authoritative absence,
     // not a transport outage. Use the configured default instead of stale cache.
-    return resolveUiVariant(config);
+    return remember(resolveUiVariant(config));
   } catch {
     // Same-user confirmed cache is the only non-server bootstrap fallback.
   }
@@ -95,8 +135,13 @@ export async function resolveInitialUiVariant(
   if (dependencies.getCurrentUserId() !== userId) {
     return resolveUiVariant(config);
   }
-  if (cachedTabletMode === true) return 'evolution';
-  return resolveUiVariant(config, cached);
+  if (cachedTabletMode === true) return remember('evolution');
+  return remember(resolveUiVariant(config, cached));
+}
+
+/** Only a refresh answered 401 means "no session"; outages are unknown state. */
+export function isConfirmedSignedOutError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401;
 }
 
 export function seedLegacyAuthSession(): void {
@@ -121,6 +166,9 @@ function defaultDependencies(): UiVariantBootstrapDependencies {
     setCached: setStoredUiVariant,
     getTabletModeCached: getStoredTabletMode,
     setTabletModeCached: setStoredTabletMode,
+    getDeviceHint: () => getDeviceUiVariantHint(),
+    setDeviceHint: (variant) => setDeviceUiVariantHint(variant),
+    isSignedOutError: isConfirmedSignedOutError,
   };
 }
 
