@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getQuickPaymentAttempt,
   markQuickPaymentReconciled,
@@ -36,17 +36,18 @@ describe('quick payment attempts outlive the sheet', () => {
     expect(getQuickPaymentAttempt(7)).toBeNull();
   });
 
-  it('turns a lost response into review after reconciliation; a new deliberate create is allowed from review', async () => {
+  it('turns a lost response into review after reconciliation; review keeps the quick create closed', async () => {
     const run = runQuickPaymentAttempt(8, () => Promise.reject(new TypeError('Failed to fetch')));
     await expect(run).resolves.toMatchObject({ outcome: 'uncertain' });
     expect(getQuickPaymentAttempt(8)).toEqual({ status: 'settled', outcome: 'uncertain' });
     markQuickPaymentReconciled(8);
     expect(getQuickPaymentAttempt(8)).toEqual({ status: 'review' });
-    const again = runQuickPaymentAttempt(8, () => Promise.reject({ statusCode: 422 }));
-    expect(again).not.toBeNull();
-    await expect(again).resolves.toMatchObject({ outcome: 'rejected' });
+    // the first POST may still be committed after the re-read: no second create from the quick sheet
+    const create = vi.fn(() => Promise.resolve());
+    expect(runQuickPaymentAttempt(8, create)).toBeNull();
+    expect(create).not.toHaveBeenCalled();
     markQuickPaymentReconciled(8);
-    expect(getQuickPaymentAttempt(8)).toBeNull();
+    expect(getQuickPaymentAttempt(8)).toEqual({ status: 'review' });
   });
 
   it('a failed re-read leaves the attempt settled, so the next sheet re-reads again', async () => {

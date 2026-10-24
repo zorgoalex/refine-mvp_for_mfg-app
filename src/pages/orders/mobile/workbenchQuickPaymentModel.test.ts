@@ -101,7 +101,7 @@ describe('workbench quick payment submission flow', () => {
     expect(submittable(state)).toBe(false);
   });
 
-  it('after a lost response requires a deliberate new amount, even after close and reopen', () => {
+  it('after a lost response keeps the quick sheet closed, even after close and reopen', () => {
     let state = run([{ type: 'submit' }, { type: 'settled', outcome: 'uncertain' }], opened);
     expect(state).toMatchObject({ phase: 'syncing', amount: null });
     state = quickPaymentReducer(state, { type: 'synced', ok: true });
@@ -111,8 +111,9 @@ describe('workbench quick payment submission flow', () => {
     expect(state).toMatchObject({ phase: 'review', amount: null });
     expect(submittable(state)).toBe(false);
     state = quickPaymentReducer(state, { type: 'setAmount', amount: 50 });
-    expect(submittable(state)).toBe(true);
-    expect(quickPaymentReducer(state, { type: 'submit' }).phase).toBe('submitting');
+    expect(state.amount).toBeNull();
+    expect(submittable(state)).toBe(false);
+    expect(quickPaymentReducer(state, { type: 'submit' }).phase).toBe('review');
   });
 
   it('after a rejection re-reads the order, then keeps the amount to fix and resend', () => {

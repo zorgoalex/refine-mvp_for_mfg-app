@@ -157,7 +157,7 @@ export const WorkbenchQuickPaymentSheet: React.FC<WorkbenchQuickPaymentSheetProp
 
   const setAmount = (value: number | null) => dispatch({ type: 'setAmount', amount: value });
   const submitting = phase === 'submitting';
-  const blocked = phase === 'submitting' || phase === 'syncing' || phase === 'stale';
+  const blocked = phase === 'submitting' || phase === 'syncing' || phase === 'stale' || phase === 'review';
   const notice = quickPaymentNotice(remaining, amount);
   const canSubmit = canSubmitQuickPayment({
     phase,
@@ -315,8 +315,8 @@ export const WorkbenchQuickPaymentSheet: React.FC<WorkbenchQuickPaymentSheetProp
           <div className="wb-paysheet__notice" data-tone="warn" role="alert">
             <ExclamationCircleOutlined />
             <div>
-              Ответ сервера не получен, платёж мог записаться. Остаток обновлён — проверьте оплаты заказа
-              и введите сумму заново, если платежа там нет.
+              Ответ сервера не получен, платёж мог записаться. Проверьте оплаты заказа в полной форме
+              платежей и при необходимости добавьте платёж там.
             </div>
           </div>
         ) : null}

@@ -10,7 +10,10 @@ export type QuickPaymentAttempt =
   | { status: 'inflight' }
   /** Запрос завершился, заказ ещё не перечитан. */
   | { status: 'settled'; outcome: QuickPaymentOutcome }
-  /** Неясный исход, заказ перечитан: нужна осознанная новая сумма. */
+  /**
+   * Неясный исход, заказ перечитан. Быстрая отправка этого заказа закрыта до перезагрузки страницы: у создания
+   * платежа нет ключа идемпотентности, и первый запрос может записаться уже после перечитывания.
+   */
   | { status: 'review' };
 
 const attempts = new Map<number, QuickPaymentAttempt>();
@@ -30,7 +33,7 @@ export function subscribeQuickPaymentAttempts(listener: () => void): () => void 
 
 /**
  * Запускает запись; исход сохраняется, даже если вызвавший лист уже размонтирован.
- * Повторный запуск, пока прошлая попытка не перечитана, отклоняется (null).
+ * Повторный запуск, пока прошлая попытка не перечитана или после неясного исхода (review), отклоняется (null).
  */
 export function runQuickPaymentAttempt(
   orderId: number,
@@ -39,7 +42,7 @@ export function runQuickPaymentAttempt(
   afterSettled?: () => void,
 ): Promise<{ outcome: QuickPaymentOutcome; error?: unknown }> | null {
   const current = attempts.get(orderId);
-  if (current && current.status !== 'review') return null;
+  if (current) return null;
   attempts.set(orderId, { status: 'inflight' });
   notify();
   const settle = (outcome: QuickPaymentOutcome) => {
@@ -64,7 +67,7 @@ export function runQuickPaymentAttempt(
   );
 }
 
-/** Заказ перечитан после попытки: успех/отказ — попытка закрыта; неясный исход — ждём новую сумму. */
+/** Заказ перечитан после попытки: успех/отказ — попытка закрыта; неясный исход — быстрая отправка закрыта (review). */
 export function markQuickPaymentReconciled(orderId: number): void {
   const current = attempts.get(orderId);
   if (current?.status !== 'settled') return;

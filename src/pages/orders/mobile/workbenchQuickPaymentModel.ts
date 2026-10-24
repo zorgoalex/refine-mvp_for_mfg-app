@@ -65,7 +65,10 @@ export function classifyQuickPaymentError(error: unknown): 'rejected' | 'uncerta
  * Состояние листа. Любая попытка записи (успех, отказ, неясный исход) переводит лист в `syncing`: новая
  * отправка закрыта, пока заказ не перечитан успешно; закрыть и открыть лист это не снимает.
  *   idle/review → submitting → syncing(after) → idle (успех: предзаполнить свежим остатком; отказ: сумма прежняя)
- *                                              | review (неясный исход: сумма пустая, предупреждение до отправки)
+ *                                              | review (неясный исход: быстрый лист закрыт до перезагрузки страницы —
+ *                                                 у POST платежа нет ключа идемпотентности, и перечитанный заказ не
+ *                                                 доказывает, что первый запрос уже не запишется; проверять и добавлять —
+ *                                                 в полной форме платежей)
  *                                              | stale (не перечитан: отправка закрыта, «Проверить ещё раз»)
  *   stale → syncing (повторная проверка, в том числе при открытии листа)
  */
@@ -109,11 +112,9 @@ export function quickPaymentReducer(state: QuickPaymentState, event: QuickPaymen
     case 'prefill':
       return state.phase === 'idle' && state.prefillPending ? { ...state, amount: event.amount, prefillPending: false } : state;
     case 'setAmount':
-      return state.phase === 'idle' || state.phase === 'review'
-        ? { ...state, amount: event.amount, prefillPending: false }
-        : state;
+      return state.phase === 'idle' ? { ...state, amount: event.amount, prefillPending: false } : state;
     case 'submit':
-      return state.phase === 'idle' || state.phase === 'review' ? { ...state, phase: 'submitting' } : state;
+      return state.phase === 'idle' ? { ...state, phase: 'submitting' } : state;
     case 'settled':
       if (state.phase !== 'submitting') return state;
       return {
@@ -135,7 +136,7 @@ export function quickPaymentReducer(state: QuickPaymentState, event: QuickPaymen
   }
 }
 
-/** Отправлять можно только из idle/review, с корректной суммой и способом из текущего списка активных. */
+/** Отправлять можно только из idle, с корректной суммой и способом из текущего списка активных. */
 export function canSubmitQuickPayment(input: {
   phase: QuickPaymentPhase;
   amount: number | null | undefined;
@@ -144,7 +145,7 @@ export function canSubmitQuickPayment(input: {
   dateValid: boolean;
 }): boolean {
   return (
-    (input.phase === 'idle' || input.phase === 'review') &&
+    input.phase === 'idle' &&
     isValidQuickPaymentAmount(input.amount) &&
     input.typePaidId != null &&
     input.activeTypeIds.includes(input.typePaidId) &&

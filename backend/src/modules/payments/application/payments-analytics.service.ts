@@ -3,6 +3,7 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { clientOrderReadScope } from '../../clients-read/application/client-list-facts.service';
 import type {
   PaymentsAnalyticsSummaryDto,
   PaymentsAnalyticsSummaryQuery,
@@ -10,8 +11,12 @@ import type {
   PaymentsDashboardQuery,
 } from './payments-analytics.types';
 
-/** Both are required: the analytics right itself and the right to see payments at all. */
-export const PAYMENTS_ANALYTICS_PERMISSIONS = ['finance.analytics.view', 'payments.view'] as const;
+/**
+ * All four are required: the analytics right itself, the right to see payments, the right to see orders and the
+ * right to see order money — the dashboard reads order amounts (receivables, the order-amount filter) straight
+ * from `orders`, over all orders.
+ */
+export const PAYMENTS_ANALYTICS_PERMISSIONS = ['finance.analytics.view', 'payments.view', 'orders.view', 'orders.view_financials'] as const;
 
 export interface PaymentsAnalyticsReadPort {
   summary(query: PaymentsAnalyticsSummaryQuery): Promise<PaymentsAnalyticsSummaryDto>;
@@ -20,7 +25,8 @@ export interface PaymentsAnalyticsReadPort {
 
 /**
  * Payments analytics («+Платежи»): totals over ALL payments of a period, so it is open only to a user
- * who has `finance.analytics.view` and whose payment visibility is not limited to their own orders.
+ * who has `finance.analytics.view` and whose payment and order visibility are not limited to their own orders
+ * (receivables count orders without payments, so the order visibility is checked on its own).
  * The rights are checked here rather than by a decorator: a refusal must reach the audit log.
  */
 export class PaymentsAnalyticsService {
@@ -39,8 +45,8 @@ export class PaymentsAnalyticsService {
 
   private async authorize(user: CurrentUser, action: 'summary' | 'dashboard', query: { dateFrom: string; dateTo: string }, requestId: string): Promise<void> {
     const missing = PAYMENTS_ANALYTICS_PERMISSIONS.filter((permission) => !user.permissions.includes(permission));
-    const scope = rolePolicyForUser(user).payments.view;
-    if (missing.length > 0 || scope !== 'all') {
+    const scopeIsAll = rolePolicyForUser(user).payments.view === 'all' && clientOrderReadScope(user).kind === 'all';
+    if (missing.length > 0 || !scopeIsAll) {
       await auditService.recordDenied(this.ports.auditClient, {
         event: 'payments.analytics_denied',
         entityType: 'payments_analytics',
