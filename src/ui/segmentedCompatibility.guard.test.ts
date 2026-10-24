@@ -18,7 +18,7 @@ const pages = [
   ['src/pages/procurement_workspace/WorklistSection.tsx', 2],
   ['src/pages/orders/list.tsx', 1],
   ['src/pages/orderStatusBoard/OrderStatusBoardPage.tsx', 7],
-  ['src/pages/calendar/components/CalendarBoard.tsx', 4],
+  ['src/pages/calendar/components/CalendarBoard.tsx', 6],
 ] as const;
 
 describe('Segmented page wiring', () => {

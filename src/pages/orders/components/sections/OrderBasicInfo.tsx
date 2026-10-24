@@ -390,10 +390,10 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
 
   return (
     <>
-      <Form layout="vertical">
+      <Form layout="vertical" className="order-basic-form">
         {/* Row 1: Автообновление, Клиент, Название заказа, Дата заказа */}
         <Row gutter={16}>
-          <Col span={7}>
+          <Col span={7} className="order-basic-form__field order-basic-form__field--client">
             <Form.Item
               label="Клиент"
               required
@@ -436,7 +436,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
             </Form.Item>
           </Col>
 
-          <Col span={6}>
+          <Col span={6} className="order-basic-form__field order-basic-form__field--name">
             <Form.Item
               label="Название заказа"
               required
@@ -452,7 +452,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
             </Form.Item>
           </Col>
 
-          <Col span={7}>
+          <Col span={7} className="order-basic-form__field order-basic-form__field--order-date">
             <Form.Item
               label="Дата заказа"
               required
@@ -474,7 +474,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
 
         {/* Row 2: Статус заказа, Статус оплаты, Статус производства, Менеджер, Приоритет */}
         <Row gutter={16}>
-          <Col span={5}>
+          <Col span={5} className="order-basic-form__field order-basic-form__field--order-status">
             <Form.Item
               label="Статус заказа"
               required
@@ -490,7 +490,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
             </Form.Item>
           </Col>
 
-          <Col span={5}>
+          <Col span={5} className="order-basic-form__field order-basic-form__field--payment-status">
             <Form.Item
               label="Статус оплаты"
               required
@@ -506,7 +506,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
             </Form.Item>
           </Col>
 
-          <Col span={5}>
+          <Col span={5} className="order-basic-form__field order-basic-form__field--production-status">
             <Form.Item
               label="Статус производства"
             >
@@ -523,7 +523,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
             </Form.Item>
           </Col>
 
-          <Col span={5}>
+          <Col span={5} className="order-basic-form__field order-basic-form__field--manager">
             <Form.Item label="Менеджер">
               <Select
                 {...resolvedEmployeeSelectProps}
@@ -539,7 +539,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
             </Form.Item>
           </Col>
 
-          <Col span={4}>
+          <Col span={4} className="order-basic-form__field order-basic-form__field--priority">
             <Form.Item
               label="Приоритет"
               tooltip="1 — наивысший приоритет, большее число — ниже"
@@ -558,13 +558,13 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
         </Row>
 
         {projectField ? (
-          <Row gutter={16}>
+          <Row gutter={16} className="order-basic-form__project">
             <Col span={7}>{projectField}</Col>
           </Row>
         ) : null}
 
         {/* Row 4: Присадки */}
-        <Row gutter={16}>
+        <Row gutter={16} className="order-basic-form__doweling">
           <Col span={24}>
             <Form.Item
               label="Присадки"

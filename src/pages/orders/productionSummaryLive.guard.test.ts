@@ -9,7 +9,7 @@ describe('order view production letters', () => {
     expect(header).toContain("resource: 'production_status_events'");
     expect(header).not.toContain('detailStatuses');
     expect(header).not.toContain('OrderProductionSummary');
-    expect(header.match(/passedCodes=\{currentProductionStatusCodes\}/g)).toHaveLength(2);
+    expect(header.match(/passedCodes=\{currentProductionStatusCodes\}/g)).toHaveLength(4);
   });
 
   it('re-reads the marks when detail stages change (the database sets and clears them)', () => {

@@ -15,7 +15,7 @@ import { OnecSnapshotsTab } from './OnecSnapshotsTab';
 import { snapshotsMode } from './onecSnapshots';
 import { OnecIssuesTab } from './OnecIssuesTab';
 import { documentBasis, formatMoment, supportsOnecConsumption } from './onecConsumption';
-import { FILM_GROUP, isOnecGroup, isStockUnsupported, nextStockSupport, pageTitle, readStoredGroup, resolveGroup, stockExportRows, stockTabs, storeGroup } from './warehouseStock';
+import { FILM_GROUP, isOnecGroup, isStockUnsupported, nextStockSupport, pageTitle, readStoredGroup, resolveGroup, stockExportRows, stockQuantityTone, stockTabs, storeGroup } from './warehouseStock';
 import './inventory.css';
 
 const { Title, Text } = Typography;
@@ -311,7 +311,7 @@ export const FilmInventoryPage: React.FC = () => {
   };
   const balanceColumns = [
     { title: 'Плёнка', dataIndex: 'filmName', key: 'filmName' }, { title: 'Поставщик', dataIndex: 'vendorName', key: 'vendorName', render: (value: string | null) => value ?? '—' },
-    { title: 'Остаток, пог. м', dataIndex: 'quantity', key: 'quantity', align: 'right' as const, render: (value: number) => formatQuantity(value) },
+    { title: 'Остаток, пог. м', dataIndex: 'quantity', key: 'quantity', align: 'right' as const, render: (value: number) => <span className="stock-qty" data-stock={stockQuantityTone(value)}>{formatQuantity(value)}</span> },
     { title: 'Последнее движение', dataIndex: 'lastMovementAt', key: 'lastMovementAt', render: (value: string | null) => value ? new Date(value).toLocaleString('ru-RU') : '—' },
   ];
   const documentColumns = [
@@ -323,7 +323,7 @@ export const FilmInventoryPage: React.FC = () => {
     { title: 'Основание', key: 'basis', render: (_: unknown, row: StockDocumentSummaryDto) => documentBasis(row) },
   ];
   if (!viewAllowed) return <Alert type="error" message="Нет доступа к складу плёнки" />;
-  return <div className="film-inventory-page">
+  return <div className="film-inventory-page wb-list">
     <Title level={2}>{pageTitle(warehousesQuery.data?.items.find((item) => item.warehouseId === activeWarehouseId)?.name)}</Title>
     <Tabs activeKey={tab} onChange={setTab} items={[
       { key: 'balances', label: 'Остатки', children: <Card>

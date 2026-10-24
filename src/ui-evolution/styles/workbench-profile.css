@@ -1,0 +1,624 @@
+/* «NewLine»: личный кабинет. Заголовок, слева оглавление разделов, справа панели;
+   варианты оформления и плотность — карточки с миниатюрами. Только оформление. */
+
+:root[data-ui-variant="workbench"] .wb-profile {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__head {
+  margin-bottom: 18px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__head h1 {
+  margin: 0;
+  color: var(--evo-text);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__head p {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 2px 0 0;
+  color: var(--evo-text-secondary);
+  font-size: 13.5px;
+  line-height: 20px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__dot::before {
+  content: '·';
+  margin: 0 8px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__layout {
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+
+/* оглавление */
+:root[data-ui-variant="workbench"] .wb-profile__toc {
+  position: sticky;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__toc a {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--evo-radius-md);
+  color: var(--evo-text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__toc a:hover {
+  background: var(--evo-surface-muted);
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__toc a[aria-current="true"] {
+  background: var(--evo-surface);
+  color: var(--evo-text);
+  box-shadow: 0 0 0 1px var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__toc a[aria-current="true"] .anticon {
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__toc a:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: 1px;
+}
+
+/* панели */
+:root[data-ui-variant="workbench"] .wb-profile__sections {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__panel {
+  scroll-margin-top: 16px;
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__panel-head h2 {
+  margin: 0;
+  color: var(--evo-text);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__panel-head span {
+  color: var(--evo-text-secondary);
+  font-size: 13px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__panel-body {
+  padding: 16px 18px;
+}
+
+/* профиль */
+:root[data-ui-variant="workbench"] .wb-profile__who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__avatar {
+  width: 64px;
+  height: 64px;
+  font-size: 22px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__who-text h3 {
+  margin: 0 0 6px;
+  color: var(--evo-text);
+  font-size: 18px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__who-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font-size: 13px;
+}
+
+/* встроенные блоки SSO и Telegram — без своей рамки */
+:root[data-ui-variant="workbench"] .wb-profile__embed > .ant-card {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__embed > .ant-card > .ant-card-head {
+  min-height: 0;
+  margin-bottom: 10px;
+  padding: 0;
+  border: 0;
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__embed > .ant-card > .ant-card-head .ant-card-head-wrapper {
+  gap: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__embed > .ant-card > .ant-card-body {
+  padding: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__embed .ant-table-wrapper .ant-table {
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-md);
+  overflow: hidden;
+}
+
+/* интерфейс */
+:root[data-ui-variant="workbench"] .wb-profile__block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 0;
+  border-top: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__block:first-child {
+  padding-top: 2px;
+  border-top: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__block:last-child {
+  padding-bottom: 2px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__sub {
+  margin: 0;
+  color: var(--evo-text);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__hint {
+  margin: 0;
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__block > .ant-segmented {
+  align-self: flex-start;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__opts {
+  display: grid;
+  gap: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__opts--variant {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__opts--density {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  max-width: 560px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__opt {
+  position: relative;
+  display: block;
+  min-width: 0;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__opt[data-disabled] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__opt > input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__opt-box {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  padding: 10px;
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+  box-shadow: inset 0 0 0 1px var(--evo-border);
+  transition: box-shadow 0.12s;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__opt:hover .wb-profile__opt-box {
+  box-shadow: inset 0 0 0 1px var(--evo-border-strong);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__opt > input:checked + .wb-profile__opt-box {
+  background: var(--evo-primary-soft);
+  box-shadow: inset 0 0 0 2px var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__opt > input:focus-visible + .wb-profile__opt-box {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: 2px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__opt-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--evo-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__opt-caption {
+  color: var(--evo-text-secondary);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__badge {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--evo-primary-soft);
+  color: var(--evo-primary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__check {
+  display: none;
+  flex: none;
+  place-items: center;
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--evo-surface);
+  background: var(--evo-primary);
+  color: #fff;
+  font-size: 10px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__opt > input:checked + .wb-profile__opt-box .wb-profile__check {
+  display: grid;
+}
+
+/* миниатюры вариантов */
+:root[data-ui-variant="workbench"] .wb-profile__thumb {
+  display: grid;
+  grid-template-columns: 26% 1fr;
+  height: 84px;
+  overflow: hidden;
+  border-radius: var(--evo-radius-md);
+  background: var(--evo-surface-muted);
+  box-shadow: inset 0 0 0 1px var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb i {
+  display: block;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb-side {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 6px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb-side i:first-child {
+  width: 60%;
+  height: 8px;
+  margin-bottom: 3px;
+  background: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb i.on {
+  background: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb-main {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px 8px 6px 4px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 10px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb-head i {
+  width: 22px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 5px;
+  background: var(--evo-surface);
+  box-shadow: 0 0 0 1px var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb-panel i {
+  background: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb-panel i:nth-child(odd) {
+  width: 92%;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb-panel i:nth-child(even) {
+  width: 74%;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb-panel i.hl {
+  background: var(--evo-primary-soft);
+}
+
+/* Эволюция: цветная шапка, светлая боковая панель */
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="evolution"] {
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="evolution"] .wb-profile__thumb-side {
+  background: var(--evo-primary-soft);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="evolution"] .wb-profile__thumb-head {
+  height: 12px;
+  margin: -6px -8px 0 -4px;
+  padding: 0 8px;
+  background: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="evolution"] .wb-profile__thumb-head i {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="evolution"] .wb-profile__thumb-panel {
+  background: var(--evo-surface-muted);
+  box-shadow: none;
+}
+
+/* Line: линии без заливок */
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="line"] {
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="line"] .wb-profile__thumb-side {
+  box-shadow: inset -1px 0 0 var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="line"] .wb-profile__thumb-panel {
+  gap: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="line"] .wb-profile__thumb-panel i {
+  width: 100%;
+  height: 1px;
+  margin: 1px 0 9px;
+  border-radius: 0;
+  background: var(--evo-border);
+}
+
+/* Air: крупные отступы, мягкие карточки */
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="air"] .wb-profile__thumb-side {
+  padding: 12px 8px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="air"] .wb-profile__thumb-main {
+  gap: 8px;
+  padding: 10px 10px 10px 6px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="air"] .wb-profile__thumb-panel {
+  gap: 7px;
+  padding: 10px;
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+/* Нейтральная: всё серое, без акцента */
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="neutral"] i.on {
+  background: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="neutral"] .wb-profile__thumb-panel i.hl {
+  background: var(--evo-border);
+}
+
+/* Классический: тёмная боковая панель, плотная таблица */
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="legacy"] {
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="legacy"] .wb-profile__thumb-side {
+  background: #2b3445;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="legacy"] .wb-profile__thumb-side i {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="legacy"] .wb-profile__thumb-side i.on {
+  background: #fff;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="legacy"] .wb-profile__thumb-main {
+  gap: 0;
+  padding: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="legacy"] .wb-profile__thumb-head {
+  height: 14px;
+  padding: 0 8px;
+  box-shadow: 0 1px 0 var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__thumb[data-variant="legacy"] .wb-profile__thumb-panel {
+  gap: 3px;
+  padding: 6px 8px;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* миниатюры плотности */
+:root[data-ui-variant="workbench"] .wb-profile__dprev {
+  display: flex;
+  flex-direction: column;
+  height: 92px;
+  overflow: hidden;
+  border-radius: var(--evo-radius-md);
+  background: var(--evo-surface);
+  box-shadow: inset 0 0 0 1px var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__dprev i {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__dprev i:last-child {
+  border-bottom: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__dprev i::before {
+  content: '';
+  width: 62%;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--evo-border-strong);
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__dprev i:nth-child(even)::before {
+  width: 44%;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__switch-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-profile__switch-row .wb-profile__hint {
+  margin-top: 4px;
+}
+
+@media (max-width: 1240px) {
+  :root[data-ui-variant="workbench"] .wb-profile__opts--variant {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  :root[data-ui-variant="workbench"] .wb-profile__layout {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  :root[data-ui-variant="workbench"] .wb-profile__toc {
+    top: 0;
+    z-index: 5;
+    flex-direction: row;
+    gap: 6px;
+    padding: 6px 0;
+    overflow-x: auto;
+    background: var(--evo-canvas);
+    scrollbar-width: none;
+  }
+
+  :root[data-ui-variant="workbench"] .wb-profile__toc a {
+    flex: none;
+    border-radius: 999px;
+    background: var(--evo-surface);
+    box-shadow: inset 0 0 0 1px var(--evo-border);
+  }
+
+  :root[data-ui-variant="workbench"] .wb-profile__toc a[aria-current="true"] {
+    background: var(--evo-primary-soft);
+    color: var(--evo-primary);
+    box-shadow: inset 0 0 0 1px var(--evo-primary);
+  }
+
+  :root[data-ui-variant="workbench"] .wb-profile__panel {
+    scroll-margin-top: 60px;
+  }
+}
+
+@media (max-width: 560px) {
+  :root[data-ui-variant="workbench"] .wb-profile__panel-head,
+  :root[data-ui-variant="workbench"] .wb-profile__panel-body {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  :root[data-ui-variant="workbench"] .wb-profile__opts--variant {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

@@ -1,0 +1,287 @@
+/* «NewLine»: сканер бирок. Заголовок страницы, ниже одна колонка под телефон: состояние камеры,
+   тёмный видоискатель с рамкой прицела, крупные поле ввода и кнопки, последние сканы. Только оформление. */
+
+:root[data-ui-variant="workbench"] .wb-scan__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 16px;
+  margin-bottom: 18px;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__head h1 {
+  margin: 0;
+  color: var(--evo-text);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__head p {
+  margin: 2px 0 0;
+  color: var(--evo-text-secondary);
+  font-size: 13.5px;
+  line-height: 20px;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__column {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 440px;
+  margin: 0 auto;
+  font-size: 16px;
+}
+
+/* отступы прежних блоков заменяет общий шаг колонки */
+:root[data-ui-variant="workbench"] .wb-scan__column > *,
+:root[data-ui-variant="workbench"] .wb-scan__manual > .ant-input-group-wrapper {
+  margin-bottom: 0 !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__status-title {
+  color: var(--evo-text);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__status .wb-pill {
+  font-size: 13px;
+  line-height: 22px;
+}
+
+/* видоискатель тёмный в любой теме — как экран камеры */
+:root[data-ui-variant="workbench"] .wb-scan__viewfinder {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 0.85;
+  overflow: hidden;
+  border-radius: 18px;
+  background: #1b2230;
+  color: #fff;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__viewfinder video {
+  display: block;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__aim {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 52%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -54%);
+  pointer-events: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__aim i {
+  position: absolute;
+  width: 18%;
+  height: 18%;
+  border: 4px solid #fff;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__aim i:nth-child(1) {
+  top: 0;
+  left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 12px 0 0 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__aim i:nth-child(2) {
+  top: 0;
+  right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 0 12px 0 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__aim i:nth-child(3) {
+  bottom: 0;
+  left: 0;
+  border-top: 0;
+  border-right: 0;
+  border-radius: 0 0 0 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__aim i:nth-child(4) {
+  right: 0;
+  bottom: 0;
+  border-top: 0;
+  border-left: 0;
+  border-radius: 0 0 12px 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__caption {
+  position: absolute;
+  right: 12px;
+  bottom: 14px;
+  left: 12px;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 550;
+  line-height: 1.35;
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__manual {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__label {
+  color: var(--evo-text);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__column .ant-input-search .ant-input-lg,
+:root[data-ui-variant="workbench"] .wb-scan__column .ant-input-search .ant-btn-lg {
+  height: 52px;
+  font-size: 17px;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__column > .ant-btn-lg {
+  height: 48px;
+  border-radius: 12px;
+  font-size: 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__column .ant-alert {
+  border-radius: 14px;
+  font-size: 15px;
+}
+
+/* найдено несколько деталей */
+:root[data-ui-variant="workbench"] .wb-scan__candidates .ant-list-header {
+  padding: 0 4px 8px;
+  border: 0;
+  color: var(--evo-text-secondary);
+  font-size: 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__candidates .ant-list-item {
+  padding: 0 0 8px;
+  border: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__candidates .ant-card {
+  border: 1px solid var(--evo-border);
+  border-radius: 12px;
+  background: var(--evo-surface);
+  font-size: 15px;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__candidates .ant-list-item:hover .ant-card {
+  border-color: var(--evo-primary);
+}
+
+/* последние сканы */
+:root[data-ui-variant="workbench"] .wb-scan__recent {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__recent h2 {
+  margin: 4px 4px 2px;
+  color: var(--evo-text-secondary);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__recent-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 6px 14px;
+  border: 1px solid var(--evo-border);
+  border-radius: 12px;
+  background: var(--evo-surface);
+  color: var(--evo-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__recent-item:hover {
+  border-color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__recent-item:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: 1px;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__recent-name {
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__recent-size {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--evo-text-secondary);
+  font-size: 14px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* карточка детали (нижняя шторка) */
+:root[data-ui-variant="workbench"] .wb-scan__info-size {
+  color: var(--evo-text);
+  font-size: 30px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__info-size small {
+  margin-left: 6px;
+  color: var(--evo-text-secondary);
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__info-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 14px;
+  margin: 0;
+  font-size: 16px;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__info-list dt {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__info-list dd {
+  min-width: 0;
+  margin: 0;
+  font-weight: 550;
+}
+
+:root[data-ui-variant="workbench"] .wb-scan__info-list .wb-pill {
+  font-size: 13px;
+  line-height: 22px;
+}

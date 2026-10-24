@@ -4,6 +4,7 @@ import { Button, Layout, Menu, Typography } from 'antd';
 import {
   AppstoreOutlined,
   AuditOutlined,
+  BookOutlined,
   CalendarOutlined,
   CreditCardOutlined,
   DownOutlined,
@@ -11,21 +12,36 @@ import {
   InboxOutlined,
   LeftOutlined,
   LineChartOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
   PlusOutlined,
   RightOutlined,
+  SearchOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
 import { useGetIdentity } from '@refinedev/core';
+import { useKBar } from '@refinedev/kbar';
 import { OrderCreateModal } from '../../pages/orders/components/OrderCreateModal';
 import { SidebarMenuSettingsButton } from '../../components/SidebarMenuSettingsButton';
 import { SIDER_RESOURCE_ICONS } from '../../components/siderResourceIcons';
 import type { UserIdentity } from '../../types/auth';
 import { APP_VERSION } from '../../version';
+import { useUiVariant } from '../../ui-variant/UiVariantProvider';
+import { getEvolutionCategoryLabels } from '../../utils/navigationMenuConfig';
 import {
-  EVOLUTION_CATEGORY_LABELS,
+  REFERENCE_HUB_KEY,
+  REFERENCE_MENU_CATEGORY,
+  buildReferenceRail,
+  referenceNamesBehindHub,
+  resolveReferenceLanding,
+} from '../../utils/referenceCatalog';
+import { REFERENCE_LAST_KEY, REFERENCE_RAIL_OPEN_EVENT } from './WorkbenchReferenceRail';
+import {
   EVOLUTION_CATEGORY_ORDER,
   useEvolutionNavigation,
 } from './useEvolutionNavigation';
+
+const FOLDED_GROUPS_KEY = 'erp.sidebar.foldedGroups';
 
 export interface EvolutionSiderProps {
   collapsed: boolean;
@@ -36,6 +52,48 @@ export interface EvolutionSiderProps {
 export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCollapse, operational = false }) => {
   const { sider, isCreateModalOpen, setIsCreateModalOpen, sidebarMenuPreferences } = useEvolutionNavigation();
   const { data: identity } = useGetIdentity<UserIdentity>();
+  const { variant } = useUiVariant();
+  const { query: quickSearch } = useKBar();
+  const isWorkbench = variant === 'workbench';
+  // «NewLine»: menu groups fold on click; the choice is a per-browser convenience.
+  const [foldedGroups, setFoldedGroups] = React.useState<readonly string[]>(() => {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(FOLDED_GROUPS_KEY) ?? '[]');
+      return Array.isArray(stored) ? stored.filter((item): item is string => typeof item === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+  const toggleGroup = (category: string) => {
+    setFoldedGroups((current) => {
+      const next = current.includes(category) ? current.filter((item) => item !== category) : [...current, category];
+      try {
+        window.localStorage.setItem(FOLDED_GROUPS_KEY, JSON.stringify(next));
+      } catch {
+        // storage can be unavailable; folding still works until reload
+      }
+      return next;
+    });
+  };
+  const categoryLabels = getEvolutionCategoryLabels(variant);
+  // «NewLine»: справочники в меню — один пункт; их список открывается панелью на самом экране.
+  const referenceGroups = React.useMemo(
+    () => (isWorkbench ? buildReferenceRail(sider.categorizedResources) : []),
+    [isWorkbench, sider.categorizedResources],
+  );
+  const referencesBehindHub = React.useMemo(() => referenceNamesBehindHub(referenceGroups), [referenceGroups]);
+  const openReferences = () => {
+    let last: string | null = null;
+    try {
+      last = window.localStorage.getItem(REFERENCE_LAST_KEY);
+    } catch {
+      last = null;
+    }
+    const target = resolveReferenceLanding(referenceGroups, last);
+    if (!target) return;
+    sider.handleNavigate(target.route);
+    window.dispatchEvent(new Event(REFERENCE_RAIL_OPEN_EVENT));
+  };
   const resourceItems = Object.values(sider.categorizedResources).flat();
   const activeCategory = Object.entries(sider.categorizedResources)
     .find(([, items]) => items.some((item) => item.name === sider.selectedKey))?.[0];
@@ -195,6 +253,21 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
               />
             </Tooltip>
 
+            {isWorkbench ? (
+              <div className="evolution-sider__search">
+                <Tooltip title={collapsed ? 'Поиск и быстрый переход (Ctrl K)' : undefined} placement="right">
+                  <Button
+                    aria-label="Открыть быстрый переход"
+                    block={!collapsed}
+                    icon={<SearchOutlined />}
+                    onClick={() => quickSearch.toggle()}
+                  >
+                    {collapsed ? null : <><span>Поиск</span><kbd>Ctrl K</kbd></>}
+                  </Button>
+                </Tooltip>
+              </div>
+            ) : null}
+
             <nav className="evolution-sider__nav">
               {!collapsed ? <Typography.Text className="evolution-sider__group-label">Работа</Typography.Text> : null}
               <Menu
@@ -224,7 +297,7 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
                       <SidebarMenuSettingsButton
                         topItems={sider.topMenuOrderItems}
                         categorizedResources={sider.categorizedResources}
-                        categoryLabels={EVOLUTION_CATEGORY_LABELS}
+                        categoryLabels={categoryLabels}
                         defaults={sider.menuOrderDefaults}
                         settings={sider.menuOrderSettings}
                         onChange={sidebarMenuPreferences.saveSettings}
@@ -241,7 +314,7 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
                   <SidebarMenuSettingsButton
                     topItems={sider.topMenuOrderItems}
                     categorizedResources={sider.categorizedResources}
-                    categoryLabels={EVOLUTION_CATEGORY_LABELS}
+                    categoryLabels={categoryLabels}
                     defaults={sider.menuOrderDefaults}
                     settings={sider.menuOrderSettings}
                     onChange={sidebarMenuPreferences.saveSettings}
@@ -252,10 +325,12 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
               ) : null}
 
               {sider.categoryOrder.map((category) => {
-                const resources = sider.categorizedResources[category] ?? [];
-                if (resources.length === 0) return null;
-                const categoryLabel = EVOLUTION_CATEGORY_LABELS[
-                  category as keyof typeof EVOLUTION_CATEGORY_LABELS
+                const resources = (sider.categorizedResources[category] ?? [])
+                  .filter((item) => !referencesBehindHub.has(item.name));
+                const holdsHub = category === REFERENCE_MENU_CATEGORY && referencesBehindHub.size > 0;
+                if (resources.length === 0 && !holdsHub) return null;
+                const categoryLabel = categoryLabels[
+                  category as keyof typeof categoryLabels
                 ] ?? category;
                 const items = resources.map((item) => ({
                   key: item.name,
@@ -264,32 +339,69 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
                   title: item.label,
                   onClick: () => sider.handleNavigate(item.route),
                 }));
+                const hubSelected = holdsHub && referencesBehindHub.has(sider.selectedKey);
+                if (holdsHub) {
+                  items.unshift({
+                    key: REFERENCE_HUB_KEY,
+                    icon: <BookOutlined />,
+                    label: 'Справочники',
+                    title: 'Справочники',
+                    onClick: openReferences,
+                  });
+                }
+
+                // a folded group that holds the current page keeps its label highlighted, so the place is not lost
+                const holdsSelection = hubSelected || resources.some((item) => item.name === sider.selectedKey);
+                const folded = isWorkbench && !collapsed && foldedGroups.includes(category);
 
                 return (
                   <div className="evolution-sider__group" key={category}>
-                    {!collapsed ? (
+                    {!collapsed && isWorkbench ? (
+                      <button
+                        type="button"
+                        className={`evolution-sider__group-label evolution-sider__group-toggle${folded && holdsSelection ? ' evolution-sider__group-toggle--current' : ''}`}
+                        aria-expanded={!folded}
+                        onClick={() => toggleGroup(category)}
+                      >
+                        <span>{categoryLabel}</span>
+                        <DownOutlined aria-hidden />
+                      </button>
+                    ) : !collapsed ? (
                       <Typography.Text className="evolution-sider__group-label">
                         {categoryLabel}
                       </Typography.Text>
                     ) : null}
+                    {folded ? null : (
                     <Menu
                       aria-label={categoryLabel}
                       inlineCollapsed={collapsed}
                       items={items}
                       mode="inline"
-                      selectedKeys={resources.some((item) => item.name === sider.selectedKey) ? [sider.selectedKey] : []}
+                      selectedKeys={hubSelected ? [REFERENCE_HUB_KEY] : resources.some((item) => item.name === sider.selectedKey) ? [sider.selectedKey] : []}
                       theme="dark"
                     />
+                    )}
                   </div>
                 );
               })}
             </nav>
+            {isWorkbench ? (
+              <button
+                type="button"
+                className="evolution-sider__collapse-row"
+                aria-label={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
+                onClick={() => onCollapse(!collapsed)}
+              >
+                {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                {collapsed ? null : <span>Свернуть меню</span>}
+              </button>
+            ) : null}
             {collapsed ? (
               <div className="evolution-sider__settings-bottom">
                 <SidebarMenuSettingsButton
                   topItems={sider.topMenuOrderItems}
                   categorizedResources={sider.categorizedResources}
-                  categoryLabels={EVOLUTION_CATEGORY_LABELS}
+                  categoryLabels={categoryLabels}
                   defaults={sider.menuOrderDefaults}
                   settings={sider.menuOrderSettings}
                   onChange={sidebarMenuPreferences.saveSettings}

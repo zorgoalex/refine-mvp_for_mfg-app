@@ -1,6 +1,6 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Form, Button, Card, Space, Typography, Tag, Empty, Alert, DatePicker, Select, Tabs } from 'antd';
+import { Form, Button, Card, Space, Typography, Tag, Empty, Alert, DatePicker, Select, Tabs, Drawer } from 'antd';
 import { Segmented } from "../../ui/Segmented";
 import { FilterOutlined, ClearOutlined, AuditOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -24,6 +24,16 @@ import { auditObject, buildAuditReadableSummary } from './readableSummary';
 import { auditEventOptions, auditEventTitle } from './eventLabels';
 import { TelegramWorkerAudit } from './TelegramWorkerAudit';
 import { Bitrix24Audit, AuditOrderLookup } from './Bitrix24Audit';
+import { Link } from 'react-router-dom';
+import { useOptionalUiVariant } from '../../ui-variant/UiVariantProvider';
+import {
+  AUDIT_PERIODS,
+  auditActorInitials,
+  auditChangeChips,
+  auditPeriodRange,
+  auditWhen,
+  type AuditPeriodKey,
+} from './auditWorkbench';
 
 const { Text } = Typography;
 
@@ -441,6 +451,10 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
   initialFilters,
 }) => {
   const businessHistoryMode = mode === 'business-history';
+  const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
+  const [period, setPeriod] = useState<AuditPeriodKey | null>(isWorkbench ? 'all' : null);
+  const [appliedFilters, setAppliedFilters] = useState<FilterValues>(initialFilters ?? {});
+  const [openEntry, setOpenEntry] = useState<AuditLogEventDto | null>(null);
   const resolvedTitle = title ?? (businessHistoryMode ? 'История бизнеса' : 'Технический аудит');
   const [form] = Form.useForm<FilterValues>();
   const [filtersVisible, setFiltersVisible] = useState(defaultFiltersVisible);
@@ -620,12 +634,30 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
   }, [preferredPageSize]);
 
   const handleFilter = (values: FilterValues) => {
+    setAppliedFilters(values);
+    // своя дата в форме снимает выбор быстрого периода
+    if (isWorkbench) setPeriod(values.createdRange || values.createdFrom || values.createdTo ? null : 'all');
     setQuery(buildAuditQuery(values, query.pageSize ?? PAGE_SIZE_DEFAULT, businessHistoryMode ? 'business' : 'all'));
   };
 
   const handleClearFilters = () => {
     form.resetFields();
+    setAppliedFilters(initialFilters ?? {});
+    if (isWorkbench) setPeriod('all');
     setQuery(buildAuditQuery(initialFilters ?? {}, query.pageSize ?? PAGE_SIZE_DEFAULT, businessHistoryMode ? 'business' : 'all'));
+  };
+
+  // «NewLine»: быстрый период = те же поля «с … по», остальные фильтры не меняются
+  const applyPeriod = (key: AuditPeriodKey) => {
+    const range = auditPeriodRange(key);
+    const dates: Pick<FilterValues, 'createdRange' | 'createdFrom' | 'createdTo'> = businessHistoryMode
+      ? { createdRange: range ?? undefined, createdFrom: undefined, createdTo: undefined }
+      : { createdRange: undefined, createdFrom: range?.[0], createdTo: range?.[1] };
+    const values: FilterValues = { ...appliedFilters, ...dates };
+    if (filtersVisible) form.setFieldsValue(dates);
+    setAppliedFilters(values);
+    setPeriod(key);
+    setQuery(buildAuditQuery(values, query.pageSize ?? PAGE_SIZE_DEFAULT, businessHistoryMode ? 'business' : 'all'));
   };
 
   const handleTableChange = (pag: { current?: number; pageSize?: number }) => {
@@ -715,21 +747,40 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
   }
 
   return (
-    <div style={{ padding: embedded ? 0 : '16px 24px' }}>
+    <div className={isWorkbench ? 'wb-audit-journal' : undefined} style={{ padding: embedded ? 0 : '16px 24px' }}>
       <div
-        style={{
+        className={isWorkbench ? 'wb-audit-journal__bar' : undefined}
+        style={isWorkbench ? undefined : {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           marginBottom: 12,
         }}
       >
-        <Space>
-          <AuditOutlined style={{ fontSize: 18, color: '#1677ff' }} />
-          <Text strong style={{ fontSize: 16 }}>
-            {resolvedTitle}
-          </Text>
-        </Space>
+        {isWorkbench ? (
+          <div className="wb-audit__period" role="group" aria-label="Период">
+            <span className="wb-audit__period-label">{resolvedTitle}</span>
+            {AUDIT_PERIODS.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className="wb-audit__chip"
+                aria-pressed={period === item.key}
+                onClick={() => applyPeriod(item.key)}
+              >
+                {item.label}
+              </button>
+            ))}
+            {period === null ? <span className="wb-audit__chip wb-audit__chip--custom">Свой период</span> : null}
+          </div>
+        ) : (
+          <Space>
+            <AuditOutlined style={{ fontSize: 18, color: '#1677ff' }} />
+            <Text strong style={{ fontSize: 16 }}>
+              {resolvedTitle}
+            </Text>
+          </Space>
+        )}
         <Space size="small" wrap>
           {!businessHistoryMode && (
             <Segmented
@@ -756,7 +807,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
       {permissionError && <Alert type="error" showIcon message={permissionError} style={{ marginBottom: 12 }} />}
 
       {filtersVisible && (
-        <Card size="small" style={{ marginBottom: 12 }} bodyStyle={{ padding: '8px 12px' }}>
+        <Card size="small" className={isWorkbench ? 'wb-audit-journal__filters' : undefined} style={{ marginBottom: 12 }} bodyStyle={{ padding: '8px 12px' }}>
           <style>{`
             .audit-filters .ant-form-item { margin-bottom: 6px; }
             .audit-filters .ant-form-item-label > label { font-size: 11px; }
@@ -1022,7 +1073,16 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
         </Card>
       )}
 
-      {businessHistoryMode || viewMode === 'readable' ? (
+      {isWorkbench && (businessHistoryMode || viewMode === 'readable') ? (
+        <WorkbenchReadableTable
+          data={data}
+          loading={loading}
+          pagination={pagination}
+          emptyText={businessHistoryMode ? 'Нет записей истории бизнеса' : 'Нет записей аудита'}
+          onChange={handleTableChange}
+          onOpen={setOpenEntry}
+        />
+      ) : businessHistoryMode || viewMode === 'readable' ? (
         <Table<AuditLogEventDto>
           rowKey="auditId"
           loading={loading}
@@ -1141,12 +1201,228 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
           />
         </Table>
       )}
+      {isWorkbench ? <AuditEntryDrawer record={openEntry} onClose={() => setOpenEntry(null)} /> : null}
     </div>
   );
 };
 
-export const AuditList: React.FC = () => (
-  <div style={{ padding: '8px 16px 0' }}>
+interface WorkbenchReadableTableProps {
+  data: AuditLogEventDto[];
+  loading: boolean;
+  pagination: { page: number; pageSize: number; total: number };
+  emptyText: string;
+  onChange: (pag: { current?: number; pageSize?: number }) => void;
+  onOpen: (record: AuditLogEventDto) => void;
+}
+
+/** «NewLine»: понятный журнал строками «время · кто · событие · объект · изменения · источник». */
+const WorkbenchReadableTable: React.FC<WorkbenchReadableTableProps> = ({ data, loading, pagination, emptyText, onChange, onOpen }) => {
+  const summaries = useMemo(
+    () => new Map(data.map((record) => [record.auditId, buildAuditReadableSummary(record)])),
+    [data],
+  );
+  const summaryOf = (record: AuditLogEventDto) => summaries.get(record.auditId) ?? buildAuditReadableSummary(record);
+  return (
+    <Table<AuditLogEventDto>
+      className="wb-audit-table"
+      rowKey="auditId"
+      loading={loading}
+      dataSource={data}
+      size="small"
+      sticky
+      // ширины колонок держатся: длинный текст переносится, а не раздвигает соседей
+      tableLayout="fixed"
+      scroll={{ x: 1090 }}
+      pagination={{
+        current: pagination.page,
+        pageSize: pagination.pageSize,
+        total: pagination.total,
+        pageSizeOptions: PAGE_SIZE_OPTIONS,
+        showSizeChanger: true,
+        showTotal: (total) => `Всего: ${total}`,
+      }}
+      onChange={(pag) => onChange(pag)}
+      onRow={(record) => ({
+        onClick: (event) => {
+          if ((event.target as HTMLElement).closest('a, button')) return;
+          onOpen(record);
+        },
+      })}
+      locale={{ emptyText: <Empty description={emptyText} /> }}
+    >
+      <Table.Column<AuditLogEventDto>
+        dataIndex="createdAt"
+        title="Время"
+        width={100}
+        render={(value: string) => {
+          const when = auditWhen(value);
+          return (
+            <span className="wb-audit-table__when" title={formatDateTime(value)}>
+              <span>{when.time}</span>
+              <small>{when.day}</small>
+            </span>
+          );
+        }}
+      />
+      <Table.Column<AuditLogEventDto>
+        title="Кто"
+        width={170}
+        render={(_, record) => (
+          <span className="wb-audit-table__who">
+            <span className="wb-avatar" aria-hidden="true">{auditActorInitials(record.username) || '·'}</span>
+            <span className="wb-audit-table__who-name">{summaryOf(record).actor}</span>
+          </span>
+        )}
+      />
+      <Table.Column<AuditLogEventDto>
+        title="Событие"
+        width={210}
+        render={(_, record) => (
+          <button type="button" className="wb-audit-table__event" onClick={() => onOpen(record)}>
+            {summaryOf(record).title}
+          </button>
+        )}
+      />
+      <Table.Column<AuditLogEventDto>
+        title="Объект"
+        width={200}
+        render={(_, record) => <span className="wb-audit-table__object">{summaryOf(record).object}</span>}
+      />
+      <Table.Column<AuditLogEventDto>
+        title="Изменения"
+        width={290}
+        render={(_, record) => {
+          const summary = summaryOf(record);
+          const { chips, more } = auditChangeChips(summary.changes);
+          if (chips.length === 0 && summary.notes.length === 0) return <span className="wb-list__muted">—</span>;
+          return (
+            <span className="wb-audit-table__chips">
+              {chips.map((chip) => <span key={chip} className="wb-audit-table__chip">{chip}</span>)}
+              {more > 0 ? <span className="wb-audit-table__chip wb-audit-table__chip--more">{`+${more}`}</span> : null}
+              {chips.length === 0 ? summary.notes.slice(0, 1).map((note) => (
+                <span key={note} className="wb-audit-table__chip wb-audit-table__chip--note">{note}</span>
+              )) : null}
+            </span>
+          );
+        }}
+      />
+      <Table.Column<AuditLogEventDto>
+        dataIndex="source"
+        title="Источник"
+        width={120}
+        render={(value: string | null) => value ? <span className="wb-audit-table__source" title={value}>{value}</span> : <span className="wb-list__muted">—</span>}
+      />
+    </Table>
+  );
+};
+
+function hasRelatedIds(record: AuditLogEventDto): boolean {
+  return [
+    record.relatedOrderId,
+    record.relatedClientId,
+    record.relatedPaymentId,
+    record.relatedDeadlineId,
+    record.relatedProductionEventId,
+    record.relatedUserId,
+  ].some((id) => id != null) || (Array.isArray(record.relatedEntities) && record.relatedEntities.length > 0);
+}
+
+/** «NewLine»: событие целиком — изменения, сведения о запросе, связанные объекты и исходные данные. */
+const AuditEntryDrawer: React.FC<{ record: AuditLogEventDto | null; onClose: () => void }> = ({ record, onClose }) => {
+  const summary = record ? buildAuditReadableSummary(record) : null;
+  return (
+    <Drawer
+      open={!!record}
+      onClose={onClose}
+      width={560}
+      className="wb-audit-entry"
+      title={summary ? (
+        <div className="wb-audit-entry__title">
+          <span>{summary.title}</span>
+          <small>{`${formatDateTime(record?.createdAt)} · ${summary.actor}`}</small>
+        </div>
+      ) : null}
+      footer={record?.relatedOrderId != null ? (
+        <div className="wb-audit-entry__footer">
+          <Link to={`/orders/show/${record.relatedOrderId}`} onClick={onClose}>
+            <Button type="primary">Открыть заказ</Button>
+          </Link>
+          <Button onClick={onClose}>Закрыть</Button>
+        </div>
+      ) : null}
+    >
+      {record && summary ? (
+        <div className="wb-audit-entry__body">
+          <section>
+            <h3>Что изменилось</h3>
+            {summary.changes.length > 0 ? (
+              <table className="wb-audit-entry__diff">
+                <thead><tr><th>Поле</th><th>Было</th><th>Стало</th></tr></thead>
+                <tbody>
+                  {summary.changes.map((change) => (
+                    <tr key={`${change.label}-${change.before}-${change.after}`}>
+                      <td>{change.label}</td>
+                      <td className="wb-audit-entry__old">{change.before}</td>
+                      <td className="wb-audit-entry__new">{change.after}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : <p className="wb-list__muted">Подробности изменений не записаны.</p>}
+            {summary.notes.length > 0 ? (
+              <Space size={[4, 4]} wrap style={{ marginTop: 8 }}>
+                {summary.notes.map((note) => <Tag key={`note-${note}`}>{note}</Tag>)}
+              </Space>
+            ) : null}
+          </section>
+          <section>
+            <h3>Сведения</h3>
+            <dl className="wb-audit-entry__facts">
+              <dt>Объект</dt><dd>{summary.object}</dd>
+              <dt>Событие</dt><dd><Text code>{record.event}</Text></dd>
+              <dt>Источник</dt><dd>{record.source ?? '—'}</dd>
+              <dt>Роль</dt><dd>{record.role ?? '—'}</dd>
+              <dt>ID запроса</dt><dd>{record.requestId ? <Text copyable={{ text: record.requestId }} code>{record.requestId}</Text> : '—'}</dd>
+              {record.ip ? <><dt>IP-адрес</dt><dd>{record.ip}</dd></> : null}
+              {record.userAgent ? <><dt>Устройство</dt><dd>{record.userAgent}</dd></> : null}
+              {record.statusName || record.statusCode ? <><dt>Статус</dt><dd>{[record.statusName, record.statusCode].filter(Boolean).join(' · ')}</dd></> : null}
+              {record.stageCode ? <><dt>Этап</dt><dd>{record.stageCode}</dd></> : null}
+            </dl>
+          </section>
+          <section>
+            <h3>Связанные объекты</h3>
+            <div className="wb-audit-entry__related"><RelatedIds record={record} /></div>
+            {summary.related.length > 0 && !hasRelatedIds(record) ? (
+              <Space size={[4, 4]} wrap style={{ marginTop: 6 }}>
+                {summary.related.map((item) => <Tag key={`related-${item}`} color="blue">{item}</Tag>)}
+              </Space>
+            ) : null}
+          </section>
+          <details className="wb-audit-entry__raw">
+            <summary>Технические данные</summary>
+            {(['before', 'after', 'diff', 'metadata'] as const).map((key) => (
+              <div key={key}>
+                <Text strong style={{ fontSize: 12 }}>{key}</Text>
+                <JsonCell value={record[key]} />
+              </div>
+            ))}
+          </details>
+        </div>
+      ) : null}
+    </Drawer>
+  );
+};
+
+export const AuditList: React.FC = () => {
+  const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
+  return (
+  <div className={isWorkbench ? 'wb-audit' : undefined} style={isWorkbench ? undefined : { padding: '8px 16px 0' }}>
+    {isWorkbench ? (
+      <header className="wb-audit__head">
+        <h1>Журналы</h1>
+        <p>Кто, что и когда изменил в системе: история бизнеса, технический аудит и обмен с Bitrix24.</p>
+      </header>
+    ) : null}
     <style>{`
       .journals-top-tabs .ant-tabs-tab,
       .technical-audit-tabs .ant-tabs-tab { min-height: 40px; font-weight: 600; }
@@ -1197,4 +1473,5 @@ export const AuditList: React.FC = () => (
       ]}
     />
   </div>
-);
+  );
+};
