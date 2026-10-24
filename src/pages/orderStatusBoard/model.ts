@@ -350,6 +350,52 @@ export function filterCncTodayColumnsByOrders(
   });
 }
 
+export interface CncSearchedOrderItem {
+  widthMm: number | null;
+  heightMm: number | null;
+  quantity: number;
+}
+
+// Items of the searched orders only, across every card of the column; other
+// orders sharing the same bath or machine file are left out.
+export function selectCncSearchedOrderItems(
+  column: { key: string } & Pick<CncTelegramTodayColumn, 'packets' | 'baths' | 'bazisCutSets'>,
+  orderFilters: readonly string[],
+): CncSearchedOrderItem[] {
+  const orderKeys = new Set(
+    normalizeCncOrderFilterValues(orderFilters).map((value) =>
+      normalizeCncOrderKey(value),
+    ),
+  );
+  if (orderKeys.size === 0) return [];
+  const matches = (item: { orderName: string }) =>
+    orderKeys.has(normalizeCncOrderKey(item.orderName));
+  if (isCncBathColumnKey(column.key)) {
+    return (column.baths ?? []).flatMap((bath) => bath.items.filter(matches));
+  }
+  return [
+    ...(column.packets ?? []).flatMap((packet) => packet.items.filter(matches)),
+    ...(column.bazisCutSets ?? []).flatMap((set) => set.items.filter(matches)),
+  ];
+}
+
+// A bath or machine file mixes details of many orders, so the order columns
+// keep only the searched orders themselves, not every order sharing their cards.
+export function filterCncOrderCardsByOrders(
+  cards: readonly OrderStatusBoardCard[],
+  orderFilters: readonly string[],
+): OrderStatusBoardCard[] {
+  const orderKeys = new Set(
+    normalizeCncOrderFilterValues(orderFilters).map((value) =>
+      normalizeCncOrderKey(value),
+    ),
+  );
+  if (orderKeys.size === 0) return [...cards];
+  return cards.filter((card) =>
+    orderKeys.has(normalizeCncOrderKey(card.orderName))
+    || orderKeys.has(normalizeCncOrderKey(card.fullNumber)));
+}
+
 export function filterCncOrderCardsByPlannedOrderDate(
   cards: readonly OrderStatusBoardCard[],
   plannedDate: string,
@@ -887,7 +933,7 @@ function collectBathOrderIds(bath: CncTelegramBathCard): number[] {
   return orderIds.every(isPositiveInteger) ? normalizePositiveIntegerArray(orderIds) : [];
 }
 
-function isCncBathColumnKey(key: CncTelegramTodayColumn['key']): boolean {
+function isCncBathColumnKey(key: string): boolean {
   return key === 'baths'
     || key === 'baths_ready'
     || key === 'baths_laminated'
