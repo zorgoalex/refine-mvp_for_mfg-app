@@ -1,4 +1,6 @@
 import type { DatabaseClient } from '../../../database/database.types';
+import { loadMdfClosedOrders } from './mdf-closed-orders';
+import { MdfNeedsAttention } from '../application/mdf-job-runner';
 import { CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE as MDF, CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE as OTHER,
   cncPacketCountsForMdfReadinessSql } from '../../../shared/cnc-material';
 
@@ -194,11 +196,46 @@ export async function loadMdfPublishedPresentation(tx: DatabaseClient, owners: s
   return { presentation, progress, orders };
 }
 
+export const MDF_UNREGISTERED_LIMIT = 200;
+const MDF_CLOSED_CHECK_CHUNK = 10;
+
+/** The canonical closed-order check (`loadMdfClosedOrders`, unchanged) under the demand loader's row bound: small
+ * batches, a batch over the bound is re-checked order by order, and an order over the bound by itself counts as not
+ * closed — its files show as unregistered rather than failing the whole board. */
+async function loadMdfClosedOrdersBounded(tx: DatabaseClient, orderIds: readonly number[]): Promise<Set<number>> {
+  const closed = new Set<number>();
+  const overLimit = (error: unknown) => error instanceof MdfNeedsAttention && error.code === 'MDF_DEMAND_LIMIT';
+  for (let i = 0; i < orderIds.length; i += MDF_CLOSED_CHECK_CHUNK) {
+    const chunk = orderIds.slice(i, i + MDF_CLOSED_CHECK_CHUNK);
+    try {
+      for (const id of await loadMdfClosedOrders(tx, chunk)) closed.add(id);
+    } catch (error) {
+      if (!overLimit(error)) throw error;
+      for (const id of chunk) {
+        try {
+          for (const one of await loadMdfClosedOrders(tx, [id])) closed.add(one);
+        } catch (single) {
+          if (!overLimit(single)) throw single;
+        }
+      }
+    }
+  }
+  return closed;
+}
+const MDF_SOURCE_CANDIDATE_LIMIT = 2000;
+
 /** Authorized sources of the window not yet registered in the engine (no source head), MDF material, every owner
- * visible. Absence from the publication alone never lands a card here. */
+ * visible. Absence from the publication alone never lands a card here.
+ * The canonical closed-order boundary (`loadMdfClosedOrders`: accepted `by_status` closure AND unchanged live demand)
+ * excludes a source whose every owner is CLOSED: finished history the baseline closed without registering (§5.7b, E1),
+ * not a pending registration. Any other source (an open, reopened, `carried` or drifted owner) stays unregistered.
+ * Order: the focused card, then searched orders' sources, then newest. `truncated`: the candidate or result bound was
+ * reached, so sources may be missing (the board says so; it never fails). */
 export async function loadMdfUnregisteredSources(tx: DatabaseClient, owners: string, userId: string,
-  window: { dateFrom: string; dateTo: string }): Promise<PublishedUnregisteredSource[]> {
-  return (await tx.query<PublishedUnregisteredSource>(`WITH allowed AS (${owners}), packets AS (
+  window: { dateFrom: string; dateTo: string },
+  priority: { orderIds?: readonly number[]; focus?: { kind: string; id: string } | null } = {},
+): Promise<{ unregistered: PublishedUnregisteredSource[]; truncated: boolean }> {
+  const candidates = (await tx.query<PublishedUnregisteredSource>(`WITH allowed AS (${owners}), packets AS (
       SELECT 'packet'::text kind,p.packet_id::text id,COALESCE(p.program_name,p.external_packet_key,p.packet_id::text) "displayName",
         COALESCE(p.source_created_at,p.created_at) created,
         ARRAY(SELECT DISTINCT i.match_order_id FROM cnc_telegram_packet_items i
@@ -224,6 +261,14 @@ export async function loadMdfUnregisteredSources(tx: DatabaseClient, owners: str
     FROM (SELECT * FROM packets UNION ALL SELECT * FROM sets) x
     WHERE cardinality(x.owners)>0 AND NOT EXISTS(SELECT 1 FROM unnest(x.owners) o
       WHERE o NOT IN (SELECT order_id FROM allowed))
-    ORDER BY x.created DESC,x.kind,x.id LIMIT 201`,
-  [userId, window.dateFrom, window.dateTo, MDF, OTHER])).rows;
+    ORDER BY COALESCE(x.kind=$7 AND x.id=$8,false) DESC,COALESCE(x.owners && $6::bigint[],false) DESC,x.created DESC,x.kind,x.id
+    LIMIT ${MDF_SOURCE_CANDIDATE_LIMIT + 1}`,
+  [userId, window.dateFrom, window.dateTo, MDF, OTHER, [...(priority.orderIds ?? [])],
+    priority.focus?.kind ?? null, priority.focus?.id ?? null])).rows;
+  const candidatesTruncated = candidates.length > MDF_SOURCE_CANDIDATE_LIMIT;
+  if (candidatesTruncated) candidates.length = MDF_SOURCE_CANDIDATE_LIMIT;
+  const closed = await loadMdfClosedOrdersBounded(tx, [...new Set(candidates.flatMap(c => c.orderIds))]);
+  const unregistered = candidates.filter(source => !source.orderIds.every(id => closed.has(id)));
+  const truncated = candidatesTruncated || unregistered.length > MDF_UNREGISTERED_LIMIT;
+  return { unregistered: unregistered.slice(0, MDF_UNREGISTERED_LIMIT), truncated };
 }

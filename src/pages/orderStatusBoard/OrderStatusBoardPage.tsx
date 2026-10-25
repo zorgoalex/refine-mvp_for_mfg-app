@@ -1598,9 +1598,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const mdfHybridSnapshot = mdfHybridActive ? mdfPublishedBoard.session?.snapshot ?? null : null;
   const mdfHybridBoard = useMemo<MdfHybridBoard | null>(
     () => mdfHybridSnapshot && cncToday
-      ? buildMdfHybridBoard({ legacyColumns: cncToday.columns, snapshot: mdfHybridSnapshot })
+      ? buildMdfHybridBoard({ legacyColumns: cncToday.columns, snapshot: mdfHybridSnapshot,
+          searchOrderIds: mdfPublishedBoard.searchOrderIds })
       : null,
-    [cncToday, mdfHybridSnapshot],
+    [cncToday, mdfHybridSnapshot, mdfPublishedBoard.searchOrderIds],
   );
   const mdfHybridBoardRef = useRef<MdfHybridBoard | null>(null);
   mdfHybridBoardRef.current = mdfHybridBoard;
@@ -3373,6 +3374,15 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 onFocusCard={focusMdfHistoryCard}
               />
             ) : !cncHasRenderableColumns ? (
+              <>
+              {mdfHybridSnapshot?.unregisteredTruncated && (
+                <Alert
+                  type="info"
+                  showIcon
+                  className="status-board-mdf-truncated"
+                  message="Не учтённых новым учётом файлов больше, чем показано: показаны файлы выбранной карточки, искомых заказов и самые новые. Уточните период или найдите заказ."
+                />
+              )}
               <Empty
                 description={
                   allCncColumnsHidden
@@ -3384,7 +3394,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                     : 'CNC-работ на сегодня нет'
                 }
               />
+              </>
             ) : (
+              <>
+              {mdfHybridSnapshot?.unregisteredTruncated && (
+                <Alert
+                  type="info"
+                  showIcon
+                  className="status-board-mdf-truncated"
+                  message="Не учтённых новым учётом файлов больше, чем показано: показаны файлы выбранной карточки, искомых заказов и самые новые. Уточните период или найдите заказ."
+                />
+              )}
               <CncTelegramTodayColumns
                 columns={cncRenderColumns}
                 readinessColumns={cncActiveColumns}
@@ -3429,6 +3449,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 onMove={moveCncCard}
                 showFinancials={canViewFinancials}
               />
+              </>
             )
           ) : columns.length === 0 ? (
             <Empty

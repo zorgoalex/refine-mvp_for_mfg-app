@@ -90,6 +90,13 @@ export const MdfPublishedBoardView: React.FC<MdfPublishedBoardViewProps> = ({
       <div className="mdf-published-board__search">
         <MdfPublishedOrderSearch loading={searchResolving} onSearch={onRequestSearchOrderNames} />
       </div>
+      {/* Over the bounds some unregistered files are missing — said on an empty board too. */}
+      {snapshot.unregisteredTruncated && (
+        <Typography.Text type="warning" className="mdf-published-board__unregistered-truncated">
+          Ожидающих учёта файлов больше, чем показано: показаны файлы выбранной карточки, искомых заказов и самые
+          новые. Уточните период или найдите заказ.
+        </Typography.Text>
+      )}
       {!hasAnyCards ? (
         <Empty description="По выбранным фильтрам МДФ-карточек нет" />
       ) : (
@@ -146,6 +153,7 @@ export const MdfPublishedBoardView: React.FC<MdfPublishedBoardViewProps> = ({
               <Typography.Text type="secondary">
                 Найдены в производстве, но ещё не приняты производственным учётом. Только просмотр.
               </Typography.Text>
+
               <ul className="mdf-published-board__unregistered-list">
                 {unregistered.map((source) => (
                   <li key={`${source.kind}:${source.id}`}>

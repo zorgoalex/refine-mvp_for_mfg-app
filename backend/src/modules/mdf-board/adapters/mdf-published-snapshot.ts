@@ -54,7 +54,7 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
     if (!state) throw new ApiError(503,'MDF_STATE_UNAVAILABLE','Состояние МДФ-доски недоступно');
     if (state.mode!=='active' && state.mode!=='read_only') return { schemaVersion: 1 as const, ...state,
       cards: [],positions: [],members: [],pendingJobs: [],trackedJobs: [],presentation: [],progress: [],orders: [],
-      unregistered: [],issues: ['MDF_PUBLICATION_NOT_ACTIVE'] };
+      unregistered: [],unregisteredTruncated: false,issues: ['MDF_PUBLICATION_NOT_ACTIVE'] };
     const scope = policyScopeSetsForUser(user).orders.view;
     const owners = mdfAllowedOrdersSql(user);
     // Card owners = current published members ∪ demand/evidence owners of the exact
@@ -151,8 +151,9 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
       cardRows.map(c => ({ kind: c.kind,id: c.id,acceptedRevision: c.acceptedRevision,allOwnersAllowed: fullyVisible(c) })),
       [...cardOwnerIds,...members.map(m => m.orderId),...(query.orderIds ?? []),...(query.searchOrderIds ?? [])]);
     checkLimit(progress,20000);
-    const unregistered = await loadMdfUnregisteredSources(tx,owners,user.id,state);
-    checkLimit(unregistered,200);
+    // Informational lists: over their bounds they say so (`unregisteredTruncated`) — never make the board unavailable.
+    const { unregistered, truncated: unregisteredTruncated } = await loadMdfUnregisteredSources(tx,owners,user.id,
+      state,{ orderIds: query.searchOrderIds ?? [], focus: query.focus ?? null });
     const pendingJobs = await loadPending(tx,owners,user.id,state,query,scope.includes('all'));
     const trackedJobs = await loadTracked(tx,owners,user.id,query.jobIds ?? [],scope.includes('all'));
     const selectedOwners = [...new Set([...members.map(m => m.orderId),...cardOwnerIds,...(query.orderIds ?? []),
@@ -167,7 +168,7 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
     [user.id,selectedOwners])).rows;
     checkLimit(positions,10000);
     return { schemaVersion: 1 as const, ...state, cards,positions,members,pendingJobs,trackedJobs,
-      presentation,progress,orders,unregistered,
+      presentation,progress,orders,unregistered,unregisteredTruncated,
       issues: state.mode==='read_only' ? ['MDF_READ_ONLY'] : [] };
   });
 }

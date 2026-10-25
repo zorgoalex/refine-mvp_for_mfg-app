@@ -1059,6 +1059,38 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
       expect(await placed(f.packetId)).toHaveLength(0);
     });
 
+    it('more than 200 unregistered sources: the board shows the newest 200 and says so instead of failing', async () => {
+      const f = await hdf({ material: 'МДФ 16 мм' });
+      const searched = await hdf({ material: 'МДФ 16 мм' }); // older than every bulk file below
+      await db.query("UPDATE cnc_telegram_packets SET source_created_at='2026-09-21T01:00:00Z' WHERE packet_id=$1", [searched.packetId]);
+      await db.query(`INSERT INTO cnc_telegram_packets(packet_id,material_name,comments_json,mdf_board_card_kind,rework,
+          completion_status,thumbs_up,workday,source_created_at)
+        SELECT gen_random_uuid(),'МДФ 16 мм','[]','machine_file',false,'pending',false,'2026-09-21'::date,
+          '2026-09-21T05:00:00Z'::timestamptz + make_interval(secs => g) FROM generate_series(1,205) g`);
+      await db.query(`INSERT INTO cnc_telegram_packet_items(packet_item_id,packet_id,source_item_key,match_order_id,match_detail_id,
+          match_status,quantity) SELECT gen_random_uuid(),p.packet_id,'bulk',$1,$2,'matched',1 FROM cnc_telegram_packets p
+        WHERE p.source_created_at > '2026-09-21T05:00:00Z' AND p.source_created_at < '2026-09-21T06:00:00Z'`, [f.orderId, f.detailId]);
+      try {
+        const snapshot = await readMdfPublishedSnapshot(database, admin, { dateTo: '2026-09-21' });
+        expect(snapshot.unregistered).toHaveLength(200);
+        expect(snapshot.unregisteredTruncated).toBe(true);
+        expect(snapshot.issues).toEqual([]);
+        expect(snapshot.unregistered.map(s => s.id)).not.toContain(searched.packetId);
+        // A searched order's file is taken first, whatever its age.
+        const found = await readMdfPublishedSnapshot(database, admin, { dateTo: '2026-09-21', searchOrderIds: [searched.orderId] });
+        expect(found.unregistered.map(s => s.id)).toContain(searched.packetId);
+        expect(found.unregisteredTruncated).toBe(true);
+        // The focused card comes first even without a search.
+        const focused = await readMdfPublishedSnapshot(database, admin, { dateTo: '2026-09-21',
+          focus: { kind: 'packet', id: searched.packetId } });
+        expect(focused.unregistered[0]?.id).toBe(searched.packetId);
+      } finally {
+        await db.query(`DELETE FROM cnc_telegram_packet_items WHERE source_item_key='bulk'`);
+        await db.query(`DELETE FROM cnc_telegram_packets WHERE source_created_at > '2026-09-21T05:00:00Z'
+          AND source_created_at < '2026-09-21T06:00:00Z'`);
+      }
+    });
+
     it('two concurrent forward moves of one file: exactly one commits, the other sees the moved column', async () => {
       const f = await hdf();
       const results = await Promise.allSettled([repo.upsert(f.command('completed','parsed')),

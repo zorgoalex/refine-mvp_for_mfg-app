@@ -114,6 +114,8 @@ export interface MdfPublishedSnapshot {
   progress: MdfPublishedCardProgress[];
   orders: MdfPublishedOrderName[];
   unregistered: MdfPublishedUnregisteredSource[];
+  /** The unregistered bounds were reached: `unregistered` holds the focused, searched, then newest sources. */
+  unregisteredTruncated?: boolean;
   issues: string[];
 }
 

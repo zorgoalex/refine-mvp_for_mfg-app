@@ -16,6 +16,7 @@ import { recordMdfReceipt, recordMdfLineageReceipt, type MdfReceiptInput, type M
 import { loadMdfClosedOrders, loadMdfHistoricalCoverageOrders, reopenMdfClosure } from './mdf-closed-orders';
 import { mdfDemandDigest } from '../domain/mdf-execution-context';
 import { PgMdfCorrectionCommand } from './mdf-correction-command';
+import { loadMdfUnregisteredSources } from './mdf-published-presentation';
 import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
 import { createMdfCorrectionPgFixture } from './mdf-correction-test-fixture.integration';
 import {
@@ -1080,6 +1081,49 @@ describe.skipIf(!enabled)('MDF §5.7b baseline population, isolated PostgreSQL s
   // =====================================================================================================
   // 6b. Reset is refused once ANY run has been activated, regardless of the run_id passed.
   // =====================================================================================================
+  it('board: files of orders closed by the baseline are not unregistered sources; a mixed or drifted one still is', async () => {
+    const closed = await seedOrder({ orderStatusId: 2, quantity: 4 });
+    const open = await seedOrder({ orderStatusId: 1, quantity: 4 });
+    await seedHandCraftedClosedOrder(closed.orderId, [{ orderId: closed.orderId, detailId: closed.detailId, quantity: 4 }]);
+    const closedOnly = await seedPacket({ completed: true, items: [{ line: 'c', orderId: closed.orderId, detailId: closed.detailId, quantity: 4 }] });
+    const openOnly = await seedPacket({ completed: false, items: [{ line: 'o', orderId: open.orderId, detailId: open.detailId, quantity: 4 }] });
+    const mixed = await seedPacket({ completed: false, items: [{ line: 'c', orderId: closed.orderId, detailId: closed.detailId, quantity: 1 },
+      { line: 'o', orderId: open.orderId, detailId: open.detailId, quantity: 1 }] });
+    const day = new Date().toISOString().slice(0, 10);
+    const read = () => database.transaction(tx2 => loadMdfUnregisteredSources(tx2,
+      'SELECT order_id FROM orders WHERE $1::text IS NOT NULL', '1', { dateFrom: day, dateTo: day }));
+    const first = await read();
+    expect(first.unregistered.map(s => s.id)).not.toContain(closedOnly);
+    expect(first.unregistered.map(s => s.id)).toEqual(expect.arrayContaining([openOnly, mixed]));
+    expect(first.truncated).toBe(false);
+    // Canonical boundary: a changed demand reopens the order for discovery, so its file is pending again (not history).
+    await fixture.client.query('UPDATE order_details SET quantity=6 WHERE detail_id=$1', [closed.detailId]);
+    const drifted = await read();
+    expect(drifted.unregistered.map(s => s.id)).toContain(closedOnly);
+  });
+
+  it('board: closed-order checks stay within the demand loader bound (big orders never fail the snapshot)', async () => {
+    const big = async (details: number, close: boolean) => {
+      const o = await seedOrder({ orderStatusId: 2, quantity: 1 });
+      await fixture.client.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,delete_flag,material_id)
+        SELECT $1*100000+g,$2,g+1,1,1,false,1 FROM generate_series(1,$3) g`, [o.orderId, o.orderId, details - 1]);
+      const demand = (await fixture.client.query<{ detailId: number }>(`SELECT detail_id::float8 "detailId" FROM order_details
+        WHERE order_id=$1 ORDER BY detail_id`, [o.orderId])).rows.map(r => ({ orderId: o.orderId, detailId: r.detailId, quantity: 1 }));
+      if (close) await seedHandCraftedClosedOrder(o.orderId, demand);
+      const packetId = await seedPacket({ completed: true, items: [{ line: 'b', orderId: o.orderId, detailId: o.detailId, quantity: 1 }] });
+      return { ...o, packetId };
+    };
+    const a = await big(2600, true), b = await big(2600, true), huge = await big(5100, true);
+    const day = new Date().toISOString().slice(0, 10);
+    const result = await database.transaction(tx2 => loadMdfUnregisteredSources(tx2,
+      'SELECT order_id FROM orders WHERE $1::text IS NOT NULL', '1', { dateFrom: day, dateTo: day }));
+    const ids = result.unregistered.map(s => s.id);
+    expect(ids).not.toContain(a.packetId);
+    expect(ids).not.toContain(b.packetId);
+    // An order over the loader bound by itself cannot be proven closed: its file stays visible, the board does not fail.
+    expect(ids).toContain(huge.packetId);
+  }, 60000);
+
   it('reset is refused once the engine has been activated', async () => {
     const dummyRunId = randomUUID();
     await database.transaction(async t => {

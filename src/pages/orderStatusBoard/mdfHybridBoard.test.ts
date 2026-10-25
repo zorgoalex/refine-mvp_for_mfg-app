@@ -142,6 +142,24 @@ describe('hybrid MDF board: legacy screen on engine data', () => {
     expect(where(board, 'cut-result:5')).toBeUndefined();
   });
 
+  it('a searched order\'s unregistered file outside the legacy period appears as an informational card', () => {
+    const snap = snapshot({ unregistered: [{ kind: 'packet', id: 'u-old', displayName: 'E2E old.nc', sourceCreatedAt: '2026-09-01',
+      orderIds: [7] }, { kind: 'packet', id: 'u-other', displayName: 'E2E other.nc', sourceCreatedAt: '2026-09-01', orderIds: [8] }] });
+    const board = buildMdfHybridBoard({ legacyColumns: columns(), snapshot: snap, searchOrderIds: [7] });
+    expect(where(board, 'u-old')).toBe('parsed');
+    expect(board.meta.get('packet:u-old')).toMatchObject({ source: 'unregistered', movable: false });
+    expect(board.columns.find(c => c.key === 'parsed')!.packets[0]).toMatchObject({ programName: 'E2E old.nc',
+      items: [expect.objectContaining({ matchOrderId: 7, orderName: 'E2E-Тест 7' })] });
+    expect(where(board, 'u-other')).toBeUndefined();
+    expect(where(buildMdfHybridBoard({ legacyColumns: columns(), snapshot: snap }), 'u-old')).toBeUndefined();
+  });
+
+  it('a terminal legacy card the engine does not know is not shown (absence never proves history)', () => {
+    const terminal: CncTelegramTodayColumn[] = [
+      { key: 'completed_laminated', title: 'Готово', total: 1, packets: [packet('old')], baths: [], bazisCutSets: [] }];
+    expect(where(buildMdfHybridBoard({ legacyColumns: terminal, snapshot: snapshot() }), 'old')).toBeUndefined();
+  });
+
   it('non-MDF machine files keep their legacy column and their own manual moves only', () => {
     const hdf = packet('h1', { materialName: 'ХДФ 3 мм' });
     const board = buildMdfHybridBoard({ legacyColumns: columns([], [], [hdf]),

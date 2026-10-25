@@ -63,6 +63,8 @@ const UNREGISTERED_REASON = 'Файл ещё не учтён в производ
 export function buildMdfHybridBoard(input: {
   legacyColumns: readonly CncTelegramTodayColumn[];
   snapshot: MdfPublishedSnapshot;
+  /** Searched orders: their unregistered files outside the legacy period still appear (minimal, read-only). */
+  searchOrderIds?: readonly number[];
 }): MdfHybridBoard {
   const { snapshot } = input;
   const readOnly = snapshot.mode === 'read_only';
@@ -134,7 +136,7 @@ export function buildMdfHybridBoard(input: {
       const key = mdfHybridCardKey('bath', bath.bathCardId);
       if (seen.has(key)) continue;
       const card = cards.get(key);
-      if (!card) continue; // Baths are always MDF: the engine decides whether one exists.
+      if (!card) continue; // Baths are always MDF and registered by the baseline: the engine decides.
       const isBound = bound(key, bath.mdfPresentationDigest);
       place(key, engineMeta(card, !isBound),
         withEngineBathCoverage(isBound ? publishedBathRows(bath, card, snapshot) : minimalBath(card, presentation.get(key), snapshot),
@@ -150,6 +152,13 @@ export function buildMdfHybridBoard(input: {
       : card.kind === 'bath' ? withEngineBathCoverage(minimalBath(card, p, snapshot), card, snapshot)
         : minimalBazisSet(card, p, snapshot);
     place(key, engineMeta(card, true), minimal);
+  }
+  // A searched order's unregistered file outside the legacy period: an informational card from the snapshot only.
+  const searched = new Set(input.searchOrderIds ?? []);
+  for (const source of searched.size ? snapshot.unregistered : []) {
+    const key = mdfHybridCardKey(source.kind, source.id);
+    if (seen.has(key) || !source.orderIds.some(id => searched.has(id))) continue;
+    place(key, unregisteredMeta(source.kind, source.id, 'parsed'), unregisteredCard(source, snapshot));
   }
 
   return {
@@ -177,6 +186,23 @@ export function mdfHybridManualMoves(manualMoves: CncBoardManualMoveState,
     if (meta.get(key)?.source === 'nonMdf') result[key] = value;
   }
   return result;
+}
+
+function unregisteredCard(source: MdfPublishedSnapshot['unregistered'][number],
+  snapshot: MdfPublishedSnapshot): CncTelegramPacket | CncTelegramBazisCutSetCard {
+  const card: MdfPublishedCard = { kind: source.kind, id: source.id, displayName: source.displayName, column: null,
+    sourceCreatedAt: source.sourceCreatedAt, acceptedRevision: null, receivedRevision: '', commandToken: null, issues: [] };
+  if (source.kind === 'bazisCutSet') {
+    return { ...minimalBazisSet(card, undefined, snapshot), items: source.orderIds.map(orderId => ({ orderId,
+      orderName: orderName(snapshot, orderId), orderDeleted: false, detailId: null, detailNumber: null, widthMm: null,
+      heightMm: null, materialName: '', quantity: 0, packedOrLater: false })) };
+  }
+  const minimal = minimalPacket(card, undefined, snapshot);
+  const items = source.orderIds.map((orderId, index) => ({ packetItemId: `${source.id}:${index}`, sourceItemKey: String(index),
+    orderName: orderName(snapshot, orderId), orderId, detailNumber: null, widthMm: null, heightMm: null, quantity: 0,
+    source: 'manual' as const, confidence: 1, matchOrderId: orderId, matchDetailId: null, matchDetailQuantity: null,
+    matchStatus: 'matched' as const, reviewNote: null, laminatedOrLater: false }));
+  return { ...minimal, items, itemCount: items.length, itemQuantityTotal: 0 };
 }
 
 const membersOf = (snapshot: MdfPublishedSnapshot, card: MdfPublishedCard) =>

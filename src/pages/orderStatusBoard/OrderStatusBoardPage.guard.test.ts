@@ -1908,7 +1908,9 @@ describe('hybrid MDF board wiring (engine active/read_only)', () => {
     expect(page).toContain('&& featureFlags.mdfHybridBoard');
     expect(page).toContain("&& searchParams.get('mdfView') !== 'engine'");
     expect(page).toContain('&& (!mdfHybridActive || (!cncToday && loadError !== null)) ? (');
-    expect(page).toContain('buildMdfHybridBoard({ legacyColumns: cncToday.columns, snapshot: mdfHybridSnapshot })');
+    expect(page).toContain('buildMdfHybridBoard({ legacyColumns: cncToday.columns, snapshot: mdfHybridSnapshot,');
+    expect(page).toContain('searchOrderIds: mdfPublishedBoard.searchOrderIds })');
+    expect(page.split('mdfHybridSnapshot?.unregisteredTruncated &&').length - 1).toBe(2);
     expect(page).toContain(': mdfHybridBoard?.columns ?? cncToday?.columns ?? [],');
     expect(page).toContain('mdfHybrid={mdfHybridBoard && mdfHybridSnapshot ? { board: mdfHybridBoard, snapshot: mdfHybridSnapshot } : null}');
   });
@@ -1933,6 +1935,12 @@ describe('hybrid MDF board wiring (engine active/read_only)', () => {
     expect(legacyMove.indexOf('moveMdfHybridCard(hybridBoard, kind, cardId')).toBeLessThan(
       legacyMove.indexOf('isMdfBackwardMove(kind, sourceColumn, targetColumn)'));
     expect(orderStatusBoardApi).toContain("{ skipAuthRefresh: true, headers: { 'Idempotency-Key': idempotencyKey } }");
+  });
+
+  it('the engine view says it is truncated on an empty board too', () => {
+    const view = readFileSync('src/pages/orderStatusBoard/MdfPublishedBoardView.tsx', 'utf8');
+    expect(view.indexOf('{snapshot.unregisteredTruncated && (')).toBeGreaterThan(-1);
+    expect(view.indexOf('{snapshot.unregisteredTruncated && (')).toBeLessThan(view.indexOf('{!hasAnyCards ? ('));
   });
 
   it('order search reaches old/completed engine cards; unknown bath coverage is not shown as zero', () => {
