@@ -1,5 +1,5 @@
 import type { DatabaseClient } from '../../../database/database.types';
-import { CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE as MDF, CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE as OTHER } from '../../../shared/cnc-material';
+import { mdfDemandMaterialSql } from '../../../shared/cnc-material';
 import { MdfNeedsAttention, type MdfSourceKind } from '../application/mdf-job-runner';
 import { mdfDemandDigest, type MdfExecutionContext } from '../domain/mdf-execution-context';
 import type { MdfPositionQuantity } from '../domain/mdf-quantities';
@@ -31,8 +31,8 @@ export async function loadMdfExecutionDetails(tx: DatabaseClient, orderIds: read
     LEFT JOIN sheet_material_types mt ON mt.sheet_material_type_id=d.sheet_material_type_id
     LEFT JOIN materials m ON m.material_id=d.material_id
     WHERE d.order_id=ANY($1::bigint[]) AND NOT d.delete_flag
-      AND COALESCE(mt.name,m.material_name,'') ~* $2 AND COALESCE(mt.name,m.material_name,'') !~* $3
-    ORDER BY d.order_id,d.detail_id LIMIT 5001`, [orderIds,MDF,OTHER])).rows;
+      AND ${mdfDemandMaterialSql('mt','m')}
+    ORDER BY d.order_id,d.detail_id LIMIT 5001`, [orderIds])).rows;
   if (rows.length > 5000) throw new MdfNeedsAttention('MDF_DEMAND_LIMIT');
   for (const d of rows) if (![d.orderId,d.detailId].every(n => Number.isSafeInteger(n) && n>0)
     || !Number.isSafeInteger(d.quantity) || d.quantity<0) throw new MdfNeedsAttention('MDF_INVALID_DEMAND');

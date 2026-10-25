@@ -494,7 +494,16 @@ export class PgCncTelegramRepository
     const workdayTo = command.workdayTo ?? workday;
     const requestedFrom = command.workdayFrom ?? workday;
     if (command.operationalWindow === 'two_months') {
-      return loadBoundedToday(this.database, command.currentUser, workdayTo, requestedFrom, command.focusBathCardId);
+      if (!await mdfEngineOwnsBoard(this.database)) {
+        return loadBoundedToday(this.database, command.currentUser, workdayTo, requestedFrom, command.focusBathCardId);
+      }
+      // Hybrid board: each MDF card's presentation and its digest come from ONE snapshot, so the board can bind it to
+      // the engine's accepted revision (equal digest ⇒ the shown composition is the one the command token acts on).
+      return this.database.transaction(async (tx) => {
+        await tx.query('SET TRANSACTION READ ONLY');
+        const today = await loadBoundedToday(tx, command.currentUser, workdayTo, requestedFrom, command.focusBathCardId);
+        return withMdfPresentationDigests(tx, today);
+      }, { isolation: 'repeatable read' });
     }
     const monthStart = mdfOperationalMonthStart(workdayTo);
     const workdayFrom = command.operationalWindow === 'month' && requestedFrom < monthStart
@@ -7491,6 +7500,34 @@ async function loadBoundedToday(
     operationalWindow: { dateFrom, dateTo }, historicalBathReadiness: [], historicalReadinessSources };
 }
 
+/** Engine `active`/`read_only` owns the MDF board (schema-tolerant: no engine state ⇒ legacy). */
+async function mdfEngineOwnsBoard(database: DatabaseClient): Promise<boolean> {
+  const row = (await database.query<{ owns: boolean }>(`SELECT to_regclass('mdf_engine_state') IS NOT NULL
+    AND EXISTS (SELECT 1 FROM mdf_engine_state WHERE singleton AND mode IN ('active','read_only')) owns`)).rows[0];
+  return row?.owns === true;
+}
+
+/** Same transaction as the cards: digest of the raw composition-sensitive presentation (migration 192). */
+async function withMdfPresentationDigests(database: DatabaseClient,
+  today: CncTelegramTodayResponseDto): Promise<CncTelegramTodayResponseDto> {
+  const keys = today.columns.flatMap(column => [
+    ...column.packets.map(card => ['packet', card.packetId]),
+    ...column.baths.map(card => ['bath', card.bathCardId]),
+    ...column.bazisCutSets.map(card => ['bazisCutSet', String(card.bazisCutSetId)]),
+  ]);
+  if (!keys.length) return today;
+  const digests = new Map((await database.query<{ kind: string; id: string; digest: string | null }>(`SELECT s.kind,s.id,
+    mdf_source_presentation_digest(s.kind,s.id) digest FROM unnest($1::text[],$2::text[]) s(kind,id)`,
+  [keys.map(k => k[0]), keys.map(k => k[1])])).rows.map(row => [`${row.kind}:${row.id}`, row.digest]));
+  const digest = (kind: string, id: string) => digests.get(`${kind}:${id}`) ?? null;
+  return { ...today, columns: today.columns.map(column => ({ ...column,
+    packets: column.packets.map(card => ({ ...card, mdfPresentationDigest: digest('packet', card.packetId) })),
+    baths: column.baths.map(card => ({ ...card, mdfPresentationDigest: digest('bath', card.bathCardId) })),
+    bazisCutSets: column.bazisCutSets.map(card => ({ ...card,
+      mdfPresentationDigest: digest('bazisCutSet', String(card.bazisCutSetId)) })),
+  })) };
+}
+
 function sourceOrderIds(columns: CncTelegramTodayColumnDto[]): number[] {
   return [...new Set(columns.flatMap(column => [
     ...column.packets.flatMap(card => card.items.map(item => item.matchOrderId ?? item.orderId)),
@@ -8211,6 +8248,19 @@ function compareBathItems(left: CncTelegramBathItemDto, right: CncTelegramBathIt
 
 function compareBathSheets(left: CncTelegramBathSheetDto, right: CncTelegramBathSheetDto): number {
   return left.sheetNumber - right.sheetNumber || left.cutGroupId - right.cutGroupId;
+}
+
+/** A machine file's column exactly as the board shows it: the server column, then its manual move unless the server
+ * column is terminal (same rule as the board's `resolveCncManualTarget`). Null when the packet does not exist. */
+export async function loadCncPacketBoardColumn(database: DatabaseClient,
+  packetId: string): Promise<'parsed' | 'completed' | 'completed_laminated' | null> {
+  const rows = await database.query<PacketJoinedRow>(packetSelectSql('p.packet_id = $1::uuid'), [packetId]);
+  const packet = mapPacketRows(rows.rows)[0];
+  if (!packet) return null;
+  const server = packetColumnKey(packet);
+  if (server === 'completed_laminated') return server;
+  const manual = packetManualTargetColumns.get(packet);
+  return manual === 'parsed' || manual === 'completed' || manual === 'completed_laminated' ? manual : server;
 }
 
 function packetColumnKey(

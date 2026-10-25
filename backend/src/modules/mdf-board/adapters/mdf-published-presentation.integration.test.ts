@@ -34,7 +34,7 @@ describe.skipIf(!enabled)('MDF published presentation, isolated PostgreSQL schem
     ]);
     await fixture.client.query('ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id)');
     await fixture.applyMigrations([
-      '165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '174_mdf_execution_context.sql',
+      '165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql',
       '175_mdf_command_placement.sql', '178_mdf_correction_receipts.sql', '179_mdf_active_return.sql',
       '182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql', '187_mdf_bazis_refill_rows.sql',
       '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql',
@@ -139,6 +139,10 @@ describe.skipIf(!enabled)('MDF published presentation, isolated PostgreSQL schem
         programName: 'CNC#_E2E.nc', materialName: 'МДФ фасад 10 мм' },
       live: { comments: ['первый комментарий'], rework: false } });
     expect(first.orders).toEqual(expect.arrayContaining([{ orderId: o.orderId, orderName: `E2E-П ${o.orderId}` }]));
+    // Hybrid board: the accepted digest equals the raw digest a legacy read of the same data computes.
+    const raw = async () => (await fixture.client.query<{ d: string }>("SELECT mdf_source_presentation_digest('packet',$1) d",
+      [packetId])).rows[0].d;
+    expect(presentationOf(first, packetId).acceptedDigest).toBe(await raw());
     // Live annotation: current value, never stale.
     await fixture.client.query(`UPDATE cnc_telegram_packets SET comments_json='["переделка CNC#_E2E.nc"]'::jsonb,rework=true
       WHERE packet_id=$1`, [packetId]);
@@ -146,7 +150,9 @@ describe.skipIf(!enabled)('MDF published presentation, isolated PostgreSQL schem
     expect(commented).toMatchObject({ stale: false, live: { comments: ['переделка CNC#_E2E.nc'], rework: true } });
     // Same members, changed dimensions ⇒ stale (minimal card).
     await fixture.client.query('UPDATE cnc_telegram_packet_items SET width_mm=301 WHERE packet_id=$1', [packetId]);
-    expect(presentationOf(await read(), packetId)).toMatchObject({ stale: true, composition: null });
+    expect(presentationOf(await read(), packetId)).toMatchObject({ stale: true, composition: null, acceptedDigest: null });
+    // A legacy card read now carries a digest that differs from the accepted one: the hybrid board shows it minimal.
+    expect(await raw()).not.toBe(presentationOf(first, packetId).acceptedDigest);
     await fixture.client.query('UPDATE cnc_telegram_packet_items SET width_mm=300 WHERE packet_id=$1', [packetId]);
     expect(presentationOf(await read(), packetId).stale).toBe(false);
     await fixture.client.query("UPDATE cnc_telegram_packets SET sheet_image_storage_key='e2e/new.png' WHERE packet_id=$1", [packetId]);

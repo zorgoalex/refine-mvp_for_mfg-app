@@ -66,7 +66,7 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
       ALTER TABLE ${fixture.schema}.outbox_events ALTER COLUMN outbox_event_id SET DEFAULT gen_random_uuid();
       CREATE UNIQUE INDEX e2e_correction_audit_related ON ${fixture.schema}.audit_log_related_entity(audit_id,entity_type,entity_id);
       CREATE UNIQUE INDEX e2e_correction_outbox ON ${fixture.schema}.outbox_events(idempotency_key)`);
-    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql',
+    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql',
       '175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql']) await fixture.applyMigrations([file]);
     await fixture.applyMigrations(['179_mdf_active_return.sql']);
     await fixture.applyMigrations(['180_mdf_cnc_observations.sql']);
@@ -868,6 +868,10 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     expect(basisDebit).toBeDefined();
     expect((await fixture.client.query(`SELECT column_key FROM mdf_published_sources
       WHERE source_kind='packet' AND source_id=$1`, [f.source.id])).rows[0].column_key).toBe('completed');
+    // Hybrid board: bath coverage is frozen with its publication, never read from live allocations.
+    const covered = async () => (await fixture.client.query(`SELECT covered_quantity::text c FROM mdf_published_source_members
+      WHERE source_kind='bath' AND source_id=$1 AND order_id=$2 AND detail_id=$3`, [f.bath.id,f.orderId,f.detailId])).rows[0]?.c;
+    expect(await covered()).toBe('10');
     const request = { sourceToken: f.token, targetColumn: 'parsed' as const };
     const preview = await command.preview(admin, f.source, request, 'E2E-split-preview');
     expect(preview.status).toBe('ready');
@@ -909,6 +913,8 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     expect((await fixture.client.query(`SELECT 1 FROM mdf_bath_allocations WHERE bath_id=$1 AND evidence_line_id=$2
       AND state='consumed' AND bath_revision=(SELECT accepted_revision_key FROM mdf_source_heads WHERE source_kind='bath' AND source_id=$1)`,
     [f.bath.id, originalBasisLine])).rows).toHaveLength(1);
+    // Correction committed, publication pending: live coverage is already 6, the published one stays 10 (old column).
+    expect(await covered()).toBe('10');
     const processed: string[] = [];
     for (let i=0;i<result.jobIds.length;i++) {
       const run = await runner.processOne();
@@ -922,6 +928,7 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
     expect((await fixture.client.query(`SELECT cut_quantity::text,credited_cut::text,credited_rolled::text,remaining::text
       FROM mdf_published_positions WHERE order_id=$1 AND detail_id=$2`, [f.orderId,f.detailId])).rows[0])
       .toEqual({ cut_quantity: '0', credited_cut: '0', credited_rolled: '6', remaining: '4' });
+    expect(await covered()).toBe('6');
     expect((await fixture.client.query('SELECT production_status_id FROM order_details WHERE detail_id=$1',[f.detailId])).rows[0]
       .production_status_id).toBe(1);
   });

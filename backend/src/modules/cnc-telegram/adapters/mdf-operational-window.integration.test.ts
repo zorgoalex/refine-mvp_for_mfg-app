@@ -1018,4 +1018,61 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     await expect(client.query('UPDATE pg_temp.cut_result_board_projection SET is_vacuum=false WHERE cut_result_id=1')).rejects.toThrow('append-only');
     await expect(client.query('DELETE FROM pg_temp.cut_result_board_projection WHERE cut_result_id=1')).rejects.toThrow('append-only');
   });
+
+  it('hybrid: an excluded-material file yields no MDF events even with a manual move (skip under active loses nothing)', async () => {
+    await client.query(`UPDATE pg_temp.cnc_telegram_packets SET mdf_board_card_kind='machine_file',material_name='ХДФ 3 мм'
+      WHERE packet_id='00000000-0000-0000-0000-000000000001'`);
+    await client.query(`INSERT INTO pg_temp.mdf_board_manual_moves(card_kind,card_id,target_column)
+      VALUES('packet','00000000-0000-0000-0000-000000000001','completed')`);
+    expect(await loadMdfBoardEvents(client as unknown as TransactionClient,
+      { kind: 'packet', id: '00000000-0000-0000-0000-000000000001' })).toEqual([]);
+    await client.query(`UPDATE pg_temp.cnc_telegram_packets SET material_name='МДФ 10мм'
+      WHERE packet_id='00000000-0000-0000-0000-000000000001'`);
+    expect((await loadMdfBoardEvents(client as unknown as TransactionClient,
+      { kind: 'packet', id: '00000000-0000-0000-0000-000000000001' })).length).toBeGreaterThan(0);
+  });
+
+  it('hybrid: engine active ⇒ one RR read-only snapshot with each MDF card digest; legacy ⇒ no digest', async () => {
+    await seed(10, [1], '2026-09-06T12:00:00+05');
+    await client.query(`UPDATE pg_temp.cnc_telegram_packets SET mdf_board_card_kind='machine_file',updated_at=now(),
+      source_version=1; UPDATE pg_temp.cnc_telegram_packet_items SET packet_item_id=COALESCE(packet_item_id,gen_random_uuid())`);
+    const legacy = (await boundedLoad()).response;
+    expect(legacy.columns.flatMap(c => c.packets).every(p => !('mdfPresentationDigest' in p))).toBe(true);
+    await client.query(`CREATE TEMP TABLE mdf_engine_state(singleton boolean PRIMARY KEY, mode text NOT NULL);
+      INSERT INTO pg_temp.mdf_engine_state VALUES(true,'active')`);
+    try {
+      const calls: string[] = [];
+      const run = (sql: string, params?: unknown[]) => { calls.push(sql); return client.query(sql, params ?? []); };
+      const repo = new PgCncTelegramRepository({ query: run, transaction: async (handler: (tx: unknown) => unknown,
+        options: { isolation?: string }) => {
+        await run('BEGIN');
+        try {
+          if (options?.isolation) await run(`SET TRANSACTION ISOLATION LEVEL ${options.isolation.toUpperCase()}`);
+          const result = await handler({ query: run, raw: client });
+          await run('COMMIT');
+          return result;
+        } catch (error) { await run('ROLLBACK'); throw error; }
+      } } as never);
+      const response = await repo.listToday({ currentUser: { id: '158', role: 'admin', permissions: [] } as never,
+        operationalWindow: 'two_months', workdayFrom: '2026-09-06', workdayTo: '2026-09-06' });
+      const packet = response.columns.flatMap(c => c.packets)[0];
+      const bath = response.columns.flatMap(c => c.baths)[0];
+      const expected = (await client.query(`SELECT mdf_source_presentation_digest('packet',$1) p,
+        mdf_source_presentation_digest('bath',$2) b`, [packet.packetId, bath.bathCardId])).rows[0];
+      expect(packet.mdfPresentationDigest).toBe(expected.p);
+      expect(bath.mdfPresentationDigest).toBe(expected.b);
+      expect(packet.mdfPresentationDigest).toMatch(/^[a-f0-9]{64}$/);
+      // Every loader statement and the digest read run after the snapshot is fixed, inside one transaction.
+      const begin = calls.indexOf('BEGIN'), commit = calls.indexOf('COMMIT');
+      expect(calls.slice(begin + 1, begin + 3)).toEqual(['SET TRANSACTION ISOLATION LEVEL REPEATABLE READ',
+        'SET TRANSACTION READ ONLY']);
+      const digestCall = calls.findIndex(sql => sql.includes('mdf_source_presentation_digest(s.kind,s.id)'));
+      expect(digestCall).toBeGreaterThan(begin + 2);
+      expect(digestCall).toBeLessThan(commit);
+      expect(calls.slice(begin + 3, commit).length).toBeGreaterThan(2);
+      expect(calls.slice(commit + 1).some(sql => /cnc_telegram_packets|cut_result/.test(sql))).toBe(false);
+    } finally {
+      await client.query('DROP TABLE IF EXISTS pg_temp.mdf_engine_state');
+    }
+  });
 });

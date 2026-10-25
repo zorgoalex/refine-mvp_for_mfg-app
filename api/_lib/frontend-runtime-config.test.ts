@@ -40,6 +40,7 @@ describe('frontend runtime config delivery', () => {
         backendOnec: false,
         filmCatalogImport: false,
         inventory: false,
+        mdfHybridBoard: true,
       },
       observability: { performanceRum: false },
       rollouts: {
@@ -125,6 +126,7 @@ describe('frontend runtime config delivery', () => {
         backendOnec: true,
         filmCatalogImport: true,
         inventory: true,
+        mdfHybridBoard: true,
       },
       observability: { performanceRum: true },
       rollouts: {
@@ -246,5 +248,10 @@ describe('frontend runtime config delivery', () => {
     expect(readBooleanEnv('unexpected', true)).toBe(true);
     expect(readBooleanEnv('off', true)).toBe(false);
     expect(readBooleanEnv('', true)).toBe(true);
+  });
+
+  it('keeps the hybrid MDF board on unless RUNTIME_CONFIG_MDF_HYBRID_BOARD switches it off (rollback)', () => {
+    expect(buildFrontendRuntimeConfig({}).features.mdfHybridBoard).toBe(true);
+    expect(buildFrontendRuntimeConfig({ RUNTIME_CONFIG_MDF_HYBRID_BOARD: 'false' }).features.mdfHybridBoard).toBe(false);
   });
 });

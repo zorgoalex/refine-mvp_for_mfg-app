@@ -41,7 +41,15 @@ describe('featureFlags', () => {
       useBackendWhatsApp: false,
       useBackendOnec: false,
       inventory: false,
+      mdfHybridBoard: true,
     });
+  });
+
+  it('keeps the hybrid MDF board on by default; env and runtime config can switch it off', () => {
+    expect(getFeatureFlags({}).mdfHybridBoard).toBe(true);
+    expect(getFeatureFlags({ VITE_MDF_HYBRID_BOARD: 'false' }).mdfHybridBoard).toBe(false);
+    expect(getFeatureFlags({}, { mdfHybridBoard: 'false' }).mdfHybridBoard).toBe(false);
+    expect(getFeatureFlags({ VITE_MDF_HYBRID_BOARD: 'false' }, { mdfHybridBoard: true }).mdfHybridBoard).toBe(true);
   });
 
   it('reads the clientScreen flag from env and runtime config, default off', () => {

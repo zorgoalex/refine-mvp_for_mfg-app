@@ -32,6 +32,9 @@ export interface PublishedCardPresentation {
   kind: PublishedCardRef['kind']; id: string;
   /** Binding missing or raw composition changed since the accepted revision: render a minimal card. */
   stale: boolean;
+  /** Presentation digest of the accepted revision (migration 192); null when stale. The hybrid board compares it with
+   * the legacy card's same-snapshot `mdfPresentationDigest`. */
+  acceptedDigest: string | null;
   /** Composition-sensitive content; present only when not stale. `items` are limited to visible orders. */
   composition: null | {
     items: PublishedPresentationItem[];
@@ -48,6 +51,9 @@ export interface PublishedCardPresentation {
 }
 export interface PublishedCardProgress {
   kind: string; id: string; orderId: number; detailId: number; member: number; cut: number; laminated: number;
+  /** Bath only: machine-file/BASIS pieces allocated to the bath, frozen with its publication (migration 273);
+   * null when not published yet. A bath's own `cut` is not its coverage. */
+  allocated?: number | null;
 }
 export interface PublishedOrderName { orderId: number; orderName: string }
 export interface PublishedUnregisteredSource {
@@ -60,7 +66,7 @@ export async function loadMdfPublishedPresentation(tx: DatabaseClient, owners: s
   // Binding: the accepted revision's digest vs the current raw digest (one set-based read).
   // ...AND the normalized raw membership (eligible, non-detached rows aggregated per position) equals the published
   // members of the card (all owners, before redaction). Baths: cut results are immutable; no raw item rows.
-  const bindings = new Map((await tx.query<{ kind: string; id: string; ok: boolean }>(`
+  const bindings = new Map((await tx.query<{ kind: string; id: string; ok: boolean; accepted: string | null }>(`
     WITH s AS (SELECT * FROM unnest($1::text[],$2::text[],$3::text[]) s(kind,id,revision)),
     -- Native-typed keys so the raw joins use the (packet_id)/(bazis_cut_set_id, …) indexes; malformed ids match nothing.
     sp AS (SELECT id,id::uuid pid FROM s WHERE kind='packet'
@@ -88,11 +94,12 @@ export async function loadMdfPublishedPresentation(tx: DatabaseClient, owners: s
       FROM pub GROUP BY kind,id)
     SELECT s.kind,s.id,(b.presentation_digest IS NOT NULL
         AND b.presentation_digest=mdf_source_presentation_digest(s.kind,s.id)
-        AND (s.kind='bath' OR COALESCE(ra.arr,'[]'::jsonb)=COALESCE(pa.arr,'[]'::jsonb))) ok
+        AND (s.kind='bath' OR COALESCE(ra.arr,'[]'::jsonb)=COALESCE(pa.arr,'[]'::jsonb))) ok,
+      b.presentation_digest accepted
     FROM s LEFT JOIN mdf_revision_presentation b ON b.source_kind=s.kind AND b.source_id=s.id AND b.revision_key=s.revision
       LEFT JOIN raw_agg ra ON ra.kind=s.kind AND ra.id=s.id
       LEFT JOIN pub_agg pa ON pa.kind=s.kind AND pa.id=s.id`,
-  [kinds, ids, revisions, MDF, OTHER])).rows.map(r => [`${r.kind}:${r.id}`, r.ok]));
+  [kinds, ids, revisions, MDF, OTHER])).rows.map(r => [`${r.kind}:${r.id}`, r]));
 
   const packetIds = cards.filter(c => c.kind === 'packet').map(c => c.id);
   const packets = new Map((await tx.query<{ id: string; programName: string | null; externalKey: string | null;
@@ -132,12 +139,15 @@ export async function loadMdfPublishedPresentation(tx: DatabaseClient, owners: s
     WHERE ('cut-result:'||r.cut_result_id::text)=ANY($1::text[])`, [bathIds])).rows.map(r => [r.id, r]));
 
   const presentation: PublishedCardPresentation[] = cards.map(card => {
-    const bound = bindings.get(`${card.kind}:${card.id}`) === true;
+    const binding = bindings.get(`${card.kind}:${card.id}`);
+    const bound = binding?.ok === true;
+    // Hybrid board: legacy presentation is shown only when its same-snapshot digest equals this accepted digest.
+    const acceptedDigest = bound ? binding!.accepted : null;
     const full = card.allOwnersAllowed;
     if (card.kind === 'packet') {
       const p = packets.get(card.id);
       const items = packetItems.filter(i => i.id === card.id).map(({ id: _id, ...item }) => item);
-      return { kind: card.kind, id: card.id, stale: !bound,
+      return { kind: card.kind, id: card.id, stale: !bound, acceptedDigest,
         composition: bound ? { items, ...(full && p ? { programName: p.programName, externalKey: p.externalKey,
           materialName: p.materialName, hasSheetImage: p.hasSheetImage, svgCutJobId: p.svgCutJobId,
           svgCutResultId: p.svgCutResultId, cuttingSequenceNo: p.cuttingSequenceNo } : {}) } : null,
@@ -146,11 +156,11 @@ export async function loadMdfPublishedPresentation(tx: DatabaseClient, owners: s
     }
     if (card.kind === 'bazisCutSet') {
       const items = setItems.filter(i => i.id === card.id).map(({ id: _id, ...item }) => item);
-      return { kind: card.kind, id: card.id, stale: !bound, composition: bound ? { items } : null,
+      return { kind: card.kind, id: card.id, stale: !bound, acceptedDigest, composition: bound ? { items } : null,
         live: full ? { name: sets.get(card.id)?.name ?? null } : null };
     }
     const b = baths.get(card.id);
-    return { kind: card.kind, id: card.id, stale: !bound,
+    return { kind: card.kind, id: card.id, stale: !bound, acceptedDigest,
       composition: bound ? { items: [], ...(full && b ? { cutJobId: b.cutJobId, cutJobName: b.cutJobName,
         resultNo: b.resultNo, revisionNo: b.revisionNo } : {}) } : null, live: null };
   });
@@ -163,11 +173,15 @@ export async function loadMdfPublishedPresentation(tx: DatabaseClient, owners: s
       GREATEST(COALESCE(sum(l.quantity) FILTER (WHERE l.stage_code='cut' AND l.evidence_kind='physical'),0),
         COALESCE(max(l.quantity) FILTER (WHERE l.stage_code='cut' AND l.evidence_kind='declaration'),0))::float8 cut,
       GREATEST(COALESCE(sum(l.quantity) FILTER (WHERE l.stage_code='laminated' AND l.evidence_kind='physical'),0),
-        COALESCE(max(l.quantity) FILTER (WHERE l.stage_code='laminated' AND l.evidence_kind='declaration'),0))::float8 laminated
+        COALESCE(max(l.quantity) FILTER (WHERE l.stage_code='laminated' AND l.evidence_kind='declaration'),0))::float8 laminated,
+      -- One published member row per position (primary key): max() only lifts it out of the grouping.
+      CASE WHEN l.source_kind='bath' THEN max(pm.covered_quantity)::float8 END allocated
     FROM unnest($2::text[],$3::text[],$4::text[]) s(kind,id,revision)
     JOIN mdf_evidence_revisions r ON r.source_kind=s.kind AND r.source_id=s.id AND r.revision_key=s.revision
     JOIN mdf_evidence_lines l ON l.source_kind=s.kind AND l.source_id=s.id AND l.revision_key=s.revision
     JOIN allowed a ON a.order_id=l.order_id
+    LEFT JOIN mdf_published_source_members pm ON pm.source_kind=l.source_kind AND pm.source_id=l.source_id
+      AND pm.order_id=l.order_id AND pm.detail_id=l.detail_id
     -- Only detachments already applied to THIS published revision (recorded with it or before it): a confirmed
     -- correction whose successor is not yet published never changes the counters of the current publication.
     WHERE NOT l.rework AND NOT EXISTS(SELECT 1 FROM mdf_position_detachments x WHERE x.source_kind=l.source_kind

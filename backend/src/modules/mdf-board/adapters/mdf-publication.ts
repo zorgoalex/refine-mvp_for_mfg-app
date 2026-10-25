@@ -57,6 +57,13 @@ export async function publishMdfState(tx: DatabaseClient, input: {
   await tx.query(`INSERT INTO mdf_published_source_members(source_kind,source_id,order_id,detail_id,quantity)
     SELECT kind,id,"orderId","detailId",quantity FROM jsonb_to_recordset($1::jsonb)
       m(kind text,id text,"orderId" bigint,"detailId" bigint,quantity bigint)`,[JSON.stringify([...members.values()])]);
+  // A bath's cut coverage is frozen with this publication (same job transaction as the allocation the projection used).
+  const baths = input.sources.filter(s => s.kind==='bath' && cards.some(c => c.kind==='bath' && c.id===s.id));
+  if (baths.length) await tx.query(`UPDATE mdf_published_source_members p SET covered_quantity=COALESCE((
+      SELECT sum(a.quantity) FROM mdf_bath_allocations a WHERE a.bath_id=p.source_id AND a.bath_revision=s.revision
+        AND a.order_id=p.order_id AND a.detail_id=p.detail_id AND a.state IN ('reserved','consumed')),0)
+    FROM unnest($1::text[],$2::text[]) s(id,revision) WHERE p.source_kind='bath' AND p.source_id=s.id`,
+  [baths.map(s => s.id),baths.map(s => s.received)]);
   if (input.retired?.length) {
     const retired = [input.retired.map(r => r.kind), input.retired.map(r => r.id)];
     await tx.query(`DELETE FROM mdf_published_source_members p USING unnest($1::text[],$2::text[]) s(kind,id)

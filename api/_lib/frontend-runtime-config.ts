@@ -37,6 +37,8 @@ export interface FrontendRuntimeConfigResponse {
     backendOnec: boolean;
     filmCatalogImport: boolean;
     inventory: boolean;
+    /** Hybrid MDF board (legacy screen on the engine's data); false = the engine's own view (rollback). */
+    mdfHybridBoard: boolean;
   };
   observability: {
     performanceRum: boolean;
@@ -107,6 +109,7 @@ export function buildFrontendRuntimeConfig(
       backendOnec: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_ONEC, false),
       filmCatalogImport: readBooleanEnv(env.RUNTIME_CONFIG_FILM_CATALOG_IMPORT, false),
       inventory: readBooleanEnv(env.RUNTIME_CONFIG_INVENTORY, false),
+      mdfHybridBoard: readBooleanEnv(env.RUNTIME_CONFIG_MDF_HYBRID_BOARD, true),
     },
     observability: {
       performanceRum: readBooleanEnv(env.RUNTIME_CONFIG_PERFORMANCE_RUM, false),

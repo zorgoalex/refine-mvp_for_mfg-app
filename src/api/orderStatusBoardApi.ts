@@ -120,6 +120,22 @@ export const orderStatusBoardApi = {
       manualCommandOptions(command),
     );
   },
+  /** Engine active: forward placement of a machine file of another material (no engine source, no token). The
+   * column the operator saw guards against a stale board; the key makes an explicit retry the same command. */
+  upsertNonMdfPacketMove(
+    packetId: string,
+    targetColumn: 'completed' | 'completed_laminated',
+    expectedColumn: 'parsed' | 'completed',
+    idempotencyKey: string,
+  ): Promise<MdfBoardManualMoveUpsertResponse> {
+    const normalizedCardId = assertMdfManualMoveIdentity('packet', packetId);
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(idempotencyKey)) throw new Error('Invalid MDF command idempotency key');
+    return httpClient.put<MdfBoardManualMoveUpsertResponse>(
+      apiRoutes.orders.statusBoardMdfManualMove('packet', normalizedCardId),
+      { targetColumn, expectedColumn },
+      { skipAuthRefresh: true, headers: { 'Idempotency-Key': idempotencyKey } },
+    );
+  },
   deleteMdfManualMove(
     cardKind: MdfBoardManualMoveCardKind,
     cardId: string,

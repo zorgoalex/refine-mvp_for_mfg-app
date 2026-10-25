@@ -130,6 +130,8 @@ export interface CncTelegramPacketCutSheetDto {
 
 export interface CncTelegramPacketDto {
   packetId: string;
+  /** Engine active/read_only only: `mdf_source_presentation_digest` read in the same snapshot as this card. */
+  mdfPresentationDigest?: string | null;
   externalPacketKey: string;
   cuttingSequenceNo: number | null;
   sourceChatId: string;
@@ -199,6 +201,8 @@ export interface CncTelegramBathSheetDto {
 export interface CncTelegramBathCardDto {
   compositionComplete?: boolean;
   bathCardId: string;
+  /** Engine active/read_only only: `mdf_source_presentation_digest` read in the same snapshot as this card. */
+  mdfPresentationDigest?: string | null;
   cutJobId: number;
   cutResultId: number;
   resultNo: number;
@@ -235,6 +239,8 @@ export interface CncTelegramBazisCutSetItemDto {
 
 export interface CncTelegramBazisCutSetCardDto {
   bazisCutSetId: number;
+  /** Engine active/read_only only: `mdf_source_presentation_digest` read in the same snapshot as this card. */
+  mdfPresentationDigest?: string | null;
   name: string;
   createdAt: string;
   orderCount: number;

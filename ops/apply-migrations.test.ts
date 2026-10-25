@@ -329,6 +329,16 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(verification).toMatch(/201_mdf_lineage_genesis_guard\*\)\s+probe_file "\$f" \|\| die/);
   });
 
+  it('probes the frozen bath coverage column before ledgering migration273', () => {
+    const start = probeFn.indexOf('273_mdf_published_bath_coverage*)');
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, probeFn.indexOf(';;', start));
+    expect(arm).toContain('q_col mdf_published_source_members covered_quantity');
+    expect(arm).toContain('q_con_on mdf_published_source_members mdf_published_member_covered_quantity_check');
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/273_mdf_published_bath_coverage\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
   it('probes sealed BASIS assignment and command intent effects before ledgering migration185', () => {
     const start = probeFn.indexOf('185_mdf_bazis_composition*)');
     const end = probeFn.indexOf('*) return 2', start);

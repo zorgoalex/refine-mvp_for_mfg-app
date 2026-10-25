@@ -26,6 +26,9 @@ export interface UseMdfPublishedBoardParams {
   period: CncOrderSearchPeriod | undefined;
   focusKind: MdfSourceKind | null;
   focusId: string | null;
+  /** Hybrid board: orders with MDF demand whose positions the snapshot would not otherwise carry (no engine card
+   * of theirs in the window). At most 100 — the endpoint's bound. */
+  orderIds?: readonly number[];
 }
 
 export interface UseMdfPublishedBoardResult {
@@ -44,6 +47,7 @@ export interface UseMdfPublishedBoardResult {
 
 export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdfPublishedBoardResult {
   const { enabled, workday, period, focusKind, focusId } = params;
+  const orderIdsKey = (params.orderIds ?? []).slice(0, 100).join(',');
   const [mode, setMode] = useState<MdfBoardMode | null>(null);
   const [session, setSession] = useState<MdfSessionSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
@@ -53,6 +57,8 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
   const generationRef = useRef<MdfBoardGenerationState>(createMdfBoardGenerationState());
   const sessionRef = useRef<MdfSessionSnapshot | null>(null);
   const searchOrderIdsRef = useRef<number[]>([]);
+  const orderIdsRef = useRef<number[]>([]);
+  orderIdsRef.current = orderIdsKey ? orderIdsKey.split(',').map(Number) : [];
   const resolvedNamesRef = useRef(new Map<string, number | null>());
   const enabledRef = useRef(enabled);
   // §5.6 R2#3: bumped on every `requestSearchOrderNames` call; an in-flight async name→id
@@ -108,6 +114,7 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
         displayFrom,
         ...(focusKind && focusId ? { focus: { kind: focusKind, id: focusId } } : {}),
         ...(searchOrderIdsRef.current.length ? { searchOrderIds: searchOrderIdsRef.current } : {}),
+        ...(orderIdsRef.current.length ? { orderIds: orderIdsRef.current } : {}),
       });
     } catch {
       publishedReadsFailed = true;
@@ -138,7 +145,7 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     }
     void runCycle(requestGeneration);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, workday, period, focusKind, focusId, searchOrderIds.join(',')]);
+  }, [enabled, workday, period, focusKind, focusId, searchOrderIds.join(','), orderIdsKey]);
 
   // Refresh every 15s and on tab visibility, like the legacy board.
   useEffect(() => {

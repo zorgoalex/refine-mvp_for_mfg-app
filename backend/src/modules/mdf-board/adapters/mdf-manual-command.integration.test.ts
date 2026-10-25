@@ -41,14 +41,15 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
     vi.stubEnv('BACKEND_MDF_SHADOW_INTAKE','true'); // Active route must not run legacy shadow finalizer.
     await db.connect(); await db.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
     for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql',
-      '174_mdf_execution_context.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql']) {
+      '174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql']) {
       await db.query(readFileSync(new URL(`../../../../db/migrations/${file}`,import.meta.url),'utf8'));
     }
     for (const table of ['orders','order_details','production_statuses','order_statuses','materials','sheet_material_types',
       'users','status_automation_rules','outbox_events','audit_log','audit_log_related_entity','app_settings',
       'bazis_order_links','order_import_entity_map','order_workshops','bazis_cut_sets','bazis_cut_set_details',
       'cnc_telegram_packets','cnc_telegram_packet_items','cnc_telegram_packet_whole_order_keys','mdf_board_manual_moves',
-      'cut_result','cut_result_board_projection','cut_result_placement','cut_result_sheet_map']) {
+      'cut_result','cut_result_board_projection','cut_result_placement','cut_result_sheet_map',
+      'cut_job','cut_group','cut_group_sheet']) {
       await db.query(`CREATE TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
     }
     await db.query('ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id)');
@@ -894,5 +895,177 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
       expect((await db.query('SELECT version FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2',[f.source.kind,f.source.id])).rows[0].version).toBe('1');
       expect((await db.query('SELECT 1 FROM mdf_recalculation_jobs WHERE request_id=$1',['E2E-reject-receipt'])).rows).toHaveLength(0);
     } finally { await db.query('ALTER TABLE mdf_evidence_revisions DROP CONSTRAINT e2e_manual_failure'); }
+  });
+
+  describe('non-MDF machine file under the active engine (hybrid board)', () => {
+    // HDF/chipboard files stay outside the engine; they keep forward manual placement through their own command.
+    async function hdf(options: { owner?: boolean; material?: string } = {}) {
+      const orderId = ++sequence, detailId = orderId*10, packetId = randomUUID();
+      await db.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,payment_status_id,created_by)
+        VALUES($1,$2,'production_order',false,1,4,1,1)`,[orderId,`E2E hdf ${orderId}`]);
+      await db.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,delete_flag,material_id)
+        VALUES($1,$2,1,2,1,false,1)`,[detailId,orderId]);
+      await db.query(`INSERT INTO cnc_telegram_packets(packet_id,material_name,comments_json,mdf_board_card_kind,rework,completion_status,
+        thumbs_up,workday,source_created_at) VALUES($1,$2,'[]','machine_file',false,'pending',false,'2026-09-21'::date,
+        '2026-09-21T06:00:00Z')`,
+      [packetId, options.material ?? 'ХДФ 3 мм']);
+      await db.query(`INSERT INTO cnc_telegram_packet_items(packet_item_id,packet_id,source_item_key,match_order_id,match_detail_id,
+        match_status,quantity,order_name) VALUES($1,$2,'hdf-part',$3,$4,$5,2,$6)`, [randomUUID(), packetId,
+        options.owner === false ? null : orderId, options.owner === false ? null : detailId,
+        options.owner === false ? 'unmatched' : 'matched', options.owner === false ? 'E2E no such order' : null]);
+      const command = (target: 'parsed'|'completed'|'completed_laminated', expected?: 'parsed'|'completed'|'completed_laminated',
+        key = randomUUID()) => ({ currentUser: admin, cardKind: 'packet' as const, cardId: packetId, targetColumn: target,
+        ...(expected ? { expectedColumn: expected } : {}), idempotencyKey: key, requestId: `E2E-hdf-${orderId}` });
+      return { orderId, detailId, packetId, command };
+    }
+    const placed = async (packetId: string) => (await db.query(`SELECT payload_json p FROM outbox_events
+      WHERE event_type='mdf_board.card_placed' AND aggregate_id=$1`,[`packet:${packetId}`])).rows.map(r => r.p);
+    const move = async (packetId: string) => (await db.query(`SELECT target_column FROM mdf_board_manual_moves
+      WHERE card_kind='packet' AND card_id=$1`,[packetId])).rows[0]?.target_column ?? null;
+
+    it('moves forward with audit owners and one idempotent card_placed event; exact retry replays, altered retry conflicts', async () => {
+      const f = await hdf(), command = f.command('completed','parsed');
+      const first = await repo.upsert(command);
+      expect(first).toMatchObject({ changed: true, move: { cardKind: 'packet', cardId: f.packetId, targetColumn: 'completed' } });
+      expect(await move(f.packetId)).toBe('completed');
+      const [audit] = await audits(`packet:${f.packetId}`);
+      expect(audit).toMatchObject({ source: 'mdf-active-non-mdf-command', status_code: 'completed' });
+      expect(audit.metadata_json).toMatchObject({ nonMdf: true, engineMode: 'active', expectedColumn: 'parsed',
+        relatedOrderIds: [f.orderId], statusAutomationDecision: 'engine_active_non_mdf_skip' });
+      expect((await db.query(`SELECT entity_id FROM audit_log_related_entity WHERE audit_id=$1 AND entity_type='order'`,
+        [audit.audit_id])).rows.map(r => Number(r.entity_id))).toEqual([f.orderId]);
+      expect(await placed(f.packetId)).toEqual([expect.objectContaining({ nonMdf: true, orderIds: [f.orderId],
+        targetColumn: 'completed', auditId: first.auditId })]);
+      expect(await repo.upsert(command)).toEqual(first);
+      expect(await audits(`packet:${f.packetId}`)).toHaveLength(1);
+      expect(await placed(f.packetId)).toHaveLength(1);
+      await expect(repo.upsert({ ...command, targetColumn: 'completed_laminated' })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+      // No engine head, receipt or MDF job for an excluded material.
+      expect((await db.query(`SELECT 1 FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,[f.packetId])).rows).toHaveLength(0);
+    });
+
+    it('refuses backward moves, clears and a stale expected column without writing', async () => {
+      const f = await hdf();
+      await repo.upsert(f.command('completed','parsed'));
+      await expect(repo.upsert(f.command('parsed','completed'))).rejects.toMatchObject({ code: 'MDF_NON_MDF_RETURN_UNSUPPORTED' });
+      await expect(repo.delete({ currentUser: admin, cardKind: 'packet', cardId: f.packetId, idempotencyKey: randomUUID() }))
+        .rejects.toMatchObject({ code: 'MDF_NON_MDF_RETURN_UNSUPPORTED' });
+      await expect(repo.upsert(f.command('completed_laminated','parsed'))).rejects.toMatchObject({ code: 'MDF_SOURCE_STALE' });
+      await expect(repo.upsert(f.command('completed_laminated'))).rejects.toMatchObject({ code: 'MDF_SOURCE_STALE' });
+      expect(await move(f.packetId)).toBe('completed');
+      expect(await audits(`packet:${f.packetId}`)).toHaveLength(1);
+      expect(await repo.upsert(f.command('completed_laminated','completed'))).toMatchObject({ changed: true });
+    });
+
+    it('enforces owner scope; an ownerless file needs the unscoped grant and still replays once', async () => {
+      const f = await hdf();
+      await db.query('UPDATE orders SET created_by=999 WHERE order_id=$1',[f.orderId]);
+      const base = rolePolicyForUser(admin);
+      const restricted: CurrentUser = { ...admin, id: '998', policyScopes: { ...base,
+        orders: { ...base.orders, view: 'own', update: 'own' }, productionTasks: { ...base.productionTasks, update: 'own' } } };
+      await expect(repo.upsert({ ...f.command('completed','parsed'), currentUser: restricted }))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      const lone = await hdf({ owner: false });
+      await expect(repo.upsert({ ...lone.command('completed','parsed'), currentUser: restricted }))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      expect(await audits(`packet:${f.packetId}`)).toHaveLength(0);
+      const command = lone.command('completed','parsed');
+      const first = await repo.upsert(command);
+      expect(await repo.upsert(command)).toEqual(first);
+      expect(await placed(lone.packetId)).toEqual([expect.objectContaining({ orderIds: [] })]);
+    });
+
+    it('a lost response survives the file becoming MDF: the same key replays, a new key goes to the engine', async () => {
+      const f = await hdf(), command = f.command('completed','parsed');
+      const first = await repo.upsert(command);
+      await db.query("UPDATE cnc_telegram_packets SET material_name='МДФ 16 мм' WHERE packet_id=$1",[f.packetId]);
+      expect(await repo.upsert(command)).toEqual(first);
+      await expect(repo.upsert(f.command('completed_laminated','completed'))).rejects.toMatchObject({ code: 'MDF_SOURCE_TOKEN_REQUIRED' });
+      // Not silently accepted: the now-MDF file is an unregistered source until the explicit reconciliation command.
+      const snapshot = await readMdfPublishedSnapshot(database, admin, { dateTo: '2026-09-21' });
+      expect(snapshot.unregistered.map(s => s.id)).toContain(f.packetId);
+      expect(snapshot.cards.map(c => c.id)).not.toContain(f.packetId);
+      expect((await db.query(`SELECT 1 FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,[f.packetId])).rows).toHaveLength(0);
+    });
+
+    it('an engine-owned packet whose material became non-MDF needs reconciliation, not the non-MDF path', async () => {
+      const f = await fixture('packet');
+      await db.query("UPDATE cnc_telegram_packets SET material_name='ХДФ 3 мм' WHERE packet_id=$1",[f.source.id]);
+      await expect(repo.upsert({ ...await f.command(), targetColumn: 'completed', expectedColumn: 'parsed' }))
+        .rejects.toMatchObject({ code: 'MDF_COMMAND_RECONCILIATION_REQUIRED' });
+      expect(await move(f.source.id)).toBeNull();
+    });
+
+    it('a diagnostic shadow head of an excluded material (no demand) is not engine ownership', async () => {
+      const f = await hdf();
+      // Shape of the shadow-intake receipt for an excluded material (mdf-shadow.ts): unaccepted, no lines, no demand.
+      await database.transaction(tx => recordMdfReceipt(tx,{ presentation: 'compute', sourceKind: 'packet', sourceId: f.packetId,
+        revisionKey: 'shadow:e2e', origin: 'legacy', actorUserId: 1, requestId: 'E2E-shadow', causeKey: `E2E-shadow-${f.packetId}`,
+        expectedFence: null, accept: false, lines: [], rules: [] }));
+      expect((await db.query(`SELECT 1 FROM mdf_source_heads WHERE source_kind='packet' AND source_id=$1`,[f.packetId])).rows).toHaveLength(1);
+      expect(await repo.upsert(f.command('completed','parsed'))).toMatchObject({ changed: true });
+      expect(await move(f.packetId)).toBe('completed');
+    });
+
+    it('a key used by a non-MDF move cannot run another card kind or a clear', async () => {
+      const f = await hdf(), command = f.command('completed','parsed');
+      await repo.upsert(command);
+      const basis = await fixture();
+      await expect(repo.upsert({ ...await basis.command(), idempotencyKey: command.idempotencyKey, targetColumn: 'completed' }))
+        .rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+      await expect(repo.delete({ ...await basis.command(), idempotencyKey: command.idempotencyKey }))
+        .rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+      expect(await audits(`${basis.source.kind}:${basis.source.id}`)).toHaveLength(0);
+    });
+
+    // Second session on the raw client; the repository runs on the pool. The race window is held open by the
+    // concurrent transaction, the command must wait and then refuse — never deadlock, never write half.
+    const concurrently = async (hold: () => Promise<void>, run: () => Promise<unknown>) => {
+      await db.query('BEGIN');
+      try { await hold(); } catch (error) { await db.query('ROLLBACK'); throw error; }
+      const pending = run().then(() => null, (error: unknown) => error);
+      await new Promise(resolve => setTimeout(resolve, 400));
+      await db.query('COMMIT');
+      return pending;
+    };
+
+    it('material change committed while the command waits for the packet: refuses, nothing written', async () => {
+      const f = await hdf();
+      const error = await concurrently(
+        async () => { await db.query("UPDATE cnc_telegram_packets SET material_name='МДФ 16 мм' WHERE packet_id=$1",[f.packetId]); },
+        () => repo.upsert(f.command('completed','parsed')));
+      expect(error).toMatchObject({ code: 'MDF_SOURCE_STALE' });
+      expect(await move(f.packetId)).toBeNull();
+      expect(await audits(`packet:${f.packetId}`)).toHaveLength(0);
+      expect(await placed(f.packetId)).toHaveLength(0);
+    });
+
+    it('engine registration (owners → source lock order) committed while the command waits: reconciliation, nothing written', async () => {
+      const f = await hdf();
+      const raw = { raw: db as never, query: (sql: string, args?: readonly unknown[]) => db.query(sql, args ? [...args] : []) };
+      const error = await concurrently(async () => {
+        await db.query('SELECT 1 FROM orders WHERE order_id=$1 FOR UPDATE',[f.orderId]);
+        await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`mdf-source:${JSON.stringify(['packet',f.packetId])}`]);
+        await recordMdfReceipt(raw as never,{ sourceKind: 'packet', sourceId: f.packetId, revisionKey: 'race', origin: 'derived',
+          actorUserId: 1, requestId: 'E2E-race', causeKey: `E2E-race-${f.packetId}`, expectedFence: null, accept: true, rules: [],
+          lines: [{ lineKey: 'hdf-part', orderId: f.orderId, detailId: f.detailId, quantity: 2, stageCode: 'membership',
+            evidenceKind: 'derived', rework: false }],
+          executionContext: { sourceCreatedAt: '2026-09-21T00:00:00Z', displayName: 'race', priorColumn: 'parsed',
+            compositionComplete: true, demand: [{ orderId: f.orderId, detailId: f.detailId, quantity: 2 }] } });
+      }, () => repo.upsert(f.command('completed','parsed')));
+      expect(error).toMatchObject({ code: 'MDF_COMMAND_RECONCILIATION_REQUIRED' });
+      expect(await move(f.packetId)).toBeNull();
+      expect(await audits(`packet:${f.packetId}`)).toHaveLength(0);
+      expect(await placed(f.packetId)).toHaveLength(0);
+    });
+
+    it('two concurrent forward moves of one file: exactly one commits, the other sees the moved column', async () => {
+      const f = await hdf();
+      const results = await Promise.allSettled([repo.upsert(f.command('completed','parsed')),
+        repo.upsert(f.command('completed','parsed'))]);
+      expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
+      expect(results.find(r => r.status === 'rejected')).toMatchObject({ reason: { code: 'MDF_SOURCE_STALE' } });
+      expect(await placed(f.packetId)).toHaveLength(1);
+    });
   });
 });

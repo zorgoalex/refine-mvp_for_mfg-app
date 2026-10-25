@@ -64,6 +64,8 @@ export interface MdfPublishedCardPresentation {
   id: string;
   /** Binding missing or raw composition changed since the accepted revision: render a minimal card. */
   stale: boolean;
+  /** Presentation digest of the accepted revision; null when stale or from an older backend. */
+  acceptedDigest?: string | null;
   /** Composition-sensitive content; present only when not stale. */
   composition: MdfPublishedCardComposition | null;
   /** Live annotations (current values; not bound to the accepted revision). Present only for fully visible cards. */
@@ -78,6 +80,8 @@ export interface MdfPublishedCardProgress {
   member: number;
   cut: number;
   laminated: number;
+  /** Bath only: pieces allocated to the bath, frozen with its publication; null/absent = no accounting data. */
+  allocated?: number | null;
 }
 
 export interface MdfPublishedOrderName {

@@ -26,7 +26,7 @@ describe.skipIf(!enabled)('active MDF correction material scope, isolated Postgr
       ADD COLUMN IF NOT EXISTS mdf_completion_returned boolean NOT NULL DEFAULT false;
       ALTER TABLE ${fixture.schema}.cnc_telegram_packets ADD PRIMARY KEY(packet_id)`);
     await fixture.applyMigrations(['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql',
-      '174_mdf_execution_context.sql', '175_mdf_command_placement.sql', '178_mdf_correction_receipts.sql',
+      '174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql', '175_mdf_command_placement.sql', '178_mdf_correction_receipts.sql',
       '179_mdf_active_return.sql', '182_mdf_physical_lineage.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql']);
     database = fixture.createDatabaseService();
     await fixture.client.query(`

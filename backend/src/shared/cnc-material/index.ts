@@ -21,3 +21,11 @@ export function cncPacketCountsForMdfReadinessSql(packetAlias: 'p' | 'packet'): 
     )
   )`;
 }
+
+// MDF demand of an order detail: the material of its sheet type (or legacy
+// material) is MDF and not another material. The engine's demand loader and
+// the order board classify details with this one fragment.
+export function mdfDemandMaterialSql(sheetTypeAlias: 'mt', materialAlias: 'm'): string {
+  const material = `COALESCE(${sheetTypeAlias}.name, ${materialAlias}.material_name, '')`;
+  return `(${material} ~* '${CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE}' AND ${material} !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}')`;
+}

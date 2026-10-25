@@ -118,6 +118,8 @@ export interface CncTelegramPacketCutSheet {
 }
 
 export interface CncTelegramPacket {
+  /** MDF engine active/read_only only: presentation digest read in the same snapshot as this card. */
+  mdfPresentationDigest?: string | null;
   packetId: string;
   externalPacketKey: string;
   cuttingSequenceNo: number | null;
@@ -172,6 +174,8 @@ export interface CncTelegramBathItem {
   quantity: number;
   completedQuantity: number;
   ready: boolean;
+  /** Hybrid MDF board: the engine has no published coverage for this piece yet ("no accounting data", not zero). */
+  coverageUnknown?: boolean;
   laminatedOrLater: boolean;
   packedOrLater: boolean;
 }
@@ -186,6 +190,8 @@ export interface CncTelegramBathSheet {
 }
 
 export interface CncTelegramBathCard {
+  /** MDF engine active/read_only only: presentation digest read in the same snapshot as this card. */
+  mdfPresentationDigest?: string | null;
   compositionComplete?: boolean;
   bathCardId: string;
   cutJobId: number;
@@ -220,6 +226,8 @@ export interface CncTelegramBazisCutSetItem {
 }
 
 export interface CncTelegramBazisCutSetCard {
+  /** MDF engine active/read_only only: presentation digest read in the same snapshot as this card. */
+  mdfPresentationDigest?: string | null;
   bazisCutSetId: number;
   name: string;
   createdAt: string;

@@ -689,7 +689,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('filterCncOrderCardsByPlannedOrderDate');
     expect(page).toContain('filterCncBathColumnsByMachineOrderMatches');
     expect(page).toContain('status-board-toolbar__cnc-order-search');
-    expect(page).toContain('mode="multiple"');
+    // Multiple order numbers; the hybrid MDF board also accepts a typed number outside the loaded period.
+    expect(page).toContain("mode={mdfHybridActive ? 'tags' : 'multiple'}");
     expect(page).toContain('suffixIcon={<SearchOutlined />}');
     expect(page).toContain('options={cncOrderFilterOptions}');
     expect(page).toContain('aria-label="Фильтр МДФ-работ по номеру заказа"');
@@ -1494,7 +1495,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns, preservedCncBathCardId)');
     expect(page).toContain('const [cncTerminalColumnsVisible, setCncTerminalColumnsVisible] = useState(false)');
     expect(page).toContain('terminalColumnsVisible={cncTerminalColumnsVisible || cncSearchActive}');
-    expect(page).toContain('buildCncTerminalSearchVisibility(cncPlannedDateColumns, cncManualMoves, {');
+    expect(page).toContain('buildCncTerminalSearchVisibility(cncPlannedDateColumns, cncBoardManualMoves, {');
+    // Outside the hybrid MDF board the projected moves are exactly the shared manual moves.
+    expect(page).toContain('mdfHybridBoard ? mdfHybridManualMoves(cncManualMoves, mdfHybridBoard.meta) : cncManualMoves');
     expect(page).toContain('cncTerminalSearchVisibility.revealedColumnKeys,');
     expect(settings).toContain('checked={cncTerminalColumnsVisible}');
     expect(settings).toContain('Завершенные файлы и ванны');
@@ -1893,5 +1896,58 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('setCncHistoryCollapsed(false)');
     expect(page).toContain('aria-label={onSelectCard');
     expect(page).toContain('Показать историю заказа');
+  });
+});
+
+describe('hybrid MDF board wiring (engine active/read_only)', () => {
+  const hook = readFileSync('src/pages/orderStatusBoard/useMdfPublishedBoard.ts', 'utf8');
+  const slice = (start: string, end: string) => page.slice(page.indexOf(start), page.indexOf(end, page.indexOf(start)));
+
+  it('renders the legacy screen on engine data, with the engine view only as rollback/degradation', () => {
+    expect(page).toContain("const mdfHybridActive = mdfBoardRenderMode === 'published'");
+    expect(page).toContain('&& featureFlags.mdfHybridBoard');
+    expect(page).toContain("&& searchParams.get('mdfView') !== 'engine'");
+    expect(page).toContain('&& (!mdfHybridActive || (!cncToday && loadError !== null)) ? (');
+    expect(page).toContain('buildMdfHybridBoard({ legacyColumns: cncToday.columns, snapshot: mdfHybridSnapshot })');
+    expect(page).toContain(': mdfHybridBoard?.columns ?? cncToday?.columns ?? [],');
+    expect(page).toContain('mdfHybrid={mdfHybridBoard && mdfHybridSnapshot ? { board: mdfHybridBoard, snapshot: mdfHybridSnapshot } : null}');
+  });
+
+  it('readiness uses engine positions; positions of card-less MDF orders are requested by id', () => {
+    expect(page).toContain('buildMdfHybridOrderReadiness({ legacy, orderCards, snapshot: mdfHybrid.snapshot })');
+    expect(page).toContain('orderIds: mdfHybridExtraOrderIds,');
+    expect(page).toContain('mdfHybridMissingPositionOrderIds(cncOrderStatusCards, mdfHybridSnapshot)');
+    expect(hook).toContain('...(orderIdsRef.current.length ? { orderIds: orderIdsRef.current } : {}),');
+    expect(page).toContain('!readiness.unknown && readiness.totalDetails > 0 && readiness.remainingDetails === 0');
+    expect(page).toContain('Учёт обновляется');
+  });
+
+  it('moves: engine cards by the published command (returns through the dialog), non-MDF forward only', () => {
+    const route = slice('const moveMdfHybridCard = useCallback((', 'const moveCncCard = useCallback((');
+    expect(route).toContain('prepareMdfPublishedCommand(session, { kind, id: cardId }, targetColumn as MdfSourceColumn).execute()');
+    expect(route).toContain('resolveMdfReturnDialog(kind, cardId, targetColumn as MdfReturnIntent');
+    expect(route).toContain('orderStatusBoardApi.upsertNonMdfPacketMove(cardId, targetColumn, expected,');
+    expect(route).toContain('Возврат файла не из МДФ при новом учёте недоступен');
+    expect(route).not.toContain('upsertMdfManualMove(');
+    const legacyMove = slice('const moveCncCard = useCallback((', 'const syncCncBoardScrollTopButton');
+    expect(legacyMove.indexOf('moveMdfHybridCard(hybridBoard, kind, cardId')).toBeLessThan(
+      legacyMove.indexOf('isMdfBackwardMove(kind, sourceColumn, targetColumn)'));
+    expect(orderStatusBoardApi).toContain("{ skipAuthRefresh: true, headers: { 'Idempotency-Key': idempotencyKey } }");
+  });
+
+  it('order search reaches old/completed engine cards; unknown bath coverage is not shown as zero', () => {
+    expect(page).toContain('requestMdfSearchOrderNames(cncOrderFilters);');
+    expect(page).toContain("mode={mdfHybridActive ? 'tags' : 'multiple'}");
+    expect(page).toContain("? 'Нет данных учёта о распиленных деталях'");
+  });
+
+  it('the card frame gates drags by the engine state and explains the block', () => {
+    const frame = slice('const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({', 'interface CncDetailedMachineMapsProps');
+    expect(frame).toContain('React.useContext(MdfHybridMoveContext)');
+    expect(frame).toContain('const moveAvailable = movesEnabled && (!hybrid || hybrid.allowed) && destinations.length > 0;');
+    expect(frame).toContain('|| !isMdfBackwardMove(kind, sourceColumn, destination.key)');
+    expect(frame).toContain('cnc-mdf-engine-badge cnc-mdf-engine-badge--');
+    expect(page).toContain("const overlaid = meta.source !== 'nonMdf' && meta.column !== shownColumn;");
+    expect(css).toContain('.cnc-mdf-engine-badge--warning');
   });
 });

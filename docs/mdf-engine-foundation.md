@@ -394,6 +394,35 @@ tokens, members and counters come only from that revision. In `legacy`/`shadow` 
 `active`/`read_only` but the reader is disabled or fails, the view shows «Производственный учёт недоступен» — never the
 legacy rendering.
 
+### Hybrid screen (default)
+
+By default (`features.mdfHybridBoard`; rollback for everyone: `RUNTIME_CONFIG_MDF_HYBRID_BOARD=false` in the frontend
+runtime config, per page: `?mdfView=engine`) the
+board keeps the legacy screen and takes from the snapshot everything the engine owns: which MDF cards exist (MDF
+machine files, BASIS sets, baths), their column, issues, queue state and command tokens, bath pieces and order readiness.
+`GET /cnc-telegram/today` supplies only the presentation of those cards plus machine files of other materials:
+- in `active`/`read_only` it runs in one `REPEATABLE READ READ ONLY` transaction and adds `mdfPresentationDigest`
+  (`mdf_source_presentation_digest`) to each card; the snapshot adds `presentation[].acceptedDigest`. The legacy
+  presentation is shown only when both digests are equal and the card is not stale — otherwise a minimal engine card
+  without moves until the next read;
+- bath pieces are the allocated machine-file/BASIS coverage frozen with the bath's publication
+  (`mdf_published_source_members.covered_quantity`, migration 273; `progress[].allocated`), never live allocations;
+- order readiness keeps the legacy formula with the engine's MDF facts (`positions`: cut = `creditedCut +
+  creditedRolled`, rolled = `creditedRolled`). The order board marks each detail `mdfEligible` with the engine's demand
+  rule (`mdfDemandMaterialSql`); when an order's MDF details differ from its positions the readiness is «Учёт обновляется»
+  and the order is not placed as ready automatically;
+- engine cards move by their command token; backward moves go through the correction dialog. Hidden-card rules by order
+  status still move cards visually; such a card cannot be dragged.
+
+Machine files of other materials (HDF, chipboard, …) stay outside the engine. Under the queued boundary a `packet`
+manual move routes, after resolving an earlier replay of the same `Idempotency-Key`: a non-MDF packet without engine
+ownership (no head, or a diagnostic head without demand) uses its own command — forward only, `expectedColumn` (the column
+the operator saw) in the body, owner authorization of every live order (a file without one needs the unscoped
+production-task grant), locks in the engine order, audit with the owners and an idempotent `mdf_board.card_placed` outbox
+event that also stores the replay. Backward moves and clears answer `409 MDF_NON_MDF_RETURN_UNSUPPORTED`; a non-MDF file
+whose head carries demand needs reconciliation. If such a file later becomes MDF it is an unregistered source until the
+reconciliation command.
+
 The snapshot also carries, from the same read-only transaction:
 - `presentation` — card presentation. Composition-sensitive content (items with sizes, previews, program/file names) is
   shown only while the accepted revision's presentation binding (`mdf_revision_presentation`, migration 192) equals

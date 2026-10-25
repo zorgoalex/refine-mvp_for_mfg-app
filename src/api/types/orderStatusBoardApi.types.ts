@@ -84,6 +84,9 @@ export interface OrderStatusBoardCardDetail {
   detailNumber: number | null;
   quantity: number;
   bazisCutQuantity: number;
+  /** MDF demand of the detail (same material rule as the MDF engine's demand). Absent from an older
+   * backend: the hybrid MDF board then treats order readiness as unknown. */
+  mdfEligible?: boolean;
 }
 
 export interface OrderStatusBoardCard {

@@ -30,7 +30,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     vi.stubEnv('BACKEND_STATUS_AUTOMATION','true');
     vi.stubEnv('BACKEND_ENABLE_NOTIFICATION_ENGINE','false'); // MDF processing is independent.
     await db.connect(); await db.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
-    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql']) {
+    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql']) {
       await db.query(readFileSync(new URL(`../../../../db/migrations/${file}`,import.meta.url),'utf8'));
     }
     // Own schema only, no public business mutations or hard-coded production ids.
@@ -128,6 +128,16 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
       .toEqual([{ quantity: '4',state: 'reserved' },{ quantity: '6',state: 'reserved' }]);
     expect((await db.query("SELECT column_key FROM mdf_published_sources WHERE source_kind='bath' AND source_id=$1",[f.receipts[2].sourceId])).rows[0].column_key)
       .toBe('baths_ready');
+    // Hybrid board: the bath has no own cut proof; its coverage is the 4+6 allocated pieces, frozen with the publication.
+    expect((await db.query(`SELECT detail_id::text,quantity::text,covered_quantity::text FROM mdf_published_source_members
+      WHERE source_kind='bath' AND source_id=$1 ORDER BY detail_id`,[f.receipts[2].sourceId])).rows)
+      .toEqual([{ detail_id: String(f.detailId),quantity: '10',covered_quantity: '10' }]);
+    expect((await db.query(`SELECT count(*)::int n FROM mdf_published_source_members WHERE source_kind<>'bath'
+      AND covered_quantity IS NOT NULL`)).rows[0].n).toBe(0);
+    const snapshot = await readMdfPublishedSnapshot(database(),admin,{ dateTo: '2026-09-21' });
+    expect(snapshot.progress.find(p => p.kind==='bath' && p.id===f.receipts[2].sourceId))
+      .toMatchObject({ member: 10,cut: 0,allocated: 10 });
+    expect(snapshot.progress.find(p => p.kind==='packet' && p.id===f.receipts[0].sourceId)?.allocated ?? null).toBeNull();
     const revision = (await db.query('SELECT published_revision FROM mdf_engine_state')).rows[0].published_revision;
     await runner().processOne(); await runner().processOne();
     expect(await runner().processOne()).toEqual({ status: 'idle' });

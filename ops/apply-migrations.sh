@@ -3091,6 +3091,11 @@ probe_file() {
     201_mdf_lineage_genesis_guard*) probe_all \
       "$(q_fun_hash 'public.mdf_guard_physical_lineage_source_head()' 4895f75ef2c486bccd3715f8ab8e6dab)" \
       ;;
+    # Hybrid MDF board: a bath member's cut coverage frozen with its publication.
+    273_mdf_published_bath_coverage*) probe_all \
+      "$(q_col mdf_published_source_members covered_quantity)" \
+      "$(q_con_on mdf_published_source_members mdf_published_member_covered_quantity_check)" \
+      ;;
     199_mdf_cutover_controls*) probe_all \
       "$(q_col mdf_freeze_guard recovery_frozen_at)" \
       "$(q_col mdf_freeze_guard recovery_reason)" \
@@ -3323,6 +3328,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     201_mdf_lineage_genesis_guard*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    273_mdf_published_bath_coverage*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     186_bitrix24_product_import*)
