@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const sql = readFileSync(new URL('./220_order_rework_rounds.sql', import.meta.url), 'utf8');
+const sql = readFileSync(new URL('./274_order_rework_rounds.sql', import.meta.url), 'utf8');
 const sql098 = readFileSync(new URL('./098_order_realtime_producer_bridge.sql', import.meta.url), 'utf8');
 const runner = readFileSync(new URL('../../../ops/apply-migrations.sh', import.meta.url), 'utf8');
 
@@ -13,7 +13,7 @@ function emitOneBody(source: string): string {
   return source.slice(start, end);
 }
 
-describe('220 order rework rounds migration (A)', () => {
+describe('274 order rework rounds migration (A)', () => {
   it('runs as one transaction', () => {
     expect(sql).toMatch(/^BEGIN;$/m);
     expect(sql.trimEnd().endsWith('COMMIT;')).toBe(true);
@@ -45,10 +45,21 @@ describe('220 order rework rounds migration (A)', () => {
 
   it('is additive: no destructive statements outside trigger re-creation', () => {
     // Function/DO bodies are excluded: emit_one legitimately UPDATEs the stream row.
-    const topLevel = sql.replace(/\$\$[\s\S]*?\$\$/g, '$$ $$');
+    const topLevel = sql.replace(/\$([a-z_]*)\$[\s\S]*?\$\1\$/g, '$$ $$');
     const withoutTriggerDrops = topLevel.replace(/DROP TRIGGER IF EXISTS [a-z_]+ ON public\.[a-z_]+;/g, '');
     expect(withoutTriggerDrops).not.toMatch(/\bDROP\b/i);
     expect(topLevel).not.toMatch(/^\s*(UPDATE|DELETE)\s+/im);
+  });
+
+  it('makes the detail-stage-mark automation (266) round-aware and a backend stage-event writer', () => {
+    const fn = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION apply_detail_stage_mark('));
+    expect(fn).toContain('SELECT order_kind, client_id, production_round INTO v_order_kind, v_client_id, v_round');
+    expect(fn).toMatch(/INSERT INTO production_status_events \(order_id, production_status_id, event_by, note, payload, round_no\)/);
+    expect(fn).toContain('WHERE order_id = p_order_id AND production_status_id = p_status_id AND round_no = v_round');
+    expect(fn).toContain("PERFORM set_config('erp.pse_writer', 'backend', true);");
+    expect(fn).toContain("PERFORM set_config('erp.pse_writer', v_prev_writer, true);");
+    // Snapshot import with rounds restores marks itself.
+    expect(fn).toMatch(/IF current_setting\('erp\.pse_writer', true\) = 'historical_import' THEN\s+RETURN;/);
   });
 
   it('pre-creates realtime stream rows so the deferred drain never inserts one', () => {
@@ -81,10 +92,10 @@ describe('220 order rework rounds migration (A)', () => {
   });
 
   it('is probed before the ledger records it, and 098 accepts the redefined emit_one', () => {
-    expect(runner).toContain('220_order_rework_rounds*) probe_all');
+    expect(runner).toContain('274_order_rework_rounds*) probe_all');
     expect(runner).toContain("q_fun_hash 'order_realtime_emit_one(bigint,text[],bigint[],text)' 04eabdca6d8369194f6937ca6d1b1fc6");
     expect(runner).toContain("q_fun_hash_either 'order_realtime_emit_one(bigint,text[],bigint[],text)' bbf8a2f2fad9cd1483a144244fe9d522 04eabdca6d8369194f6937ca6d1b1fc6");
     const verify = runner.slice(runner.indexOf('verify_applied_effect() {'));
-    expect(verify).toMatch(/220_order_rework_rounds\*\)\s+probe_file "\$f" \|\| die/);
+    expect(verify).toMatch(/274_order_rework_rounds\*\)\s+probe_file "\$f" \|\| die/);
   });
 });

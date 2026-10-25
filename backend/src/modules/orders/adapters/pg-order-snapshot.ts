@@ -1365,6 +1365,10 @@ async function importSnapshotInTransaction(
       ownOrderId: orderId,
     });
   const dowelingOrderIds = await upsertDowelingOrders(tx, snapshot, orderId, payloadHash, guardDowelingOrders);
+  // A snapshot with rounds carries the order stage marks of every round: the detail-stage automation (266) is
+  // off while its details are written, otherwise details of earlier rounds would mark their stages in the
+  // restored current round.
+  if (restoresRounds) await markStageEventWriter(tx, 'historical_import');
   await upsertOrderChildren(tx, snapshot, orderId, dowelingOrderIds, payloadHash, command);
   await upsertProductionEvents(tx, snapshot, orderId, payloadHash);
   await restoreSnapshotProductionRounds(

@@ -460,6 +460,21 @@ export class OrderReworkService {
       )).rows[0].order_production_round_id);
     }
 
+    // The order enters the round BEFORE its details move: the detail-stage-mark trigger (266/274) writes
+    // order marks into the order's current round, so round N marks go to N and earlier rounds' marks stay history.
+    const enteringRework = !openRound && mode === 'after_ready';
+    const reworkStatusId = enteringRework ? await loadReworkStatusId(tx) : null;
+    const version = Number((await tx.query<{ version: string }>(
+      `UPDATE orders
+       SET order_status_id = COALESCE($2, order_status_id),
+           production_round = $3,
+           last_round_no = GREATEST(last_round_no, $3),
+           version = version + 1
+       WHERE order_id = $1
+       RETURNING version`,
+      [order.orderId, reworkStatusId, roundNo],
+    )).rows[0].version);
+
     for (const item of planned) {
       await tx.query(
         `INSERT INTO order_production_round_details (
@@ -484,18 +499,6 @@ export class OrderReworkService {
       );
     }
 
-    const enteringRework = !openRound && mode === 'after_ready';
-    const reworkStatusId = enteringRework ? await loadReworkStatusId(tx) : null;
-    const version = Number((await tx.query<{ version: string }>(
-      `UPDATE orders
-       SET order_status_id = COALESCE($2, order_status_id),
-           production_round = $3,
-           last_round_no = GREATEST(last_round_no, $3),
-           version = version + 1
-       WHERE order_id = $1
-       RETURNING version`,
-      [order.orderId, reworkStatusId, roundNo],
-    )).rows[0].version);
     const seq = await bumpEventSeq(tx, roundId);
 
     const detailIds = planned.map((p) => p.detailId);
@@ -663,6 +666,25 @@ export class OrderReworkService {
         [Number(row.detail_id), Number(row.from_production_round), toNullableNumber(row.from_production_status_id)],
       );
     }
+    // Order stage marks (266) of the cancelled round go with it: restoring the details re-entered their earlier
+    // stages while the round was still current, so the automation marked them in this round. Done before the
+    // order leaves the round (boundary 275 allows deleting only current-round events); earlier rounds keep theirs.
+    const removedMarks = (await tx.query<{
+      event_id: string; production_status_id: string; production_status_code: string; production_status_name: string;
+    }>(
+      `WITH removed AS (
+         DELETE FROM production_status_events
+         WHERE order_id = $1 AND detail_id IS NULL AND round_no = $2
+         RETURNING event_id, production_status_id
+       )
+       SELECT removed.event_id, removed.production_status_id, ps.production_status_code, ps.production_status_name
+       FROM removed JOIN production_statuses ps USING (production_status_id)
+       ORDER BY ps.sort_order, removed.event_id`,
+      [order.orderId, command.roundNo],
+    )).rows;
+    const removedStageMarks = removedMarks.map((row) => ({
+      productionEventId: Number(row.event_id), productionStatusId: Number(row.production_status_id),
+    }));
     const restoreStatus = round.mode === 'after_ready' ? Number(round.from_order_status_id) : null;
     const fromRound = Number(round.from_order_production_round);
     await tx.query(
@@ -713,14 +735,50 @@ export class OrderReworkService {
       },
       relatedEntities: detailIds.map((detailId) => ({ entityType: 'order_detail', entityId: detailId })),
       metadata: {
-        roundNo: command.roundNo, mode: round.mode, closeReason: 'false_positive', comment, detailIds, eventSeq: seq,
+        roundNo: command.roundNo, mode: round.mode, closeReason: 'false_positive', comment, detailIds, removedStageMarks, eventSeq: seq,
         idempotencyKey: command.idempotencyKey, outboxIdempotencyKey: outboxKey,
       },
     });
     await enqueueOutbox(tx, 'order.rework_closed', order, outboxKey, {
-      roundNo: command.roundNo, mode: round.mode, closeReason: 'false_positive', detailIds,
+      roundNo: command.roundNo, mode: round.mode, closeReason: 'false_positive', detailIds, removedStageMarks,
       actorUserId: command.currentUser.id, requestId, idempotencyKey: command.idempotencyKey,
     });
+    // Each removed order stage mark is audited like a stage-menu removal (normalized production event link).
+    for (const mark of removedMarks) {
+      const productionEventId = Number(mark.event_id);
+      const productionStatusId = Number(mark.production_status_id);
+      const markOutboxKey = `${outboxKey}:stage:${productionEventId}`;
+      const markFacts = {
+        productionEventId, productionStatusId, productionStatusCode: mark.production_status_code, roundNo: command.roundNo,
+      };
+      await auditService.record(tx, {
+        event: 'production.stage_deactivate',
+        entityType: 'order',
+        entityId: order.orderId,
+        ...actorAudit(command.currentUser),
+        requestId,
+        source: SOURCE,
+        relatedOrderId: order.orderId,
+        relatedClientId: order.clientId,
+        relatedProductionEventId: productionEventId,
+        statusField: 'productionStage',
+        statusId: productionStatusId,
+        statusName: mark.production_status_name,
+        statusCode: mark.production_status_code,
+        stageCode: mark.production_status_code,
+        before: { active: true, roundNo: command.roundNo },
+        after: { active: false, ...markFacts },
+        diff: { active: { before: true, after: false } },
+        metadata: {
+          origin: 'order_rework_false_positive', action: 'deactivate', statusField: 'productionStage', ...markFacts,
+          causationOutboxIdempotencyKey: outboxKey, outboxIdempotencyKey: markOutboxKey,
+        },
+      });
+      await enqueueOutbox(tx, 'production.stage_deactivated', order, markOutboxKey, {
+        ...markFacts, action: 'deactivate', origin: 'order_rework_false_positive',
+        actorUserId: command.currentUser.id, requestId, scope: { source: 'order_rework' },
+      });
+    }
     if (restoreStatus !== null && restoreStatus !== order.orderStatusId) {
       await recordStatusTransition(tx, command.currentUser, order, restoreStatus, requestId, `${outboxKey}:status`);
     }

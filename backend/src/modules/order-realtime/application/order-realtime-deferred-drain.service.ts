@@ -23,7 +23,7 @@ export const ORDER_REALTIME_DRAIN_APPLICATION_NAME = 'erp-order-realtime-drain';
 
 /**
  * Every table that `order_realtime_emit_one` and its helpers read or write
- * (migration 220 §6c, 098 helpers: `order_realtime_bridge_config`,
+ * (migration 274 §6c, 098 helpers: `order_realtime_bridge_config`,
  * `order_realtime_bridge_max_detail_ids` → app_settings; stream; event log and
  * its FK to orders; the queue). Update together with `emit_one`.
  */
@@ -182,7 +182,7 @@ export class OrderRealtimeDeferredDrainService implements OnModuleInit, OnModule
         await db.query('COMMIT');
         return 'empty';
       }
-      // The stream row exists in advance (migration 220 backfill + order insert trigger);
+      // The stream row exists in advance (migration 274 backfill + order insert trigger);
       // the drain never creates it (no speculative insert wait).
       const stream = await db.query('SELECT 1 FROM order_realtime_stream WHERE order_id = $1 FOR UPDATE NOWAIT', [orderId]);
       if (stream.rows.length === 0) {

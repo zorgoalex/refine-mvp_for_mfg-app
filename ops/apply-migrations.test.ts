@@ -442,7 +442,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).not.toMatch(/q_fun_hash\(\).*md5\(prosrc\)/);
     expect(probeFn).toContain("q_fun_hash 'cnc_telegram_worker_reason_code_valid(text)'");
     expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(
-      requiredFunctions.length + 2 + 9 + 1 + 1 + 7 + 4 + 8 + 5 - 1 + 1 + 1, // prior probes plus 182 lineage and 185 assignment markers; 182 seal guard moved to q_fun_hash_either (191); 098 emit_one moved to q_fun_hash_either while 220 fingerprints it exactly (net 0); 221 stage-event boundary (+1); 222 round closure (+1)
+      requiredFunctions.length + 2 + 9 + 1 + 1 + 7 + 4 + 8 + 5 - 1 + 1 + 1, // prior probes plus 182 lineage and 185 assignment markers; 182 seal guard moved to q_fun_hash_either (191); 098 emit_one moved to q_fun_hash_either while 274 fingerprints it exactly (net 0); 275 stage-event boundary (+1); 276 round closure (+1)
     );
   });
 

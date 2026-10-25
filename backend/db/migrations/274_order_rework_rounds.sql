@@ -474,4 +474,198 @@ AFTER INSERT OR UPDATE OR DELETE ON public.order_production_rounds
 DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW EXECUTE FUNCTION public.ctrg_order_production_rounds_consistency();
 
+
+-- 8. Отметки этапов заказа из статусов деталей (266) — по текущему кругу ----------------------
+-- apply_detail_stage_mark (266) пишет/снимает события этапов заказа из триггеров деталей. С кругами
+-- отметка принадлежит текущему кругу заказа: вставка с round_no текущего круга, снятие — только в
+-- текущем круге (события прошлых кругов — история, граница 275 их не даёт менять), запись — под
+-- маркером backend-писателя (граница 275), прежний маркер вызывающего восстанавливается. Импорт
+-- снимка с кругами (маркер historical_import) восстанавливает отметки из снимка — автоматика их не
+-- добавляет (иначе детали прошлых кругов отметили бы свои этапы в текущем). Остальное тело — без
+-- изменений относительно 266.
+-- История отметок (266) хранит круг: после удаления отметки её принадлежность кругу не теряется.
+-- Строки до кругов — круг 1.
+ALTER TABLE production_stage_mark_history ADD COLUMN IF NOT EXISTS round_no smallint NOT NULL DEFAULT 1;
+
+CREATE OR REPLACE FUNCTION trg_record_stage_mark_history()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+  v_row production_status_events%ROWTYPE;
+BEGIN
+  IF TG_OP = 'INSERT' THEN v_row := NEW; ELSE v_row := OLD; END IF;
+  IF v_row.order_id IS NULL THEN
+    RETURN NULL;
+  END IF;
+  INSERT INTO production_stage_mark_history (
+    action, automatic, event_id, order_id, production_status_id, event_by, event_at, note, payload, request_id, round_no
+  ) VALUES (
+    lower(TG_OP),
+    CASE WHEN TG_OP = 'INSERT'
+      THEN COALESCE(v_row.payload->>'origin', '') IN ('detail_status', 'detail_status_backfill')
+      -- unset in a session reads as NULL: a manual delete must still be false
+      ELSE COALESCE(current_setting('erp.stage_mark_automation', true), '') = 'on' END,
+    v_row.event_id, v_row.order_id, v_row.production_status_id, v_row.event_by, v_row.event_at,
+    v_row.note, COALESCE(v_row.payload, '{}'::jsonb), NULLIF(current_setting('erp.request_id', true), ''),
+    v_row.round_no
+  );
+  RETURN NULL;
+END
+$function$;
+
+CREATE OR REPLACE FUNCTION apply_detail_stage_mark(
+  p_order_id bigint,
+  p_status_id smallint,
+  p_detail_ids bigint[],
+  p_entered boolean,
+  p_left boolean
+) RETURNS void
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+  v_status_code text;
+  v_status_name text;
+  v_status_active boolean;
+  v_order_kind text;
+  v_client_id bigint;
+  v_present boolean;
+  v_event_id bigint;
+  v_active boolean;
+  v_audit_id uuid;
+  v_removed record;
+  v_before jsonb;
+  v_round smallint;
+  v_prev_writer text;
+  -- The HTTP request id is transaction-local (DatabaseService.transaction);
+  -- standalone SQL and background jobs fall back to the transaction id.
+  v_http_request_id text := NULLIF(current_setting('erp.request_id', true), '');
+  v_request_id text := COALESCE(v_http_request_id, 'detail-stage-mark:' || txid_current()::text);
+BEGIN
+  -- A historical import restores the order's stage marks from its snapshot; the automation adds none.
+  IF current_setting('erp.pse_writer', true) = 'historical_import' THEN
+    RETURN;
+  END IF;
+  SELECT production_status_code, production_status_name, is_active
+    INTO v_status_code, v_status_name, v_status_active
+    FROM production_statuses
+   WHERE production_status_id = p_status_id;
+  IF NOT FOUND OR NOT v_status_active OR v_status_code = 'new' THEN
+    RETURN;
+  END IF;
+
+  -- Serializes concurrent transitions of one order: the presence check below
+  -- runs after the lock with a fresh snapshot. NO KEY UPDATE is what the
+  -- detail-summary recalculation already takes on the order row and does not
+  -- conflict with the KEY SHARE locks of concurrent detail inserts (FOR UPDATE
+  -- would, and could deadlock with them).
+  SELECT order_kind, client_id, production_round INTO v_order_kind, v_client_id, v_round
+    FROM orders
+   WHERE order_id = p_order_id
+   FOR NO KEY UPDATE;
+  IF v_order_kind IS DISTINCT FROM 'production_order' THEN
+    RETURN;
+  END IF;
+
+  v_present := EXISTS (
+      SELECT 1 FROM order_details
+       WHERE order_id = p_order_id
+         AND COALESCE(delete_flag, false) = false
+         AND production_status_id = p_status_id
+    ) OR (
+      v_status_code = 'hdf' AND EXISTS (
+        SELECT 1 FROM order_hdf_details
+         WHERE order_id = p_order_id
+           AND COALESCE(delete_flag, false) = false
+           AND production_status_id = p_status_id
+      )
+    );
+
+  -- «Переделка»: order marks belong to the order's current production round; the write passes the
+  -- stage-event command boundary (275) as a backend writer, restoring the caller's marker afterwards.
+  v_prev_writer := COALESCE(current_setting('erp.pse_writer', true), '');
+  PERFORM set_config('erp.pse_writer', 'backend', true);
+  IF v_present AND p_entered THEN
+    INSERT INTO production_status_events (order_id, production_status_id, event_by, note, payload, round_no)
+    VALUES (
+      p_order_id, p_status_id, NULL, 'По статусу деталей',
+      jsonb_build_object('origin', 'detail_status', 'detailIds', to_jsonb(p_detail_ids)),
+      v_round
+    )
+    ON CONFLICT DO NOTHING
+    RETURNING event_id INTO v_event_id;
+    v_active := true;
+    v_before := jsonb_build_object('active', false);
+  ELSIF NOT v_present AND p_left THEN
+    -- Marks the history row of this delete as automatic.
+    PERFORM set_config('erp.stage_mark_automation', 'on', true);
+    DELETE FROM production_status_events
+     WHERE order_id = p_order_id AND production_status_id = p_status_id AND round_no = v_round
+    RETURNING event_id, event_by, event_at, note, payload INTO v_removed;
+    PERFORM set_config('erp.stage_mark_automation', '', true);
+    v_event_id := v_removed.event_id;
+    v_active := false;
+    -- Free text (note, payload) goes only to production_stage_mark_history.
+    v_before := jsonb_build_object('active', true, 'eventBy', v_removed.event_by,
+      'eventAt', v_removed.event_at, 'removedEventId', v_removed.event_id);
+  END IF;
+
+  PERFORM set_config('erp.pse_writer', v_prev_writer, true);
+
+  IF v_event_id IS NULL THEN
+    RETURN;
+  END IF;
+
+  -- The actor is the system: the detail change that caused this has its own
+  -- audit with the user. app.user_id is session-wide on pooled connections and
+  -- is not trusted here.
+  -- clock_timestamp keeps the order of several changes inside one transaction.
+  INSERT INTO audit_log (
+    created_at, event, entity_type, entity_id, user_id, username, request_id,
+    before_json, after_json, diff_json, metadata_json, source,
+    related_order_id, related_client_id, related_production_event_id,
+    status_field, status_id, status_name, status_code, stage_code
+  ) VALUES (
+    clock_timestamp(),
+    CASE WHEN v_active THEN 'production_stage_mark.auto_activate' ELSE 'production_stage_mark.auto_deactivate' END,
+    'order', p_order_id::text, NULL, 'system', v_request_id,
+    v_before,
+    jsonb_build_object('active', v_active, 'productionEventId', v_event_id,
+      'productionStatusId', p_status_id, 'productionStatusCode', v_status_code, 'roundNo', v_round),
+    jsonb_build_object('active', jsonb_build_object('before', NOT v_active, 'after', v_active)),
+    jsonb_build_object('origin', 'detail_status', 'orderId', p_order_id, 'clientId', v_client_id,
+      'productionEventId', v_event_id, 'productionStatusId', p_status_id,
+      'productionStatusCode', v_status_code, 'detailIds', to_jsonb(p_detail_ids),
+      'action', CASE WHEN v_active THEN 'activate' ELSE 'deactivate' END,
+      'statusField', 'productionStage', 'transactionId', txid_current(),
+      'causationRequestId', v_http_request_id, 'roundNo', v_round),
+    'detail_status_trigger',
+    p_order_id, v_client_id, v_event_id,
+    'productionStage', p_status_id, v_status_name, v_status_code, v_status_code
+  )
+  RETURNING audit_id INTO v_audit_id;
+
+  -- Same domain event as a manual menu toggle (production-actions), told apart
+  -- by origin/scope. No relay consumer handles stage events yet; a relay run
+  -- marks them processed. A future consumer replays them by re-queuing
+  -- (status='pending') rows of these event types from its start date.
+  INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+  VALUES (
+    CASE WHEN v_active THEN 'production.stage_activated' ELSE 'production.stage_deactivated' END,
+    'order', p_order_id::text,
+    jsonb_build_object(
+      'eventType', CASE WHEN v_active THEN 'production.stage_activated' ELSE 'production.stage_deactivated' END,
+      'origin', 'detail_status',
+      'actorUserId', NULL, 'requestId', v_request_id, 'auditId', v_audit_id,
+      'entityType', 'order', 'entityId', p_order_id::text, 'orderId', p_order_id, 'clientId', v_client_id,
+      'productionEventId', v_event_id, 'productionStatusId', p_status_id,
+      'productionStatusCode', v_status_code, 'detailIds', to_jsonb(p_detail_ids), 'roundNo', v_round,
+      'action', CASE WHEN v_active THEN 'activate' ELSE 'deactivate' END,
+      'scope', jsonb_build_object('source', 'detail_status')
+    ),
+    'detail-stage-mark:' || v_audit_id::text
+  );
+END
+$function$;
+
 COMMIT;

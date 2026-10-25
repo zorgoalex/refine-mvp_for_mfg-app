@@ -129,6 +129,10 @@ const EVENT_TEXT: Record<string, string> = {
   DEADLINE_EXPIRED: 'истёк срок',
   'order.resource_procurement_changed': 'изменился закуп материала',
   'order.resource_demand_changed_after_mark': 'потребность изменилась после отметки «Закуплено»',
+  'order.rework_started': 'запущена переделка',
+  'order.rework_details_added': 'в переделку добавлены детали',
+  'order.rework_reason_clarified': 'уточнена причина переделки',
+  'order.rework_closed': 'круг переделки закрыт',
 };
 
 function orderLabel(ctx: NotificationEventContext): string {

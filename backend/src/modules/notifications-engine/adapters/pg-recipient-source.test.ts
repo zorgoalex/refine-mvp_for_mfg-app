@@ -148,15 +148,13 @@ describe('PgRecipientSourceAdapter.direction_head', () => {
 describe('PgRecipientSourceAdapter.rework_managers («Переделка»)', () => {
   const adapter = new PgRecipientSourceAdapter();
 
-  it('resolves active users whose active role literally holds orders.rework', async () => {
+  it('resolves users whose effective permissions literally hold orders.rework (same source as authorization)', async () => {
     const { client, calls } = fakeClient([{ user_id: 5 }, { user_id: '8' }]);
     const result = await adapter.resolveDynamic(client, 'rework_managers', buildContext({ eventType: 'order.rework_started' }));
     expect(result).toEqual([5, 8]);
     expect(calls).toHaveLength(1);
-    expect(calls[0].sql).toContain("rp.permission_name = 'orders.rework' AND rp.is_enabled = true");
-    expect(calls[0].sql).toContain('r.is_active = true');
-    expect(calls[0].sql).toContain('pc.is_active = true');
-    expect(calls[0].sql).toContain('u.is_active = true');
+    expect(calls[0].sql).toContain('FROM public.user_effective_permissions ep');
+    expect(calls[0].sql).toContain("ep.permission_name = 'orders.rework'");
   });
 
   it('does not resolve without an order anchor (fail closed like every order resolver)', async () => {

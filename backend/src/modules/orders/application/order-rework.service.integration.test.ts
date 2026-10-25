@@ -23,7 +23,7 @@ import { ROLE_TO_ROLE_ID } from '../../../permissions/permissions';
 import { OrderReworkReasonCatalogService } from './order-rework-reason-catalog.service';
 
 // Real PostgreSQL proof of the rework commands («Переделка», slice 4). Gated on
-// REWORK_INTEGRATION_DATABASE_URL (scratch DB: erp schema + migrations 220–222).
+// REWORK_INTEGRATION_DATABASE_URL (scratch DB: erp schema + migrations 274–276).
 // Creates and removes its own `E2E-Тест` fixtures.
 const databaseUrl = process.env.REWORK_INTEGRATION_DATABASE_URL;
 
@@ -114,9 +114,21 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
 
   const version = async (orderId: number) => Number((await pool.query('SELECT version FROM orders WHERE order_id = $1', [orderId])).rows[0].version);
   const key = () => `e2e-rework-${randomUUID()}`;
+  let engineMode: string | null = null;
+  // Order stage-mark automation (266) audits its own changes; command assertions exclude it.
+  const commandAudit = "event NOT LIKE 'production_stage_mark.%'";
+  const orderMarks = async (orderId: number) => (await pool.query(
+    `SELECT ps.production_status_code AS code, pse.round_no FROM production_status_events pse
+       JOIN production_statuses ps USING (production_status_id)
+      WHERE pse.order_id = $1 AND pse.detail_id IS NULL ORDER BY pse.round_no, ps.sort_order`, [orderId],
+  )).rows.map((r) => [r.code, Number(r.round_no)]);
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: databaseUrl, max: 6 });
+    // Rounds are refused while the MDF engine is active (§5.5): the suite runs on «legacy»
+    // and restores the database's own mode afterwards (stage copies may be «active»).
+    engineMode = (await pool.query('SELECT mode FROM mdf_engine_state WHERE singleton')).rows[0]?.mode ?? null;
+    if (engineMode) await pool.query("UPDATE mdf_engine_state SET mode = 'legacy' WHERE singleton");
     service = new OrderReworkService({
       database: database(),
       isEnabled: () => true,
@@ -143,6 +155,7 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
   afterAll(async () => {
     if (!pool) return;
     try {
+      if (engineMode) await pool.query('UPDATE mdf_engine_state SET mode = $1 WHERE singleton', [engineMode]);
       for (const orderId of orderIds) {
         await pool.query('DELETE FROM audit_log_related_entity WHERE audit_id IN (SELECT audit_id FROM audit_log WHERE related_order_id = $1)', [orderId]);
         await pool.query('DELETE FROM audit_log WHERE related_order_id = $1', [orderId]);
@@ -190,7 +203,7 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
     } finally {
       await pool.end();
     }
-  });
+  }, 120_000);
 
   it('starts a round after readiness: «Переделка», round 2, restaged details, audit, outbox, deferred realtime', async () => {
     const { orderId, detailIds } = await createOrder('legacy_6', 'packed');
@@ -213,16 +226,18 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
     expect(round).toMatchObject({ reason_comment: 'скол', mode: 'after_ready' });
     const events = (await pool.query('SELECT production_status_id, round_no FROM production_status_events WHERE detail_id = $1 ORDER BY round_no', [detailIds[0]])).rows;
     expect(events.map((e) => [Number(e.production_status_id), Number(e.round_no)])).toEqual([[stage.packed, 1], [stage.drawn, 2]]);
-    const audit = (await pool.query("SELECT event FROM audit_log WHERE related_order_id = $1 ORDER BY event", [orderId])).rows.map((r) => r.event);
+    const audit = (await pool.query(`SELECT event FROM audit_log WHERE related_order_id = $1 AND ${commandAudit} ORDER BY event`, [orderId])).rows.map((r) => r.event);
     expect(audit).toEqual(['order.rework_started', 'orders.status_change']);
-    const outbox = (await pool.query("SELECT event_type, idempotency_key FROM outbox_events WHERE aggregate_id = $1 ORDER BY event_type", [String(orderId)])).rows;
+    // Order stage marks (266): the original run keeps its mark, the new round gets its own.
+    expect(await orderMarks(orderId)).toEqual([['packed', 1], ['drawn', 2]]);
+    const outbox = (await pool.query("SELECT event_type, idempotency_key FROM outbox_events WHERE aggregate_id = $1 AND event_type LIKE 'order.%' ORDER BY event_type", [String(orderId)])).rows;
     expect(outbox.map((o) => o.event_type)).toEqual(['order.rework_started', 'order.status_changed']);
     expect(outbox[0].idempotency_key).toBe(`order:${orderId}:rework:2:started:1`);
 
     // Idempotent replay: same result, no new rows.
     const replay = await service.startOrExtend(command);
     expect(replay).toMatchObject({ roundNo: 2, action: 'started', version: result.version });
-    expect(Number((await pool.query('SELECT count(*) FROM audit_log WHERE related_order_id = $1', [orderId])).rows[0].count)).toBe(2);
+    expect(Number((await pool.query(`SELECT count(*) FROM audit_log WHERE related_order_id = $1 AND ${commandAudit}`, [orderId])).rows[0].count)).toBe(2);
 
     // Extend: a new detail joins round 2; an already included detail is a no-op.
     const extended = await service.startOrExtend({
@@ -276,7 +291,7 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
     expect(result).toMatchObject({ mode: 'in_production', roundNo: 2, action: 'started' });
     const order = (await pool.query('SELECT order_status_id, production_round FROM orders WHERE order_id = $1', [orderId])).rows[0];
     expect([Number(order.order_status_id), Number(order.production_round)]).toEqual([status.legacy_4, 2]);
-    const audit = (await pool.query("SELECT event FROM audit_log WHERE related_order_id = $1", [orderId])).rows.map((r) => r.event);
+    const audit = (await pool.query(`SELECT event FROM audit_log WHERE related_order_id = $1 AND ${commandAudit}`, [orderId])).rows.map((r) => r.event);
     expect(audit).toEqual(['order.rework_started']);
     const closed = await service.falsePositive({
       currentUser: admin, orderId, roundNo: 2, version: await version(orderId), idempotencyKey: key(), dto: { comment: 'ошибка' },
@@ -650,6 +665,9 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
     expect((await detailRounds(imported.orderId)).map((detail) => detail.round)).toEqual([2, 3]);
     expect(await roundRows(imported.orderId)).toEqual(await roundRows(source.orderId));
     expect(await eventRounds(imported.orderId)).toEqual(await eventRounds(source.orderId));
+    // Order stage marks come from the snapshot only: the detail-stage automation (266) adds none for the
+    // imported current round (round-1/2 details would otherwise mark their stages in round 3).
+    expect(await orderMarks(imported.orderId)).toEqual(await orderMarks(source.orderId));
     const before = (await pool.query(
       `SELECT d.from_production_status_id, d.from_production_round, d.to_production_status_id FROM order_production_round_details d
        JOIN order_production_rounds r USING (order_production_round_id) WHERE r.order_id = $1 ORDER BY r.round_no`, [imported.orderId],
@@ -1230,6 +1248,25 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
     expect((await service.listRounds(admin, completed.orderId)).order.action).toBeNull();
   });
 
+  it('refuses round commands while the MDF engine is active or read-only; the UI is told why', async () => {
+    const ready = await createOrder('legacy_6', 'packed', 1);
+    try {
+      for (const mode of ['active', 'read_only']) {
+        await pool.query('UPDATE mdf_engine_state SET mode = $1 WHERE singleton', [mode]);
+        const before = await version(ready.orderId);
+        await expect(service.startOrExtend({
+          currentUser: admin, orderId: ready.orderId, version: before, idempotencyKey: key(),
+          dto: { reasonId: reasons.workshop_defect, details: [{ detailId: ready.detailIds[0], productionStatusId: stage.drawn }] },
+        })).rejects.toMatchObject({ statusCode: 409, code: 'ORDER_REWORK_MDF_ENGINE_UNSUPPORTED' });
+        expect(await version(ready.orderId)).toBe(before);
+        expect((await pool.query('SELECT count(*)::int n FROM order_production_rounds WHERE order_id = $1', [ready.orderId])).rows[0].n).toBe(0);
+        expect(await service.availability()).toEqual({ availability: 'mdf_engine_unsupported' });
+      }
+    } finally {
+      await pool.query("UPDATE mdf_engine_state SET mode = 'legacy' WHERE singleton");
+    }
+  });
+
   it('reason catalogue under concurrency: case-insensitive duplicates → exactly one wins, the other 409 (never 500)', async () => {
     const catalog = new OrderReworkReasonCatalogService(database());
     const base = `E2E-Тест гонка ${tag}`;
@@ -1341,5 +1378,71 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
       await pool.query('UPDATE orders SET created_by = $2 WHERE order_id = $1', [foreign.orderId, userId]);
       await pool.query('DELETE FROM users WHERE user_id = $1', [other]);
     }
+  });
+
+  it('detail-stage marks (266, round-aware in 274) follow the current round; earlier rounds stay history', async () => {
+    const { orderId, detailIds } = await createOrder('legacy_6', 'packed', 2);
+    const marks = async () => (await pool.query(
+      `SELECT ps.production_status_code AS code, e.round_no FROM production_status_events e
+       JOIN production_statuses ps USING (production_status_id)
+       WHERE e.order_id = $1 ORDER BY e.round_no, ps.sort_order`, [orderId],
+    )).rows.map((row) => `${row.code}:${row.round_no}`);
+    // A plain detail update (no backend marker in the session) still passes the stage-event boundary.
+    await pool.query('UPDATE order_details SET production_status_id = $2 WHERE detail_id = $1', [detailIds[1], stage.cut]);
+    const round1 = await marks();
+    expect(round1).toEqual(expect.arrayContaining(['packed:1', 'cut:1']));
+
+    await service.startOrExtend({
+      currentUser: admin, orderId, version: await version(orderId), idempotencyKey: key(),
+      dto: { reasonId: reasons.workshop_defect, details: [{ detailId: detailIds[0], productionStatusId: stage.drawn }] },
+    });
+    const afterStart = await marks();
+    // Round 2 gets the mark of the stage its detail entered; round 1 marks are untouched history.
+    expect(afterStart).toEqual(expect.arrayContaining([...round1, 'drawn:2']));
+    expect(afterStart.filter((m) => m.endsWith(':1'))).toEqual(round1);
+
+    await service.falsePositive({
+      currentUser: admin, orderId, roundNo: 2, version: await version(orderId), idempotencyKey: key(), dto: {},
+    });
+    // The cancelled round leaves no order marks (restored details re-entering «Упакован» must not mark round 2);
+    // round 1 marks are exactly as before.
+    expect(await marks()).toEqual(round1);
+    expect(Number((await pool.query('SELECT production_round FROM orders WHERE order_id = $1', [orderId])).rows[0].production_round)).toBe(1);
+    const closed = (await pool.query(
+      "SELECT metadata_json FROM audit_log WHERE related_order_id = $1 AND event = 'order.rework_closed'", [orderId],
+    )).rows[0].metadata_json;
+    expect(closed.removedStageMarks.map((m: { productionStatusId: number }) => m.productionStatusId)).toEqual([stage.packed]);
+    const history = (await pool.query(
+      `SELECT action, automatic FROM production_stage_mark_history
+        WHERE order_id = $1 AND production_status_id = $2 ORDER BY history_id`, [orderId, stage.packed],
+    )).rows.map((r) => `${r.action}:${r.automatic}`);
+    expect(history.slice(-2)).toEqual(['insert:true', 'delete:false']);
+    // The mark history keeps the round of every mark, also after it was removed.
+    const historyRounds = (await pool.query(
+      `SELECT action, round_no FROM production_stage_mark_history WHERE order_id = $1 ORDER BY history_id`, [orderId],
+    )).rows.map((r) => `${r.action}:${r.round_no}`);
+    expect(historyRounds).toEqual(expect.arrayContaining(['insert:2', 'delete:2', 'insert:1']));
+    // Each removed mark has its own audit row, found by its production event (normalized link), and an outbox event.
+    const removedId = closed.removedStageMarks[0].productionEventId;
+    const deactivated = (await pool.query(
+      `SELECT event, user_id, status_code, stage_code, metadata_json FROM audit_log
+        WHERE related_order_id = $1 AND related_production_event_id = $2`, [orderId, removedId],
+    )).rows.filter((r) => r.event === 'production.stage_deactivate');
+    expect(deactivated).toHaveLength(1);
+    expect(deactivated[0]).toMatchObject({
+      user_id: String(userId), status_code: 'packed', stage_code: 'packed',
+      metadata_json: { origin: 'order_rework_false_positive', roundNo: 2, productionEventId: removedId },
+    });
+    const stageOutbox = (await pool.query(
+      "SELECT payload_json FROM outbox_events WHERE aggregate_id = $1 AND event_type = 'production.stage_deactivated' AND payload_json->>'origin' = 'order_rework_false_positive'",
+      [String(orderId)],
+    )).rows;
+    expect(stageOutbox.map((r) => [r.payload_json.productionEventId, r.payload_json.roundNo])).toEqual([[removedId, 2]]);
+    // The automation's own audit carries the round too.
+    const automated = (await pool.query(
+      "SELECT metadata_json FROM audit_log WHERE related_order_id = $1 AND event = 'production_stage_mark.auto_activate' ORDER BY created_at",
+      [orderId],
+    )).rows.map((r) => r.metadata_json.roundNo);
+    expect(automated).toEqual(expect.arrayContaining([1, 2]));
   });
 });

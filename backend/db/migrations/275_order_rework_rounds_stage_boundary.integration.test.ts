@@ -3,16 +3,16 @@ import { readFileSync } from 'node:fs';
 import { Pool, type PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// Real PostgreSQL proof of migration 221 («Переделка», migration B): the old
+// Real PostgreSQL proof of migration 275 («Переделка», migration B): the old
 // «stage once» indexes are gone and the stage-event command boundary admits
 // only backend writers in the current round. Gated on
-// REWORK_INTEGRATION_DATABASE_URL (scratch DB with the erp schema, 220 and 221);
+// REWORK_INTEGRATION_DATABASE_URL (scratch DB with the erp schema, 274 and 275);
 // creates and removes its own `E2E-Тест` fixtures.
 const databaseUrl = process.env.REWORK_INTEGRATION_DATABASE_URL;
-const migration221 = readFileSync(new URL('./221_order_rework_rounds_stage_boundary.sql', import.meta.url), 'utf8');
-const rollback221 = readFileSync(new URL('../rollback/221_order_rework_rounds_stage_boundary.down.sql', import.meta.url), 'utf8');
+const migration221 = readFileSync(new URL('./275_order_rework_rounds_stage_boundary.sql', import.meta.url), 'utf8');
+const rollback221 = readFileSync(new URL('../rollback/275_order_rework_rounds_stage_boundary.down.sql', import.meta.url), 'utf8');
 
-describe.skipIf(!databaseUrl)('221 stage-event command boundary (real PostgreSQL)', () => {
+describe.skipIf(!databaseUrl)('275 stage-event command boundary (real PostgreSQL)', () => {
   let pool: Pool;
   let userId: number;
   let authorId: number;
@@ -61,7 +61,7 @@ describe.skipIf(!databaseUrl)('221 stage-event command boundary (real PostgreSQL
   beforeAll(async () => {
     pool = new Pool({ connectionString: databaseUrl, max: 4 });
     const phaseB = (await pool.query("SELECT to_regclass('public.uq_pse_detail_status_once') IS NULL AS b")).rows[0].b;
-    expect(phaseB, 'migration 221 must be applied to the scratch DB').toBe(true);
+    expect(phaseB, 'migration 275 must be applied to the scratch DB').toBe(true);
     cut = Number((await pool.query("SELECT production_status_id FROM production_statuses WHERE production_status_code = 'cut'")).rows[0].production_status_id);
     const draft = Number((await pool.query("SELECT order_status_id FROM order_statuses WHERE order_status_code = 'legacy_2'")).rows[0].order_status_id);
     userId = Number((await pool.query(
@@ -115,7 +115,7 @@ describe.skipIf(!databaseUrl)('221 stage-event command boundary (real PostgreSQL
       if (clientId) await pool.query('DELETE FROM clients WHERE client_id = $1', [clientId]);
       if (userId) await pool.query('DELETE FROM users WHERE user_id = $1', [userId]);
       if (authorId) await pool.query('DELETE FROM users WHERE user_id = $1', [authorId]);
-      // Guarded rollback succeeds only when no round > 1 is left anywhere; then 221 is re-applied.
+      // Guarded rollback succeeds only when no round > 1 is left anywhere; then 275 is re-applied.
       const rounds = await pool.query(
         'SELECT (SELECT count(*) FROM production_status_events WHERE round_no > 1)::int + (SELECT count(*) FROM order_production_rounds)::int AS n',
       );

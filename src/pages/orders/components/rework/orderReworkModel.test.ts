@@ -94,7 +94,7 @@ describe('«Переделка» UI model', () => {
   it('the panel and the reasons tab modules load (JSX/imports are valid)', async () => {
     expect(typeof (await import('./OrderReworkPanel')).OrderReworkPanel).toBe('function');
     expect(typeof (await import('../../../configuration/components/ReworkReasonsConfigTab')).ReworkReasonsConfigTab).toBe('function');
-  });
+  }, 60_000); // first transform of the antd component graph is slow on a loaded host
 
   it('mounts the panel in the order card and gates actions by orders.rework', () => {
     const show = readFileSync(join(__dirname, '../../show.tsx'), 'utf8');

@@ -89,7 +89,7 @@ function describeException(exception: unknown): string {
 }
 
 /**
- * DB guard triggers of production rounds («Переделка», migrations 220–222) raise
+ * DB guard triggers of production rounds («Переделка», migrations 274–276) raise
  * P0001 with a stable code as the message. They fire on any write path (order
  * save, status change, automation, Bitrix, …); answer 409 with that code instead
  * of an opaque 500.

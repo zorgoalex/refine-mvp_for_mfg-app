@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Checkbox, Collapse, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Checkbox, Collapse, Form, Input, Modal, Select, Space, Tag, Typography, message } from 'antd';
+import { Table, Tooltip } from '../../../../ui/tooltipDelay';
 import {
   orderReworkApi,
   REWORK_CLOSE_REASON_LABELS,

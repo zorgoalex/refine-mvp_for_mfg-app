@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Space, Switch, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Space, Switch, Tag, Typography, message } from 'antd';
+import { Table } from '../../../ui/tooltipDelay';
 import { orderReworkApi, type OrderReworkReasonCatalogItem } from '../../../api/orderReworkApi';
 
 const { Text } = Typography;
