@@ -40,6 +40,10 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     for (const table of tables) {
       await client.query(`CREATE TEMP TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
     }
+    // The shared database's own engine mode must not pick the board path: these fixtures are legacy
+    // unless a test switches this session-local state to an engine mode.
+    await client.query(`CREATE TEMP TABLE mdf_engine_state(singleton boolean PRIMARY KEY, mode text NOT NULL);
+      INSERT INTO pg_temp.mdf_engine_state VALUES(true,'legacy')`);
     // CREATE TABLE AS drops defaults; order_details.production_round is NOT NULL DEFAULT 1 («Переделка»).
     await client.query('ALTER TABLE order_details ALTER COLUMN production_round SET DEFAULT 1');
     await client.query(`
@@ -1098,17 +1102,18 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
       source_version=1; UPDATE pg_temp.cnc_telegram_packet_items SET packet_item_id=COALESCE(packet_item_id,gen_random_uuid())`);
     const legacy = (await boundedLoad()).response;
     expect(legacy.columns.flatMap(c => c.packets).every(p => !('mdfPresentationDigest' in p))).toBe(true);
-    await client.query(`CREATE TEMP TABLE mdf_engine_state(singleton boolean PRIMARY KEY, mode text NOT NULL);
-      INSERT INTO pg_temp.mdf_engine_state VALUES(true,'active')`);
+    await client.query("UPDATE pg_temp.mdf_engine_state SET mode='active'");
     try {
       const calls: string[] = [];
       const run = (sql: string, params?: unknown[]) => { calls.push(sql); return client.query(sql, params ?? []); };
-      const repo = new PgCncTelegramRepository({ query: run, transaction: async (handler: (tx: unknown) => unknown,
-        options: { isolation?: string }) => {
-        await run('BEGIN');
+      // Temp tables are session-local, so this harness serves the shared snapshot from one session;
+      // database.service.readSnapshot's multi-session import is covered by its own PostgreSQL test.
+      const repo = new PgCncTelegramRepository({ query: run, readSnapshot: async (handler: (client: unknown) => unknown,
+        options: { parallelism?: number }) => {
+        expect(options.parallelism).toBeGreaterThan(1);
+        await run('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
         try {
-          if (options?.isolation) await run(`SET TRANSACTION ISOLATION LEVEL ${options.isolation.toUpperCase()}`);
-          const result = await handler({ query: run, raw: client });
+          const result = await handler({ query: run });
           await run('COMMIT');
           return result;
         } catch (error) { await run('ROLLBACK'); throw error; }
@@ -1123,16 +1128,15 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
       expect(bath.mdfPresentationDigest).toBe(expected.b);
       expect(packet.mdfPresentationDigest).toMatch(/^[a-f0-9]{64}$/);
       // Every loader statement and the digest read run after the snapshot is fixed, inside one transaction.
-      const begin = calls.indexOf('BEGIN'), commit = calls.indexOf('COMMIT');
-      expect(calls.slice(begin + 1, begin + 3)).toEqual(['SET TRANSACTION ISOLATION LEVEL REPEATABLE READ',
-        'SET TRANSACTION READ ONLY']);
+      const begin = calls.indexOf('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY'), commit = calls.indexOf('COMMIT');
+      expect(begin).toBeGreaterThanOrEqual(0);
       const digestCall = calls.findIndex(sql => sql.includes('mdf_source_presentation_digest(s.kind,s.id)'));
-      expect(digestCall).toBeGreaterThan(begin + 2);
+      expect(digestCall).toBeGreaterThan(begin);
       expect(digestCall).toBeLessThan(commit);
-      expect(calls.slice(begin + 3, commit).length).toBeGreaterThan(2);
+      expect(calls.slice(begin + 1, commit).length).toBeGreaterThan(2);
       expect(calls.slice(commit + 1).some(sql => /cnc_telegram_packets|cut_result/.test(sql))).toBe(false);
     } finally {
-      await client.query('DROP TABLE IF EXISTS pg_temp.mdf_engine_state');
+      await client.query("UPDATE pg_temp.mdf_engine_state SET mode='legacy'");
     }
   });
 });

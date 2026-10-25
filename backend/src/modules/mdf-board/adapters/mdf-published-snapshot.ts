@@ -40,9 +40,9 @@ export interface PublishedMember { kind: string; id: string; orderId: number; de
  * Scope is resolved from current server policy, never client-supplied owner ids.
  * The two-month window limits cards only; position totals are already accounted
  * against all accepted history. No legacy/source JSON readiness fallback. */
-export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: CurrentUser, query: MdfPublishedQuery = {}) {
-  return database.transaction(async tx => {
-    await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+export async function readMdfPublishedSnapshot(database: MdfJobDatabase | MdfSnapshotDatabase, user: CurrentUser,
+  query: MdfPublishedQuery = {}) {
+  return readOneSnapshot(database, async tx => {
     const state = (await tx.query<{ mode: string; revision: string; generatedAt: string; dateFrom: string; dateTo: string;
       displayFrom: string }>(`SELECT
       mode,published_revision::text revision,transaction_timestamp()::text "generatedAt",
@@ -61,6 +61,11 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
     // published accepted AND received revisions (retained physical proof survives a
     // composition edit). Never today's head, never caller-provided owners or markers.
     const cardOwners = mdfPublishedCardOwnersSql;
+    // Reads that need only the window start now and run beside the card chain (one shared snapshot).
+    const unregisteredRead = settled(loadMdfUnregisteredSources(tx,owners,user.id,
+      state,{ orderIds: query.searchOrderIds ?? [], focus: query.focus ?? null }));
+    const pendingRead = settled(loadPending(tx,owners,user.id,state,query,scope.includes('all')));
+    const trackedRead = settled(loadTracked(tx,owners,user.id,query.jobIds ?? [],scope.includes('all')));
     // Visibility (at least one allowed owner) is decided BEFORE the page limit, so newer
     // denied cards can never push an older authorized/focused card out of the page.
     const cardRows = (await tx.query<PublishedCard & { headVersion: string; headEpoch: string; headReceived: string;
@@ -104,7 +109,28 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
     const cardOwnerIds = cardRows.flatMap(c => c.ownerIds);
     // §5.4d: placement follows the members' live ranks (one set-based read, no writes/automation).
     // Unusable inputs keep the stored column and make the card non-movable.
-    const placements = await loadMdfEffectivePlacement(tx, cardRows);
+    const cardKeys = [cardRows.map(c => c.kind),cardRows.map(c => c.id)];
+    const [placements,rawOwnersVisible,members] = await Promise.all([loadMdfEffectivePlacement(tx, cardRows),
+      tx.query<{ kind: string; id: string; ok: boolean }>(`WITH allowed AS (${owners}),
+      s AS (SELECT * FROM unnest($2::text[],$3::text[]) s(kind,id)),
+      raw AS (
+        SELECT s.kind,s.id,i.match_order_id order_id FROM s JOIN cnc_telegram_packet_items i
+          ON s.kind='packet' AND i.packet_id::text=s.id WHERE i.match_order_id IS NOT NULL
+        UNION SELECT s.kind,s.id,d.source_order_id FROM s JOIN bazis_cut_set_details d
+          ON s.kind='bazisCutSet' AND d.bazis_cut_set_id::text=s.id WHERE d.source_order_id IS NOT NULL
+        UNION SELECT s.kind,s.id,cp.order_id FROM s JOIN cut_result_placement cp
+          ON s.kind='bath' AND ('cut-result:'||cp.cut_result_id::text)=s.id WHERE cp.order_id IS NOT NULL)
+      SELECT s.kind,s.id,($4::boolean OR NOT EXISTS(SELECT 1 FROM raw r WHERE r.kind=s.kind AND r.id=s.id
+        AND r.order_id NOT IN (SELECT order_id FROM allowed))) ok FROM s`,
+      [user.id,...cardKeys,scope.includes('all')]).then(result => new Map(result.rows.map(r => [`${r.kind}:${r.id}`,r.ok]))),
+      tx.query<PublishedMember>(`WITH allowed AS (${owners})
+      SELECT m.source_kind kind,m.source_id id,m.order_id::float8 "orderId",
+      m.detail_id::float8 "detailId",m.quantity::float8 quantity FROM mdf_published_source_members m
+      JOIN unnest($2::text[],$3::text[]) s(kind,id) ON m.source_kind=s.kind AND m.source_id=s.id
+      JOIN allowed a ON a.order_id=m.order_id
+      ORDER BY m.source_kind,m.source_id,m.order_id,m.detail_id LIMIT 10001`,
+      [user.id,...cardKeys]).then(result => result.rows)]);
+    checkLimit(members,10000);
     for (const card of cardRows) {
       const placement = placements.get(mdfSourceKey(card));
       if (!placement) continue;
@@ -116,18 +142,6 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
     // command token: a command would act on positions of orders it cannot see.
     // §5.6: source-wide presentation (name, program/BASIS name, previews, comments) needs EVERY owner of the raw source
     // content visible — incl. non-MDF rows/items that never become members — in addition to the frozen owners.
-    const rawOwnersVisible = new Map((await tx.query<{ kind: string; id: string; ok: boolean }>(`WITH allowed AS (${owners}),
-      s AS (SELECT * FROM unnest($2::text[],$3::text[]) s(kind,id)),
-      raw AS (
-        SELECT s.kind,s.id,i.match_order_id order_id FROM s JOIN cnc_telegram_packet_items i
-          ON s.kind='packet' AND i.packet_id::text=s.id WHERE i.match_order_id IS NOT NULL
-        UNION SELECT s.kind,s.id,d.source_order_id FROM s JOIN bazis_cut_set_details d
-          ON s.kind='bazisCutSet' AND d.bazis_cut_set_id::text=s.id WHERE d.source_order_id IS NOT NULL
-        UNION SELECT s.kind,s.id,cp.order_id FROM s JOIN cut_result_placement cp
-          ON s.kind='bath' AND ('cut-result:'||cp.cut_result_id::text)=s.id WHERE cp.order_id IS NOT NULL)
-      SELECT s.kind,s.id,($4::boolean OR NOT EXISTS(SELECT 1 FROM raw r WHERE r.kind=s.kind AND r.id=s.id
-        AND r.order_id NOT IN (SELECT order_id FROM allowed))) ok FROM s`,
-    [user.id,cardRows.map(c => c.kind),cardRows.map(c => c.id),scope.includes('all')])).rows.map(r => [`${r.kind}:${r.id}`,r.ok]));
     const fullyVisible = (c: { kind: string; id: string; allOwnersAllowed: boolean }) =>
       c.allOwnersAllowed && rawOwnersVisible.get(`${c.kind}:${c.id}`) === true;
     // A partial viewer never sees the source name (program/BASIS names can identify hidden co-owners).
@@ -139,23 +153,10 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
       commandToken: allOwnersAllowed && headReceived === card.receivedRevision && headAccepted === headReceived
         && card.issues.length === 0
         ? mdfSourceCommandToken(card,{ received: headReceived,version: headVersion,epoch: headEpoch }) : null }));
-    const members = (await tx.query<PublishedMember>(`WITH allowed AS (${owners})
-      SELECT m.source_kind kind,m.source_id id,m.order_id::float8 "orderId",
-      m.detail_id::float8 "detailId",m.quantity::float8 quantity FROM mdf_published_source_members m
-      JOIN unnest($2::text[],$3::text[]) s(kind,id) ON m.source_kind=s.kind AND m.source_id=s.id
-      JOIN allowed a ON a.order_id=m.order_id
-      ORDER BY m.source_kind,m.source_id,m.order_id,m.detail_id LIMIT 10001`,
-    [user.id,cards.map(c => c.kind),cards.map(c => c.id)])).rows;
-    checkLimit(members,10000);
-    const { presentation, progress, orders } = await loadMdfPublishedPresentation(tx,owners,user.id,
+    const presentationRead = settled(loadMdfPublishedPresentation(tx,owners,user.id,
       cardRows.map(c => ({ kind: c.kind,id: c.id,acceptedRevision: c.acceptedRevision,allOwnersAllowed: fullyVisible(c) })),
-      [...cardOwnerIds,...members.map(m => m.orderId),...(query.orderIds ?? []),...(query.searchOrderIds ?? [])]);
-    checkLimit(progress,20000);
-    // Informational lists: over their bounds they say so (`unregisteredTruncated`) — never make the board unavailable.
-    const { unregistered, truncated: unregisteredTruncated } = await loadMdfUnregisteredSources(tx,owners,user.id,
-      state,{ orderIds: query.searchOrderIds ?? [], focus: query.focus ?? null });
-    const pendingJobs = await loadPending(tx,owners,user.id,state,query,scope.includes('all'));
-    const trackedJobs = await loadTracked(tx,owners,user.id,query.jobIds ?? [],scope.includes('all'));
+      [...cardOwnerIds,...members.map(m => m.orderId),...(query.orderIds ?? []),...(query.searchOrderIds ?? [])]));
+    const pendingJobs = await pendingRead;
     const selectedOwners = [...new Set([...members.map(m => m.orderId),...cardOwnerIds,...(query.orderIds ?? []),
       ...(query.searchOrderIds ?? []),
       ...pendingJobs.flatMap(j => j.orderIds)])];
@@ -167,6 +168,11 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
       WHERE p.order_id=ANY($2::bigint[]) ORDER BY p.order_id,p.detail_id LIMIT 10001`,
     [user.id,selectedOwners])).rows;
     checkLimit(positions,10000);
+    const { presentation, progress, orders } = await presentationRead;
+    checkLimit(progress,20000);
+    // Informational lists: over their bounds they say so (`unregisteredTruncated`) — never make the board unavailable.
+    const { unregistered, truncated: unregisteredTruncated } = await unregisteredRead;
+    const trackedJobs = await trackedRead;
     return { schemaVersion: 1 as const, ...state, cards,positions,members,pendingJobs,trackedJobs,
       presentation,progress,orders,unregistered,unregisteredTruncated,
       issues: state.mode==='read_only' ? ['MDF_READ_ONLY'] : [] };
@@ -263,6 +269,27 @@ async function loadPending(tx: DatabaseClient,owners: string,userId: string,
   [userId,state.dateFrom,state.dateTo,query.focus?.kind ?? null,query.focus?.id ?? null,query.orderIds ?? [],allowUnlinked])).rows;
   checkLimit(rows,1000); return rows;
 }
+/** A read started ahead of its first await: its failure still fails the snapshot, never an unhandled rejection. */
+function settled<T>(read: Promise<T>): Promise<T> {
+  read.catch(() => undefined);
+  return read;
+}
+
+/** The DatabaseService surface: one exported snapshot shared by parallel sessions. */
+export interface MdfSnapshotDatabase {
+  readSnapshot<T>(handler: (client: DatabaseClient) => Promise<T>, options?: { parallelism?: number }): Promise<T>;
+}
+const MDF_SNAPSHOT_PARALLELISM = 4;
+
+function readOneSnapshot<T>(database: MdfJobDatabase | MdfSnapshotDatabase,
+  handler: (client: DatabaseClient) => Promise<T>): Promise<T> {
+  if ('readSnapshot' in database) return database.readSnapshot(handler, { parallelism: MDF_SNAPSHOT_PARALLELISM });
+  return database.transaction(async tx => {
+    await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    return handler(tx);
+  });
+}
+
 function checkLimit(rows: readonly unknown[],limit: number): void {
   if (rows.length>limit) throw new ApiError(422,'MDF_PUBLICATION_SCOPE_LIMIT','Слишком большой состав доски. Уточните период.');
 }

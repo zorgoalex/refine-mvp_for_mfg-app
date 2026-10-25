@@ -30,6 +30,14 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
   });
 }
 
+/** Connections kept free for other requests before a snapshot read takes followers. */
+const SNAPSHOT_POOL_RESERVE = 3;
+
+function spareSnapshotFollowers(pool: Pool): number {
+  const max = pool.options.max ?? 10;
+  return Math.max(0, pool.idleCount + (max - pool.totalCount) - pool.waitingCount - SNAPSHOT_POOL_RESERVE);
+}
+
 // PostgreSQL rejects SET TRANSACTION ISOLATION LEVEL after the first query;
 // COMMIT/ROLLBACK end the transaction and need no setup.
 const SKIPS_DEFERRED = /^\s*(SET\s+TRANSACTION|COMMIT|ROLLBACK)\b/i;
@@ -172,6 +180,83 @@ export class DatabaseService implements OnModuleDestroy, DatabaseClient {
       discardTransactionHooks(client);
       discardMdfCommandBoundary(client);
       rawClient.release();
+    }
+  }
+
+  /**
+   * Read-only REPEATABLE READ view in which every query sees ONE database snapshot, while queries the
+   * handler issues concurrently run in parallel: the leader exports its snapshot and up to
+   * `parallelism - 1` follower sessions import it (SET TRANSACTION SNAPSHOT). Followers come only from
+   * capacity that is spare at the moment they are taken, so a busy pool degrades to the leader alone and
+   * never waits for a follower; a follower that cannot import the snapshot is destroyed, never used.
+   * Once the handler settles the view closes: later queries (e.g. a sibling branch still chaining after a
+   * failure) are rejected, in-flight statements drain, then every session ends and is released — a session
+   * whose COMMIT/ROLLBACK is not confirmed is destroyed, not returned to the pool.
+   */
+  async readSnapshot<T>(handler: (client: DatabaseClient) => Promise<T>,
+    options: { parallelism?: number } = {}): Promise<T> {
+    const pool = this.requirePool();
+    // `clean`: the session's transaction end was confirmed, so it may go back to the pool.
+    const lanes: { raw: PoolClient; running: Set<Promise<unknown>>; open: boolean; clean: boolean }[] = [];
+    let closed = false;
+    const end = async (statement: 'COMMIT' | 'ROLLBACK') => {
+      closed = true;
+      const outcomes = await Promise.allSettled(lanes.map(async lane => {
+        await Promise.allSettled([...lane.running]);
+        if (!lane.open) return;
+        lane.open = false;
+        await withTimeout(lane.raw.query(statement), this.queryTimeoutMs, 'Database snapshot end');
+        lane.clean = true;
+      }));
+      const failure = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+      if (failure) throw failure.reason;
+    };
+    try {
+      const leader = await withTimeout(pool.connect(), this.queryTimeoutMs, 'Database connect');
+      lanes.push({ raw: leader, running: new Set(), open: false, clean: false });
+      await withTimeout(leader.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY'), this.queryTimeoutMs, 'Database query');
+      lanes[0].open = true;
+      const wanted = Math.max(0, Math.trunc(options.parallelism ?? 1) - 1);
+      const id = wanted > 0 ? (await withTimeout(leader.query<{ id: string }>('SELECT pg_export_snapshot() id'),
+        this.queryTimeoutMs, 'Database query')).rows[0]?.id : undefined;
+      if (id && /^[0-9A-F-]+$/i.test(id)) {
+        // Capacity is read and every follower `connect()` is issued in this same synchronous step, so
+        // concurrent snapshot reads cannot all count the same spare connections.
+        const acquisitions = Array.from({ length: Math.min(wanted, spareSnapshotFollowers(pool)) }, () => pool.connect());
+        await Promise.all(acquisitions.map(async acquisition => {
+          const raw = await acquisition.catch(() => null);
+          if (!raw) return;
+          try {
+            await withTimeout(raw.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY'), this.queryTimeoutMs, 'Database query');
+            await withTimeout(raw.query(`SET TRANSACTION SNAPSHOT '${id}'`), this.queryTimeoutMs, 'Database query');
+            lanes.push({ raw, running: new Set(), open: true, clean: false });
+          } catch (error) {
+            raw.release(error instanceof Error ? error : true);
+          }
+        }));
+      }
+      const client: DatabaseClient = {
+        query: <R extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = [],
+          queryOptions: DatabaseQueryOptions = {}) => {
+          if (closed) return Promise.reject(new ApiError(503, 'DATABASE_SNAPSHOT_CLOSED', 'Database snapshot is closed'));
+          const lane = lanes.reduce((best, next) => next.running.size < best.running.size ? next : best);
+          return this.telemetry.measure(text, () => {
+            const running = lane.raw.query<R>(text, [...params]);
+            const tracked = running.then(() => undefined, () => undefined);
+            lane.running.add(tracked);
+            void tracked.then(() => lane.running.delete(tracked));
+            return withTimeout(running, queryOptions.timeoutMs ?? this.queryTimeoutMs, 'Database query');
+          });
+        },
+      };
+      const result = await handler(client);
+      await end('COMMIT');
+      return result;
+    } catch (error) {
+      await end('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      for (const lane of lanes) lane.raw.release(lane.clean ? undefined : true);
     }
   }
 

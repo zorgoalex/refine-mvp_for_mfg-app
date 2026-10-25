@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
 import { mdfCorrectionApi } from '../../api/mdfCorrectionApi';
+import { authSession } from '../../api/authSession';
 import { mdfPublishedApi } from '../../api/mdfPublishedApi';
 import type { MdfSessionSnapshot, MdfSourceKind } from '../../api/types/mdfPublishedApi.types';
 import {
@@ -45,10 +46,20 @@ export interface UseMdfPublishedBoardResult {
   requestSearchOrderNames: (names: readonly string[]) => void;
 }
 
+/** The early snapshot is used only if the auth session it was read under is still current when the mode settles;
+ * otherwise (re-login, permission refresh) it is dropped and read again under the current session. */
+export async function currentSessionSnapshot(early: Promise<MdfSessionSnapshot> | null,
+  read: () => Promise<MdfSessionSnapshot>, currentGeneration: () => number): Promise<MdfSessionSnapshot> {
+  const snapshot = early ? await early : await read();
+  return snapshot.sessionGeneration === currentGeneration() ? snapshot : read();
+}
+
 export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdfPublishedBoardResult {
   const { enabled, workday, period, focusKind, focusId } = params;
   const orderIdsKey = (params.orderIds ?? []).slice(0, 100).join(',');
   const [mode, setMode] = useState<MdfBoardMode | null>(null);
+  const modeRef = useRef<MdfBoardMode | null>(null);
+  modeRef.current = mode;
   const [session, setSession] = useState<MdfSessionSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [searchOrderIds, setSearchOrderIds] = useState<number[]>([]);
@@ -83,6 +94,21 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
 
   const runCycle = useCallback(async (requestGeneration: number) => {
     setLoading(true);
+    // Legacy-parity display cut: the same `dateFrom` the legacy board computes for this
+    // workday+period via `buildCncOrderSearchDateRange` (default period `1w` → workday − 6 days).
+    // Search/focus reach older cards regardless — this only trims the default payload.
+    const displayFrom = buildCncOrderSearchDateRange(workday, period).dateFrom;
+    const readPublished = () => mdfPublishedApi.get({
+      dateTo: workday,
+      displayFrom,
+      ...(focusKind && focusId ? { focus: { kind: focusKind, id: focusId } } : {}),
+      ...(searchOrderIdsRef.current.length ? { searchOrderIds: searchOrderIdsRef.current } : {}),
+      ...(orderIdsRef.current.length ? { orderIds: orderIdsRef.current } : {}),
+    });
+    // Unless the board is known to be legacy, the snapshot is requested beside the mode instead of after it;
+    // the mode still decides whether that result is used at all.
+    const earlyRead = modeRef.current === 'legacy' ? null : readPublished();
+    earlyRead?.catch(() => undefined);
     let engineModeFetch: MdfEngineModeFetchResult;
     try {
       const engineMode = await mdfCorrectionApi.getEngineMode();
@@ -104,18 +130,8 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     }
     let publishedReadsFailed = false;
     let nextSession: MdfSessionSnapshot | null = null;
-    // Legacy-parity display cut: the same `dateFrom` the legacy board computes for this
-    // workday+period via `buildCncOrderSearchDateRange` (default period `1w` → workday − 6 days).
-    // Search/focus reach older cards regardless — this only trims the default payload.
-    const displayFrom = buildCncOrderSearchDateRange(workday, period).dateFrom;
     try {
-      nextSession = await mdfPublishedApi.get({
-        dateTo: workday,
-        displayFrom,
-        ...(focusKind && focusId ? { focus: { kind: focusKind, id: focusId } } : {}),
-        ...(searchOrderIdsRef.current.length ? { searchOrderIds: searchOrderIdsRef.current } : {}),
-        ...(orderIdsRef.current.length ? { orderIds: orderIdsRef.current } : {}),
-      });
+      nextSession = await currentSessionSnapshot(earlyRead, readPublished, () => authSession.getSessionGeneration());
     } catch {
       publishedReadsFailed = true;
     }

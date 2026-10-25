@@ -8,14 +8,16 @@ const api = vi.hoisted(() => ({
   getEngineMode: vi.fn(),
   publishedGet: vi.fn(),
   searchMdfBoardHistoryOrders: vi.fn(),
+  sessionGeneration: 1,
 }));
+vi.mock('../../api/authSession', () => ({ authSession: { getSessionGeneration: () => api.sessionGeneration } }));
 vi.mock('../../api/mdfCorrectionApi', () => ({ mdfCorrectionApi: { getEngineMode: api.getEngineMode } }));
 vi.mock('../../api/mdfPublishedApi', () => ({ mdfPublishedApi: { get: api.publishedGet } }));
 vi.mock('../../api/cncTelegramApi', () => ({
   cncTelegramApi: { searchMdfBoardHistoryOrders: api.searchMdfBoardHistoryOrders },
 }));
 
-import { useMdfPublishedBoard, type UseMdfPublishedBoardResult } from './useMdfPublishedBoard';
+import { currentSessionSnapshot, useMdfPublishedBoard, type UseMdfPublishedBoardResult } from './useMdfPublishedBoard';
 
 function snapshot(overrides: Partial<MdfPublishedSnapshot> = {}): MdfPublishedSnapshot {
   return {
@@ -275,5 +277,80 @@ describe('useMdfPublishedBoard: displayFrom — legacy-parity display cut sent t
         focus: { kind: 'packet', id: 'pkt-1' },
       }),
     );
+  });
+});
+
+describe('useMdfPublishedBoard: snapshot requested beside the engine mode', () => {
+  let renderer: ReactTestRenderer;
+
+  beforeEach(() => {
+    current = null;
+    api.sessionGeneration = 1;
+    api.getEngineMode.mockReset();
+    api.publishedGet.mockReset();
+    vi.stubGlobal('window', { setInterval: vi.fn(() => 0), clearInterval: vi.fn() });
+    vi.stubGlobal('document', { addEventListener: vi.fn(), removeEventListener: vi.fn(), visibilityState: 'visible' });
+  });
+
+  afterEach(() => {
+    act(() => renderer?.unmount());
+    vi.unstubAllGlobals();
+    api.sessionGeneration = 1;
+  });
+
+  it('starts the snapshot read before the engine mode settles', async () => {
+    let settleMode!: (value: unknown) => void;
+    api.getEngineMode.mockReturnValue(new Promise(resolve => { settleMode = resolve; }));
+    api.publishedGet.mockResolvedValue({ sessionGeneration: 1, snapshot: snapshot() } satisfies MdfSessionSnapshot);
+    act(() => {
+      renderer = create(<Harness workday="2026-09-27" focusKind={null} focusId={null} />);
+    });
+    await vi.waitFor(() => expect(api.publishedGet).toHaveBeenCalledTimes(1));
+    expect(current?.mode).toBeNull();
+    await act(async () => { settleMode({ mode: 'active', publishedReads: true }); });
+    await vi.waitFor(() => expect(current?.mode).toBe('published'));
+    expect(api.publishedGet).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a snapshot read under an older auth session and reads again under the current one', async () => {
+    let settleMode!: (value: unknown) => void;
+    api.getEngineMode.mockReturnValue(new Promise(resolve => { settleMode = resolve; }));
+    const old = snapshot({ revision: 'old-permissions' });
+    const fresh = snapshot({ revision: 'current-permissions' });
+    api.publishedGet
+      .mockResolvedValueOnce({ sessionGeneration: 1, snapshot: old } satisfies MdfSessionSnapshot)
+      .mockResolvedValueOnce({ sessionGeneration: 2, snapshot: fresh } satisfies MdfSessionSnapshot);
+    act(() => {
+      renderer = create(<Harness workday="2026-09-27" focusKind={null} focusId={null} />);
+    });
+    await vi.waitFor(() => expect(api.publishedGet).toHaveBeenCalledTimes(1));
+    api.sessionGeneration = 2; // permissions refreshed / re-login while the mode request is pending
+    await act(async () => { settleMode({ mode: 'active', publishedReads: true }); });
+    await vi.waitFor(() => expect(current?.session?.snapshot.revision).toBe('current-permissions'));
+    expect(api.publishedGet).toHaveBeenCalledTimes(2);
+  });
+
+  it('known legacy board reads no snapshot at all', async () => {
+    api.getEngineMode.mockResolvedValue({ mode: 'legacy', publishedReads: false });
+    act(() => {
+      renderer = create(<Harness workday="2026-09-27" focusKind={null} focusId={null} />);
+    });
+    await vi.waitFor(() => expect(current?.mode).toBe('legacy'));
+    api.publishedGet.mockClear();
+    await act(async () => { current!.refresh(); });
+    await vi.waitFor(() => expect(api.getEngineMode).toHaveBeenCalledTimes(2));
+    expect(api.publishedGet).not.toHaveBeenCalled();
+  });
+});
+
+describe('currentSessionSnapshot', () => {
+  it('keeps a current-session snapshot and rereads a stale one', async () => {
+    const read = vi.fn(async () => ({ sessionGeneration: 3, snapshot: snapshot({ revision: 'reread' }) }));
+    const kept = await currentSessionSnapshot(Promise.resolve({ sessionGeneration: 3, snapshot: snapshot() }), read, () => 3);
+    expect(kept.snapshot.revision).toBe('rev-1');
+    expect(read).not.toHaveBeenCalled();
+    const reread = await currentSessionSnapshot(Promise.resolve({ sessionGeneration: 2, snapshot: snapshot() }), read, () => 3);
+    expect(reread.snapshot.revision).toBe('reread');
+    expect(read).toHaveBeenCalledTimes(1);
   });
 });

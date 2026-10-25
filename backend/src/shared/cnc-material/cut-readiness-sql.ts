@@ -51,11 +51,15 @@ export function mdfCutReadinessCtes(scope: CutReadinessScope = {}): string {
         WHERE setting_key = 'status_automation.mdf_board_hidden_production_statuses'
           AND is_active = true), '{}'::jsonb) AS value
     ),
+    -- Same keys as GROUP BY … HAVING COUNT(*) = 1, but the planner estimates this form near its real size
+    -- (thousands, not ~16), so packet items hash-join it instead of rescanning it once per packet.
     mdf_unique_order_keys AS (
-      SELECT lower(trim(order_name)) AS order_key, MIN(order_id)::bigint AS order_id
-      FROM orders WHERE delete_flag = false AND order_kind = 'production_order'
-        AND NULLIF(trim(order_name), '') IS NOT NULL
-      GROUP BY lower(trim(order_name)) HAVING COUNT(*) = 1
+      SELECT order_key, order_id FROM (
+        SELECT lower(trim(order_name)) AS order_key, order_id::bigint AS order_id,
+          COUNT(*) OVER (PARTITION BY lower(trim(order_name))) AS key_count
+        FROM orders WHERE delete_flag = false AND order_kind = 'production_order'
+          AND NULLIF(trim(order_name), '') IS NOT NULL
+      ) keyed WHERE key_count = 1
     ),
     mdf_source_packets AS MATERIALIZED (
       SELECT p.packet_id, p.completion_status, p.thumbs_up,

@@ -25,7 +25,10 @@ describe('1C agent mTLS ingress', () => {
   it('pins the regular backend router to its own service and strips agent trust headers', () => {
     const labels: string[] = vps.services.backend.labels;
     expect(labels).toContain('traefik.http.routers.backend.service=backend');
-    expect(labels).toContain('traefik.http.routers.backend.middlewares=backend-strip-onec-headers');
+    expect(labels).toContain('traefik.http.routers.backend.middlewares=backend-strip-onec-headers,backend-compress-json');
+    // Compression is JSON-only: SSE streams (text/event-stream) and file downloads stay uncompressed.
+    expect(labels).toContain('traefik.http.middlewares.backend-compress-json.compress=true');
+    expect(labels).toContain('traefik.http.middlewares.backend-compress-json.compress.includedcontenttypes=application/json');
     for (const name of ['X-Onec-Ingress-Auth', 'X-Forwarded-Tls-Client-Cert', 'X-Forwarded-Tls-Client-Cert-Info']) {
       expect(labels).toContain(`traefik.http.middlewares.backend-strip-onec-headers.headers.customrequestheaders.${name}=`);
     }

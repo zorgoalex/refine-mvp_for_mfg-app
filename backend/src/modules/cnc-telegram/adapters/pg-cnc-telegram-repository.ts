@@ -500,11 +500,12 @@ export class PgCncTelegramRepository
       }
       // Hybrid board: each MDF card's presentation and its digest come from ONE snapshot, so the board can bind it to
       // the engine's accepted revision (equal digest ⇒ the shown composition is the one the command token acts on).
-      return this.database.transaction(async (tx) => {
-        await tx.query('SET TRANSACTION READ ONLY');
-        const today = await loadBoundedToday(tx, command.currentUser, workdayTo, requestedFrom, command.focusBathCardId);
-        return withMdfPresentationDigests(tx, today);
-      }, { isolation: 'repeatable read' });
+      // One exported snapshot shared by several sessions: the same-snapshot binding holds while the board's
+      // independent reads run in parallel instead of queueing on one connection.
+      return this.database.readSnapshot(async (snapshot) => {
+        return loadBoundedToday(snapshot, command.currentUser, workdayTo, requestedFrom, command.focusBathCardId,
+          { presentationDigests: true });
+      }, { parallelism: MDF_BOARD_SNAPSHOT_PARALLELISM });
     }
     const monthStart = mdfOperationalMonthStart(workdayTo);
     const workdayFrom = command.operationalWindow === 'month' && requestedFrom < monthStart
@@ -7415,6 +7416,7 @@ async function enqueueOutbox(
 /** Bounded calculation history is separate from display cards and their order scope. */
 async function loadBoundedToday(
   database: DatabaseClient, currentUser: CurrentUser, dateTo: string, requestedFrom: string, focusBathCardId?: string,
+  options: { presentationDigests?: boolean } = {},
 ): Promise<CncTelegramTodayResponseDto> {
   const dateFrom = mdfOperationalTwoMonthStart(dateTo);
   const displayFrom = requestedFrom < dateFrom ? dateFrom : requestedFrom;
@@ -7436,6 +7438,10 @@ async function loadBoundedToday(
     loadPeriodBazisCutSetCards(database, displayFrom, dateTo),
   ]);
   const columns = buildTodayColumns(mapPacketRows(packets.rows), baths.cards, basis);
+  // The shown cards are final here (the history below never changes them): their digests are read
+  // alongside the history instead of after it.
+  const digestsPromise = options.presentationDigests ? loadMdfPresentationDigests(database, columns) : null;
+  digestsPromise?.catch(() => undefined); // a failing history read must not leave this rejection unhandled
   const cutQuantities = (await cutQuantitiesPromise).rows;
   const orderIds = sourceOrderIds(columns);
   let historicalReadinessSources: CncHistoricalReadinessSourceDto[] = [];
@@ -7507,9 +7513,13 @@ async function loadBoundedToday(
           { orderId: null, detailId: null, detailNumber: null, quantity: 0 }] : bath.items);
     }
   }
-  return { workday: dateTo, generatedAt: new Date().toISOString(), columns,
+  const today: CncTelegramTodayResponseDto = { workday: dateTo, generatedAt: new Date().toISOString(), columns,
     operationalWindow: { dateFrom, dateTo }, historicalBathReadiness: [], historicalReadinessSources };
+  return digestsPromise ? withMdfPresentationDigests(today, await digestsPromise) : today;
 }
+
+/** Sessions sharing the hybrid board's read snapshot (spare pool capacity permitting). */
+const MDF_BOARD_SNAPSHOT_PARALLELISM = 4;
 
 /** Engine `active`/`read_only` owns the MDF board (schema-tolerant: no engine state ⇒ legacy). */
 async function mdfEngineOwnsBoard(database: DatabaseClient): Promise<boolean> {
@@ -7518,18 +7528,22 @@ async function mdfEngineOwnsBoard(database: DatabaseClient): Promise<boolean> {
   return row?.owns === true;
 }
 
-/** Same transaction as the cards: digest of the raw composition-sensitive presentation (migration 192). */
-async function withMdfPresentationDigests(database: DatabaseClient,
-  today: CncTelegramTodayResponseDto): Promise<CncTelegramTodayResponseDto> {
-  const keys = today.columns.flatMap(column => [
+/** Same snapshot as the cards: digest of the raw composition-sensitive presentation (migration 192). */
+async function loadMdfPresentationDigests(database: DatabaseClient,
+  columns: CncTelegramTodayColumnDto[]): Promise<Map<string, string | null>> {
+  const keys = columns.flatMap(column => [
     ...column.packets.map(card => ['packet', card.packetId]),
     ...column.baths.map(card => ['bath', card.bathCardId]),
     ...column.bazisCutSets.map(card => ['bazisCutSet', String(card.bazisCutSetId)]),
   ]);
-  if (!keys.length) return today;
-  const digests = new Map((await database.query<{ kind: string; id: string; digest: string | null }>(`SELECT s.kind,s.id,
+  if (!keys.length) return new Map();
+  return new Map((await database.query<{ kind: string; id: string; digest: string | null }>(`SELECT s.kind,s.id,
     mdf_source_presentation_digest(s.kind,s.id) digest FROM unnest($1::text[],$2::text[]) s(kind,id)`,
   [keys.map(k => k[0]), keys.map(k => k[1])])).rows.map(row => [`${row.kind}:${row.id}`, row.digest]));
+}
+
+function withMdfPresentationDigests(today: CncTelegramTodayResponseDto,
+  digests: ReadonlyMap<string, string | null>): CncTelegramTodayResponseDto {
   const digest = (kind: string, id: string) => digests.get(`${kind}:${id}`) ?? null;
   return { ...today, columns: today.columns.map(column => ({ ...column,
     packets: column.packets.map(card => ({ ...card, mdfPresentationDigest: digest('packet', card.packetId) })),

@@ -408,7 +408,10 @@ services:
       # Explicit service: the backend container may also expose the onec-agent service.
       - traefik.http.routers.backend.service=backend
       # The regular API host never forwards 1C agent trust headers from clients.
-      - traefik.http.routers.backend.middlewares=backend-strip-onec-headers
+      - traefik.http.routers.backend.middlewares=backend-strip-onec-headers,backend-compress-json
+      # JSON only (boards return megabytes); never SSE streams, files or the 1C agent route.
+      - traefik.http.middlewares.backend-compress-json.compress=true
+      - traefik.http.middlewares.backend-compress-json.compress.includedcontenttypes=application/json
       - traefik.http.middlewares.backend-strip-onec-headers.headers.customrequestheaders.X-Onec-Ingress-Auth=
       - traefik.http.middlewares.backend-strip-onec-headers.headers.customrequestheaders.X-Forwarded-Tls-Client-Cert=
       - traefik.http.middlewares.backend-strip-onec-headers.headers.customrequestheaders.X-Forwarded-Tls-Client-Cert-Info=
