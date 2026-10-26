@@ -1,3 +1,4 @@
+import { mdfOwnJobSql } from '../adapters/mdf-republish';
 import { createHash } from 'node:crypto';
 import { MDF_BAZIS_RAW_ROW_DIGEST_SQL } from '../adapters/mdf-bazis-composition-snapshot';
 import type { QueryResultRow } from 'pg';
@@ -378,11 +379,14 @@ async function persistMdfReceipt(tx: DatabaseClient, input: MdfReceiptInput,
     FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2 FOR UPDATE`, source)).rows[0];
   const existing = (await tx.query<{ payload_digest: string; job_id: string | null; manifest_digest?: string | null }>(lineage ? `
     SELECT r.payload_digest,j.job_id,c.manifest_digest FROM mdf_evidence_revisions r
-    LEFT JOIN mdf_recalculation_jobs j USING(source_kind,source_id,revision_key)
-    LEFT JOIN mdf_physical_lineage_contracts c USING(source_kind,source_id,revision_key)
+    LEFT JOIN mdf_recalculation_jobs j ON j.source_kind=r.source_kind AND j.source_id=r.source_id
+      AND j.revision_key=r.revision_key AND ${mdfOwnJobSql('j')}
+    LEFT JOIN mdf_physical_lineage_contracts c ON c.source_kind=r.source_kind AND c.source_id=r.source_id
+      AND c.revision_key=r.revision_key
     WHERE r.source_kind=$1 AND r.source_id=$2 AND r.revision_key=$3` : `
     SELECT r.payload_digest,j.job_id FROM mdf_evidence_revisions r
-    LEFT JOIN mdf_recalculation_jobs j USING(source_kind,source_id,revision_key)
+    LEFT JOIN mdf_recalculation_jobs j ON j.source_kind=r.source_kind AND j.source_id=r.source_id
+      AND j.revision_key=r.revision_key AND ${mdfOwnJobSql('j')}
     WHERE r.source_kind=$1 AND r.source_id=$2 AND r.revision_key=$3`, [...source, input.revisionKey])).rows[0];
   if (existing) {
     if (lineage && !composition && input.sourceKind==='bazisCutSet') {

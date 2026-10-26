@@ -88,6 +88,10 @@ interface DetailRow extends QueryResultRow { detailId: number; orderId: number }
  * No head/state validation and no locks happen here. */
 export async function loadMdfBazisCompositionJobIntent(tx: DatabaseClient,
   job: MdfJob): Promise<MdfBazisCompositionJobIntent | null> {
+  // A re-publication of an already accepted (composition) revision accepts nothing: it carries no intent of its own;
+  // the sealed assignment state is still validated by the execution snapshot like for any accepted revision.
+  if ((await tx.query<{ marked: boolean }>(`SELECT EXISTS (SELECT 1 FROM mdf_republish_jobs WHERE job_id=$1::uuid) marked`,
+    [job.job_id])).rows[0]?.marked === true) return null;
   const intents = (await tx.query<IntentRow>(`SELECT intent_id::text intent_id,job_id::text job_id,source_kind,
       source_id,revision_key,predecessor_revision_key,assignment_state_id::text assignment_state_id,
       set_id::text set_id,set_version::text set_version,raw_snapshot_digest,membership_digest,intentional_empty,

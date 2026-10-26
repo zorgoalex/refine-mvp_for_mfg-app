@@ -1,3 +1,4 @@
+import { mdfOwnJobSql } from '../../mdf-board/adapters/mdf-republish';
 import { normalizeSvgRenderContours } from '../../../shared/svg-render-contours';
 import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
@@ -434,7 +435,8 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
         duplicate:currentMatches.length>0});
       const response = await importer.manualSvgUploadInTransaction(tx, { currentUser: requester, dto, requestId: input.requestId });
       const mdfJobId=boundary.queued ? (await tx.query<{job_id:string}>(`SELECT job_id FROM mdf_recalculation_jobs
-        WHERE source_kind='packet' AND source_id=$1 ORDER BY created_at DESC LIMIT 1`,[response.packet.packetId])).rows[0]?.job_id : undefined;
+        WHERE source_kind='packet' AND source_id=$1 AND ${mdfOwnJobSql('mdf_recalculation_jobs')}
+        ORDER BY created_at DESC LIMIT 1`,[response.packet.packetId])).rows[0]?.job_id : undefined;
       const updated = await tx.query<Row>(`UPDATE cnc_telegram_import_items SET status='imported', packet_id=$2, cut_job_id=$3, cut_result_id=$4, updated_at=now() WHERE import_item_id=$1 RETURNING *`, [text(item, 'import_item_id'), response.packet.packetId, response.cutJobId, response.cutResultId]);
       const observationRegistered=boundary.queued && currentMatches.length===0
         ? await registerExplicitImportObservationTarget(tx,{importItemId:text(item,'import_item_id'),

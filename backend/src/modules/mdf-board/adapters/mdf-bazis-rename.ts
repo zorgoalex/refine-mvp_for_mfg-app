@@ -1,3 +1,4 @@
+import { mdfOwnJobSql, mdfRepublishOpen } from './mdf-republish';
 import { ApiError } from '../../../common/errors/api-error';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
@@ -110,9 +111,9 @@ export async function executeMdfBazisRename(
   }
   if (!head.accepted || head.accepted !== head.received) reconcile();
 
-  const acceptedJob = (await tx.query<{ status: string }>(`SELECT status FROM mdf_recalculation_jobs
-    WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3`, [...key, head.accepted])).rows;
-  if (acceptedJob.length !== 1 || acceptedJob[0].status !== 'done') {
+  const acceptedJob = (await tx.query<{ status: string }>(`SELECT status FROM mdf_recalculation_jobs j
+    WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3 AND ${mdfOwnJobSql('j')}`, [...key, head.accepted])).rows;
+  if (acceptedJob.length !== 1 || acceptedJob[0].status !== 'done' || await mdfRepublishOpen(tx, key[0], key[1])) {
     conflict('MDF_COMMAND_PENDING', 'Дождитесь завершения обработки карточки');
   }
   const published = (await tx.query<{ issues: string[] }>(`SELECT issues FROM mdf_published_sources

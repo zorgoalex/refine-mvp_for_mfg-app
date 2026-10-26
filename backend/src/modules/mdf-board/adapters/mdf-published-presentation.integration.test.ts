@@ -34,7 +34,7 @@ describe.skipIf(!enabled)('MDF published presentation, isolated PostgreSQL schem
     ]);
     await fixture.client.query('ALTER TABLE cnc_telegram_packets ADD PRIMARY KEY(packet_id)');
     await fixture.applyMigrations([
-      '165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql',
+      '165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql','277_mdf_bath_declared_coverage.sql',
       '175_mdf_command_placement.sql', '178_mdf_correction_receipts.sql', '179_mdf_active_return.sql',
       '182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql', '187_mdf_bazis_refill_rows.sql',
       '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql',

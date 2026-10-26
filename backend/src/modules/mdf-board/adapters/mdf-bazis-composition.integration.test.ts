@@ -1,3 +1,4 @@
+import { enqueueMdfRepublish } from './mdf-republish';
 import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
@@ -82,7 +83,7 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
       ALTER COLUMN updated_at SET DEFAULT now()`);
     await fixture.applyMigrations([
       '165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql',
-      '174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql', '175_mdf_command_placement.sql',
+      '174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql','277_mdf_bath_declared_coverage.sql', '175_mdf_command_placement.sql',
       '178_mdf_correction_receipts.sql', '179_mdf_active_return.sql',
       '182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql', '187_mdf_bazis_refill_rows.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql',
     ]);
@@ -2099,4 +2100,26 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
       [f.sourceId])).rows[0].n).toBe(0);
     } finally { vi.stubEnv('BACKEND_MDF_BAZIS_REFILL', 'false'); }
   }, 60000);
+  // Last on purpose: earlier cases count events across this shared schema.
+  it('a re-publication of an accepted composition revision publishes without effects and never blocks the next command', async () => {
+    const f = await makeV2Source(10);
+    const request = { expectedVersion: '1', sourceToken: await sourceToken(f),
+      desiredRows: [{ rowId: String(f.rowId), quantity: 8 }] };
+    const rid = `composition-republish-${randomUUID()}`;
+    const preview = await command().preview(user, f.setId, request, rid);
+    if (!preview.previewDigest) throw new Error('MDF_COMPOSITION_PREVIEW_DIGEST_REQUIRED');
+    const queued = await command().confirm(user, f.setId, { ...request, expectedDigest: preview.previewDigest,
+      idempotencyKey: `composition-republish-key-${f.setId}` }, rid);
+    if (queued.status !== 'queued') throw new Error(`MDF_COMPOSITION_QUEUED_EXPECTED:${queued.status}`);
+    expect(await processJob(queued.jobId)).toMatchObject({ status: 'done' });
+    if (!database) throw new Error('MDF_TEST_DATABASE_NOT_READY');
+    const run = await database.transaction(tx => enqueueMdfRepublish(tx, { runId: `E2E-composition-${f.setId}`,
+      actorUserId: 1, sources: [{ kind: 'bazisCutSet', id: f.sourceId }] }));
+    expect(run.queued).toEqual([expect.objectContaining({ kind: 'bazisCutSet', id: f.sourceId })]);
+    expect(await processJob(run.queued[0].jobId)).toMatchObject({ status: 'done' });
+    // The revision still has exactly one own job; the next composition command is neither stale nor blocked.
+    const next = await command().preview(user, f.setId, { expectedVersion: '2', sourceToken: await sourceToken(f),
+      desiredRows: [{ rowId: String(f.rowId), quantity: 7 }] }, `${rid}-next`);
+    expect(next).toMatchObject({ status: 'ready' });
+  });
 });

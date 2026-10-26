@@ -18,6 +18,18 @@ export interface MdfRepublishResult {
 
 const SOURCE_KINDS = new Set(['packet', 'bazisCutSet', 'bath']);
 
+/** A revision's own (receipt) jobs: re-publication jobs of the same revision are not «the» job of the revision. */
+export const mdfOwnJobSql = (alias: string) =>
+  `NOT EXISTS (SELECT 1 FROM mdf_republish_jobs republish WHERE republish.job_id=${alias}.job_id)`;
+
+/** Revision commands (rename, composition) wait while a re-publication of the source is still open. */
+export async function mdfRepublishOpen(tx: TransactionClient, kind: string, id: string): Promise<boolean> {
+  return (await tx.query<{ open: boolean }>(`SELECT EXISTS (SELECT 1 FROM mdf_recalculation_jobs j
+    JOIN mdf_republish_jobs r ON r.job_id=j.job_id
+    WHERE j.source_kind=$1 AND j.source_id=$2 AND j.status IN ('pending','needs_attention')) open`, [kind, id])).rows[0]?.open
+    === true;
+}
+
 /** Scope «declared-candidates»: every published bath that is not ready (its readiness may now come from credited cut).
  * Scope «rollback-declared»: the given sources plus every published bath that carries credited-cut coverage. */
 export async function loadMdfRepublishScope(tx: TransactionClient, scope: MdfRepublishScope): Promise<MdfRepublishSource[]> {
@@ -48,11 +60,17 @@ export async function enqueueMdfRepublish(tx: TransactionClient, input: {
   if (mode !== 'active') throw new Error('MDF_REPUBLISH_ENGINE_NOT_ACTIVE');
   const requestId = `mdf-republish:${input.runId}`;
   const result: MdfRepublishResult = { runId: input.runId, queued: [], skipped: [] };
+  // All heads are locked up front in ONE statement with the worker's order (ORDER BY source_kind,source_id in the
+  // database collation — never a client-side sort): a run and a job never wait on each other's heads in a cycle. The
+  // lock serializes with receipts/corrections of the same sources (they update the head in their transaction).
+  const heads = new Map((await tx.query<{ kind: string; id: string; received: string; accepted: string | null; epoch: string }>(
+    `SELECT source_kind kind,source_id id,received_revision_key received,accepted_revision_key accepted,
+      correction_epoch::text epoch FROM mdf_source_heads
+    WHERE (source_kind,source_id) IN (SELECT * FROM unnest($1::text[],$2::text[]))
+    ORDER BY source_kind,source_id FOR UPDATE`,
+  [input.sources.map(s => s.kind), input.sources.map(s => s.id)])).rows.map(h => [`${h.kind}:${h.id}`, h]));
   for (const source of input.sources) {
-    // The head row lock serializes with receipts/corrections of the same source (they update it in their transaction).
-    const head = (await tx.query<{ received: string; accepted: string | null; epoch: string }>(`SELECT
-      received_revision_key received,accepted_revision_key accepted,correction_epoch::text epoch
-      FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2 FOR UPDATE`, [source.kind, source.id])).rows[0];
+    const head = heads.get(`${source.kind}:${source.id}`);
     if (!head) { result.skipped.push({ ...source, reason: 'NO_HEAD' }); continue; }
     if (!head.accepted || head.accepted !== head.received) {
       result.skipped.push({ ...source, reason: 'ACCEPTANCE_PENDING' }); continue;

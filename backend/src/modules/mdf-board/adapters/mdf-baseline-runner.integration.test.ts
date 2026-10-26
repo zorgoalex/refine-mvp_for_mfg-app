@@ -64,7 +64,7 @@ describe.skipIf(!enabled)('MDF §5.7b baseline population, isolated PostgreSQL s
       ALTER TABLE cnc_telegram_import_items ADD PRIMARY KEY(import_item_id);
       ALTER TABLE cnc_manual_svg_telegram_send_requests ADD PRIMARY KEY(request_id)`);
     for (const file of ['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql', '167_mdf_shadow_observations.sql',
-      '171_mdf_shadow_commands.sql', '174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql', '175_mdf_command_placement.sql',
+      '171_mdf_shadow_commands.sql', '174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql','277_mdf_bath_declared_coverage.sql', '175_mdf_command_placement.sql',
       '178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql',
       '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql',
       '195_mdf_baseline_population.sql']) {
@@ -1087,7 +1087,8 @@ describe.skipIf(!enabled)('MDF §5.7b baseline population, isolated PostgreSQL s
     const openOnly = await seedPacket({ completed: false, items: [{ line: 'o', orderId: open.orderId, detailId: open.detailId, quantity: 4 }] });
     const mixed = await seedPacket({ completed: false, items: [{ line: 'c', orderId: closed.orderId, detailId: closed.detailId, quantity: 1 },
       { line: 'o', orderId: open.orderId, detailId: open.detailId, quantity: 1 }] });
-    const day = new Date().toISOString().slice(0, 10);
+    // The database's own day: seeded rows use CURRENT_DATE/now() in its time zone (UTC date differs late in the day).
+    const day = (await fixture.client.query<{ d: string }>('SELECT current_date::text d')).rows[0].d;
     const read = () => database.transaction(tx2 => loadMdfUnregisteredSources(tx2,
       'SELECT order_id FROM orders WHERE $1::text IS NOT NULL', '1', { dateFrom: day, dateTo: day }));
     const first = await read();
@@ -1112,7 +1113,8 @@ describe.skipIf(!enabled)('MDF §5.7b baseline population, isolated PostgreSQL s
       return { ...o, packetId };
     };
     const a = await big(2600, true), b = await big(2600, true), huge = await big(5100, true);
-    const day = new Date().toISOString().slice(0, 10);
+    // The database's own day: seeded rows use CURRENT_DATE/now() in its time zone (UTC date differs late in the day).
+    const day = (await fixture.client.query<{ d: string }>('SELECT current_date::text d')).rows[0].d;
     const result = await database.transaction(tx2 => loadMdfUnregisteredSources(tx2,
       'SELECT order_id FROM orders WHERE $1::text IS NOT NULL', '1', { dateFrom: day, dateTo: day }));
     const ids = result.unregistered.map(s => s.id);

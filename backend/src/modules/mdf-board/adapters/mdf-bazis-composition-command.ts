@@ -1,3 +1,4 @@
+import { mdfOwnJobSql, mdfRepublishOpen } from './mdf-republish';
 import { createHash, randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
@@ -290,9 +291,9 @@ export class PgMdfBazisCompositionCommand {
     if (!acceptedLines.length && !(await validatedIntentionalEmpty())) {
       blockers.push({ code: 'CURRENT_SOURCE_MISSING', sourceId: target.id });
     }
-    const acceptedJob = (await tx.query<{ status: string }>(`SELECT status FROM mdf_recalculation_jobs
-      WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3`, [target.kind, target.id, accepted])).rows;
-    if (acceptedJob.length !== 1 || acceptedJob[0].status !== 'done') {
+    const acceptedJob = (await tx.query<{ status: string }>(`SELECT status FROM mdf_recalculation_jobs j
+      WHERE source_kind=$1 AND source_id=$2 AND revision_key=$3 AND ${mdfOwnJobSql('j')}`, [target.kind, target.id, accepted])).rows;
+    if (acceptedJob.length !== 1 || acceptedJob[0].status !== 'done' || await mdfRepublishOpen(tx, target.kind, target.id)) {
       fail(409, 'MDF_BAZIS_COMPOSITION_STALE', 'Дождитесь завершения обработки карточки');
     }
     const card = snapshot.published.get(targetKey);

@@ -66,7 +66,7 @@ describe.skipIf(!enabled)('active MDF correction command, isolated PostgreSQL sc
       ALTER TABLE ${fixture.schema}.outbox_events ALTER COLUMN outbox_event_id SET DEFAULT gen_random_uuid();
       CREATE UNIQUE INDEX e2e_correction_audit_related ON ${fixture.schema}.audit_log_related_entity(audit_id,entity_type,entity_id);
       CREATE UNIQUE INDEX e2e_correction_outbox ON ${fixture.schema}.outbox_events(idempotency_key)`);
-    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql',
+    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql','277_mdf_bath_declared_coverage.sql',
       '175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql']) await fixture.applyMigrations([file]);
     await fixture.applyMigrations(['179_mdf_active_return.sql']);
     await fixture.applyMigrations(['180_mdf_cnc_observations.sql']);

@@ -1,16 +1,15 @@
 -- MDF bath readiness from credited (declared) cut, infrastructure part.
 -- 1) declared_covered_quantity: pieces of a bath member closed by credited cut that is NOT a physical allocation
 --    (manual move of a machine file to «Распилено»), frozen with the publication. covered_quantity stays physical.
--- 2) mdf_republish_jobs: immutable marker of an internal re-publication job. Such a job keeps the sealed effect
+-- 2) mdf_republish_jobs: immutable marker (own trigger function; no dependency on 179) of an internal re-publication job. Such a job keeps the sealed effect
 --    policy of its revision and only projects/publishes: no rule effects, no CNC authority effects.
 --    No FK to mdf_recalculation_jobs (same lock order as mdf_correction_job_effect_suppressions, migration 179).
 BEGIN;
 
 DO $$
 BEGIN
-  IF to_regclass(format('%I.%I',current_schema(),'mdf_published_source_members')) IS NULL
-    OR to_regprocedure('mdf_reject_evidence_change()') IS NULL THEN
-    RAISE EXCEPTION 'MDF migration 277 requires migrations 174, 179 and 273 in schema %',current_schema();
+  IF to_regclass(format('%I.%I',current_schema(),'mdf_published_source_members')) IS NULL THEN
+    RAISE EXCEPTION 'MDF migration 277 requires migrations 174 and 273 in schema %',current_schema();
   END IF;
 END;
 $$;
@@ -36,10 +35,15 @@ CREATE TABLE IF NOT EXISTS mdf_republish_jobs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_mdf_republish_jobs_run ON mdf_republish_jobs(run_id,job_id);
+CREATE OR REPLACE FUNCTION mdf_reject_republish_job_change() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'MDF republish job markers are immutable' USING ERRCODE='55000';
+END;
+$$;
 DROP TRIGGER IF EXISTS mdf_republish_job_immutable ON mdf_republish_jobs;
 CREATE TRIGGER mdf_republish_job_immutable
   BEFORE UPDATE OR DELETE ON mdf_republish_jobs
-  FOR EACH ROW EXECUTE FUNCTION mdf_reject_evidence_change();
+  FOR EACH ROW EXECUTE FUNCTION mdf_reject_republish_job_change();
 COMMENT ON TABLE mdf_republish_jobs IS
   'Immutable marker: internal MDF re-publication job (sealed effect policy kept; projection/publication only, no effects).';
 
