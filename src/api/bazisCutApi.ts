@@ -22,6 +22,8 @@ export interface BazisCutSetListItemDto {
   quantity: number;
   positionCount: number;
   totalAreaM2: number;
+  /** Distinct detail material names; absent on backends older than this field. */
+  materialNames?: string[];
   orders: BazisCutSourceRefDto[];
   projects: BazisCutSourceRefDto[];
   bazisProjects: BazisCutSourceRefDto[];

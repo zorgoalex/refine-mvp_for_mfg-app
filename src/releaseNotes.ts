@@ -29,6 +29,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-26", title: "Базис-раскрой: материалы наборов",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "В списке наборов «Базис-раскрой» после «Площади» — колонка «Материал»: все разные материалы деталей набора.",
+    ],
+    changed: [
+      "На МДФ-доске карточка набора «Базис-раскрой», в котором есть деталь не из МДФ (ХДФ, ЛДСП, фанера и др.), — на светло-кремовом фоне с толстым коричневым контуром, как файлы на станке не из МДФ.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-25", title: "МДФ-доска открывается быстрее",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

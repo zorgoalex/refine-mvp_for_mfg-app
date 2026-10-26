@@ -94,6 +94,7 @@ describe('PgBazisCutRepository security and event contract', () => {
           quantity: 5,
           position_count: 2,
           total_area_m2: '1.25',
+          material_names: ['МДФ 16 мм', 'ЛДСП белый', ' МДФ 16 мм '],
           orders: [],
           projects: [],
           bazis_projects: [],
@@ -105,8 +106,11 @@ describe('PgBazisCutRepository security and event contract', () => {
     const repository = new PgBazisCutRepository(database);
 
     await expect(repository.list({ currentUser: user, requestId: 'list-1', search: '', page: 1, pageSize: 25 }))
-      .resolves.toMatchObject({ items: [{ quantity: 5, positionCount: 2, totalAreaM2: 1.25 }] });
+      .resolves.toMatchObject({ items: [{
+        quantity: 5, positionCount: 2, totalAreaM2: 1.25, materialNames: ['ЛДСП белый', 'МДФ 16 мм'],
+      }] });
     expect(sqlText).toContain('finished_length_mm * d.finished_width_mm * d.quantity / 1000000.0');
+    expect(sqlText).toContain('array_agg(DISTINCT btrim(d.material_name)::text)');
   });
 
   it('uses unprefixed ERP order numbers on the card and preserves full provenance', async () => {

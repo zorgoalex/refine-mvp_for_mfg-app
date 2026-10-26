@@ -24346,7 +24346,7 @@ components:
     BazisCutSetSummary:
       type: object
       required: [bazisCutSetId, name, version, createdAt, updatedAt, quantity, positionCount, totalAreaM2,
-        orders, projects, bazisProjects, bazisOrders]
+        materialNames, orders, projects, bazisProjects, bazisOrders]
       properties:
         bazisCutSetId: { type: integer, format: int64 }
         name: { type: string }
@@ -24356,6 +24356,7 @@ components:
         quantity: { type: integer, minimum: 0 }
         positionCount: { type: integer, minimum: 0 }
         totalAreaM2: { type: number, minimum: 0 }
+        materialNames: { type: array, items: { type: string } }
         orders: { type: array, items: { $ref: '#/components/schemas/BazisCutSourceRef' } }
         projects: { type: array, items: { $ref: '#/components/schemas/BazisCutSourceRef' } }
         bazisProjects: { type: array, items: { $ref: '#/components/schemas/BazisCutSourceRef' } }

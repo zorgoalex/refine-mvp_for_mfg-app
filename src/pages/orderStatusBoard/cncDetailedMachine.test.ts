@@ -10,6 +10,7 @@ import {
   CNC_MACHINE_DETAIL_SIZE_TOLERANCE_MM,
   buildCncDetailedMachineSources,
   cncBathDetailHasMachineFile,
+  cncBazisCutSetHasOtherMaterial,
   cncMaterialNameIsMdf,
   cncPacketCountsForMdfReadiness,
   cncPacketHasOtherMaterialMarker,
@@ -209,6 +210,18 @@ describe('CNC detailed machine sources', () => {
     expect(cncPacketHasOtherMaterialMarker(packet({ materialName: 'МДФ 16 мм' }))).toBe(false);
     expect(cncPacketHasOtherMaterialMarker(packet({ materialName: 'Не определён' }))).toBe(false);
     expect(cncPacketHasOtherMaterialMarker(packet({ materialName: 'Не определено' }))).toBe(false);
+  });
+
+  it('marks a Bazis-cut set as other material when any detail names a non-MDF material', () => {
+    const set = (...materialNames: string[]) => ({
+      items: materialNames.map((materialName) => ({ materialName })),
+    }) as unknown as Parameters<typeof cncBazisCutSetHasOtherMaterial>[0];
+    expect(cncBazisCutSetHasOtherMaterial(set('ЛДСП белый 16 мм'))).toBe(true);
+    expect(cncBazisCutSetHasOtherMaterial(set('МДФ 16 мм', 'ХДФ 3 мм'))).toBe(true);
+    expect(cncBazisCutSetHasOtherMaterial(set('Фанера 12'))).toBe(true);
+    expect(cncBazisCutSetHasOtherMaterial(set('МДФ 16 мм', 'MDF 18'))).toBe(false);
+    expect(cncBazisCutSetHasOtherMaterial(set('', 'Не определено'))).toBe(false);
+    expect(cncBazisCutSetHasOtherMaterial(set())).toBe(false);
   });
 
   it('counts only explicit MDF material for cut readiness', () => {
