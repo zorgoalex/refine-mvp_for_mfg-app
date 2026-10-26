@@ -35,6 +35,22 @@ describe('OrderRealtimeSnapshotService', () => {
     expect(JSON.stringify(first)).not.toContain('99');
   });
 
+  it('carries the order version and changes the ETag with it (the card re-reads a changed order)', async () => {
+    let orderVersion = 3;
+    const reader = {
+      authorize: async () => ({ currentUser: user, cutRefsAllowed: false, permissionVariant: 'status' }),
+      loadSnapshot: async () => ({
+        orderVersion, commitSequence: 1, detailStatusRevision: 2, cutRefsRevision: 0, details: [{ detailId: 1, productionStatusId: 4 }],
+      }),
+    };
+    const service = new OrderRealtimeSnapshotService(reader as any, { snapshotEnabled: true, isStreamEnabledForUser: async () => true } as any);
+    const before = await service.getSnapshot({ tokenUser: user, orderId: 42 });
+    orderVersion = 4;
+    const after = await service.getSnapshot({ tokenUser: user, orderId: 42 });
+    expect([before.orderVersion, after.orderVersion]).toEqual([3, 4]);
+    expect(after.etag).not.toBe(before.etag);
+  });
+
   it('does not expose the cut counter to a status-only user', async () => {
     const reader = {
       authorize: async () => ({ currentUser: user, cutRefsAllowed: false, permissionVariant: 'status' }),

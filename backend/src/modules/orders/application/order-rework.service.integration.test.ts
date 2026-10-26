@@ -282,15 +282,16 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
     expect(Number((await pool.query('SELECT count(*) FROM order_realtime_deferred WHERE order_id = $1', [orderId])).rows[0].count)).toBeGreaterThan(0);
   });
 
-  it('opens a round inside production without changing the order status (D6)', async () => {
-    const { orderId, detailIds } = await createOrder('legacy_4', 'cut');
+  it.each(['legacy_4', 'legacy_5'] as const)('opens a round inside production (%s) without changing the order status (D6)', async (statusCode) => {
+    // «Распилен» (legacy_5) is production too: a cutting defect is reworked there.
+    const { orderId, detailIds } = await createOrder(statusCode, 'cut');
     const result = await service.startOrExtend({
       currentUser: admin, orderId, version: await version(orderId), idempotencyKey: key(),
       dto: { reasonId: reasons.workshop_defect, details: [{ detailId: detailIds[0], productionStatusId: stage.drawn }] },
     });
     expect(result).toMatchObject({ mode: 'in_production', roundNo: 2, action: 'started' });
     const order = (await pool.query('SELECT order_status_id, production_round FROM orders WHERE order_id = $1', [orderId])).rows[0];
-    expect([Number(order.order_status_id), Number(order.production_round)]).toEqual([status.legacy_4, 2]);
+    expect([Number(order.order_status_id), Number(order.production_round)]).toEqual([status[statusCode], 2]);
     const audit = (await pool.query(`SELECT event FROM audit_log WHERE related_order_id = $1 AND ${commandAudit}`, [orderId])).rows.map((r) => r.event);
     expect(audit).toEqual(['order.rework_started']);
     const closed = await service.falsePositive({
@@ -299,7 +300,7 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
     expect(closed.action).toBe('false_positive');
     const detail = (await pool.query('SELECT production_status_id, production_round FROM order_details WHERE detail_id = $1', [detailIds[0]])).rows[0];
     expect([Number(detail.production_status_id), Number(detail.production_round)]).toEqual([stage.cut, 1]);
-    expect(Number((await pool.query('SELECT order_status_id FROM orders WHERE order_id = $1', [orderId])).rows[0].order_status_id)).toBe(status.legacy_4);
+    expect(Number((await pool.query('SELECT order_status_id FROM orders WHERE order_id = $1', [orderId])).rows[0].order_status_id)).toBe(status[statusCode]);
   });
 
   it('rejects invalid commands without side effects', async () => {
@@ -1126,8 +1127,9 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
       "INSERT INTO users (username, email, password_hash, role_id) VALUES ($1, $2, 'x', $3) RETURNING user_id",
       [`e2e_rework_unassigned_${tag}`, `e2e_rework_unassigned_${tag}@example.invalid`, roleId])).rows[0].user_id);
     const resolver = new RecipientResolverService(new PgRecipientSourceAdapter(), new PgVisibilityAdapter());
-    const recipients = (eventType: string, resolvers: string[]) => resolver.resolve(pool as never, { resolvers: resolvers as never },
-      { eventType, orderId, groupIds: [] } as never);
+    // Only this test's users are judged: real users of a stage copy (e.g. admins with scope «all») also see the order.
+    const recipients = async (eventType: string, resolvers: string[]) => (await resolver.resolve(pool as never, { resolvers: resolvers as never },
+      { eventType, orderId, groupIds: [] } as never)).filter((id: number) => id === userId || id === otherUserId);
     let orderWorkshopId: number | null = null;
     try {
       for (const name of ['orders.rework', 'orders.view']) {

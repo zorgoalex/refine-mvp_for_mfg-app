@@ -33,6 +33,8 @@ interface UseOrderDetailLiveStateArgs {
 
 export interface OrderDetailLiveStateMaps {
   statusByDetailId: Map<number, number | null>;
+  /** orders.version of the latest snapshot: a newer one means the order itself changed (e.g. «Переделка»). */
+  orderVersion: number | null;
   cutJobByDetailId: Map<number, CutDetailLastReadyJobRef>;
   bathCutJobByDetailId: Map<number, CutDetailLastReadyJobRef>;
   loaded: boolean;
@@ -41,6 +43,7 @@ export interface OrderDetailLiveStateMaps {
 
 const EMPTY_STATE: OrderDetailLiveStateMaps = {
   statusByDetailId: new Map(),
+  orderVersion: null,
   cutJobByDetailId: new Map(),
   bathCutJobByDetailId: new Map(),
   loaded: false,
@@ -460,6 +463,7 @@ export function buildOrderDetailLiveStateMaps(
   })));
   return {
     statusByDetailId,
+    orderVersion: snapshot.orderVersion ?? null,
     ...cutMaps,
     loaded: true,
     scopeKey,
@@ -471,6 +475,7 @@ export function areOrderDetailLiveStateMapsEqual(
   right: OrderDetailLiveStateMaps,
 ): boolean {
   if (left.loaded !== right.loaded || left.scopeKey !== right.scopeKey) return false;
+  if (left.orderVersion !== right.orderVersion) return false;
   if (!areNumberMapsEqual(left.statusByDetailId, right.statusByDetailId)) return false;
   return areCutJobLinkMapsEqual(left, right);
 }

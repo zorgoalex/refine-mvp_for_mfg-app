@@ -10,6 +10,7 @@ import {
   type OrderReworkState,
 } from '../../../../api/orderReworkApi';
 import { can } from '../../../../utils/permissions';
+import { useIsMobile } from '../../../../hooks/useDeviceTier';
 import {
   buildReworkRequest,
   createLatestGate,
@@ -46,6 +47,8 @@ const errorText = (error: unknown) =>
 export const OrderReworkPanel: React.FC<OrderReworkPanelProps> = ({ orderId, version, details, stages, onChanged }) => {
   // Reasons are loaded for holders of the permission; actions use the backend-resolved capability.
   const canLoadReasons = can('orders.rework');
+  // On a phone the round actions go under the banner text (as an Alert action they squeeze it into a column).
+  const isMobile = useIsMobile();
   const [state, setState] = useState<OrderReworkState | null>(null);
   const [availability, setAvailability] = useState<OrderReworkAvailability | null>(null);
   const [reasons, setReasons] = useState<OrderReworkReason[]>([]);
@@ -122,6 +125,15 @@ export const OrderReworkPanel: React.FC<OrderReworkPanelProps> = ({ orderId, ver
     ? UNAVAILABLE_HINT[availability] : null;
   const showStart = canRework && action !== null && availability !== 'disabled_flag';
 
+  const roundActions = (round: OrderReworkRound) => (
+    <Space wrap>
+      <Button size="small" disabled={syncing} onClick={() => formVersion !== null && setReasonForm({ round, version: formVersion })}>
+        {round.reasonIsSystem ? 'Указать причину' : 'Изменить причину'}
+      </Button>
+      <Button size="small" danger disabled={syncing} onClick={falsePositive}>Это не переделка</Button>
+    </Space>
+  );
+
   const falsePositive = () => {
     if (!openRound) return;
     if (formVersion === null) return;
@@ -157,14 +169,8 @@ export const OrderReworkPanel: React.FC<OrderReworkPanelProps> = ({ orderId, ver
               </Text>
             </Space>
           )}
-          action={canRework ? (
-            <Space>
-              <Button size="small" disabled={syncing} onClick={() => formVersion !== null && setReasonForm({ round: openRound, version: formVersion })}>
-                {openRound.reasonIsSystem ? 'Указать причину' : 'Изменить причину'}
-              </Button>
-              <Button size="small" danger disabled={syncing} onClick={falsePositive}>Это не переделка</Button>
-            </Space>
-          ) : undefined}
+          action={canRework && !isMobile ? roundActions(openRound) : undefined}
+          description={canRework && isMobile ? roundActions(openRound) : undefined}
         />
       ) : null}
       {showStart ? (
@@ -178,6 +184,8 @@ export const OrderReworkPanel: React.FC<OrderReworkPanelProps> = ({ orderId, ver
               {reworkActionLabel(action!, order.openRoundNo)}
             </Button>
           </Tooltip>
+          {/* A disabled button shows no tooltip on hover: the reason is written next to it. */}
+          {unavailableHint ? <Text type="secondary">{unavailableHint}</Text> : null}
         </Space>
       ) : null}
       {syncing ? (

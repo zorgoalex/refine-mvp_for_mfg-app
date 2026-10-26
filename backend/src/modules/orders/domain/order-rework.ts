@@ -13,8 +13,8 @@ export type OrderReworkMode = 'after_ready' | 'in_production';
 
 /** «Готов к выдаче», «Выдан»: the order enters «Переделка». */
 export const REWORK_AFTER_READY_STATUS_CODES: readonly string[] = ['legacy_6', 'legacy_7'];
-/** «Оформлен», «Запланирован», «В производстве»: a round opens, the order status stays (D6). */
-export const REWORK_IN_PRODUCTION_STATUS_CODES: readonly string[] = ['legacy_2', 'legacy_3', 'legacy_4'];
+/** «Оформлен», «Запланирован», «В производстве», «Распилен»: a round opens, the order status stays (D6). */
+export const REWORK_IN_PRODUCTION_STATUS_CODES: readonly string[] = ['legacy_2', 'legacy_3', 'legacy_4', 'legacy_5'];
 export const REWORK_STATUS_CODE = 'rework';
 export const REWORK_SYSTEM_REASON_CODE = 'unclarified';
 

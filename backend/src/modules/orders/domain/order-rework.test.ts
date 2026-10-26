@@ -16,7 +16,9 @@ describe('order rework domain rules', () => {
     expect(resolveReworkMode('legacy_2')).toBe('in_production');
     expect(resolveReworkMode('legacy_3')).toBe('in_production');
     expect(resolveReworkMode('legacy_4')).toBe('in_production');
-    for (const code of ['legacy_1', 'legacy_5', 'legacy_8', 'crm_request', 'rework']) {
+    // «Распилен» is still production: a cutting defect is reworked without changing the order status.
+    expect(resolveReworkMode('legacy_5')).toBe('in_production');
+    for (const code of ['legacy_1', 'legacy_8', 'crm_request', 'rework']) {
       expect(resolveReworkMode(code)).toBeNull();
     }
   });

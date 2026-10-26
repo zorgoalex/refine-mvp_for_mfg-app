@@ -103,11 +103,16 @@ describe('«Переделка» UI model', () => {
     // Actions use the backend-resolved capability (orders.rework + orders.update in scope).
     expect(panel).toContain('const canRework = order.canRework;');
     expect(panel).toContain("availability !== 'disabled_flag'");
+    // Why the action is unavailable (MDF engine, cutover) is visible text, not a hover tooltip of a disabled button.
+    expect(panel).toContain('{unavailableHint ? <Text type="secondary">{unavailableHint}</Text> : null}');
+    // Phone: round actions go under the banner text, not beside it.
+    expect(panel).toContain('action={canRework && !isMobile ? roundActions(openRound) : undefined}');
+    expect(panel).toContain('description={canRework && isMobile ? roundActions(openRound) : undefined}');
     // The reason of any round (open or closed) can be set from the history (plan §8.5).
     // Forms carry the rounds snapshot version (never the card props version) and only when in sync.
     expect(panel).toContain('const formVersion = reworkFormVersion(order.version, version);');
     expect(panel).toContain('setReasonForm({ round: r, version: formVersion })');
-    expect(panel).toContain('setReasonForm({ round: openRound, version: formVersion })');
+    expect(panel).toContain('setReasonForm({ round, version: formVersion })');
     expect(panel).toContain('setStartForm({ version: formVersion })');
     expect(panel).toContain('const openedVersion = formVersion;');
     expect(panel).toContain('orderReworkApi.clarifyReason(orderId, reasonForm.round.roundNo, reasonForm.version');
@@ -121,5 +126,19 @@ describe('«Переделка» UI model', () => {
     // 409 closes the form and re-reads the order.
     expect(panel).toContain('Данные обновлены — повторите действие.');
     expect(show).toContain('round={Number(detail.production_round ?? 1)}');
+  });
+
+  it('the card shows a new round without a reload: the stage cell redraws on a round change, other tabs re-read the order', () => {
+    const show = readFileSync(join(__dirname, '../../show.tsx'), 'utf8');
+    // The stage cell is redrawn only when its live version changes: the round must be part of it.
+    const statusVersion = show.slice(show.indexOf('const statusVersion = JSON.stringify(['), show.indexOf(']);', show.indexOf('const statusVersion = JSON.stringify([')));
+    expect(statusVersion).toContain('Number(detail?.production_round ?? 1)');
+    // A live snapshot with a newer order version re-reads the card once per version.
+    expect(show).toContain('const liveOrderVersion = orderDetailLiveState.loaded ? orderDetailLiveState.orderVersion : null;');
+    // Re-reads go through the catch-up scheduler (one at a time, retried while behind; behaviour: orderVersionCatchUp.test).
+    expect(show).toContain('orderVersionCatchUpRef.current?.update(liveOrderVersion, Number.isFinite(shownOrderVersion) ? shownOrderVersion : null);');
+    expect(show).toContain('refetch: () => refetchOrderShowRef.current(),');
+    expect(show).toContain('const orderVersionCatchUpActive = isWorkspaceTabActive && documentVisible && ordinaryReadActive;');
+    expect(show).toContain('orderVersionCatchUpRef.current?.setActive(orderVersionCatchUpActive);');
   });
 });

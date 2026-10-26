@@ -23,6 +23,7 @@ import { handleExcelError } from "../../utils/excel/excelErrorHandler";
 import { openOrderProductionPdfPreview } from "../../utils/pdf/orderProductionPdf";
 import { OrderPrintView } from "./components/print/OrderPrintView";
 import { OrderReworkPanel } from './components/rework/OrderReworkPanel';
+import { createOrderVersionCatchUp, type OrderVersionCatchUp } from './orderVersionCatchUp';
 import { withRoundSuffix } from '../../api/orderReworkApi';
 import { OrderShowHeader } from "./components/sections/OrderShowHeader";
 import { ClientScreenShowHeader } from "../clientScreen/ClientScreenShowHeader";
@@ -583,6 +584,9 @@ const orderShowBazisCutSortValue = (detail: any): string => {
     .filter(Boolean)
     .join(', ');
 };
+
+/** «Переделка» and other changes made elsewhere: retry interval while the card is behind the live order version. */
+const ORDER_VERSION_CATCH_UP_RETRY_MS = 5000;
 
 const OrderDetailProductionStatusTag = memo(function OrderDetailProductionStatusTag({
   statusId,
@@ -1252,6 +1256,33 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     authScopeKey: authCacheNamespace,
     orderId: record?.order_id,
   });
+  // The live snapshot carries orders.version: a newer one than the card shows means the order itself
+  // changed elsewhere (e.g. «Переделка» from another tab) — re-read the card once per such version.
+  const liveOrderVersion = orderDetailLiveState.loaded ? orderDetailLiveState.orderVersion : null;
+  const shownOrderVersion = Number(record?.version ?? backendOrder?.version);
+  const refetchOrderShowRef = useRef(queryResult.refetch);
+  refetchOrderShowRef.current = queryResult.refetch;
+  const orderVersionCatchUpRef = useRef<OrderVersionCatchUp | null>(null);
+  useEffect(() => {
+    // One read at a time; a failed read (or an older answer) is retried after ORDER_VERSION_CATCH_UP_RETRY_MS.
+    const catchUp = createOrderVersionCatchUp({
+      refetch: () => refetchOrderShowRef.current(),
+      retryMs: ORDER_VERSION_CATCH_UP_RETRY_MS,
+    });
+    orderVersionCatchUpRef.current = catchUp;
+    return () => {
+      catchUp.dispose();
+      if (orderVersionCatchUpRef.current === catchUp) orderVersionCatchUpRef.current = null;
+    };
+  }, [record?.order_id]);
+  // Only a visible, active card with its lifecycle gate open catches up (a manual refetch bypasses `enabled`).
+  const orderVersionCatchUpActive = isWorkspaceTabActive && documentVisible && ordinaryReadActive;
+  useEffect(() => {
+    orderVersionCatchUpRef.current?.setActive(orderVersionCatchUpActive);
+  }, [orderVersionCatchUpActive, record?.order_id]);
+  useEffect(() => {
+    orderVersionCatchUpRef.current?.update(liveOrderVersion, Number.isFinite(shownOrderVersion) ? shownOrderVersion : null);
+  }, [liveOrderVersion, shownOrderVersion]);
   const detailProductionStatusBaseByIdRef = useRef(detailProductionStatusBaseById);
   const currentDetailProductionStatusById = useMemo(() => {
     const map = new Map(detailProductionStatusBaseById);
@@ -2295,6 +2326,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       const directStatusName = statusId === baseStatusId ? detail?.production_status_name : undefined;
       const statusVersion = JSON.stringify([
         statusId ?? null,
+        // «Переделка»: the round arrives with the card re-read, after the live stage — the cell must redraw.
+        Number(detail?.production_round ?? 1),
         directStatusName ?? null,
         statusMeta?.name ?? null,
         statusMeta?.color ?? null,
