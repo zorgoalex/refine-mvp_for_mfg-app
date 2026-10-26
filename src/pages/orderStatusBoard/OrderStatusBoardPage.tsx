@@ -137,6 +137,7 @@ import {
   buildCncOrderMissingDetails,
   indexCncOrderComposition,
   cncOrderDetailSourceKeys,
+  collectCncMdfOrderIds,
   collectCncOrderIds,
   DEFAULT_CNC_ORDER_SEARCH_PERIOD,
   DEFAULT_MDF_ORDER_CARD_SORT,
@@ -193,6 +194,7 @@ import {
   cncPacketCountsForMdfReadiness,
   cncPacketHasOtherMaterialMarker,
   cncBazisCutSetHasOtherMaterial,
+  cncMaterialNameIsOther,
   type CncDetailedMachineSource,
 } from './cncDetailedMachine';
 import { touchBoardEdgeScrollDelta } from './touchBoardDrag';
@@ -1706,7 +1708,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     [cncBathsRequireMachineFiles, cncOrderFilteredColumns, cncOriginalView, preservedCncBathCardId],
   );
   const cncVisibleOrderIds = useMemo(
-    () => new Set(collectCncOrderIds(cncFilteredColumns)),
+    () => new Set(collectCncMdfOrderIds(cncFilteredColumns)),
     [cncFilteredColumns],
   );
   const cncVisibleOrderStatusCards = useMemo(
@@ -4459,6 +4461,14 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                   {!searchTotals || !orderColumn ? (
                     <Typography.Text className="cnc-today-column__totals" type="secondary">
                       {totals.details} дет. · {formatArea(totals.areaM2)}
+                      {totals.otherDetails ? (
+                        <span
+                          className="cnc-today-column__totals-other"
+                          title="Детали файлов не из МДФ (ЛДСП, ХДФ…): карточки видны на доске, в итоги МДФ не входят"
+                        >
+                          +{totals.otherDetails} не МДФ
+                        </span>
+                      ) : null}
                     </Typography.Text>
                   ) : null}
                 </>
@@ -6039,6 +6049,7 @@ const CncTelegramPrintBoard: React.FC<CncTelegramPrintBoardProps> = ({
                 </div>
                 <small>
                   {column.totals.details} дет. · {formatArea(column.totals.areaM2)}
+                  {column.totals.otherDetails ? ` +${column.totals.otherDetails} не МДФ` : ''}
                 </small>
               </th>
             ))}
@@ -9746,6 +9757,8 @@ function cncColumnCardNoun(columnKey: CncTelegramTodayDisplayColumnKey): string 
 interface CncColumnTotals {
   details: number;
   areaM2: number;
+  /** Details of non-MDF files (cream cards): shown on the board, never part of the MDF totals. */
+  otherDetails?: number;
 }
 
 interface CncColumnTotalItem {
@@ -9780,6 +9793,7 @@ function buildCncColumnTotals(
         { details: 0, areaM2: 0 },
       );
   }
+  const otherItems: CncColumnTotalItem[] = [];
   const items: CncColumnTotalItem[] =
     isCncBathColumnKey(column.key)
       ? column.baths
@@ -9793,16 +9807,24 @@ function buildCncColumnTotals(
               (!relationContext && !detailedPacketHighlightEnabled) ||
               getCncPacketDisplayState(packet, relationContext, detailedContext) !== 'dimmed',
             )
-            .flatMap((packet) => packet.items),
+            .flatMap((packet) => {
+              if (!cncPacketHasOtherMaterialMarker(packet)) return packet.items;
+              otherItems.push(...packet.items);
+              return [];
+            }),
           ...(column.bazisCutSets ?? [])
             .filter((card) =>
               (!relationContext && !detailedPacketHighlightEnabled) ||
               getCncBazisCutSetDisplayState(card, relationContext, detailedContext) !== 'dimmed',
             )
-            .flatMap((card) => card.items),
+            .flatMap((card) => card.items.filter((item) => {
+              if (!cncMaterialNameIsOther(item.materialName)) return true;
+              otherItems.push(item);
+              return false;
+            })),
         ];
 
-  return items.reduce<CncColumnTotals>(
+  const totals = items.reduce<CncColumnTotals>(
     (totals, item) => {
       const quantity = Math.max(0, Number.isFinite(item.quantity) ? item.quantity : 0);
       totals.details += quantity;
@@ -9811,6 +9833,9 @@ function buildCncColumnTotals(
     },
     { details: 0, areaM2: 0 },
   );
+  const otherDetails = otherItems.reduce(
+    (sum, item) => sum + Math.max(0, Number.isFinite(item.quantity) ? item.quantity : 0), 0);
+  return otherDetails > 0 ? { ...totals, otherDetails } : totals;
 }
 
 const NO_CNC_ORDER_FILTERS: readonly string[] = [];

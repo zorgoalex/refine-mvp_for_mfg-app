@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-26", title: "МДФ-доска: итоги колонок только по МДФ",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "В шапках колонок с файлами («Файлы на станке», «Распилено» и др.) детали и площадь считаются только по МДФ. Детали файлов не из МДФ (кремовые карточки: ЛДСП, ХДФ) показаны отдельной строкой «+N не МДФ».",
+      "Заказ, который попал на доску только через файл не из МДФ, больше не получает карточку в колонках заказов.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-26", title: "Базис-раскрой: материалы наборов",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

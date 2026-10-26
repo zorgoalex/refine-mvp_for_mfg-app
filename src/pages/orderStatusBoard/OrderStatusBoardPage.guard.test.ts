@@ -70,7 +70,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(memo('cncOrderIds')).toContain('collectCncOrderIds(cncPeriodColumns)');
     expect(memo('cncActiveColumns')).not.toContain('cncFilteredColumns');
     expect(memo('cncOrderFilteredColumns')).toContain('filterCncTodayColumnsByOrders(cncActiveColumns, cncOrderFilters)');
-    expect(memo('cncVisibleOrderIds')).toContain('collectCncOrderIds(cncFilteredColumns)');
+    expect(memo('cncVisibleOrderIds')).toContain('collectCncMdfOrderIds(cncFilteredColumns)');
     expect(memo('cncVisibleOrderStatusCards')).toContain('cncVisibleOrderIds');
     expect(memo('cncDisplayOrderStatusCards')).toContain('cncVisibleOrderStatusCards');
     expect(memo('cncHistoricalBathReadiness')).toContain('cncToday?.historicalBathReadiness');

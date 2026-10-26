@@ -985,6 +985,12 @@
   white-space: nowrap;
 }
 
+/* Details of non-MDF files: on its own line in the cream cards' brown, outside the MDF totals. */
+.cnc-today-column__totals-other {
+  display: block;
+  color: #8b5a2b;
+}
+
 .cnc-today-column__badge-placeholder,
 .cnc-today-column__badge-placeholder .ant-skeleton-button {
   width: 34px !important;

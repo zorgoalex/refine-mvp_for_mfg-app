@@ -15,7 +15,12 @@ import type {
   OrderStatusBoardSortOrder,
   OrderStatusBoardType,
 } from '../../api/types/orderStatusBoardApi.types';
-import { cncMaterialNameIsMdf, cncPacketCountsForMdfReadiness } from './cncDetailedMachine';
+import {
+  cncMaterialNameIsMdf,
+  cncMaterialNameIsOther,
+  cncPacketCountsForMdfReadiness,
+  cncPacketHasOtherMaterialMarker,
+} from './cncDetailedMachine';
 
 const COMPLETED_ORDER_STATUS_NAMES = new Set<string>(['завершен', 'завершён']);
 export interface MdfBoardHiddenStatusesSetting {
@@ -373,9 +378,12 @@ export function selectCncSearchedOrderItems(
   if (isCncBathColumnKey(column.key)) {
     return (column.baths ?? []).flatMap((bath) => bath.items.filter(matches));
   }
+  // Non-MDF files (cream cards) are shown, but their details are not MDF work.
   return [
-    ...(column.packets ?? []).flatMap((packet) => packet.items.filter(matches)),
-    ...(column.bazisCutSets ?? []).flatMap((set) => set.items.filter(matches)),
+    ...(column.packets ?? []).filter((packet) => !cncPacketHasOtherMaterialMarker(packet))
+      .flatMap((packet) => packet.items.filter(matches)),
+    ...(column.bazisCutSets ?? []).flatMap((set) =>
+      set.items.filter((item) => matches(item) && !cncMaterialNameIsOther(item.materialName))),
   ];
 }
 
@@ -960,6 +968,18 @@ export function collectCncOrderIds(columns: CncTelegramTodayColumn[]): number[] 
     }
   }
   return Array.from(orderIds).sort((left, right) => left - right);
+}
+
+/** Orders with MDF work on the board: a non-MDF file (cream card) alone gives its orders no order card. */
+export function collectCncMdfOrderIds(columns: CncTelegramTodayColumn[]): number[] {
+  return collectCncOrderIds(columns.map((column) => ({
+    ...column,
+    packets: (column.packets ?? []).filter((packet) => !cncPacketHasOtherMaterialMarker(packet)),
+    bazisCutSets: (column.bazisCutSets ?? []).map((set) => ({
+      ...set,
+      items: set.items.filter((item) => !cncMaterialNameIsOther(item.materialName)),
+    })),
+  })));
 }
 
 export function buildCncOrderSearchDateRange(
