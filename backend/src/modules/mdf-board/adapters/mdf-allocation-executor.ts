@@ -1,4 +1,5 @@
 import type { DatabaseClient } from '../../../database/database.types';
+import type { MdfDeclaredCoverage } from './mdf-publication';
 import { auditService } from '../../../common/audit/audit.service';
 import { MdfNeedsAttention, type MdfJob, type MdfSourceKind } from '../application/mdf-job-runner';
 import type { MdfEvidenceAllocation, MdfEvidenceReservation } from '../domain/mdf-evidence-allocation';
@@ -25,7 +26,7 @@ const MAX_ORDERS = 100, MAX_SOURCES = 250, MAX_ROWS = 5000;
 const key = (s: Source) => JSON.stringify([s.kind, s.id]);
 function attention(code: string): never { throw new MdfNeedsAttention(`MDF_ALLOCATION_${code}`); }
 const result = (status: 'disabled' | 'superseded' | 'allocated') => ({ status, reservedCount: 0, consumedCount: 0,
-  readyBathIds: [] as string[], blockers: [] as ReturnType<typeof planMdfQuarantinedAllocations>['blockers'],
+  readyBathIds: [] as string[], declaredCoverage: [] as MdfDeclaredCoverage[], blockers: [] as ReturnType<typeof planMdfQuarantinedAllocations>['blockers'],
   quarantine: [] as ReturnType<typeof planMdfQuarantinedAllocations>['quarantine'], blockedPositionKeys: [] as string[],
   orderIds: [] as number[], closedOrderIds: [] as number[], sourceHeads: [] as Head[], sourceLines: [] as Line[],
   executionSnapshot: null as Awaited<ReturnType<typeof loadMdfExecutionSnapshot>> | null,
@@ -318,7 +319,8 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
     WHERE allocation_id=ANY($1::uuid[]) AND state='reserved'`, [toConsume.map(a => a.allocationId)]);
   await auditChanges(tx, job, 'reserved', inserted);
   await auditChanges(tx, job, 'consumed', toConsume);
-  return { ...result('allocated'), readyBathIds: plan.readyBathIds, blockers: plan.blockers,
+  return { ...result('allocated'), readyBathIds: plan.readyBathIds, declaredCoverage: plan.declaredCoverage,
+    blockers: plan.blockers,
     quarantine: plan.quarantine, blockedPositionKeys: plan.blockedPositionKeys,
     reservedCount: inserted.length, consumedCount: toConsume.length,
     orderIds: scope.orders, closedOrderIds: scope.closedOrders, sourceHeads: heads, sourceLines: lines, executionSnapshot,

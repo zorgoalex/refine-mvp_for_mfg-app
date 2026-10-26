@@ -365,3 +365,65 @@ describe('dependency-local MDF accounting quarantine', () => {
     expect(() => plan([source('cnc')], [allocation(),allocation()])).toThrow('MDF_ALLOCATION_INVALID_ALLOCATION');
   });
 });
+
+describe('bath readiness from credited (declared) cut — second pass after the physical plan', () => {
+  const declaredFile = (id: string, detailId = 11, quantity = 10): MdfAllocationSource => ({ kind: 'packet', id,
+    accepted: '1', received: '1', createdAt: '2026-09-01', lines: [
+      { evidenceLineId: `${id}-member`, revision: '1', orderId: 1, detailId, quantity, stage: 'membership', evidence: 'derived', rework: false },
+      { evidenceLineId: `${id}-declared`, revision: '1', orderId: 1, detailId, quantity, stage: 'cut', evidence: 'declaration', rework: false },
+    ] });
+  const bath = (id: string, createdAt: string, detailId = 11, quantity = 10): MdfAllocationSource =>
+    ({ ...source(id, 'bath', detailId, quantity), createdAt });
+
+  it('a bath closed only by a manually declared cut is ready, with its declared coverage and no ledger rows', () => {
+    const result = plan([declaredFile('hdf-move'), bath('cut-result:1', '2026-09-02')]);
+    expect(result.readyBathIds).toEqual(['cut-result:1']);
+    expect(result.physicalReadyBathIds).toEqual([]);
+    expect(result.declaredReadyBathIds).toEqual(['cut-result:1']);
+    expect(result.declaredCoverage).toEqual([{ bathId: 'cut-result:1', bathRevision: '1', orderId: 1, detailId: 11, quantity: 10 }]);
+    expect(result.reservations).toEqual([]);
+    expect(result.consumableBathIds).toEqual([]);
+  });
+
+  it('one credited piece closes at most one bath: the oldest fully closable one', () => {
+    const result = plan([declaredFile('m'), bath('cut-result:2', '2026-09-03'), bath('cut-result:1', '2026-09-02')]);
+    expect(result.declaredReadyBathIds).toEqual(['cut-result:1']);
+    expect(result.declaredCoverage.map(c => c.bathId)).toEqual(['cut-result:1']);
+  });
+
+  it('an older bath that cannot be closed takes nothing; a younger closable one is ready (order 3058 shape)', () => {
+    const older = { ...bath('cut-result:1065', '2026-10-19'), lines: [...bath('cut-result:1065', '2026-10-19').lines,
+      { evidenceLineId: 'b1065-member-2', revision: '1', orderId: 1, detailId: 12, quantity: 1,
+        stage: 'membership', evidence: 'derived', rework: false }] };
+    const result = plan([declaredFile('m'), older, bath('cut-result:1141', '2026-10-23')]);
+    expect(result.declaredReadyBathIds).toEqual(['cut-result:1141']);
+  });
+
+  it('physical supply goes first and a declaration of the same pieces never adds a second credit', () => {
+    const both: MdfAllocationSource = { ...source('cnc'), lines: [...source('cnc').lines,
+      { evidenceLineId: 'cnc-declared', revision: '1', orderId: 1, detailId: 11, quantity: 10, stage: 'cut',
+        evidence: 'declaration', rework: false }] };
+    const result = plan([both, bath('cut-result:1', '2026-09-02'), bath('cut-result:2', '2026-09-03')]);
+    expect(result.physicalReadyBathIds).toEqual(['cut-result:1']);
+    expect(result.declaredReadyBathIds).toEqual([]);
+  });
+
+  it('a declaration above the physical cut credits only the rest after the physical reservation', () => {
+    const partial: MdfAllocationSource = { ...source('cnc', 'packet', 11, 4), lines: [
+      ...source('cnc', 'packet', 11, 4).lines,
+      { evidenceLineId: 'm-declared', revision: '1', orderId: 1, detailId: 11, quantity: 10, stage: 'cut', evidence: 'declaration', rework: false }] };
+    const result = plan([partial, bath('cut-result:1', '2026-09-02', 11, 4), bath('cut-result:2', '2026-09-03', 11, 6)]);
+    expect(result.physicalReadyBathIds).toEqual(['cut-result:1']);
+    expect(result.declaredCoverage).toEqual([{ bathId: 'cut-result:2', bathRevision: '1', orderId: 1, detailId: 11, quantity: 6 }]);
+  });
+
+  it('live reserved/consumed debits are held; released ones are free again', () => {
+    const held = plan([declaredFile('m'), bath('cut-result:1', '2026-09-02')],
+      [allocation({ evidenceLineId: 'm-declared', bathId: 'other', state: 'consumed' })]);
+    // A debit on a non-physical line is not verifiable supply: that bath is quarantined, the position is blocked.
+    expect(held.declaredReadyBathIds).toEqual([]);
+    const released = plan([declaredFile('m'), bath('cut-result:1', '2026-09-02')],
+      [allocation({ evidenceLineId: 'm-declared', bathId: 'other', state: 'released' })]);
+    expect(released.declaredReadyBathIds).toEqual(['cut-result:1']);
+  });
+});

@@ -163,6 +163,7 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   await publishMdfState(tx,{ job, orderIds: allocation.orderIds, positionOrderIds: [...openOrderIds, ...closureTrigger],
     sources, metadata: snapshot.metadata, state: final,
     retired: allocation.sourceHeads.filter(h => snapshot.retired.has(mdfSourceKey(h))),
+    declaredCoverage: allocation.declaredCoverage,
     ...(republish ? { republish } : {}) });
   return 'done';
 }

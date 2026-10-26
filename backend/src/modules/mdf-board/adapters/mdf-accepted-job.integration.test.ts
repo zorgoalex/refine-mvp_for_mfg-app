@@ -83,7 +83,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
       expect((await db.query('SELECT 1 FROM pg_namespace WHERE nspname=$1',[schema])).rows).toHaveLength(0);
     } finally { await db.end(); }
   });
-  async function fixture(options: { rolled?: boolean; context?: boolean } = {}) {
+  async function fixture(options: { rolled?: boolean; context?: boolean; declared?: boolean } = {}) {
     // Previous fixtures must not leave claimable jobs ahead of this scenario.
     await db.query("UPDATE mdf_recalculation_jobs SET status='superseded',finished_at=now() WHERE status='pending'");
     const orderId = ++sequence, detailId = orderId*10;
@@ -112,8 +112,12 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
         displayName: `E2E ${kind}`,priorColumn: kind==='bath' ? 'baths' : 'parsed',compositionComplete: true,demand },
       lines: [{ lineKey: 'member',orderId,detailId,quantity,stageCode: 'membership',evidenceKind: 'derived',rework: false },
         ...(kind!=='bath' || options.rolled ? [{ lineKey: 'proof',orderId,detailId,quantity,
-          stageCode: kind==='bath' ? 'laminated' : 'cut',evidenceKind: 'physical' as const,rework: false }] : [])] });
-    const receipts = [make('packet',packetId,4),make('bazisCutSet',String(orderId),6),make('bath',`cut-result:${orderId}`,10)];
+          stageCode: kind==='bath' ? 'laminated' : 'cut',
+          // `declared`: the files were moved to «Распилено» by hand — credited cut, no machine report.
+          evidenceKind: kind!=='bath' && options.declared ? 'declaration' as const : 'physical' as const,rework: false }] : [])] });
+    // `declared`: one file moved by hand covers the whole detail (separate declarations never add up — coverage rule).
+    const receipts = options.declared ? [make('packet',packetId,10),make('bath',`cut-result:${orderId}`,10)]
+      : [make('packet',packetId,4),make('bazisCutSet',String(orderId),6),make('bath',`cut-result:${orderId}`,10)];
     const jobs = [];
     for (const r of receipts) jobs.push(await database().transaction(tx => recordMdfReceipt(tx,r)));
     return { orderId,detailId,receipts,jobs };
@@ -155,6 +159,21 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     outbox: (await db.query('SELECT count(*)::int n FROM outbox_events WHERE aggregate_id=$1',[String(orderId)])).rows[0].n,
     rules: (await db.query("SELECT count(*)::int n FROM audit_log WHERE event='status_automation.rule_applied' AND related_order_id=$1",
       [orderId])).rows[0].n });
+
+  it('a bath closed only by credited (declared) cut is ready, shows full coverage and audits the «declared» basis', async () => {
+    const f = await fixture({ declared: true });
+    for (let i = 0; i < 2; i++) expect(await runner().processOne()).toMatchObject({ status: 'done' });
+    const bathId = f.receipts[1].sourceId;
+    expect((await db.query("SELECT column_key FROM mdf_published_sources WHERE source_kind='bath' AND source_id=$1",[bathId]))
+      .rows[0].column_key).toBe('baths_ready');
+    expect((await db.query(`SELECT covered_quantity::text,declared_covered_quantity::text FROM mdf_published_source_members
+      WHERE source_kind='bath' AND source_id=$1`,[bathId])).rows).toEqual([{ covered_quantity: '0',declared_covered_quantity: '10' }]);
+    expect((await db.query('SELECT count(*)::int n FROM mdf_bath_allocations WHERE order_id=$1',[f.orderId])).rows[0].n).toBe(0);
+    const snapshot = await readMdfPublishedSnapshot(database(),admin,{ dateTo: '2026-09-21' });
+    expect(snapshot.progress.find(p => p.kind==='bath' && p.id===bathId)).toMatchObject({ member: 10,allocated: 10,declared: 10 });
+    expect((await db.query(`SELECT after_json->>'basis' basis FROM audit_log WHERE event='mdf_board.bath_readiness_changed'
+      AND entity_id=$1 ORDER BY created_at DESC LIMIT 1`,[bathId])).rows[0].basis).toBe('declared');
+  });
 
   it('audits a bath readiness basis change with bath/order/detail dimensions; republish without change adds none', async () => {
     const f = await fixture();

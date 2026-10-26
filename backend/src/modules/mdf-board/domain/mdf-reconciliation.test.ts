@@ -133,12 +133,12 @@ describe('components and evaluation', () => {
     expect(result.positions).toEqual([expect.objectContaining({ orderId: 1, detailId: 10, creditedCut: 3 })]);
   });
 
-  it('declared cut is coverage only, never allocatable supply', () => {
+  it('declared cut is never allocatable supply, but it makes the bath ready (credited readiness, no ledger rows)', () => {
     const declared = classifyMdfReconciliationSource(packet({ kind: 'bazisCutSet', id: '9', provenCut: true, items: [item('a', 1, 10, 2)] }));
     const b = bath('cut-result:1', '2026-09-01T00:00:00Z', [item('1:10', 1, 10, 2)]);
     const result = evaluateMdfReconciliationComponent([declared, b], [{ orderId: 1, detailId: 10, quantity: 2, rank: 1 }], T);
     expect(result.reservations).toEqual([]);
-    expect(result.readyBathIds).toEqual([]);
+    expect(result.readyBathIds).toEqual(['cut-result:1']);
     expect(result.positions[0].creditedCut).toBe(2);
   });
 

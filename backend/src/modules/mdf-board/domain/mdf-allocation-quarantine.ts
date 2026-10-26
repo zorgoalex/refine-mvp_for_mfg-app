@@ -70,6 +70,8 @@ export function planMdfQuarantinedAllocations(input: {
 }) {
   const quarantine: MdfAllocationQuarantine[] = [], blocked = new Set<string>(), blockedOrders = new Set<number>();
   const supply: MdfSupplyLine[] = [], baths: MdfBathDemand[] = [], laminated = new Set<string>();
+  // Credited (declared) cut of the same admitted sources: never supply of the ledger, only bath readiness (C2).
+  const declared: MdfSupplyLine[] = [];
   const liveAllocations = input.allocations.filter(a => a.state !== 'released');
   const ownAllocations = (id: string) => liveAllocations.filter(a => a.bathId === id);
   const reject = (s: MdfAllocationSource, code: string, rows: readonly MdfPositionQuantity[] = [], widen = false) => {
@@ -137,6 +139,7 @@ export function planMdfQuarantinedAllocations(input: {
     }
     if (s.kind !== 'bath') {
       supply.push(...own.filter(l => l.stage === 'cut' && l.evidence === 'physical' && !l.rework));
+      declared.push(...own.filter(l => l.stage === 'cut' && l.evidence === 'declaration' && !l.rework));
       continue;
     }
     const items = [...members.values()].sort((a,b) => compare(mdfPositionKey(a),mdfPositionKey(b)));
@@ -194,13 +197,70 @@ export function planMdfQuarantinedAllocations(input: {
     for (const b of eligible) if (laminated.has(b.id) && !plan.readyBathIds.includes(b.id)) {
       if (!failures.has(b.id)) failures.set(b.id,'LAMINATION_SUPPLY_MISSING');
     }
-    if (!failures.size) return { ...plan, quarantine: quarantine.sort((a,b) => compare(JSON.stringify(a),JSON.stringify(b))),
-      blockedPositionKeys: [...blocked].sort(compare),
-      consumableBathIds: plan.readyBathIds.filter(id => laminated.has(id)) };
+    if (!failures.size) {
+      // After convergence only: lamination checks and consumption above used the physical plan alone.
+      const credited = planMdfDeclaredReadiness({ baths: eligible, physicalReadyBathIds: plan.readyBathIds,
+        supply: supply.filter(l => !isBlocked(l)), declared: declared.filter(l => !isBlocked(l)),
+        allocations: liveAllocations.filter(a => !isBlocked(a)), reservations: plan.reservations });
+      return { ...plan, readyBathIds: [...plan.readyBathIds, ...credited.readyBathIds],
+        physicalReadyBathIds: plan.readyBathIds, declaredReadyBathIds: credited.readyBathIds,
+        declaredCoverage: credited.coverage,
+        quarantine: quarantine.sort((a,b) => compare(JSON.stringify(a),JSON.stringify(b))),
+        blockedPositionKeys: [...blocked].sort(compare),
+        consumableBathIds: plan.readyBathIds.filter(id => laminated.has(id)) };
+    }
     for (const [id,code] of failures) {
       const s = sourceOf(id);
       reject(s,code,[...s.lines,...ownAllocations(id)]);
     }
   }
   throw new Error('MDF_ALLOCATION_QUARANTINE_DID_NOT_CONVERGE');
+}
+
+/** Bath readiness from credited cut (plan «MDF bath readiness from credited cut», r2): a bath not ready on physical supply
+ * may be closed by the credited cut of its positions that no other bath holds. Per position the credited cut is the
+ * same coverage as the publication's (physical sum vs. the largest declaration, never added); what the physical ledger
+ * (live reserved/consumed debits and this plan's reservations) already holds is subtracted. Oldest bath first, all or
+ * nothing per bath, so one credited piece closes at most one bath. Pure: no ledger rows, no consumption. */
+export function planMdfDeclaredReadiness(input: {
+  baths: readonly MdfBathDemand[]; physicalReadyBathIds: readonly string[];
+  supply: readonly MdfPositionQuantity[]; declared: readonly MdfPositionQuantity[];
+  allocations: readonly (MdfPositionQuantity & { bathId: string; state: string })[];
+  reservations: readonly (MdfPositionQuantity & { bathId: string })[];
+}): { readyBathIds: string[]; coverage: { bathId: string; bathRevision: string; orderId: number; detailId: number; quantity: number }[] } {
+  const free = new Map<string, number>();
+  const physical = new Map<string, number>(), declaration = new Map<string, number>();
+  for (const l of input.supply) physical.set(mdfPositionKey(l), mdfSum(physical.get(mdfPositionKey(l)) ?? 0, l.quantity));
+  for (const l of input.declared) declaration.set(mdfPositionKey(l), Math.max(declaration.get(mdfPositionKey(l)) ?? 0, l.quantity));
+  for (const key of new Set([...physical.keys(), ...declaration.keys()])) {
+    free.set(key, Math.max(physical.get(key) ?? 0, declaration.get(key) ?? 0));
+  }
+  const held = new Map<string, Map<string, number>>();
+  const debit = (row: MdfPositionQuantity & { bathId: string }) => {
+    const key = mdfPositionKey(row);
+    free.set(key, (free.get(key) ?? 0) - row.quantity);
+    const own = held.get(row.bathId) ?? new Map<string, number>();
+    own.set(key, mdfSum(own.get(key) ?? 0, row.quantity));
+    held.set(row.bathId, own);
+  };
+  for (const a of input.allocations) if (a.state === 'reserved' || a.state === 'consumed') debit(a);
+  for (const r of input.reservations) debit(r);
+  const physicalReady = new Set(input.physicalReadyBathIds);
+  const result: ReturnType<typeof planMdfDeclaredReadiness> = { readyBathIds: [], coverage: [] };
+  const sorted = [...input.baths].filter(b => !physicalReady.has(b.id))
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || compare(a.id, b.id));
+  for (const bath of sorted) {
+    const own = held.get(bath.id) ?? new Map<string, number>();
+    const needs = quantities(bath.items);
+    const missing = [...needs].map(([key, item]) => ({ key, item, quantity: Math.max(0, item.quantity - (own.get(key) ?? 0)) }))
+      .filter(n => n.quantity > 0);
+    if (!missing.length || missing.some(n => n.quantity > (free.get(n.key) ?? 0))) continue;
+    for (const n of missing) {
+      free.set(n.key, (free.get(n.key) ?? 0) - n.quantity);
+      result.coverage.push({ bathId: bath.id, bathRevision: bath.revision, orderId: n.item.orderId, detailId: n.item.detailId,
+        quantity: n.quantity });
+    }
+    result.readyBathIds.push(bath.id);
+  }
+  return result;
 }
