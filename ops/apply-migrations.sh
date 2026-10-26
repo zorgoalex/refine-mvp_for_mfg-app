@@ -3143,6 +3143,13 @@ probe_file() {
       "$(q_col mdf_published_source_members covered_quantity)" \
       "$(q_con_on mdf_published_source_members mdf_published_member_covered_quantity_check)" \
       ;;
+    # MDF bath readiness from credited cut: declared coverage + republish job marker.
+    277_mdf_bath_declared_coverage*) probe_all \
+      "$(q_col mdf_published_source_members declared_covered_quantity)" \
+      "$(q_con_on mdf_published_source_members mdf_published_member_declared_coverage_check)" \
+      "SELECT to_regclass('public.mdf_republish_jobs') IS NOT NULL;" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid='public.mdf_republish_jobs'::regclass AND t.tgname='mdf_republish_job_immutable' AND NOT t.tgisinternal);" \
+      ;;
     199_mdf_cutover_controls*) probe_all \
       "$(q_col mdf_freeze_guard recovery_frozen_at)" \
       "$(q_col mdf_freeze_guard recovery_reason)" \
@@ -3384,6 +3391,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     273_mdf_published_bath_coverage*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    277_mdf_bath_declared_coverage*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     186_bitrix24_product_import*)

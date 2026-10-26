@@ -80,8 +80,10 @@ export interface MdfPublishedCardProgress {
   member: number;
   cut: number;
   laminated: number;
-  /** Bath only: pieces allocated to the bath, frozen with its publication; null/absent = no accounting data. */
+  /** Bath only: pieces closed with its publication (physical allocations + credited cut); null/absent = no data. */
   allocated?: number | null;
+  /** Bath only: the part of `allocated` closed by credited (manually declared) cut. */
+  declared?: number | null;
 }
 
 export interface MdfPublishedOrderName {

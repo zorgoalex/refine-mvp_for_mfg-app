@@ -53,9 +53,11 @@ export interface PublishedCardPresentation {
 }
 export interface PublishedCardProgress {
   kind: string; id: string; orderId: number; detailId: number; member: number; cut: number; laminated: number;
-  /** Bath only: machine-file/BASIS pieces allocated to the bath, frozen with its publication (migration 273);
-   * null when not published yet. A bath's own `cut` is not its coverage. */
+  /** Bath only: pieces of the bath closed with its publication — physical allocations (migration 273) plus credited
+   * cut (`declared`, migration 277); null when not published yet. A bath's own `cut` is not its coverage. */
   allocated?: number | null;
+  /** Bath only: the part of `allocated` closed by credited (manually declared) cut, not by a machine report. */
+  declared?: number | null;
 }
 export interface PublishedOrderName { orderId: number; orderName: string }
 export interface PublishedUnregisteredSource {
@@ -177,7 +179,9 @@ export async function loadMdfPublishedPresentation(tx: DatabaseClient, owners: s
       GREATEST(COALESCE(sum(l.quantity) FILTER (WHERE l.stage_code='laminated' AND l.evidence_kind='physical'),0),
         COALESCE(max(l.quantity) FILTER (WHERE l.stage_code='laminated' AND l.evidence_kind='declaration'),0))::float8 laminated,
       -- One published member row per position (primary key): max() only lifts it out of the grouping.
-      CASE WHEN l.source_kind='bath' THEN max(pm.covered_quantity)::float8 END allocated
+      CASE WHEN l.source_kind='bath' THEN (max(pm.covered_quantity)+max(pm.declared_covered_quantity))::float8 END allocated,
+      CASE WHEN l.source_kind='bath' AND max(pm.covered_quantity) IS NOT NULL
+        THEN max(pm.declared_covered_quantity)::float8 END declared
     FROM unnest($2::text[],$3::text[],$4::text[]) s(kind,id,revision)
     JOIN mdf_evidence_revisions r ON r.source_kind=s.kind AND r.source_id=s.id AND r.revision_key=s.revision
     JOIN mdf_evidence_lines l ON l.source_kind=s.kind AND l.source_id=s.id AND l.revision_key=s.revision

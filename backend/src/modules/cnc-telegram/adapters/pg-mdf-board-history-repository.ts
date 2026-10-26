@@ -709,6 +709,8 @@ const ENGINE_EVENT_TEXT: Record<string, { code: string; reason: string; conseque
     consequence: 'Закатанные детали засчитаны заказу.' },
   'mdf_board.bath_supply_released': { code: 'BATH_SUPPLY_RELEASED', reason: 'Резерв ванны освобождён',
     consequence: 'Детали снова доступны другим ваннам.' },
+  'mdf_board.bath_readiness_changed': { code: 'BATH_READINESS_CHANGED', reason: 'Изменилось основание готовности ванны',
+    consequence: 'Готовность ванны пересчитана: по отчёту станка или по засчитанному (ручному) распилу.' },
   'mdf_board.order_cascade_accepted': { code: 'ORDER_DEMAND_UPDATED', reason: 'Учтено изменение состава заказа',
     consequence: 'Потребность карточки обновлена; учтённое производство не изменилось.' },
   'mdf_board.order_correction_accepted': { code: 'ORDER_CORRECTION_ACCEPTED', reason: 'Учтено подтверждённое изменение заказа',

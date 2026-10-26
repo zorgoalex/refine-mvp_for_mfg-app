@@ -8,6 +8,7 @@ import { recordMdfReceipt, recordMdfLineageReceipt, type MdfLineageReceiptInput,
 import { MdfJobRunner } from '../application/mdf-job-runner';
 import { executeMdfAcceptedJob } from '../application/mdf-accepted-job';
 import { readMdfPublishedSnapshot } from './mdf-published-snapshot';
+import { enqueueMdfRepublish, loadMdfRepublishStatus } from './mdf-republish';
 import type { CurrentUser } from '../../../permissions/current-user';
 
 describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → queue → allocation → rules → publication PostgreSQL', () => {
@@ -50,6 +51,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     await db.query(readFileSync(new URL('../../../../db/migrations/180_mdf_cnc_observations.sql',import.meta.url),'utf8'));
     await db.query(readFileSync(new URL('../../../../db/migrations/182_mdf_physical_lineage.sql',import.meta.url),'utf8'));
     await db.query(readFileSync(new URL('../../../../db/migrations/185_mdf_bazis_composition.sql',import.meta.url),'utf8'));
+    await db.query(readFileSync(new URL('../../../../db/migrations/277_mdf_bath_declared_coverage.sql',import.meta.url),'utf8'));
     const expectedLocal = ['bazis_cut_set_details','bazis_cut_sets','mdf_bazis_assignment_states','mdf_bazis_composition_intents'];
     expect((await db.query<{relname:string}>(`SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
       WHERE n.nspname=$1 AND c.relkind='r' AND c.relname=ANY($2::text[]) ORDER BY c.relname`,[schema,expectedLocal]))
@@ -145,6 +147,94 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     expect(await runner().processOne()).toEqual({ status: 'idle' });
     expect((await db.query('SELECT count(*) n FROM outbox_events WHERE aggregate_id=$1',[String(f.orderId)])).rows[0].n).toBe('1');
     expect(BigInt((await db.query('SELECT published_revision FROM mdf_engine_state')).rows[0].published_revision)).toBe(BigInt(revision)+2n);
+  });
+
+  const republish = (runId: string, sources: { kind: 'packet'|'bazisCutSet'|'bath'; id: string }[]) =>
+    database().transaction(tx => enqueueMdfRepublish(tx,{ runId,actorUserId: 1,sources }));
+  const effects = async (orderId: number) => ({ statuses: await statuses(orderId),
+    outbox: (await db.query('SELECT count(*)::int n FROM outbox_events WHERE aggregate_id=$1',[String(orderId)])).rows[0].n,
+    rules: (await db.query("SELECT count(*)::int n FROM audit_log WHERE event='status_automation.rule_applied' AND related_order_id=$1",
+      [orderId])).rows[0].n });
+
+  it('audits a bath readiness basis change with bath/order/detail dimensions; republish without change adds none', async () => {
+    const f = await fixture();
+    for (let i = 0; i < 3; i++) await runner().processOne();
+    const bathId = f.receipts[2].sourceId;
+    const changes = async () => (await db.query(`SELECT a.before_json->>'basis' before,a.after_json->>'basis' after,
+      a.user_id::text,(SELECT array_agg(r.entity_type||':'||r.entity_id ORDER BY r.entity_type,r.entity_id)
+        FROM audit_log_related_entity r WHERE r.audit_id=a.audit_id) related
+      FROM audit_log a WHERE a.event='mdf_board.bath_readiness_changed' AND a.entity_id=$1 ORDER BY a.created_at`,[bathId])).rows;
+    // Physically covered by the packet + BASIS cuts (4+6): none → physical, linked to its order and detail.
+    expect(await changes()).toEqual([{ before: 'none',after: 'physical',user_id: '1',
+      related: [`order:${f.orderId}`,`order_detail:${f.detailId}`] }]);
+    const queued = await republish(`E2E-basis-${f.orderId}`,[{ kind: 'bath',id: bathId }]);
+    expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: queued.queued[0].jobId });
+    expect(await changes()).toHaveLength(1);
+    const snapshot = await readMdfPublishedSnapshot(database(),admin,{ dateTo: '2026-09-21' });
+    expect(snapshot.progress.find(p => p.kind==='bath' && p.id===bathId)).toMatchObject({ allocated: 10,declared: 0 });
+  });
+
+  it('republish of a forward revision publishes again with no rule effects and is idempotent per run', async () => {
+    const f = await fixture();
+    for (let i = 0; i < 3; i++) expect(await runner().processOne()).toMatchObject({ status: 'done' });
+    // A user moved the detail back after the rule ran: a re-publication must not re-apply rule 17.
+    await db.query('UPDATE order_details SET production_status_id=1 WHERE order_id=$1',[f.orderId]);
+    const before = await effects(f.orderId);
+    const revision = BigInt((await db.query('SELECT published_revision FROM mdf_engine_state')).rows[0].published_revision);
+    const run = `E2E-republish-${f.orderId}`;
+    const queued = await republish(run,[{ kind: 'packet',id: f.receipts[0].sourceId }]);
+    expect(queued.queued).toEqual([expect.objectContaining({ kind: 'packet',effectPolicy: 'forward',revisionKey: '1' })]);
+    expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: queued.queued[0].jobId });
+    expect(await effects(f.orderId)).toEqual(before);
+    expect(BigInt((await db.query('SELECT published_revision FROM mdf_engine_state')).rows[0].published_revision)).toBe(revision+1n);
+    expect((await db.query(`SELECT user_id::text,request_id FROM audit_log WHERE event='mdf_board.republished' AND entity_id=$1`,
+      [queued.queued[0].jobId])).rows).toEqual([{ user_id: '1',request_id: `mdf-republish:${run}` }]);
+    // The same run never queues the same revision twice; a later run may.
+    expect((await republish(run,[{ kind: 'packet',id: f.receipts[0].sourceId }])).skipped)
+      .toEqual([expect.objectContaining({ reason: 'ALREADY_QUEUED_IN_RUN' })]);
+    expect(await database().transaction(tx => loadMdfRepublishStatus(tx,run))).toMatchObject({ runId: run,jobs: { done: 1 } });
+    // An open job of the source is never raced: it is reported, not queued.
+    await database().transaction(tx => recordMdfReceipt(tx,{ ...f.receipts[0],revisionKey: '2',accept: false,
+      expectedFence: { version: '1',correctionEpoch: '0' } }));
+    expect((await republish(`${run}-b`,[{ kind: 'packet',id: f.receipts[0].sourceId }])).skipped)
+      .toEqual([expect.objectContaining({ reason: 'ACCEPTANCE_PENDING' })]);
+  });
+
+  it('republish keeps the sealed publish_only policy of a corrected revision', async () => {
+    const f = await fixture();
+    for (let i = 0; i < 3; i++) await runner().processOne();
+    const original = f.receipts[0];
+    // As in the owner command: the old reservations are released before a correction is recorded.
+    await db.query("UPDATE mdf_bath_allocations SET state='released' WHERE order_id=$1 AND state<>'released'",[f.orderId]);
+    const corrected = await database().transaction(tx => recordMdfReceipt(tx,{ ...original,revisionKey: '2',correction: true,
+      expectedFence: { version: '1',correctionEpoch: '0' } }));
+    expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: corrected.jobId });
+    await db.query('UPDATE order_details SET production_status_id=1 WHERE order_id=$1',[f.orderId]);
+    const before = await effects(f.orderId);
+    const queued = await republish(`E2E-republish-po-${f.orderId}`,[{ kind: 'packet',id: original.sourceId }]);
+    expect(queued.queued).toEqual([expect.objectContaining({ effectPolicy: 'publish_only',revisionKey: '2' })]);
+    expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: queued.queued[0].jobId });
+    expect(await effects(f.orderId)).toEqual(before);
+  });
+
+  it('republish of a CNC observation revision publishes without an authority marker and without CNC effects', async () => {
+    const f = await fixture();
+    for (let i = 0; i < 3; i++) await runner().processOne();
+    const observation = `cnc-observation:${randomUUID()}`;
+    // A new revision of an allocated source is not accepted on receipt; free it so the observation is the accepted one.
+    await db.query("UPDATE mdf_bath_allocations SET state='released' WHERE order_id=$1 AND state<>'released'",[f.orderId]);
+    const saved = await database().transaction(tx => recordMdfReceipt(tx,{ ...f.receipts[0],revisionKey: observation,
+      expectedFence: { version: '1',correctionEpoch: '0' } }));
+    // Its own job (normally claimed with an authority marker) is already finished here.
+    await db.query("UPDATE mdf_recalculation_jobs SET status='done',finished_at=now() WHERE job_id=$1",[saved.jobId]);
+    await db.query('UPDATE order_details SET production_status_id=1 WHERE order_id=$1',[f.orderId]);
+    const before = await effects(f.orderId);
+    const queued = await republish(`E2E-republish-cnc-${f.orderId}`,[{ kind: 'packet',id: f.receipts[0].sourceId }]);
+    expect(queued.queued).toEqual([expect.objectContaining({ revisionKey: observation })]);
+    expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: queued.queued[0].jobId });
+    expect(await effects(f.orderId)).toEqual(before);
+    expect((await db.query('SELECT accepted_revision_key FROM mdf_published_sources WHERE source_kind=$1 AND source_id=$2',
+      ['packet',f.receipts[0].sourceId])).rows[0].accepted_revision_key).toBe(observation);
   });
 
   it('fails closed on a CNC-authority marker without a matching completed observer receipt', async () => {

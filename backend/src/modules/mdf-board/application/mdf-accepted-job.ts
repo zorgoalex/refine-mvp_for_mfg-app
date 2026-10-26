@@ -17,9 +17,12 @@ import { applyMdfCncAuthorityEffects, loadMdfCncAuthority, lockAndReadMdfCncAuto
  * and cutover coverage are complete. No raw-source/legacy readiness fallback. */
 export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   rules: readonly MdfPinnedRule[]): Promise<'done'|'superseded'> {
+  // An internal re-publication (immutable marker, migration 277) keeps the sealed effect policy of its revision but only
+  // projects and publishes: no rule effects and no CNC authority effects, so it needs no CNC authority marker either.
+  const republish = await loadMdfRepublishMarker(tx, job);
   // Classify and validate provenance before allocation. Observation revisions
   // with a missing marker fail closed; origin=cnc alone is not authority.
-  const cncAuthority = await loadMdfCncAuthority(tx, job);
+  const cncAuthority = republish ? null : await loadMdfCncAuthority(tx, job);
   // Match the legacy AutoCut-setting lock order: setting/catalogue first,
   // before allocation discovers and locks owners and source heads.
   const cncAutoCutEnabled = cncAuthority ? await lockAndReadMdfCncAutoCut(tx) : false;
@@ -107,7 +110,7 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   // §5.7b: a closed order (historical status closure) never receives rule effects; its status stays as it is.
   const closedOrderIds = new Set(allocation.closedOrderIds);
   const openOrderIds = allocation.orderIds.filter(id => !closedOrderIds.has(id));
-  let ruleEvents = composition ? [] : resolved.events.filter(event => !suppressedOrderIds.has(event.orderId)
+  let ruleEvents = composition || republish ? [] : resolved.events.filter(event => !suppressedOrderIds.has(event.orderId)
     && !closedOrderIds.has(event.orderId));
   let changedCompositionOrderIds: number[] = [];
   if (!composition && cncAuthority) {
@@ -128,7 +131,7 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   }
   // Accepted business facts outlive actor accounts. A missing actor never gets
   // fabricated admin authority; retain accounting, omit rule effects, expose why.
-  const user = !composition && job.actor_user_id ? (await tx.query<{ user_id: string; username: string; role_id: number }>(
+  const user = !composition && !republish && job.actor_user_id ? (await tx.query<{ user_id: string; username: string; role_id: number }>(
     'SELECT user_id,username,role_id FROM users WHERE user_id=$1 AND is_active',[job.actor_user_id])).rows[0] : null;
   // Effective authorization of the living actor (same snapshot as the token), read in this transaction.
   const actor = user ? await loadEvaluationUserWith(tx, user.user_id) : null;
@@ -159,6 +162,17 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   const closureTrigger = job.source_kind === 'order' && !openOrderIds.includes(Number(job.source_id)) ? [Number(job.source_id)] : [];
   await publishMdfState(tx,{ job, orderIds: allocation.orderIds, positionOrderIds: [...openOrderIds, ...closureTrigger],
     sources, metadata: snapshot.metadata, state: final,
-    retired: allocation.sourceHeads.filter(h => snapshot.retired.has(mdfSourceKey(h))) });
+    retired: allocation.sourceHeads.filter(h => snapshot.retired.has(mdfSourceKey(h))),
+    ...(republish ? { republish } : {}) });
   return 'done';
+}
+
+export interface MdfRepublishMarker { runId: string; commandKey: string; actorUserId: string; requestId: string }
+
+/** The immutable re-publication marker of this job (migration 277), or null for an ordinary job. */
+export async function loadMdfRepublishMarker(tx: TransactionClient, job: MdfJob): Promise<MdfRepublishMarker | null> {
+  if (!(await tx.query<{ ok: boolean }>(`SELECT to_regclass('mdf_republish_jobs') IS NOT NULL ok`)).rows[0]?.ok) return null;
+  return (await tx.query<MdfRepublishMarker>(`SELECT run_id "runId",command_key "commandKey",
+    actor_user_id::text "actorUserId",request_id "requestId" FROM mdf_republish_jobs WHERE job_id=$1::uuid`,
+  [job.job_id])).rows[0] ?? null;
 }

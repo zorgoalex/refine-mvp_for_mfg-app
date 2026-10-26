@@ -12,6 +12,11 @@
  *   npx tsx scripts/mdf-baseline.ts reconcile                      one demand-drift reconciliation tick (active only)
  *   npx tsx scripts/mdf-baseline.ts drain    [--max <n>]       process pending engine jobs until idle (active mode only;
  *                                                               for a database without a running backend worker)
+ *   npx tsx scripts/mdf-baseline.ts republish --scope <declared-candidates|rollback-declared|sources>
+ *        [--sources bath:cut-result:1,packet:<uuid>,...] [--run <id>] [--out <dir>]
+ *                                                               queue publication-only jobs (no rule/CNC effects) for the
+ *                                                               current accepted revisions; the source list is saved
+ *   npx tsx scripts/mdf-baseline.ts republish-status --run <id>    job states + baths still carrying credited-cut coverage
  * Every command except dry-run requires MDF_BASELINE_TARGET="<current_database()>:<cluster system_identifier>" of the
  * intended cluster (refuses otherwise) and MDF_BASELINE_OPERATOR_ID (user id recorded in audit). Apply/resume hold the
  * exclusive cutover lock on this ONE session for the whole run (writers get 409 MDF_CUTOVER_IN_PROGRESS).
@@ -29,6 +34,8 @@ import { mapUserRow } from '../src/permissions/visibility/order-visibility-filte
 import { changeMdfEngineMode, loadMdfEngineOnlyFacts, MdfCutoverControlRefused, setMdfRecoveryFreeze,
   type MdfEngineTargetMode } from '../src/modules/mdf-board/adapters/mdf-cutover-control';
 import { executeMdfAcceptedJob } from '../src/modules/mdf-board/application/mdf-accepted-job';
+import { enqueueMdfRepublish, loadMdfRepublishScope, loadMdfRepublishStatus, type MdfRepublishScope,
+  type MdfRepublishSource } from '../src/modules/mdf-board/adapters/mdf-republish';
 import { abortMdfBaseline, dryRunMdfBaseline, handoffMdfBaseline, loadMdfBaselineBuild, markMdfBaselineRecorded,
   recordMdfBaselineBatch, resetMdfBaseline, startMdfBaselineRun, MdfBaselineRefused, type MdfBaselineActor } from
   '../src/modules/mdf-board/adapters/mdf-baseline-runner';
@@ -131,6 +138,35 @@ async function main() {
         if (r.status === 'idle' || r.status === 'disabled') break;
       }
       log(`drain: ${JSON.stringify(counts)}`);
+      return;
+    }
+    if (command === 'republish') {
+      const scopeName = option('--scope');
+      const listed = (option('--sources') ?? '').split(',').filter(Boolean).map((value): MdfRepublishSource => {
+        const separator = value.indexOf(':');
+        return { kind: value.slice(0, separator) as MdfRepublishSource['kind'], id: value.slice(separator + 1) };
+      });
+      const scope: MdfRepublishScope | null = scopeName === 'declared-candidates' ? { kind: 'declared-candidates' }
+        : scopeName === 'rollback-declared' ? { kind: 'rollback-declared', sources: listed }
+          : scopeName === 'sources' && listed.length ? { kind: 'sources', sources: listed } : null;
+      if (!scope) throw new MdfBaselineRefused('MDF_REPUBLISH_SCOPE_INVALID');
+      const run = runId ?? `${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
+      const result = await inTransaction(client, async t => enqueueMdfRepublish(t, { runId: run,
+        actorUserId: actor.operatorUserId!, sources: await loadMdfRepublishScope(t, scope) }));
+      const out = option('--out');
+      if (out) {
+        mkdirSync(out, { recursive: true });
+        writeFileSync(join(out, `mdf-republish-${run}.json`), `${JSON.stringify({ target: await target(client), scope: scopeName,
+          ...result }, null, 2)}\n`);
+      }
+      const reasons: Record<string, number> = {};
+      for (const skipped of result.skipped) reasons[skipped.reason] = (reasons[skipped.reason] ?? 0) + 1;
+      log(`republish ${run}: queued=${result.queued.length} skipped=${JSON.stringify(reasons)}`);
+      return;
+    }
+    if (command === 'republish-status') {
+      if (!runId) throw new MdfBaselineRefused('MDF_BASELINE_RUN_REQUIRED');
+      log(`republish-status: ${JSON.stringify(await inTransaction(client, t => loadMdfRepublishStatus(t, runId)))}`);
       return;
     }
     if (command === 'abort' || command === 'reset') {

@@ -339,6 +339,18 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(verification).toMatch(/273_mdf_published_bath_coverage\*\)\s+probe_file "\$f" \|\| die/);
   });
 
+  it('probes declared bath coverage and the republish job marker before ledgering migration277', () => {
+    const start = probeFn.indexOf('277_mdf_bath_declared_coverage*)');
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, probeFn.indexOf(';;', start));
+    expect(arm).toContain('q_col mdf_published_source_members declared_covered_quantity');
+    expect(arm).toContain('q_con_on mdf_published_source_members mdf_published_member_declared_coverage_check');
+    expect(arm).toContain("to_regclass('public.mdf_republish_jobs') IS NOT NULL");
+    expect(arm).toContain("t.tgname='mdf_republish_job_immutable'");
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/277_mdf_bath_declared_coverage\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
   it('probes sealed BASIS assignment and command intent effects before ledgering migration185', () => {
     const start = probeFn.indexOf('185_mdf_bazis_composition*)');
     const end = probeFn.indexOf('*) return 2', start);
