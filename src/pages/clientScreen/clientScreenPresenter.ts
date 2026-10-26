@@ -464,7 +464,6 @@ export class ClientScreenPresenter {
         ? withShownFrameOnly(built, resolveClientScreenTab(this.provider.getUi(this.idFor).tab, this.lastCustomerTab, built))
         : built;
     }
-    this.frameSentAt = snapshot?.frame ? this.deps.env.now() : null;
     const next = publisherState(this.state, snapshot);
     this.state = next.state;
     this.blanked = snapshot === null;
@@ -472,6 +471,9 @@ export class ClientScreenPresenter {
     this.send(next.message);
     // A send that failed has ended the presentation and erased everything: nothing is set after it.
     if (this.lastSnapshot !== snapshot || this.state.phase !== 'owner') return;
+    // The pause before the next copy counts from the moment this one went, not from when it was built:
+    // on a busy computer building a large copy takes time, and the next must not go sooner after it.
+    this.frameSentAt = snapshot?.frame ? this.deps.env.now() : null;
     if (snapshot) this.sendUi();
     if (this.lastSnapshot !== snapshot || this.state.phase !== 'owner') return;
     // sendUi sets the preview with the interface state; a blank or a state without one is set here.

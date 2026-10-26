@@ -913,14 +913,14 @@ describe('customer screen: a tab shown whole', () => {
   });
 
   it('snapshots with a copy go no more often than the limit, however fast the order changes; a blank is never delayed', async () => {
-    const states: Array<{ at: number; mode: string; frame: boolean }> = [];
+    const states: Array<{ at: number; mode: string; frame: boolean; text: string }> = [];
     const clock = { offset: 0 };
     const { startViewer, presenter } = setup({ current: ticked('tab.cut') }, clock);
     const viewer = startViewer();
     await until(() => viewer.getRole() === 'viewer', 'viewer lock');
     const a = presenter({
       wrapPost: (post) => (message) => {
-        if (message.t === 'state') states.push({ at: Date.now(), mode: message.mode, frame: Boolean(message.snapshot?.frame) });
+        if (message.t === 'state') states.push({ at: Date.now(), mode: message.mode, frame: Boolean(message.snapshot?.frame), text: JSON.stringify(message.snapshot ?? null) });
         post(message);
       },
     });
@@ -947,7 +947,40 @@ describe('customer screen: a tab shown whole', () => {
     shown.source = { ...shown.source, frame: frame('после') };
     a.notifyChanged('order-1');
     clock.offset += 61_000;
-    await until(() => viewer.getState().shown === null, 'blank shown', 1500);
-    expect(JSON.stringify(states.filter((state) => state.mode === 'order').at(-1) ?? {})).not.toContain('после');
+    // Generous for a busy test machine; that the blank was not held back by the limit is shown by the line below.
+    await until(() => viewer.getState().shown === null, 'blank shown', 3000);
+    expect(states.filter((state) => state.mode === 'order').at(-1)?.text).toContain('Задание 49');
+    expect(states.some((state) => state.text.includes('после'))).toBe(false);
+  });
+
+  it('«Скрыть от клиента» right after a copy went is not held back by the limit, and the change waiting for it never goes', async () => {
+    const states: Array<{ t: string; text: string }> = [];
+    const { startViewer, presenter } = setup({ current: ticked('tab.cut') });
+    const viewer = startViewer();
+    await until(() => viewer.getRole() === 'viewer', 'viewer lock');
+    const a = presenter({
+      wrapPost: (post) => (message) => {
+        states.push({ t: message.t, text: message.t === 'state' ? JSON.stringify(message.snapshot ?? null) : '' });
+        post(message);
+      },
+    });
+    const shown = withCut('A1');
+    a.present('order-1', shown);
+    await until(() => shownFrame(viewer) !== null, 'copy shown');
+    shown.source = { ...shown.source, frame: frame('первое') };
+    a.notifyChanged('order-1');
+    await until(() => JSON.stringify(shownFrame(viewer)?.tree).includes('первое'), 'first change shown');
+
+    // The limit is running now: the next change waits for it, the hide does not.
+    shown.source = { ...shown.source, frame: frame('после') };
+    a.notifyChanged('order-1');
+    const before = states.length;
+    a.hide('order-1');
+    // Sent within the call itself, not on a timer.
+    expect(states.slice(before).map((state) => state.t)).toContain('release');
+    await until(() => viewer.getState().screen === 'splash', 'splash after hide', 3000);
+    await wait(FRAME_PUBLISH_MS + 100);
+    expect(states.some((state) => state.text.includes('после'))).toBe(false);
+    expect(viewer.getState().screen).toBe('splash');
   });
 });
