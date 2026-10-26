@@ -1958,4 +1958,12 @@ describe('hybrid MDF board wiring (engine active/read_only)', () => {
     expect(page).toContain("const overlaid = meta.source !== 'nonMdf' && meta.column !== shownColumn;");
     expect(css).toContain('.cnc-mdf-engine-badge--warning');
   });
+
+  it('shows only the searched-order totals in column headers while searching', () => {
+    expect(page).toContain('const searchTotals = buildCncSearchedOrderTotals(column, searchOrderFilters);');
+    expect(page).toContain('{!searchTotals ? (');
+    expect(page).not.toContain('{!searchTotals || !orderColumn ? (');
+    expect(page).toContain('не МДФ: {searchTotals.otherDetails} дет.');
+    expect(page).toContain(': { details: 0, areaM2: 0 };');
+  });
 });

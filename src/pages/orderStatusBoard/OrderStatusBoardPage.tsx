@@ -4466,7 +4466,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                       не МДФ: {searchTotals.otherDetails} дет. · {formatArea(searchTotals.otherAreaM2 ?? 0)}
                     </Typography.Text>
                   ) : null}
-                  {!searchTotals || !orderColumn ? (
+                  {!searchTotals ? (
                     <Typography.Text className="cnc-today-column__totals" type="secondary">
                       {totals.details} дет. · {formatArea(totals.areaM2)}
                       {totals.otherDetails ? (
@@ -9850,8 +9850,9 @@ function buildCncColumnTotals(
 
 const NO_CNC_ORDER_FILTERS: readonly string[] = [];
 
-// Header totals of the searched orders; null when nothing is searched or the
-// column has no card with them. Order columns hold only searched orders already.
+// Header totals of the searched orders; null only when nothing is searched. While
+// searching, the header shows these instead of the column totals (zero when the
+// column has no card of the searched orders). Order columns hold only them already.
 function buildCncSearchedOrderTotals(
   column: CncTelegramTodayDisplayColumn,
   searchOrderFilters: readonly string[],
@@ -9860,10 +9861,9 @@ function buildCncSearchedOrderTotals(
   if (isCncOrderColumnKey(column.key)) {
     return (column.orderCards ?? []).length > 0
       ? buildCncColumnTotals(column, null, null)
-      : null;
+      : { details: 0, areaM2: 0 };
   }
   const { mdf, other } = splitCncSearchedOrderItems(column, searchOrderFilters);
-  if (mdf.length === 0 && other.length === 0) return null;
   const totals = sumCncTotalItems(mdf);
   if (other.length === 0) return totals;
   const otherTotals = sumCncTotalItems(other);
