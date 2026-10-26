@@ -143,13 +143,16 @@ export function cncPacketHasOtherMaterialMarker(packet: CncTelegramPacket): bool
 export function cncBazisCutSetHasOtherMaterial(
   card: Pick<CncTelegramBazisCutSetCard, 'items'>,
 ): boolean {
-  return card.items.some((item) => {
-    const materialName = item.materialName?.trim() ?? '';
-    if (!materialName) return false;
-    if (CNC_OTHER_MATERIAL_MARKER_PATTERN.test(materialName)) return true;
-    if (CNC_UNKNOWN_MATERIAL_PATTERN.test(materialName)) return false;
-    return !CNC_MDF_MATERIAL_PATTERN.test(materialName);
-  });
+  return card.items.some((item) => cncMaterialNameIsOther(item.materialName));
+}
+
+// One detail named in a non-MDF material (ЛДСП, ХДФ…); empty or unrecognised names do not count.
+export function cncMaterialNameIsOther(materialName: string | null | undefined): boolean {
+  const normalized = materialName?.trim() ?? '';
+  if (!normalized) return false;
+  if (CNC_OTHER_MATERIAL_MARKER_PATTERN.test(normalized)) return true;
+  if (CNC_UNKNOWN_MATERIAL_PATTERN.test(normalized)) return false;
+  return !CNC_MDF_MATERIAL_PATTERN.test(normalized);
 }
 
 export function cncMaterialNameIsMdf(materialName: string | null | undefined): boolean {

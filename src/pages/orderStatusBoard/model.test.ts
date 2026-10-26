@@ -56,6 +56,7 @@ import {
   filterCncTodayColumnsByOrders,
   filterCncTodayColumnsByPlannedOrderDate,
   selectCncSearchedOrderItems,
+  collectCncMdfOrderIds,
   isCncCardSummaryOnly,
   isCncOrderHiddenFromMdfBoard,
   mergeOrderStatusBoardColumnPage,
@@ -1147,6 +1148,28 @@ describe('order status board model', () => {
     } as unknown as CncTelegramTodayColumn;
     expect(selectCncSearchedOrderItems(machineColumn, ['2706'])).toHaveLength(2);
     expect(selectCncSearchedOrderItems(machineColumn, ['2706, 2707'])).toHaveLength(4);
+  });
+
+  it('non-MDF files (cream cards) add no MDF details to search totals and no order card of their own', () => {
+    const ldsp = { ...cncPacket('ldsp', ['2706', '2708'], [2706, 2708]), materialName: 'ЛДСП 16мм' };
+    const unknown = { ...cncPacket('unknown', ['2709'], [2709]), materialName: '' };
+    const column = {
+      key: 'parsed' as const, title: 'Files', total: 4,
+      packets: [cncPacket('mdf', ['2706'], [2706]), ldsp, unknown],
+      baths: [],
+      bazisCutSets: [cncBazisCutSet(9002, [
+        { orderName: '2706', orderId: 2706, detailId: 1, materialName: 'МДФ 16мм' },
+        { orderName: '2706', orderId: 2706, detailId: 2, materialName: 'ХДФ 3мм' },
+        { orderName: '2710', orderId: 2710, detailId: 3, materialName: 'ЛДСП 16мм' },
+      ])],
+    } as unknown as CncTelegramTodayColumn;
+    // 2706: the MDF file and the MDF detail of the mixed set; the ЛДСП file and the ХДФ detail stay out.
+    expect(selectCncSearchedOrderItems(column, ['2706'])).toHaveLength(2);
+    expect(selectCncSearchedOrderItems(column, ['2708'])).toEqual([]);
+    // An unrecognised material is not proven non-MDF: the card is not cream and still counts.
+    expect(selectCncSearchedOrderItems(column, ['2709'])).toHaveLength(1);
+    // 2708 and 2710 reach the board only through non-MDF work: no order card.
+    expect(collectCncMdfOrderIds([column])).toEqual([2706, 2709]);
   });
 
   it.each([
