@@ -31,7 +31,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     vi.stubEnv('BACKEND_STATUS_AUTOMATION','true');
     vi.stubEnv('BACKEND_ENABLE_NOTIFICATION_ENGINE','false'); // MDF processing is independent.
     await db.connect(); await db.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
-    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql']) {
+    for (const file of ['165_mdf_engine_foundation.sql','166_mdf_engine_fences.sql','174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql','277_mdf_bath_declared_coverage.sql','175_mdf_command_placement.sql','178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql']) {
       await db.query(readFileSync(new URL(`../../../../db/migrations/${file}`,import.meta.url),'utf8'));
     }
     // Own schema only, no public business mutations or hard-coded production ids.
@@ -64,10 +64,11 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
       INSERT INTO materials(material_id,material_name) VALUES(1,'MDF 10 mm');
       INSERT INTO production_statuses(production_status_id,production_status_code,production_status_name,sort_order,is_active)
       VALUES(1,'new','E2E new',1,true),(2,'cut','Распилен',20,true),(3,'laminated','Закатан',30,true),
-        (4,'packed','Упакован',40,true),(5,'issued','Выдан',50,true);
+        (4,'packed','Упакован',40,true),(5,'issued','Выдан',50,true),(6,'e2e_bath_ready','E2E ванна готова',25,true);
       INSERT INTO status_automation_rules(id,name,event_type,action_type,target_status_id,conditions_json,priority,is_enabled,version,action_config_json)
       VALUES(17,'E2E queued cut','mdf.board.completed','change_details_production_status',2,'{}',100,true,1,'{}'),
-        (18,'E2E queued bath','mdf.board.baths_laminated','change_details_production_status',3,'{}',100,true,1,'{}')`);
+        (18,'E2E queued bath','mdf.board.baths_laminated','change_details_production_status',3,'{}',100,true,1,'{}'),
+        (19,'E2E bath ready','mdf.board.baths_ready','change_details_production_status',6,'{}',100,true,1,'{}')`);
     // Copy exact existing pure summary/recalc functions into this test schema.
     // Their unqualified relations resolve here. Do NOT invoke a public-bound body.
     for (const signature of ['order_production_summary(bigint,bigint[])','recalc_order_production_status(bigint)']) {
@@ -107,7 +108,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     const make = (kind: 'packet'|'bazisCutSet'|'bath', id: string, quantity: number): MdfReceiptInput => ({
       sourceKind: kind,sourceId: id,revisionKey: '1',origin: kind==='packet' ? 'cnc' : 'manual',actorUserId: 1,
       requestId: 'E2E queued',causeKey: `E2E ${id}`,expectedFence: null,accept: true,
-      rules: [{ ruleId: 17,version: 1 },{ ruleId: 18,version: 1 }],
+      rules: [{ ruleId: 17,version: 1 },{ ruleId: 18,version: 1 },...(options.declared ? [{ ruleId: 19,version: 1 }] : [])],
       executionContext: options.context===false ? undefined : { sourceCreatedAt: '2026-09-01T00:00:00Z',
         displayName: `E2E ${kind}`,priorColumn: kind==='bath' ? 'baths' : 'parsed',compositionComplete: true,demand },
       lines: [{ lineKey: 'member',orderId,detailId,quantity,stageCode: 'membership',evidenceKind: 'derived',rework: false },
@@ -173,6 +174,61 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
     expect(snapshot.progress.find(p => p.kind==='bath' && p.id===bathId)).toMatchObject({ member: 10,allocated: 10,declared: 10 });
     expect((await db.query(`SELECT after_json->>'basis' basis FROM audit_log WHERE event='mdf_board.bath_readiness_changed'
       AND entity_id=$1 ORDER BY created_at DESC LIMIT 1`,[bathId])).rows[0].basis).toBe('declared');
+  });
+
+  it('enabled «bath ready» rule: a declared-ready bath applies it once; replay, republish and an unchanged new job add no change', async () => {
+    const f = await fixture({ declared: true });
+    for (let i = 0; i < 2; i++) expect(await runner().processOne()).toMatchObject({ status: 'done' });
+    const bath = f.receipts[1];
+    const counts = async () => ({ statuses: await statuses(f.orderId),
+      outbox: (await db.query('SELECT count(*)::int n FROM outbox_events WHERE aggregate_id=$1',[String(f.orderId)])).rows[0].n,
+      applied: (await db.query(`SELECT count(*)::int n FROM audit_log WHERE event='status_automation.rule_applied'
+        AND related_order_id=$1`,[f.orderId])).rows[0].n });
+    const first = await counts();
+    expect(first.statuses).toEqual([6,1]); // rule 19 advanced the bath's detail; the other detail is not in the bath
+    // Replay of the same accepted job (re-run after a lost commit) and a re-publication: nothing changes.
+    await db.query("UPDATE mdf_recalculation_jobs SET status='pending',finished_at=NULL WHERE job_id=$1",[f.jobs[1].jobId]);
+    expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: f.jobs[1].jobId });
+    const queued = await republish(`E2E-rule-${f.orderId}`,[{ kind: 'bath',id: bath.sourceId }]);
+    expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: queued.queued[0].jobId });
+    // A new accepted revision with the same composition (an ordinary forward job): still ready, same status.
+    const next = await database().transaction(tx => recordMdfReceipt(tx,{ ...bath,revisionKey: '2',
+      expectedFence: { version: '1',correctionEpoch: '0' } }));
+    expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: next.jobId });
+    expect((await counts()).statuses).toEqual(first.statuses);
+    expect((await counts()).outbox).toBe(first.outbox);
+  });
+
+  it('declared readiness moving A→B→A between two baths of one piece never changes statuses or outbox twice', async () => {
+    const f = await fixture({ declared: true });
+    for (let i = 0; i < 2; i++) await runner().processOne();
+    const a = f.receipts[1];
+    // Bath B: a younger bath of the same detail (cut result created later).
+    const bId = 700000 + f.orderId;
+    await db.query("INSERT INTO cut_result(cut_result_id,created_at) VALUES($1,'2026-09-21')",[bId]);
+    const b = { ...a,sourceId: `cut-result:${bId}`,causeKey: `E2E B ${bId}`,
+      executionContext: { ...a.executionContext!,sourceCreatedAt: '2026-09-02T00:00:00Z' } };
+    const bJob = await database().transaction(tx => recordMdfReceipt(tx,b));
+    expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: bJob.jobId });
+    const column = async (id: string) => (await db.query("SELECT column_key FROM mdf_published_sources WHERE source_kind='bath' AND source_id=$1",[id])).rows[0]?.column_key;
+    expect([await column(a.sourceId),await column(b.sourceId)]).toEqual(['baths_ready','baths']);
+    const before = { statuses: await statuses(f.orderId),
+      outbox: (await db.query('SELECT count(*)::int n FROM outbox_events WHERE aggregate_id=$1',[String(f.orderId)])).rows[0].n };
+    // A gets an extra member nobody cut (rev 2): it cannot close, so the credited piece goes to B …
+    const aRev2 = await database().transaction(tx => recordMdfReceipt(tx,{ ...a,revisionKey: '2',expectedFence: { version: '1',correctionEpoch: '0' },
+      lines: [...a.lines,{ lineKey: 'member-2',orderId: f.orderId,detailId: f.detailId+1,quantity: 1,stageCode: 'membership',
+        evidenceKind: 'derived' as const,rework: false }],
+      executionContext: { ...a.executionContext!,demand: [{ orderId: f.orderId,detailId: f.detailId,quantity: 10 },
+        { orderId: f.orderId,detailId: f.detailId+1,quantity: 1 }] } }));
+    expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: aRev2.jobId });
+    expect([await column(a.sourceId),await column(b.sourceId)]).toEqual(['baths','baths_ready']);
+    // … and back (rev 3 = original composition): A, the older bath, takes it again.
+    const aRev3 = await database().transaction(tx => recordMdfReceipt(tx,{ ...a,revisionKey: '3',expectedFence: { version: '2',correctionEpoch: '0' } }));
+    expect(await runner().processOne()).toMatchObject({ status: 'done',jobId: aRev3.jobId });
+    expect([await column(a.sourceId),await column(b.sourceId)]).toEqual(['baths_ready','baths']);
+    expect({ statuses: await statuses(f.orderId),
+      outbox: (await db.query('SELECT count(*)::int n FROM outbox_events WHERE aggregate_id=$1',[String(f.orderId)])).rows[0].n })
+      .toEqual(before);
   });
 
   it('audits a bath readiness basis change with bath/order/detail dimensions; republish without change adds none', async () => {

@@ -24,7 +24,7 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF allocation exec
     await db.connect();
     await db.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
     for (const file of ['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql',
-      '174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql', '175_mdf_command_placement.sql', '178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql']) {
+      '174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql','277_mdf_bath_declared_coverage.sql', '175_mdf_command_placement.sql', '178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql']) {
       await db.query(readFileSync(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     await db.query(`CREATE TABLE bazis_cut_sets(bazis_cut_set_id bigint PRIMARY KEY,name text,
@@ -177,7 +177,12 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF allocation exec
     const saved = await tx(c => recordMdfReceipt(c, { ...f.receipts[0], revisionKey: '2',
       expectedFence: { version: '1', correctionEpoch: '0' }, lines: f.receipts[0].lines.map(l => l.stageCode !== 'cut' ? l
         : { ...l, rework: kind === 'rework', evidenceKind: kind === 'declaration' ? 'declaration' : 'physical' }) }));
-    expect(await tx(c => executeMdfAllocation(c, saved.jobId))).toMatchObject({ readyBathIds: [], reservedCount: 0 });
+    const result = await tx(c => executeMdfAllocation(c, saved.jobId));
+    // Neither is ledger supply. A declared (manually credited) cut may still close the bath through credited readiness —
+    // with its own coverage and no reservation; a rework cut never does.
+    expect(result).toMatchObject({ reservedCount: 0,
+      readyBathIds: kind === 'declaration' ? [f.bathIds[0]] : [],
+      declaredCoverage: kind === 'declaration' ? [expect.objectContaining({ bathId: f.bathIds[0], quantity: 10 })] : [] });
   });
   it('requires full own lamination before consuming reserved supply', async () => {
     const f = await fixture([10], [10]);

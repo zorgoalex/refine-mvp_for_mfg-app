@@ -427,3 +427,32 @@ describe('bath readiness from credited (declared) cut — second pass after the 
     expect(released.declaredReadyBathIds).toEqual(['cut-result:1']);
   });
 });
+
+describe('declared readiness is the same before and after the physical plan is persisted', () => {
+  const declaredOn = (s: MdfAllocationSource, quantity: number): MdfAllocationSource => ({ ...s, lines: [...s.lines,
+    { evidenceLineId: `${s.id}-declared`, revision: '1', orderId: 1, detailId: 11, quantity, stage: 'cut',
+      evidence: 'declaration', rework: false }] });
+  const baths = () => [{ ...source('cut-result:1', 'bath', 11, 4), createdAt: '2026-09-02' },
+    { ...source('cut-result:2', 'bath', 11, 6), createdAt: '2026-09-03' }];
+  const sources = () => [declaredOn(source('cnc', 'packet', 11, 4), 10), ...baths()];
+  const first = plan(sources());
+
+  it('reservations of this plan and the same rows persisted as reserved/consumed give the same result', () => {
+    expect(first.physicalReadyBathIds).toEqual(['cut-result:1']);
+    expect(first.declaredCoverage).toEqual([{ bathId: 'cut-result:2', bathRevision: '1', orderId: 1, detailId: 11, quantity: 6 }]);
+    for (const state of ['reserved', 'consumed'] as const) {
+      const persisted = first.reservations.map((r, index) => allocation({ ...r, allocationId: `p-${index}`, state }));
+      const again = plan(sources(), persisted);
+      expect(again.reservations).toEqual([]);
+      expect({ ready: again.readyBathIds, declared: again.declaredCoverage })
+        .toEqual({ ready: first.readyBathIds, declared: first.declaredCoverage });
+    }
+  });
+
+  it('a released debit frees its pieces again: the result equals the plan without it', () => {
+    const released = first.reservations.map((r, index) => allocation({ ...r, allocationId: `r-${index}`, state: 'released' }));
+    const again = plan(sources(), released);
+    expect({ ready: again.readyBathIds, declared: again.declaredCoverage, reserved: again.reservations })
+      .toEqual({ ready: first.readyBathIds, declared: first.declaredCoverage, reserved: first.reservations });
+  });
+});
