@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-26", title: "МДФ-доска: итоги искомого заказа отдельно по МДФ и не МДФ",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "При поиске по номеру заказа жирная строка в шапке колонки считает только детали МДФ искомого заказа, а под ней отдельной строкой — «не МДФ: N дет. · площадь» по деталям этого заказа в файлах и наборах не из МДФ (ЛДСП, ХДФ и др.).",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-26", title: "МДФ-доска: итоги колонок только по МДФ",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

@@ -147,7 +147,7 @@ import {
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
   filterCncOrderCardsByOrders,
-  selectCncSearchedOrderItems,
+  splitCncSearchedOrderItems,
   filterCncOrderCardsByPlannedOrderDate,
   filterCncTodayColumnsByOrders,
   filterCncTodayColumnsByPlannedOrderDate,
@@ -4456,6 +4456,14 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                       title="Детали и площадь только искомого заказа"
                     >
                       {searchTotals.details} дет. · {formatArea(searchTotals.areaM2)}
+                    </Typography.Text>
+                  ) : null}
+                  {searchTotals?.otherDetails ? (
+                    <Typography.Text
+                      className="cnc-today-column__totals cnc-today-column__totals--search-other"
+                      title="Детали искомого заказа в файлах не из МДФ (ЛДСП, ХДФ…): в итоги МДФ не входят"
+                    >
+                      не МДФ: {searchTotals.otherDetails} дет. · {formatArea(searchTotals.otherAreaM2 ?? 0)}
                     </Typography.Text>
                   ) : null}
                   {!searchTotals || !orderColumn ? (
@@ -9759,6 +9767,8 @@ interface CncColumnTotals {
   areaM2: number;
   /** Details of non-MDF files (cream cards): shown on the board, never part of the MDF totals. */
   otherDetails?: number;
+  /** Area of those non-MDF details; filled for the searched-order totals. */
+  otherAreaM2?: number;
 }
 
 interface CncColumnTotalItem {
@@ -9852,9 +9862,16 @@ function buildCncSearchedOrderTotals(
       ? buildCncColumnTotals(column, null, null)
       : null;
   }
-  const items = selectCncSearchedOrderItems(column, searchOrderFilters);
-  if (items.length === 0) return null;
-  return items.reduce<CncColumnTotals>(
+  const { mdf, other } = splitCncSearchedOrderItems(column, searchOrderFilters);
+  if (mdf.length === 0 && other.length === 0) return null;
+  const totals = sumCncTotalItems(mdf);
+  if (other.length === 0) return totals;
+  const otherTotals = sumCncTotalItems(other);
+  return { ...totals, otherDetails: otherTotals.details, otherAreaM2: otherTotals.areaM2 };
+}
+
+function sumCncTotalItems(items: readonly CncColumnTotalItem[]): { details: number; areaM2: number } {
+  return items.reduce(
     (totals, item) => {
       const quantity = Math.max(0, Number.isFinite(item.quantity) ? item.quantity : 0);
       totals.details += quantity;
