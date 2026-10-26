@@ -178,6 +178,7 @@ import {
   cncMaterialNameIsMdf,
   cncPacketCountsForMdfReadiness,
   cncPacketHasOtherMaterialMarker,
+  cncBazisCutSetHasOtherMaterial,
   type CncDetailedMachineSource,
 } from './cncDetailedMachine';
 import { touchBoardEdgeScrollDelta } from './touchBoardDrag';
@@ -6019,6 +6020,7 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
   const orderSummaries = buildCncOrderSummaries(card.items);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const minimal = displayMode === 'minimal';
+  const otherMaterial = cncBazisCutSetHasOtherMaterial(card);
   const openSet = (event: React.MouseEvent) => {
     event.stopPropagation();
     onOpenBazisCut(card.bazisCutSetId);
@@ -6031,10 +6033,12 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
           'status-board-card cnc-packet-card cnc-bazis-cut-card',
           minimal ? 'cnc-bazis-cut-card--minimal cnc-compact-card' : '',
           summaryOnly ? 'cnc-card--summary-only' : '',
+          otherMaterial ? 'cnc-packet-card--other-material' : '',
         ].filter(Boolean).join(' '),
         relationState,
         highlightEnabled,
       )}
+      data-cnc-material-kind={otherMaterial ? 'other' : undefined}
       data-cnc-relation-state={highlightEnabled ? relationState : undefined}
       data-cnc-card-view={minimal ? 'minimal' : summaryOnly ? 'compact' : 'standard'}
       data-bazis-cut-set-id={card.bazisCutSetId}
