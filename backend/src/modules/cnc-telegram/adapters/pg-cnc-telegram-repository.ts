@@ -8288,6 +8288,40 @@ export async function loadCncPacketBoardColumn(database: DatabaseClient,
   return manual === 'parsed' || manual === 'completed' || manual === 'completed_laminated' ? manual : server;
 }
 
+/** The column the legacy board shows a BASIS set in (the hybrid board keeps it for a non-MDF set): finished
+ * («completed_laminated») when every item is packed or later — its detail packed, or its owner order issued or later,
+ * exactly as `loadPeriodBazisCutSetCards` + `allItemsPackedOrLater` — otherwise its manual placement, else the machine. */
+export async function loadCncBazisCutSetBoardColumn(database: DatabaseClient,
+  setId: string): Promise<'parsed' | 'completed' | 'completed_laminated' | null> {
+  const row = (await database.query<{ items: string; packed: string; manual: string | null }>(`
+    WITH packed_status AS (
+      SELECT COALESCE(MIN(ps.sort_order) FILTER (WHERE lower(trim(COALESCE(ps.production_status_code, ''))) = 'packed'),
+        MIN(ps.sort_order) FILTER (WHERE lower(trim(ps.production_status_name)) = 'упакован')) AS sort_order
+      FROM production_statuses ps
+    ), issued_status AS (
+      SELECT MIN(os.sort_order) FILTER (WHERE lower(trim(os.order_status_name)) = 'выдан') AS sort_order FROM order_statuses os
+    )
+    SELECT count(detail.bazis_cut_set_detail_id)::text items,
+      count(*) FILTER (WHERE (detail_status.sort_order IS NOT NULL AND packed_status.sort_order IS NOT NULL
+          AND detail_status.sort_order >= packed_status.sort_order)
+        OR (source_order_status.sort_order IS NOT NULL AND issued_status.sort_order IS NOT NULL
+          AND source_order_status.sort_order >= issued_status.sort_order))::text packed,
+      (SELECT m.target_column FROM mdf_board_manual_moves m
+        WHERE m.card_kind = 'bazisCutSet' AND m.card_id = cut_set.bazis_cut_set_id::text) manual
+    FROM bazis_cut_sets cut_set
+    LEFT JOIN bazis_cut_set_details detail ON detail.bazis_cut_set_id = cut_set.bazis_cut_set_id
+    LEFT JOIN order_details source_detail ON source_detail.detail_id = detail.source_order_detail_id
+    LEFT JOIN orders source_order ON source_order.order_id = COALESCE(detail.source_order_id, source_detail.order_id)
+    LEFT JOIN order_statuses source_order_status ON source_order_status.order_status_id = source_order.order_status_id
+    LEFT JOIN production_statuses detail_status ON detail_status.production_status_id = source_detail.production_status_id
+    CROSS JOIN packed_status CROSS JOIN issued_status
+    WHERE cut_set.bazis_cut_set_id::text = $1
+    GROUP BY cut_set.bazis_cut_set_id`, [setId])).rows[0];
+  if (!row) return null;
+  if (Number(row.items) > 0 && row.packed === row.items) return 'completed_laminated';
+  return row.manual === 'parsed' || row.manual === 'completed' || row.manual === 'completed_laminated' ? row.manual : 'parsed';
+}
+
 function packetColumnKey(
   packet: CncTelegramPacketDto,
 ): 'parsed' | 'completed' | 'completed_laminated' {

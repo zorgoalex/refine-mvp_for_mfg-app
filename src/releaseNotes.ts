@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-26", title: "МДФ-доска: ручной перенос наборов без МДФ",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Кремовый набор Базис-раскроя без деталей МДФ (например, только ХДФ) можно перенести вперёд вручную — так же, как файл станка не из МДФ. Возврат назад для таких карточек недоступен.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-26", title: "МДФ-доска: наборы ХДФ и служебные записи ванн",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: [

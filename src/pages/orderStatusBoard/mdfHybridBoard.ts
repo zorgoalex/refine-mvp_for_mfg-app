@@ -55,7 +55,6 @@ export const MDF_HYBRID_COLUMN_ORDER: readonly ColumnKey[] = ['parsed', 'complet
 export const mdfHybridCardKey = (kind: MdfSourceKind, id: string): string => `${kind}:${id}`;
 
 const READ_ONLY_REASON = 'Производственный учёт МДФ сейчас только для чтения';
-const NON_MDF_SET_REASON = 'Набор без деталей МДФ не входит в учёт МДФ — его перемещение на этой доске недоступно';
 const MINIMAL_REASON = 'Состав карточки обновляется — обновите доску';
 const NO_TOKEN_REASON = 'Перенос недоступен: карточка требует проверки или нет доступа ко всем её заказам';
 const UNPLACED_REASON = 'Карточка требует проверки';
@@ -132,11 +131,11 @@ export function buildMdfHybridBoard(input: {
       } else if (unregistered.has(key)) {
         place(key, unregisteredMeta('bazisCutSet', String(set.bazisCutSetId), 'parsed'), set);
       } else if (!set.items.some((item) => cncMaterialNameIsMdf(item.materialName))) {
-        // A set with no MDF detail (e.g. ХДФ only) is outside the engine: shown where the legacy board places it,
-        // never in MDF readiness. The non-MDF move command covers machine files only, so it stays in place.
+        // A set with no MDF detail (e.g. ХДФ only) is outside the engine: shown where the legacy board places it, never
+        // in MDF readiness, moved forward by hand through the non-MDF command (as a non-MDF machine file).
         place(key, { kind: 'bazisCutSet', id: String(set.bazisCutSetId), source: 'nonMdf', column: column.key,
-          commandToken: null, minimal: false, issues: [], pending: false, movable: false,
-          blockedReason: readOnly ? READ_ONLY_REASON : NON_MDF_SET_REASON }, set);
+          commandToken: null, minimal: false, issues: [], pending: false, movable: !readOnly,
+          blockedReason: readOnly ? READ_ONLY_REASON : null }, set);
       }
     }
     for (const bath of column.baths) {

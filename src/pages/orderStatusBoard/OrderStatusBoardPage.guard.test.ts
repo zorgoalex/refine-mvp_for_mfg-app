@@ -1928,8 +1928,8 @@ describe('hybrid MDF board wiring (engine active/read_only)', () => {
     const route = slice('const moveMdfHybridCard = useCallback((', 'const moveCncCard = useCallback((');
     expect(route).toContain('prepareMdfPublishedCommand(session, { kind, id: cardId }, targetColumn as MdfSourceColumn).execute()');
     expect(route).toContain('resolveMdfReturnDialog(kind, cardId, targetColumn as MdfReturnIntent');
-    expect(route).toContain('orderStatusBoardApi.upsertNonMdfPacketMove(cardId, targetColumn, expected,');
-    expect(route).toContain('Возврат файла не из МДФ при новом учёте недоступен');
+    expect(route).toContain('orderStatusBoardApi.upsertNonMdfMove(kind, cardId, targetColumn, expected,');
+    expect(route).toContain('Возврат карточки не из МДФ при новом учёте недоступен');
     expect(route).not.toContain('upsertMdfManualMove(');
     const legacyMove = slice('const moveCncCard = useCallback((', 'const syncCncBoardScrollTopButton');
     expect(legacyMove.indexOf('moveMdfHybridCard(hybridBoard, kind, cardId')).toBeLessThan(

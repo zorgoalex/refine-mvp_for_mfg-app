@@ -1020,6 +1020,103 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real MDF manual com
       expect(await audits(`${basis.source.kind}:${basis.source.id}`)).toHaveLength(0);
     });
 
+    // A BASIS set with no MDF detail (ХДФ only, e.g. БР-80) is outside the engine as well: manual forward placement.
+    async function hdfSet(materials: string[] = ['ХДФ 2800*2070 3мм черновой']) {
+      const orderId = ++sequence, detailId = orderId*10, setId = 900000 + orderId;
+      await db.query(`INSERT INTO orders(order_id,order_name,order_kind,delete_flag,version,order_status_id,payment_status_id,created_by)
+        VALUES($1,$2,'production_order',false,1,4,1,1)`,[orderId,`E2E hdf set ${orderId}`]);
+      await db.query(`INSERT INTO order_details(detail_id,order_id,detail_number,quantity,production_status_id,delete_flag,material_id)
+        VALUES($1,$2,1,3,1,false,1)`,[detailId,orderId]);
+      await db.query(`INSERT INTO bazis_cut_sets(bazis_cut_set_id,name,version,created_at,updated_at)
+        VALUES($1,$2,1,'2026-09-21','2026-09-21')`,[setId,`БР-E2E-${orderId}`]);
+      for (const [index, material] of materials.entries()) {
+        await db.query(`INSERT INTO bazis_cut_set_details(bazis_cut_set_detail_id,bazis_cut_set_id,source_order_id,
+          source_order_detail_id,quantity,cut_enabled,material_name) VALUES($1,$2,$3,$4,3,true,$5)`,
+        [setId * 10 + index, setId, orderId, detailId, material]);
+      }
+      const command = (target: 'parsed'|'completed'|'completed_laminated', expected?: 'parsed'|'completed'|'completed_laminated',
+        key = randomUUID()) => ({ currentUser: admin, cardKind: 'bazisCutSet' as const, cardId: String(setId), targetColumn: target,
+        ...(expected ? { expectedColumn: expected } : {}), idempotencyKey: key, requestId: `E2E-hdf-set-${orderId}` });
+      return { orderId, detailId, setId: String(setId), command };
+    }
+    const setMove = async (setId: string) => (await db.query(`SELECT target_column FROM mdf_board_manual_moves
+      WHERE card_kind='bazisCutSet' AND card_id=$1`,[setId])).rows[0]?.target_column ?? null;
+
+    it('a ХДФ-only BASIS set moves forward with audit, owners and one card_placed event; retry replays; returns refused', async () => {
+      const f = await hdfSet(), command = f.command('completed','parsed');
+      const first = await repo.upsert(command);
+      expect(first).toMatchObject({ changed: true, move: { cardKind: 'bazisCutSet', cardId: f.setId, targetColumn: 'completed' } });
+      expect(await setMove(f.setId)).toBe('completed');
+      const [audit] = await audits(`bazisCutSet:${f.setId}`);
+      expect(audit).toMatchObject({ source: 'mdf-active-non-mdf-command', status_code: 'completed' });
+      expect(audit.metadata_json).toMatchObject({ nonMdf: true, expectedColumn: 'parsed', relatedOrderIds: [f.orderId] });
+      const events = (await db.query(`SELECT payload_json p FROM outbox_events WHERE event_type='mdf_board.card_placed'
+        AND aggregate_id=$1`,[`bazisCutSet:${f.setId}`])).rows.map(r => r.p);
+      expect(events).toEqual([expect.objectContaining({ nonMdf: true, sourceKind: 'bazisCutSet', orderIds: [f.orderId] })]);
+      expect(await repo.upsert(command)).toEqual(first);
+      expect(await audits(`bazisCutSet:${f.setId}`)).toHaveLength(1);
+      await expect(repo.upsert(f.command('parsed','completed'))).rejects.toMatchObject({ code: 'MDF_NON_MDF_RETURN_UNSUPPORTED' });
+      await expect(repo.upsert(f.command('completed_laminated','parsed'))).rejects.toMatchObject({ code: 'MDF_SOURCE_STALE' });
+      expect(await repo.upsert(f.command('completed_laminated','completed'))).toMatchObject({ changed: true });
+      expect((await db.query(`SELECT 1 FROM mdf_source_heads WHERE source_kind='bazisCutSet' AND source_id=$1`,[f.setId])).rows)
+        .toHaveLength(0);
+    });
+
+    it('a BASIS set with any MDF detail stays the engine\'s; a packed-out ХДФ set is already finished', async () => {
+      const mixed = await hdfSet(['ХДФ 3мм', 'MDF 10 mm']);
+      await expect(repo.upsert(mixed.command('completed','parsed'))).rejects.toMatchObject({ code: 'MDF_SOURCE_TOKEN_REQUIRED' });
+      expect(await setMove(mixed.setId)).toBeNull();
+      const done = await hdfSet();
+      await db.query('UPDATE order_details SET production_status_id=4 WHERE order_id=$1',[done.orderId]);
+      await expect(repo.upsert(done.command('completed','parsed'))).rejects.toMatchObject({ code: 'MDF_SOURCE_STALE' });
+      expect(await setMove(done.setId)).toBeNull();
+    });
+
+    it('an owner known only through a row\'s source detail is authorized, locked and audited as well', async () => {
+      const mine = await hdfSet();
+      const foreign = await hdfSet();
+      await db.query('UPDATE orders SET created_by=999 WHERE order_id=$1',[foreign.orderId]);
+      // A second row of «mine» set names no order, only a detail of the foreign order.
+      await db.query(`INSERT INTO bazis_cut_set_details(bazis_cut_set_detail_id,bazis_cut_set_id,source_order_id,
+        source_order_detail_id,quantity,cut_enabled,material_name) VALUES($1,$2,NULL,$3,1,true,'ХДФ 3мм')`,
+      [Number(mine.setId) * 10 + 9, mine.setId, foreign.detailId]);
+      const base = rolePolicyForUser(admin);
+      const restricted: CurrentUser = { ...admin, id: '1', policyScopes: { ...base,
+        orders: { ...base.orders, view: 'own', update: 'own' }, productionTasks: { ...base.productionTasks, update: 'own' } } };
+      await expect(repo.upsert({ ...mine.command('completed','parsed'), currentUser: restricted }))
+        .rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      expect(await setMove(mine.setId)).toBeNull();
+      const done = await repo.upsert(mine.command('completed','parsed'));
+      const [audit] = await audits(`bazisCutSet:${mine.setId}`);
+      expect(audit.metadata_json.relatedOrderIds).toEqual([mine.orderId, foreign.orderId].sort((a, b) => a - b));
+      expect(done).toMatchObject({ changed: true });
+    });
+
+    it('a ХДФ set whose owner order is issued is already finished: a stale «parsed» move is refused', async () => {
+      const f = await hdfSet();
+      await db.query(`INSERT INTO order_statuses(order_status_id,order_status_name,order_status_code,sort_order,is_active,
+        created_at,updated_at) VALUES(90,'Выдан','issued',90,true,now(),now()) ON CONFLICT DO NOTHING`);
+      await db.query('UPDATE orders SET order_status_id=90 WHERE order_id=$1',[f.orderId]);
+      await expect(repo.upsert(f.command('completed','parsed'))).rejects.toMatchObject({ code: 'MDF_SOURCE_STALE' });
+      expect(await setMove(f.setId)).toBeNull();
+    });
+
+    it('a detail added to the set under its lock (FK key-share on the owner) never deadlocks with the move', async () => {
+      const f = await hdfSet();
+      await db.query('BEGIN');
+      let pending: Promise<unknown>;
+      try {
+        // The BASIS addition path: set row lock first, then the new detail's FK check takes KEY SHARE on the owner.
+        await db.query('SELECT 1 FROM bazis_cut_sets WHERE bazis_cut_set_id::text=$1 FOR UPDATE',[f.setId]);
+        pending = repo.upsert(f.command('completed','parsed')).then(r => r, (error: unknown) => error);
+        await new Promise(resolve => setTimeout(resolve, 400)); // the move holds its owner lock and waits for the set
+        await db.query('SELECT 1 FROM orders WHERE order_id=$1 FOR KEY SHARE',[f.orderId]);
+        await db.query('COMMIT');
+      } catch (error) { await db.query('ROLLBACK'); throw error; }
+      expect(await pending!).toMatchObject({ changed: true });
+      expect(await setMove(f.setId)).toBe('completed');
+    });
+
     // Second session on the raw client; the repository runs on the pool. The race window is held open by the
     // concurrent transaction, the command must wait and then refuse — never deadlock, never write half.
     const concurrently = async (hold: () => Promise<void>, run: () => Promise<unknown>) => {

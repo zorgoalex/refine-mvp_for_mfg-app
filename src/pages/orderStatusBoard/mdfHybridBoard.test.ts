@@ -170,7 +170,7 @@ describe('hybrid MDF board: legacy screen on engine data', () => {
       'bath:cut-result:9': 'baths_ready' }, board.meta)).toEqual({ 'packet:h1': 'completed_laminated' });
   });
 
-  it('a BASIS set without MDF details (ХДФ only) stays in its legacy column, not movable, outside readiness', () => {
+  it('a BASIS set without MDF details (ХДФ only) stays in its legacy column, movable by hand, outside readiness', () => {
     const set = (id: number, materials: string[]) => ({ bazisCutSetId: id, name: `БР-${id}`,
       items: materials.map((materialName, index) => ({ orderId: 3057, orderName: '3057', detailId: index + 1,
         detailNumber: index + 1, quantity: 1, materialName })) }) as unknown as CncTelegramBazisCutSetCard;
@@ -179,7 +179,9 @@ describe('hybrid MDF board: legacy screen on engine data', () => {
     const board = buildMdfHybridBoard({ legacyColumns: legacy, snapshot: snapshot() });
     const parsed = board.columns.find(c => c.key === 'parsed')!;
     expect(parsed.bazisCutSets.map(s => s.bazisCutSetId)).toEqual([80]);
-    expect(board.meta.get('bazisCutSet:80')).toMatchObject({ source: 'nonMdf', movable: false });
+    expect(board.meta.get('bazisCutSet:80')).toMatchObject({ source: 'nonMdf', movable: true, blockedReason: null });
+    expect(mdfHybridManualMoves({ 'bazisCutSet:80': 'completed', 'bazisCutSet:81': 'completed' }, board.meta))
+      .toEqual({ 'bazisCutSet:80': 'completed' });
     // A set with an MDF detail the engine did not select is still hidden: the engine decides MDF cards.
     expect(board.meta.has('bazisCutSet:81')).toBe(false);
   });

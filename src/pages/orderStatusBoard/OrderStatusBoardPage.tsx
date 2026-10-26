@@ -2270,9 +2270,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       return;
     }
     const expected = shown === 'parsed' || shown === 'completed' ? shown : null;
-    if (!expected || (targetColumn !== 'completed' && targetColumn !== 'completed_laminated')
+    if (kind === 'bath' || !expected || (targetColumn !== 'completed' && targetColumn !== 'completed_laminated')
       || isMdfBackwardMove(kind, expected, targetColumn)) {
-      message.warning('Возврат файла не из МДФ при новом учёте недоступен — обратитесь к администратору.');
+      message.warning('Возврат карточки не из МДФ при новом учёте недоступен — обратитесь к администратору.');
       return;
     }
     const key = cncManualMoveStorageKey(kind, cardId);
@@ -2281,7 +2281,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     cncManualMovesRef.current = optimisticMoves;
     setCncManualMoves(optimisticMoves);
     window.requestAnimationFrame(() => trigger?.focus());
-    void orderStatusBoardApi.upsertNonMdfPacketMove(cardId, targetColumn, expected,
+    void orderStatusBoardApi.upsertNonMdfMove(kind, cardId, targetColumn, expected,
       `mdf-non-mdf:${crypto.randomUUID()}`)
       .then((response) => {
         setCncManualMoves((current) => {
