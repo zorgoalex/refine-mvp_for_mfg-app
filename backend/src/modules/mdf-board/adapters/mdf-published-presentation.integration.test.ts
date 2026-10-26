@@ -352,9 +352,14 @@ describe.skipIf(!enabled)('MDF published presentation, isolated PostgreSQL schem
     const hdf = await packet([{ ...o, quantity: 10 }], { register: false });
     await fixture.client.query("UPDATE cnc_telegram_packets SET program_name='CNC#_ХДФ_3мм.nc' WHERE packet_id=$1", [hdf.packetId]);
     const mdf = await packet([{ ...o, quantity: 10 }], { register: false });
+    // A cut's bath seed is not a machine file: the legacy board never shows it, nor does this lane.
+    const seed = await packet([{ ...o, quantity: 10 }], { register: false });
+    await fixture.client.query(`UPDATE cnc_telegram_packets SET mdf_board_card_kind='bath_seed',source_chat_id='erp-cut-mdf-card',
+      program_name='Ванна E2E' WHERE packet_id=$1`, [seed.packetId]);
     const lane = (await read()).unregistered.map(u => u.id);
     expect(lane).toContain(mdf.packetId);
     expect(lane).not.toContain(hdf.packetId);
+    expect(lane).not.toContain(seed.packetId);
   });
 
   it('source-wide names need every raw-content owner visible (non-MDF rows of a hidden order count)', async () => {

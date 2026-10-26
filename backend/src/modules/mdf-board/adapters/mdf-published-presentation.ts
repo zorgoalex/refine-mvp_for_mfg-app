@@ -243,6 +243,11 @@ export async function loadMdfUnregisteredSources(tx: DatabaseClient, owners: str
       FROM cnc_telegram_packets p
       WHERE COALESCE(p.source_created_at,p.created_at) >= $2::date AND COALESCE(p.source_created_at,p.created_at) < $3::date+interval '1 day'
         AND p.mdf_board_hidden_at IS NULL AND ${cncPacketCountsForMdfReadinessSql('p')}
+        -- Same visibility as the legacy board's machine-file cards: never a cut's bath seed ('bath_seed'), and a manual
+        -- SVG upload only once its MDF card was created.
+        AND p.mdf_board_card_kind='machine_file'
+        AND (p.source_chat_id IS DISTINCT FROM 'erp-manual-svg-upload' OR EXISTS(SELECT 1 FROM outbox_events e
+          WHERE e.idempotency_key='cnc-manual-svg:'||p.packet_id::text||':source-'||p.source_version::text||':mdf-card-created'))
         -- Hashed set (heads are few, packets many): avoids a misestimated per-row nested anti-join.
         AND p.packet_id::text NOT IN (SELECT h.source_id FROM mdf_source_heads h WHERE h.source_kind='packet')
     ), sets AS (

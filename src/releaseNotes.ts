@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-26", title: "МДФ-доска: наборы ХДФ и служебные записи ванн",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "Набор Базис-раскроя без деталей МДФ (например, только ХДФ) снова виден на МДФ-доске в своей колонке, кремовой карточкой.",
+      "В «Файлах на станке» больше не появляются лишние карточки «Не учтён» вида «Ванна …»: это служебные записи карт ванн из «Раскроя», а не файлы станка.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-26", title: "МДФ-доска: итоги искомого заказа отдельно по МДФ и не МДФ",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [
