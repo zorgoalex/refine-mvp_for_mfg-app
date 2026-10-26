@@ -214,7 +214,9 @@ export class OnecAgentProtocolService {
           severity: 'critical',
           subject: { type: 'onec_source', id: String(source.sourceId) },
           data: { sourceGeneration: source.generation },
-          idempotencyKey: `onec.source.identity_changed:${source.sourceId}:${identity.databaseId}:${identity.exportEpoch}:${identity.environment}`,
+          // With the generation: a base that changes back and forth across rebaselines (A → B, accepted, B → A,
+          // accepted, A → B) gets an event for every change; the projector skips the superseded generations.
+          idempotencyKey: `onec.source.identity_changed:${source.sourceId}:${source.generation}:${identity.databaseId}:${identity.exportEpoch}:${identity.environment}`,
         }),
       );
       return 'identity_changed';
