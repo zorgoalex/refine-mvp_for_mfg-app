@@ -991,6 +991,11 @@
   color: #8b5a2b;
 }
 
+.cnc-today-column__totals--search-other {
+  color: #8b5a2b;
+  font-weight: 600;
+}
+
 .cnc-today-column__badge-placeholder,
 .cnc-today-column__badge-placeholder .ant-skeleton-button {
   width: 34px !important;

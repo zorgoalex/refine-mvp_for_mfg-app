@@ -367,24 +367,38 @@ export function selectCncSearchedOrderItems(
   column: { key: string } & Pick<CncTelegramTodayColumn, 'packets' | 'baths' | 'bazisCutSets'>,
   orderFilters: readonly string[],
 ): CncSearchedOrderItem[] {
+  return splitCncSearchedOrderItems(column, orderFilters).mdf;
+}
+
+// Searched-order items split by material: non-MDF files (cream cards) and non-MDF
+// Bazis-cut positions are shown on the board but are not MDF work.
+export function splitCncSearchedOrderItems(
+  column: { key: string } & Pick<CncTelegramTodayColumn, 'packets' | 'baths' | 'bazisCutSets'>,
+  orderFilters: readonly string[],
+): { mdf: CncSearchedOrderItem[]; other: CncSearchedOrderItem[] } {
   const orderKeys = new Set(
     normalizeCncOrderFilterValues(orderFilters).map((value) =>
       normalizeCncOrderKey(value),
     ),
   );
-  if (orderKeys.size === 0) return [];
+  const mdf: CncSearchedOrderItem[] = [];
+  const other: CncSearchedOrderItem[] = [];
+  if (orderKeys.size === 0) return { mdf, other };
   const matches = (item: { orderName: string }) =>
     orderKeys.has(normalizeCncOrderKey(item.orderName));
   if (isCncBathColumnKey(column.key)) {
-    return (column.baths ?? []).flatMap((bath) => bath.items.filter(matches));
+    for (const bath of column.baths ?? []) mdf.push(...bath.items.filter(matches));
+    return { mdf, other };
   }
-  // Non-MDF files (cream cards) are shown, but their details are not MDF work.
-  return [
-    ...(column.packets ?? []).filter((packet) => !cncPacketHasOtherMaterialMarker(packet))
-      .flatMap((packet) => packet.items.filter(matches)),
-    ...(column.bazisCutSets ?? []).flatMap((set) =>
-      set.items.filter((item) => matches(item) && !cncMaterialNameIsOther(item.materialName))),
-  ];
+  for (const packet of column.packets ?? []) {
+    (cncPacketHasOtherMaterialMarker(packet) ? other : mdf).push(...packet.items.filter(matches));
+  }
+  for (const set of column.bazisCutSets ?? []) {
+    for (const item of set.items.filter(matches)) {
+      (cncMaterialNameIsOther(item.materialName) ? other : mdf).push(item);
+    }
+  }
+  return { mdf, other };
 }
 
 // A bath or machine file mixes details of many orders, so the order columns
