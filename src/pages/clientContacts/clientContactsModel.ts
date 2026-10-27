@@ -1,6 +1,6 @@
 import type {
   ClientContactColumn, ClientContactSort, ClientContactsContact, ClientContactsPhone, ClientContactsQuery, ClientContactsRow, ClientPhoneType,
-  ColumnFilterValue, PhoneSetLine,
+  ColumnFilterValue, ExpectedPhoneLine, PhoneSetLine,
 } from '../../api/clientContactsApi';
 import { ApiError } from '../../api/apiError';
 import { CLIENT_CONTACT_COLUMNS } from '../../api/clientContactsApi';
@@ -81,9 +81,12 @@ let nextKey = 0;
 const key = () => `draft-${++nextKey}`;
 
 export const phonesToDraft = (phones: readonly ClientContactsPhone[]): PhoneDraft[] =>
-  phones.map((phone) => ({ rowKey: key(), phoneId: phone.phoneId, phoneNumber: phone.phoneNumber, phoneType: phone.phoneType, isPrimary: phone.isPrimary }));
+    // A stored NULL type / primary becomes «mobile» / not primary in the draft; saving writes that value.
+  phones.map((phone) => ({ rowKey: key(), phoneId: phone.phoneId, phoneNumber: phone.phoneNumber, phoneType: phone.phoneType ?? 'mobile',
+    isPrimary: phone.isPrimary ?? false }));
 
-export const phoneLines = (phones: readonly ClientContactsPhone[]): PhoneSetLine[] =>
+/** The set the screen saw, as stored (nulls included) — the server compares it with the locked rows. */
+export const phoneLines = (phones: readonly ClientContactsPhone[]): ExpectedPhoneLine[] =>
   phones.map(({ phoneId, phoneNumber, phoneType, isPrimary }) => ({ phoneId, phoneNumber, phoneType, isPrimary }));
 
 export function addPhoneDraft(rows: readonly PhoneDraft[]): PhoneDraft[] {

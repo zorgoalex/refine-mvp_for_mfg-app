@@ -346,6 +346,24 @@ describe.skipIf(!databaseUrl)('«Контакты клиентов»: list, cont
       expect((await setPhones(1, seen(await storedPhones(1)), [], 'set-key-3')).deleted).toBe(2);
     });
 
+    it('saves a set holding an old phone with no type and no primary mark (both columns are nullable)', async () => {
+      await q('UPDATE client_phones SET phone_type = NULL, is_primary = NULL WHERE phone_id = 102');
+      const shown = (await list.row(1))!.phones;
+      expect(shown.find((phone) => phone.phoneId === 102)).toMatchObject({ phoneType: null, isPrimary: null });
+      // the screen sends back what it saw (nulls included); its draft wrote «mobile» / not primary for that phone
+      const expected = shown.map(({ phoneId, phoneNumber, phoneType, isPrimary }) => ({ phoneId, phoneNumber, phoneType, isPrimary }));
+      const result = await setPhones(1, expected as ReturnType<typeof seen>, [
+        { phoneId: 101, phoneNumber: '+7 701 555 01 01', phoneType: 'mobile', isPrimary: true },
+        { phoneId: 102, phoneNumber: '8 727 222 33 44', phoneType: 'mobile', isPrimary: false },
+      ], 'set-key-null');
+      expect(result).toMatchObject({ created: 0, updated: 1, deleted: 0 });
+      expect((await storedPhones(1)).find((row) => row.phoneId === 102)).toMatchObject({ phoneType: 'mobile', isPrimary: false });
+      // and the delete of such a phone goes through as well
+      await q('UPDATE client_phones SET phone_type = NULL, is_primary = NULL WHERE phone_id = 102');
+      const again = (await list.row(1))!.phones.map(({ phoneId, phoneNumber, phoneType, isPrimary }) => ({ phoneId, phoneNumber, phoneType, isPrimary }));
+      expect((await setPhones(1, again as ReturnType<typeof seen>, [{ phoneId: 101, phoneNumber: '+7 701 555 01 01', phoneType: 'mobile', isPrimary: true }])).deleted).toBe(1);
+    });
+
     it('sees the Bitrix24 sync that replaced the phones (same numbers, new ids) as a change', async () => {
       const expected = seen(await storedPhones(1));
       await q(`DELETE FROM client_phones WHERE client_id = 1;

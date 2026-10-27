@@ -50,6 +50,13 @@ describe('phone set of the contacts screen', () => {
     expect(samePhoneSet(stored, [...seen(stored), ...seen([stored[0]])])).toBe(false);
   });
 
+  it('compares an old phone with no type / no primary mark as stored (NULL equals NULL only)', () => {
+    const old = { ...phone(3, '8 727 000 00 01'), phoneType: null, isPrimary: null } as unknown as ClientPhoneDto;
+    const nulls = { phoneId: 3, phoneNumber: '8 727 000 00 01', phoneType: null, isPrimary: null };
+    expect(samePhoneSet([old], [nulls])).toBe(true);
+    expect(samePhoneSet([old], [{ ...nulls, phoneType: 'mobile', isPrimary: false }])).toBe(false);
+  });
+
   it('plans removals, changes and new phones; moves the primary', () => {
     const plan = planPhoneSet(stored, [
       { phoneId: 2, phoneNumber: '8 727 222 33 44', phoneType: 'work', isPrimary: true },

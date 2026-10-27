@@ -473,7 +473,7 @@ export function parkedNumber(phoneId: number, used: ReadonlySet<string>): string
 /** The stored set equals what the screen saw: the same ids with the same number, type and primary flag. */
 export function samePhoneSet(
   stored: readonly ClientPhoneDto[],
-  expected: readonly { phoneId: number; phoneNumber: string; phoneType: string; isPrimary: boolean }[],
+  expected: readonly { phoneId: number; phoneNumber: string; phoneType: string | null; isPrimary: boolean | null }[],
 ): boolean {
   if (stored.length !== expected.length) return false;
   const byId = new Map(expected.map((phone) => [phone.phoneId, phone]));
