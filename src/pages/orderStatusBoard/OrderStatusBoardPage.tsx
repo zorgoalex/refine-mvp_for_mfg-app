@@ -1,5 +1,7 @@
 import { Popover, Tooltip } from '../../ui/tooltipDelay';
 import { MdfProductionReturnDialog, isMdfBackwardMove, type MdfReturnIntent } from './MdfProductionReturnDialog';
+import { keepsShownMdfBoard, mdfShownDataKey, resetMdfBoardForNewSession } from './mdfBoardSessionData';
+import { useSessionGenerationReset } from './useSessionGenerationReset';
 import React, {
   lazy,
   memo,
@@ -705,6 +707,12 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncOrderSearchTodayRef = useRef<CncTelegramTodayResponse | null>(null);
   const [cncOrderBoard, setCncOrderBoard] =
     useState<OrderStatusBoardResponse | null>(initialMdfSnapshot?.orderBoard ?? null);
+  // the dataset the board currently shows (see the activation effect)
+  const shownDatasetKeyRef = useRef<string | null>(null);
+  const shownCncTodayRef = useRef(cncToday);
+  shownCncTodayRef.current = cncToday;
+  const shownBoardRef = useRef(board);
+  shownBoardRef.current = board;
   const cncOrderBoardRef = useRef(cncOrderBoard);
   cncOrderBoardRef.current = cncOrderBoard;
   const [cncOrderBoardLoading, setCncOrderBoardLoading] = useState(false);
@@ -1139,16 +1147,41 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     [fetchCncManualMoves, refetchMdfBoardSettings, replacePending],
   );
 
+  // A re-login or a permission/scope change drops what the board shows at once (also while it is hidden or a
+  // background read is still running); a shown board reads its dataset again under the new session.
+  const datasetKeyRef = useRef(datasetKey);
+  datasetKeyRef.current = datasetKey;
+  useSessionGenerationReset({ active, revisionRef: datasetRevisionRef, onReset: (shown) => resetMdfBoardForNewSession({
+    dropAuxiliaryReads: () => { cncAuxiliaryRefreshRevisionRef.current += 1; },
+    clearBoard: () => { boardRef.current = null; setBoard(null); },
+    clearToday: () => { cncTodayRef.current = null; setCncToday(null); },
+    clearOrderSearchToday: () => { cncOrderSearchTodayRef.current = null; setCncOrderSearchToday(null); },
+    clearOriginalBoard: () => setCncOriginalBoard(null),
+    clearOrderBoard: () => { cncOrderBoardRequestKeyRef.current = null; setCncOrderBoard(null); },
+    setShownKey: (key) => { shownDatasetKeyRef.current = key; },
+    reload: () => { void fetchInitial(); },
+  }, { shown, datasetKey: datasetKeyRef.current, sessionGeneration: authSession.getSessionGeneration() }) });
+
   useEffect(() => {
     if (!active) return;
     if (mdfWorkdayTodayOpenPatchNeeded) return;
     const preserveInitialSnapshot = preserveInitialMdfSnapshotRef.current;
     preserveInitialMdfSnapshotRef.current = false;
+    // the shown data belongs to this dataset and to this auth session (a re-login or a permission change drops it)
+    const shownKey = mdfShownDataKey(datasetKey, authSession.getSessionGeneration());
     if (preserveInitialSnapshot) {
+      shownDatasetKeyRef.current = shownKey;
       setStale(false);
       loadingColumnTokensRef.current.clear();
       return;
     }
+    // Back on the board (the persistent host only hid it) with the same data: what was shown stays on screen and is
+    // refreshed in the background instead of being cleared and loaded again.
+    if (keepsShownMdfBoard(shownDatasetKeyRef.current, shownKey, Boolean(shownCncTodayRef.current || shownBoardRef.current))) {
+      void fetchInitial({ preserveLoading: true });
+      return;
+    }
+    shownDatasetKeyRef.current = shownKey;
     setBoard(null);
     boardRef.current = null;
     setCncToday(null);

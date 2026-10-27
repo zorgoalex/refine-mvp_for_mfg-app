@@ -1232,6 +1232,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('let alreadyLoaded = cncOrderBoardRequestKeyRef.current === requestKey;');
     expect(page).toContain('cncOrderStatusBoardKeyCovers(cncOrderBoardKeyOf(loadedBoard), requestKey)');
     expect(page).toContain('if (!cncStrongRefreshInFlightRef.current) setCncOrderBoardLoading(false);');
+    // returning to the persistent board keeps it on screen and refreshes in the background
+    expect(page).toContain('const shownKey = mdfShownDataKey(datasetKey, authSession.getSessionGeneration());');
+    expect(page).toContain('useSessionGenerationReset({ active, revisionRef: datasetRevisionRef, onReset: (shown) => resetMdfBoardForNewSession({');
+    expect(page).toContain('if (keepsShownMdfBoard(shownDatasetKeyRef.current, shownKey, Boolean(shownCncTodayRef.current || shownBoardRef.current))) {');
     expect(page).toContain('buildCncOrderStatusBoardRequestKey(orderIds, DEFAULT_MDF_ORDER_CARD_SORT, includeBazisAllocation));');
     expect(page).toContain('if (!alreadyLoaded) void loadOrderBoard();');
     expect(page).toContain('const timer = window.setInterval(() => {');
