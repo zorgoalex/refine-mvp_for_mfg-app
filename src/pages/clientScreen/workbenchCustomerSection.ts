@@ -67,17 +67,35 @@ export function workbenchCustomerEvents(previous: WorkbenchCustomerInputs | null
   return events;
 }
 
-export function useWorkbenchCustomerSection(input: WorkbenchCustomerInputs & { isOpen: (key: string) => boolean }): string {
-  const [section, setSection] = useState(input.activeTab);
-  const previous = useRef<WorkbenchCustomerInputs | null>(null);
-  const { activeTab, pinned, spy, foldsKey, navigationSeq, isOpen } = input;
+/**
+ * The customer's section of each order, kept outside the form: the workspace may rebuild a form it has
+ * hidden (its own state starts over then), and the customer must not lose the section because of that.
+ */
+const sectionByOrder = new Map<string, string>();
+
+export function useWorkbenchCustomerSection(input: WorkbenchCustomerInputs & {
+  orderKey: string;
+  /** False while the form is kept under another workspace page: nothing it reports then is the manager's. */
+  active: boolean;
+  isOpen: (key: string) => boolean;
+}): string {
+  const { orderKey, active, activeTab, pinned, spy, foldsKey, navigationSeq, isOpen } = input;
+  const [section, setSection] = useState(() => sectionByOrder.get(orderKey) ?? activeTab);
+  // A form rebuilt for an order the customer already follows starts from what it reports now, without
+  // treating that as the manager's navigation.
+  const previous = useRef<WorkbenchCustomerInputs | null>(
+    sectionByOrder.has(orderKey) ? { activeTab, pinned, spy, foldsKey, navigationSeq } : null,
+  );
   useEffect(() => {
     const next = { activeTab, pinned, spy, foldsKey, navigationSeq };
     const events = workbenchCustomerEvents(previous.current, next);
     previous.current = next;
-    if (events.length === 0) return;
+    if (!active || events.length === 0) return;
     const context: WorkbenchCustomerContext = { pinned, spy, isOpen };
     setSection((current) => events.reduce((value, event) => nextWorkbenchCustomerSection(value, event, context), current));
-  }, [activeTab, pinned, spy, foldsKey, navigationSeq, isOpen]);
+  }, [active, activeTab, pinned, spy, foldsKey, navigationSeq, isOpen]);
+  useEffect(() => {
+    sectionByOrder.set(orderKey, section);
+  }, [orderKey, section]);
   return section;
 }

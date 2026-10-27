@@ -501,12 +501,15 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const [hybridOpenSections, setHybridOpenSections] = useState<string[]>([]);
   const hybridSectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const hybridInitialTabRef = useRef(true);
+  const keepAliveActive = useKeepAlive().isActive;
   const isFormSectionActive = (key: string) => (
     isWorkbench
       ? HYBRID_MAIN_SECTION_KEYS.includes(key) || hybridOpenSections.includes(key)
       : activeTab === key
   );
   const workbenchCustomerSection = useWorkbenchCustomerSection({
+    orderKey,
+    active: keepAliveActive,
     activeTab,
     pinned: workbenchPinnedSection,
     spy: workbenchOpenSpySection,
