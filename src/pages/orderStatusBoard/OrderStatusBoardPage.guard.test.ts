@@ -1236,6 +1236,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     // returning to the persistent board keeps it on screen and refreshes in the background
     expect(page).toContain('const shownKey = mdfShownDataKey(datasetKey, authSession.getSessionGeneration());');
     expect(page).toContain('useSessionGenerationReset({ active, revisionRef: datasetRevisionRef, onReset: (shown) => resetMdfBoardForNewSession({');
+    expect(page).toContain('preserveInitialMdfSnapshotRef.current = false;\n      preserveInitialMdfOrderBoardRef.current = false;\n      preserveInitialMdfManualMovesRef.current = false;');
     // inline updates: unchanged cards keep their objects and shared inputs; the move entry point is stable
     expect(page).toContain('reuseUnchangedCncColumns(stableCncPeriodColumnsRef.current, columns)');
     expect(page).not.toContain('MdfHybridMoveContext');

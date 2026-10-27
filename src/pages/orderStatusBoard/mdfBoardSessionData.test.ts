@@ -4,13 +4,13 @@ import { keepsShownMdfBoard, mdfShownDataKey, resetMdfBoardForNewSession, type M
 function data(): MdfBoardSessionData & { calls: string[] } {
   const calls: string[] = [];
   const record = (name: string) => vi.fn((...args: unknown[]) => { calls.push(args.length ? `${name}:${String(args[0])}` : name); });
-  return { calls, dropAuxiliaryReads: record('dropAuxiliaryReads'), clearBoard: record('clearBoard'),
+  return { calls, dropInitialSnapshot: record('dropInitialSnapshot'), dropAuxiliaryReads: record('dropAuxiliaryReads'), clearBoard: record('clearBoard'),
     clearToday: record('clearToday'), clearOrderSearchToday: record('clearOrderSearchToday'),
     clearOriginalBoard: record('clearOriginalBoard'), clearOrderBoard: record('clearOrderBoard'),
     setShownKey: record('setShownKey'), reload: record('reload') };
 }
 
-const ALL_CLEARED = ['dropAuxiliaryReads', 'clearBoard', 'clearToday', 'clearOrderSearchToday', 'clearOriginalBoard',
+const ALL_CLEARED = ['dropInitialSnapshot', 'dropAuxiliaryReads', 'clearBoard', 'clearToday', 'clearOrderSearchToday', 'clearOriginalBoard',
   'clearOrderBoard'];
 
 describe('MDF board data across auth sessions', () => {

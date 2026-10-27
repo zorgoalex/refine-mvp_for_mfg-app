@@ -1229,6 +1229,12 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const datasetKeyRef = useRef(datasetKey);
   datasetKeyRef.current = datasetKey;
   useSessionGenerationReset({ active, revisionRef: datasetRevisionRef, onReset: (shown) => resetMdfBoardForNewSession({
+    // a hidden board mounted with a prefetched snapshot must load under the new session when it is shown
+    dropInitialSnapshot: () => {
+      preserveInitialMdfSnapshotRef.current = false;
+      preserveInitialMdfOrderBoardRef.current = false;
+      preserveInitialMdfManualMovesRef.current = false;
+    },
     dropAuxiliaryReads: () => { cncAuxiliaryRefreshRevisionRef.current += 1; },
     clearBoard: () => { boardRef.current = null; setBoard(null); },
     clearToday: () => { cncTodayRef.current = null; setCncToday(null); },
