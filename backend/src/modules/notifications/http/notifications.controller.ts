@@ -63,13 +63,21 @@ export class NotificationsController {
     });
   }
 
-  @ApiResponse({ status: 200, description: 'Marked current-user notifications as read' })
-  @ApiOperation({ operationId: 'markAllNotificationsRead', summary: 'Mark all current-user notifications as read' })
+  @ApiResponse({ status: 200, description: 'Marked current-user notifications as read (only body.notificationIds when given)' })
+  @ApiResponse({ status: 422, description: 'Invalid notificationIds' })
+  @ApiOperation({ operationId: 'markAllNotificationsRead', summary: 'Mark all (or the listed) current-user notifications as read' })
   @Patch('read-all')
   async markAllRead(
     @Req() request: RequestWithCurrentUser,
+    @Body() body: unknown,
   ): Promise<MarkAllNotificationsReadResponseDto> {
-    return this.notifications.markAllRead({ currentUser: request.user });
+    // Без тела — все непрочитанные (прежний клиент); с notificationIds — только показанные в списке.
+    const legacyEmptyBody = body === undefined || body === null
+      || (typeof body === 'object' && !Array.isArray(body) && Object.keys(body).length === 0);
+    const input: { notificationIds?: string[] } = legacyEmptyBody
+      ? {}
+      : parseBody(markAllReadSchema, body, 'Invalid notifications read-all request');
+    return this.notifications.markAllRead({ currentUser: request.user, notificationIds: input.notificationIds });
   }
 
   @ApiResponse({ status: 200, description: 'Leased (2 min) unshown balloons of the current user; own unfinished lease first; mandatory balloons only with header X-Balloon-Capabilities: mandatory' })
@@ -139,11 +147,12 @@ export function parseNotificationListQuery(
 
 const claimBalloonsSchema = z.object({ token: z.string().uuid(), limit: z.number().int().min(1).max(5) }).strict();
 const ackBalloonsSchema = z.object({ token: z.string().uuid(), notificationIds: z.array(z.string().uuid()).min(1).max(20) }).strict();
+const markAllReadSchema = z.object({ notificationIds: z.array(z.string().uuid()).max(200) }).strict();
 
-function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
+function parseBody<T>(schema: z.ZodType<T>, body: unknown, errorMessage = 'Invalid notification balloons request'): T {
   const result = schema.safeParse(body ?? {});
   if (!result.success) {
-    throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid notification balloons request', { issues: result.error.issues });
+    throw new ApiError(422, 'VALIDATION_ERROR', errorMessage, { issues: result.error.issues });
   }
   return result.data;
 }

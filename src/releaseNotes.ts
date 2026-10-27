@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-27", title: "Колокольчик: «Все прочитаны» — только то, что в списке",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "«Все прочитаны» в колокольчике отмечает прочитанными только уведомления, которые видны в списке. Раньше кнопка гасила и уведомления, пришедшие после открытия списка: их не было видно, и их балун уже не всплывал.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-27", title: "NewLine: «Сохранить и создать ещё»",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

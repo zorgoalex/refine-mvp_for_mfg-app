@@ -68,11 +68,38 @@ describe('NotificationsController', () => {
     const controller = new NotificationsController(service);
     const request = currentRequest();
 
-    await controller.markAllRead(request);
+    await controller.markAllRead(request, undefined);
 
     expect(service.markAllRead).toHaveBeenCalledWith({
       currentUser: request.user,
     });
+  });
+
+  it('passes the listed notification ids to markAllRead and rejects invalid ids', async () => {
+    const service = {
+      list: vi.fn(),
+      markRead: vi.fn(),
+      markAllRead: vi.fn(async () => ({ updatedCount: 1 })),
+      delete: vi.fn(),
+    };
+    const controller = new NotificationsController(service);
+    const request = currentRequest();
+    const ids = ['11111111-1111-4111-8111-111111111111'];
+
+    await controller.markAllRead(request, { notificationIds: ids });
+    expect(service.markAllRead).toHaveBeenCalledWith({ currentUser: request.user, notificationIds: ids });
+
+    await expect(controller.markAllRead(request, { notificationIds: ['not-a-uuid'] })).rejects.toMatchObject({ statusCode: 422 });
+    await expect(controller.markAllRead(request, { other: true })).rejects.toMatchObject({ statusCode: 422 });
+    // A JSON array is not the legacy empty body: rejected, the service is not called with «mark everything».
+    const callsBefore = service.markAllRead.mock.calls.length;
+    await expect(controller.markAllRead(request, [])).rejects.toMatchObject({ statusCode: 422 });
+    expect(service.markAllRead.mock.calls.length).toBe(callsBefore);
+
+    await controller.markAllRead(request, {});
+    expect(service.markAllRead).toHaveBeenLastCalledWith({ currentUser: request.user });
+    await controller.markAllRead(request, { notificationIds: [] });
+    expect(service.markAllRead).toHaveBeenLastCalledWith({ currentUser: request.user, notificationIds: [] });
   });
 
   it('passes current user and id to delete service', async () => {
