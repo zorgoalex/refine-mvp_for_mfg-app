@@ -28,6 +28,8 @@ export const SuppliersSelect: React.FC<SuppliersSelectProps> = ({ value, onChang
       disabled={disabled}
       placeholder={placeholder ?? 'Выберите поставщиков (первый — основной)'}
       value={value ?? []}
+      // На всю ширину: в вертикальном Space и в ячейке таблицы Select иначе сжимается до содержимого.
+      style={{ width: '100%', minWidth: 220 }}
       onChange={(next) => onChange?.((next as unknown[]).map(Number))}
     />
   );
