@@ -124,7 +124,8 @@ import { getOrdersReadBackendMode } from "../../query/orderPrimaryResource";
 import { ORDER_PRIMARY_HARD_STALE_TIME_MS } from "../../query/orderPrimaryFetchPolicy";
 import { useOrderLifecycleCohort } from "../../performance/orderLifecycleCohortStore";
 import { useOptionalUiVariant } from "../../ui-variant/UiVariantProvider";
-import { orderDeadlineHint, orderListWorkbenchDefaultOrder, orderStatusTone, paymentStatusTone } from "./orderListWorkbench";
+import { groupOrderRows, ORDER_LIST_GROUPINGS, ORDER_LIST_PERIODS, orderListPeriodOf, orderListPeriodRange, type OrderListPeriod, orderDeadlineHint, orderListWorkbenchDefaultOrder, orderStatusTone, paymentStatusTone, type OrderListGrouping } from "./orderListWorkbench";
+import { flattenOrderGroups, isOrderGroupRow, withGroupHeaderColumns } from "./orderListGroupedTable";
 import "./list.css";
 
 const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
@@ -229,9 +230,24 @@ const OrdersMobileHeaderDisclosure: React.FC<OrdersMobileHeaderDisclosureProps> 
   </section>
 );
 
+const ORDER_LIST_GROUPING_KEY = 'erp.orderList.workbenchGrouping';
+
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
   // «NewLine» меняет только отрисовку ячеек; колонки, их ключи и настройки общие.
   const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
+  // «NewLine»: группировка загруженной страницы (мокап 03); выбор запоминается в браузере
+  const [listGrouping, setListGrouping] = useState<OrderListGrouping>(() => {
+    try {
+      const stored = window.localStorage.getItem(ORDER_LIST_GROUPING_KEY);
+      return ORDER_LIST_GROUPINGS.some((option) => option.value === stored) ? stored as OrderListGrouping : 'none';
+    } catch {
+      return 'none';
+    }
+  });
+  const chooseListGrouping = useCallback((value: OrderListGrouping) => {
+    setListGrouping(value);
+    try { window.localStorage.setItem(ORDER_LIST_GROUPING_KEY, value); } catch { /* только на эту загрузку */ }
+  }, []);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [searchOrderId, setSearchOrderId] = useState<string>("");
   const [highlightedOrderId, setHighlightedOrderId] = useState<number | null>(null);
@@ -716,6 +732,19 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     }
     setCurrent(1); // Сброс на первую страницу
   }, [currentUser?.id, filters, setFilters, setCurrent]);
+
+  // «NewLine»: быстрый период = тот же фильтр «Дата заказа» формы; остальные фильтры не меняются
+  const applyOrderListPeriod = useCallback((period: OrderListPeriod) => {
+    const range = orderListPeriodRange(period);
+    const rest = (filters || []).filter((f: any) => f.field !== "order_date");
+    setFilters(range ? [
+      ...rest,
+      { field: "order_date", operator: "gte" as const, value: range[0] },
+      { field: "order_date", operator: "lte" as const, value: range[1] },
+    ] : rest, "replace");
+    form.setFieldsValue({ order_date_range: range ? [dayjs(range[0]), dayjs(range[1])] : undefined });
+    setCurrent(1);
+  }, [filters, form, setCurrent, setFilters]);
 
   const handleSnapshotBatchExport = async () => {
     if (!snapshotBatchRange) {
@@ -1570,6 +1599,13 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     orderListColumnSettings,
   );
 
+  // «NewLine»: строки-заголовки групп поверх загруженной страницы (мокап 03)
+  const listGroupingActive = isWorkbench && !isMobile && !isTablet && listGrouping !== 'none';
+  const groupedListRows = listGroupingActive
+    ? flattenOrderGroups(groupOrderRows((tableProps.dataSource ?? []) as any[], listGrouping))
+    : null;
+  const groupedListColumns = listGroupingActive ? withGroupHeaderColumns(visibleOrderListColumns as any) : null;
+
   return (
     <>
       <List
@@ -1625,6 +1661,17 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                 Найти
               </Button>
             </Space.Compact>
+            {isWorkbench && !isMobile && !isTablet ? (
+              <Select
+                className="wb-orders-grouping"
+                aria-label="Группировка заказов"
+                size="middle"
+                value={listGrouping}
+                onChange={(value) => chooseListGrouping(value as OrderListGrouping)}
+                options={ORDER_LIST_GROUPINGS.map((option) => ({ ...option }))}
+                style={{ width: 170, marginRight: 8 }}
+              />
+            ) : null}
             {/* Быстрый фильтр "Мои заказы" */}
             <Checkbox
               checked={showMyOrders}
@@ -1754,6 +1801,25 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         {(!filtersVisible || (isMobile && !mobileHeaderExpanded)) && (
           <Form form={form} className="orders-filter-form-connector" aria-hidden />
         )}
+        {isWorkbench && !isMobile && !isTablet ? (() => {
+          const activePeriod = orderListPeriodOf((filters || []) as any[]);
+          return (
+            <div className="wb-orders-periods" role="group" aria-label="Период по дате заказа">
+              {ORDER_LIST_PERIODS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className="wb-orders-periods__chip"
+                  aria-pressed={activePeriod === option.value}
+                  onClick={() => applyOrderListPeriod(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+              {activePeriod === null ? <span className="wb-orders-periods__chip wb-orders-periods__chip--custom">Свой период</span> : null}
+            </div>
+          );
+        })() : null}
         {filtersVisible && (!isMobile || mobileHeaderExpanded) && (
           <Card className="orders-filter-card" style={{ marginBottom: 16 }}>
             <Form form={form} layout="vertical" onFinish={handleFilter}>
@@ -1910,7 +1976,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           </div>
         ) : (
           <Table
-            {...tableProps}
+            {...(tableProps as any)}
+            {...(groupedListRows ? { dataSource: groupedListRows } : null)}
             loading={false}
             rowKey="order_id"
             sticky
@@ -1918,8 +1985,9 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
               useBackendCut
                 ? {
                     selectedRowKeys: selectedCutOrderIds,
-                    onChange: (keys) => setSelectedCutOrderIds(keys.map(Number)),
+                    onChange: (keys: React.Key[]) => setSelectedCutOrderIds(keys.filter((key) => typeof key === 'number' || /^\d+$/.test(String(key))).map(Number)),
                     preserveSelectedRowKeys: true,
+                    getCheckboxProps: (record: unknown) => (isOrderGroupRow(record) ? { disabled: true, style: { display: 'none' } } : {}),
                   }
                 : undefined
             }
@@ -1927,15 +1995,16 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             pagination={ordersCompactPagination}
             scroll={{ x: "max-content", y: 600 }}
             showSorterTooltip={{ mouseEnterDelay: 1 }}
-            rowClassName={(record) =>
-              record.order_id === highlightedOrderId ? "highlighted-row" : ""
+            rowClassName={(record: any) =>
+              isOrderGroupRow(record) ? "wb-order-group" : record.order_id === highlightedOrderId ? "highlighted-row" : ""
             }
-            onRow={(record) => ({
+            onRow={(record: any) => ({
               onDoubleClick: () => {
+                if (isOrderGroupRow(record)) return;
                 show("orders_view", record.order_id, "push");
               },
             })}
-            columns={visibleOrderListColumns}
+            columns={(groupedListRows ? groupedListColumns : visibleOrderListColumns) as any}
           />
           )}
         </OrderListProgressiveSurface>

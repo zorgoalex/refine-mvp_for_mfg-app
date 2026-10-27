@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-27", title: "NewLine: список заказов — группировка и периоды",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "В NewLine над списком заказов — быстрые периоды по дате заказа: «Все», «Сегодня», «Эта неделя», «30 дней», «Квартал» (тот же фильтр «Дата заказа», что в форме фильтров).",
+      "Группировка списка «По статусу» или «По сроку» (просрочено, сегодня, ближайшие 7 дней, позже, без срока, выполнены) — внутри показанной страницы; выбор запоминается.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-27", title: "NewLine: доработки по макетам",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

@@ -81,3 +81,114 @@ export function orderListWorkbenchDefaultOrder(keys: readonly string[]): string[
   const leadingSet = new Set(leading);
   return [...leading, ...keys.filter((key) => !leadingSet.has(key))];
 }
+
+/** «NewLine», mockup 03: grouping of the loaded page of the orders list (the server order is kept inside a group). */
+export type OrderListGrouping = 'none' | 'status' | 'deadline';
+
+export const ORDER_LIST_GROUPINGS: ReadonlyArray<{ value: OrderListGrouping; label: string }> = [
+  { value: 'none', label: 'Без группировки' },
+  { value: 'status', label: 'По статусу' },
+  { value: 'deadline', label: 'По сроку' },
+];
+
+const DEADLINE_GROUPS = [
+  { key: 'overdue', label: 'Просрочено' },
+  { key: 'today', label: 'Сегодня' },
+  { key: 'week', label: 'Ближайшие 7 дней' },
+  { key: 'later', label: 'Позже' },
+  { key: 'none', label: 'Без срока' },
+  { key: 'done', label: 'Выполнены и выданы' },
+] as const;
+
+type GroupableOrder = {
+  order_status_name?: unknown;
+  planned_completion_date?: unknown;
+  issue_date?: unknown;
+  completion_date?: unknown;
+};
+
+export function orderDeadlineGroupKey(order: GroupableOrder, now: Date = new Date()): (typeof DEADLINE_GROUPS)[number]['key'] {
+  if (toLocalDay(order.issue_date) !== null || toLocalDay(order.completion_date) !== null) return 'done';
+  const planned = toLocalDay(order.planned_completion_date);
+  if (planned === null) return 'none';
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const days = Math.round((planned - today) / DAY_MS);
+  if (days < 0) return 'overdue';
+  if (days === 0) return 'today';
+  if (days <= 7) return 'week';
+  return 'later';
+}
+
+export interface OrderListGroup<T> {
+  key: string;
+  label: string;
+  rows: T[];
+}
+
+/** Groups in a stable order: deadlines — from overdue to done; statuses — as they first appear on the page. */
+export function groupOrderRows<T extends GroupableOrder>(rows: readonly T[], grouping: OrderListGrouping, now: Date = new Date()): OrderListGroup<T>[] {
+  if (grouping === 'none') return [{ key: 'all', label: '', rows: [...rows] }];
+  if (grouping === 'deadline') {
+    return DEADLINE_GROUPS
+      .map((group) => ({ key: group.key, label: group.label, rows: rows.filter((row) => orderDeadlineGroupKey(row, now) === group.key) }))
+      .filter((group) => group.rows.length > 0);
+  }
+  const groups = new Map<string, OrderListGroup<T>>();
+  for (const row of rows) {
+    const name = typeof row.order_status_name === 'string' && row.order_status_name.trim() ? row.order_status_name.trim() : 'Без статуса';
+    const group = groups.get(name) ?? { key: name, label: name, rows: [] };
+    group.rows.push(row);
+    groups.set(name, group);
+  }
+  return [...groups.values()];
+}
+
+/** «NewLine», mockup 03: quick periods over the order date — the same «Дата заказа» filter as in the form. */
+export type OrderListPeriod = 'all' | 'today' | 'week' | '30d' | 'quarter';
+
+export const ORDER_LIST_PERIODS: ReadonlyArray<{ value: OrderListPeriod; label: string }> = [
+  { value: 'all', label: 'Все' },
+  { value: 'today', label: 'Сегодня' },
+  { value: 'week', label: 'Эта неделя' },
+  { value: '30d', label: '30 дней' },
+  { value: 'quarter', label: 'Квартал' },
+];
+
+const isoDay = (date: Date): string => {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+
+/** [from, to] as YYYY-MM-DD; `null` — no date limit. The week starts on Monday; the quarter is the calendar one. */
+export function orderListPeriodRange(period: OrderListPeriod, now: Date = new Date()): [string, string] | null {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (period === 'all') return null;
+  if (period === 'today') return [isoDay(today), isoDay(today)];
+  if (period === 'week') {
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return [isoDay(monday), isoDay(sunday)];
+  }
+  if (period === '30d') {
+    const from = new Date(today);
+    from.setDate(today.getDate() - 29);
+    return [isoDay(from), isoDay(today)];
+  }
+  const quarterStart = new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3, 1);
+  const quarterEnd = new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3 + 3, 0);
+  return [isoDay(quarterStart), isoDay(quarterEnd)];
+}
+
+/** Which quick period the current order-date filter is: `null` — a custom range. */
+export function orderListPeriodOf(filters: ReadonlyArray<{ field?: unknown; operator?: unknown; value?: unknown }>, now: Date = new Date()): OrderListPeriod | null {
+  const from = filters.find((filter) => filter.field === 'order_date' && filter.operator === 'gte')?.value;
+  const to = filters.find((filter) => filter.field === 'order_date' && filter.operator === 'lte')?.value;
+  if (from === undefined && to === undefined) return 'all';
+  for (const option of ORDER_LIST_PERIODS) {
+    const range = orderListPeriodRange(option.value, now);
+    if (range && range[0] === from && range[1] === to) return option.value;
+  }
+  return null;
+}

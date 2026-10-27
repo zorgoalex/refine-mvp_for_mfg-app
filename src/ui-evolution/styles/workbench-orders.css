@@ -2689,3 +2689,79 @@
     gap: 8px 14px;
   }
 }
+
+/* список заказов: строка-заголовок группы (мокап 03) */
+:root[data-ui-variant="workbench"] .orders-table .wb-order-group > td {
+  padding-top: 14px !important;
+  padding-bottom: 6px !important;
+  background: var(--evo-surface-muted) !important;
+  border-bottom: 1px solid var(--evo-border);
+  cursor: default;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-group__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--evo-text);
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-group__count {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--evo-surface);
+  color: var(--evo-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+
+/* список заказов: быстрые периоды по дате заказа (мокап 03), вид — как у периодов журналов */
+:root[data-ui-variant="workbench"] .wb-orders-periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+:root[data-ui-variant="workbench"] .wb-orders-periods__chip {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--evo-border);
+  border-radius: 999px;
+  background: var(--evo-surface);
+  color: var(--evo-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] button.wb-orders-periods__chip:hover {
+  border-color: var(--evo-primary);
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-orders-periods__chip[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--evo-primary) 35%, transparent);
+  background: var(--evo-primary-soft);
+  color: var(--evo-primary);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-orders-periods__chip:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: 1px;
+}
+
+:root[data-ui-variant="workbench"] .wb-orders-periods__chip--custom {
+  border-style: dashed;
+  color: var(--evo-text-secondary);
+  cursor: default;
+}
