@@ -1,63 +1,91 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Alert, Button, Card, Checkbox, Empty, Input, Select, Space, Tag, Typography, message } from 'antd';
 import { DeleteOutlined, PlusOutlined, StarFilled } from '@ant-design/icons';
 import type { EmployeeContact, EmployeeContactInput, EmployeeContactKind } from '../../api/employeeContactsApiTypes';
 import { isApiError } from '../../api/apiError';
 import {
   EMPLOYEE_CONTACT_KIND_LABELS, EMPLOYEE_CONTACTS_MAX,
-  addDraftRow, changeDraftKind, isContactsApiMissing, contactsToDraft, draftToInput, formatContact, removeDraftRow, setDraftPrimary, sortContacts,
+  addDraftRow, contactValueMaxLength, changeDraftKind, isContactsApiMissing, contactsToDraft, draftToInput, formatContact, removeDraftRow, setDraftPrimary, sortContacts,
   type EmployeeContactDraft,
 } from './contactsModel';
 
-const PLACEHOLDERS = { phone: '+7 701 555 01 01', email: 'name@mebel.kz', telegram: '@username' } as const;
+const PLACEHOLDERS: Record<EmployeeContactKind, string> = {
+  phone: '+7 701 555 01 01', email: 'name@mebel.kz', telegram: '@username', address: 'Город, улица, дом',
+  whatsapp: '+7 701 555 01 01', viber: '+7 701 555 01 01', instagram: '@account', other: 'vk.com/…',
+};
+const FROM_ONEC_TAG = <Tag color="blue">из 1С</Tag>;
 
 /** Where a contact set lives: employees, suppliers, vendors and clients each bring their own API. */
 export interface ContactsSource {
-  load: (ownerId: number) => Promise<{ version: number; contacts: EmployeeContact[] }>;
-  save: (ownerId: number, body: { version: number; contacts: EmployeeContactInput[] }) => Promise<{ version: number; contacts: EmployeeContact[] }>;
+  load: (ownerId: number) => Promise<LoadedContacts>;
+  save: (ownerId: number, body: { version: number; contacts: EmployeeContactInput[] }) => Promise<LoadedContacts>;
   /** The API code of a stale set version. */
   conflictCode: string;
-  /** Kinds this owner keeps here (a client's phones live in the client phones list). */
+  /**
+   * Kinds this owner keeps here (a client's phones live in the client phones list). A backend that answers `kinds`
+   * decides instead (the client messengers can be switched off there; an older backend does not know them).
+   */
   kinds: readonly EmployeeContactKind[];
   title: string;
   /** The grey line under the editor. */
   hint: ReactNode;
 }
 
+interface LoadedContacts { version: number; contacts: EmployeeContact[]; kinds?: EmployeeContactKind[] }
+
 interface Props {
   ownerId: number | null | undefined;
   /** The editor; otherwise the read-only list. */
   editable: boolean;
   source: ContactsSource;
+  /** A change of it reloads the set (e.g. after a sync with 1C made elsewhere on the page). */
+  reloadToken?: number;
+  /** Unsaved edits appear or go: the page holds back actions that would reload the set over them. */
+  onDirtyChange?: (dirty: boolean) => void;
+  /** Another block of the page is changing these contacts (a sync with 1C, a link change): editing waits. */
+  locked?: boolean;
 }
 
 /** Contacts of an owner: phones, emails, Telegram accounts; one «основной» per kind. */
-export const ContactsCard: React.FC<Props> = ({ ownerId, editable, source }) => {
-  const [data, setData] = useState<{ version: number; contacts: EmployeeContact[] } | null>(null);
+export const ContactsCard: React.FC<Props> = ({ ownerId, editable, source, reloadToken = 0, onDirtyChange, locked = false }) => {
+  const [data, setData] = useState<LoadedContacts | null>(null);
   const [rows, setRows] = useState<EmployeeContactDraft[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [unsupported, setUnsupported] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  // Only the latest load applies its answer and ends «reloading» (loads may overlap: an owner change, a reload).
+  const loadGeneration = useRef(0);
 
   const load = useCallback(async () => {
     if (!ownerId) return;
+    const generation = ++loadGeneration.current;
+    setReloading(true);
     try {
       const result = await source.load(ownerId);
+      if (generation !== loadGeneration.current) return;
       setData(result);
       setRows(contactsToDraft(sortContacts(result.contacts)));
       setDirty(false);
       setLoadError(null);
     } catch (error) {
+      if (generation !== loadGeneration.current) return;
       if (isContactsApiMissing(error)) { setUnsupported(true); return; }
       setLoadError(error instanceof Error ? error.message : 'Не удалось загрузить контакты');
+    } finally {
+      if (generation === loadGeneration.current) setReloading(false);
     }
-  }, [ownerId, source]);
+    // reloadToken: a reload on demand of the page.
+  }, [ownerId, source, reloadToken]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
 
-  // While a save is in flight the set is locked: the answer replaces the rows, so later edits would be lost.
-  const change = (next: EmployeeContactDraft[]) => { if (saving) return; setRows(next); setDirty(true); };
+  // While a save, a reload or a change from another block of the page is in flight the set is locked: the answer
+  // replaces the rows, so later edits would be lost.
+  const busy = saving || reloading || locked;
+  const change = (next: EmployeeContactDraft[]) => { if (busy) return; setRows(next); setDirty(true); };
   const patch = (key: string, fields: Partial<EmployeeContactDraft>) =>
     change(rows.map((row) => (row.rowKey === key ? { ...row, ...fields } : row)));
 
@@ -86,6 +114,7 @@ export const ContactsCard: React.FC<Props> = ({ ownerId, editable, source }) => 
 
   if (!ownerId || unsupported) return null;
   const title = source.title;
+  const kinds = data?.kinds ?? source.kinds;
   if (loadError) return <Card title={title} size="small"><Alert type="error" showIcon message={loadError} /></Card>;
 
   if (!editable) {
@@ -99,6 +128,7 @@ export const ContactsCard: React.FC<Props> = ({ ownerId, editable, source }) => 
                 <Typography.Text type="secondary">{EMPLOYEE_CONTACT_KIND_LABELS[contact.kind]}</Typography.Text>
                 <Typography.Text copyable>{formatContact(contact)}</Typography.Text>
                 {contact.isPrimary ? <Tag color="gold">основной</Tag> : null}
+                {contact.origin === 'onec' ? FROM_ONEC_TAG : null}
                 {contact.note ? <Typography.Text type="secondary">{contact.note}</Typography.Text> : null}
               </Space>
             ))}
@@ -113,44 +143,55 @@ export const ContactsCard: React.FC<Props> = ({ ownerId, editable, source }) => 
       title={title}
       size="small"
       loading={!data}
-      extra={<Button type="primary" size="small" loading={saving} disabled={!dirty} onClick={() => { void save(); }}>Сохранить контакты</Button>}
+      extra={<Button type="primary" size="small" loading={saving} disabled={!dirty || reloading || locked} onClick={() => { void save(); }}>Сохранить контакты</Button>}
     >
       <Space direction="vertical" style={{ width: '100%' }} size={8}>
         {rows.length === 0 ? <Typography.Text type="secondary">Контактов нет</Typography.Text> : null}
-        {rows.map((row) => (
+        {rows.map((row) => row.fromOnec ? (
+          // A contact from 1C: its value lives in 1C; here only «основной» moves.
+          <div key={row.rowKey} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            <Typography.Text type="secondary" style={{ width: 120 }}>{EMPLOYEE_CONTACT_KIND_LABELS[row.kind]}</Typography.Text>
+            <Typography.Text style={{ flex: '1 1 200px', minWidth: 0 }}>
+              {formatContact({ kind: row.kind, value: row.value, valueNormalized: row.value })} {FROM_ONEC_TAG}
+            </Typography.Text>
+            <Checkbox disabled={busy} checked={row.isPrimary} onChange={() => change(setDraftPrimary(rows, row.rowKey))}>
+              {row.isPrimary ? <><StarFilled style={{ color: '#faad14' }} /> основной</> : 'основной'}
+            </Checkbox>
+          </div>
+        ) : (
           <div key={row.rowKey} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
             <Select
-              disabled={saving}
+              disabled={busy}
               value={row.kind}
               style={{ width: 120 }}
-              options={source.kinds.map((kind) => ({ value: kind, label: EMPLOYEE_CONTACT_KIND_LABELS[kind] }))}
+              options={[...kinds, ...(kinds.includes(row.kind) ? [] : [row.kind])].map((kind) => ({ value: kind, label: EMPLOYEE_CONTACT_KIND_LABELS[kind] }))}
               onChange={(kind) => change(changeDraftKind(rows, row.rowKey, kind))}
             />
             <Input
-              disabled={saving}
+              disabled={busy}
               value={row.value}
-              maxLength={200}
+              maxLength={contactValueMaxLength(row.kind)}
               placeholder={PLACEHOLDERS[row.kind]}
               style={{ flex: '1 1 200px', minWidth: 0 }}
               onChange={(event) => patch(row.rowKey, { value: event.target.value })}
             />
-            <Checkbox disabled={saving} checked={row.isPrimary} onChange={() => change(setDraftPrimary(rows, row.rowKey))}>
+            <Checkbox disabled={busy} checked={row.isPrimary} onChange={() => change(setDraftPrimary(rows, row.rowKey))}>
               {row.isPrimary ? <><StarFilled style={{ color: '#faad14' }} /> основной</> : 'основной'}
             </Checkbox>
             <Input
-              disabled={saving}
+              disabled={busy}
               value={row.note}
               maxLength={200}
-              placeholder="Примечание"
+              placeholder={row.kind === 'other' ? 'Подпись (например, VK)' : 'Примечание'}
               style={{ flex: '1 1 160px', minWidth: 0 }}
               onChange={(event) => patch(row.rowKey, { note: event.target.value })}
             />
-            <Button aria-label="Удалить контакт" disabled={saving} icon={<DeleteOutlined />} danger type="text" onClick={() => change(removeDraftRow(rows, row.rowKey))} />
+            <Button aria-label="Удалить контакт" disabled={busy} icon={<DeleteOutlined />} danger type="text" onClick={() => change(removeDraftRow(rows, row.rowKey))} />
           </div>
         ))}
         <Space wrap>
-          {source.kinds.map((kind) => (
-            <Button key={kind} size="small" icon={<PlusOutlined />} disabled={saving || rows.length >= EMPLOYEE_CONTACTS_MAX}
+          {kinds.map((kind) => (
+            <Button key={kind} size="small" icon={<PlusOutlined />} disabled={busy || rows.filter((row) => !row.fromOnec).length >= EMPLOYEE_CONTACTS_MAX}
               onClick={() => change(addDraftRow(rows, kind))}>
               {EMPLOYEE_CONTACT_KIND_LABELS[kind]}
             </Button>

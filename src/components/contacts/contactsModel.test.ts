@@ -53,3 +53,31 @@ describe('employee contacts editor model', () => {
     expect(draftToInput(addDraftRow(rows, 'email'))).toHaveProperty('error');
   });
 });
+
+describe('contacts that came from 1C and addresses', () => {
+  const fromOnec = [
+    { contactId: 7, kind: 'phone' as const, value: '+7 (701) 555-11-01', valueNormalized: '77015551101', isPrimary: false, note: null, origin: 'onec' as const },
+    { contactId: 8, kind: 'address' as const, value: 'Алматы, ул. Тестовая, 1', valueNormalized: 'алматы, ул. тестовая, 1', isPrimary: true, note: null, origin: 'onec' as const },
+  ];
+
+  it('a row from 1C cannot be removed or change its kind, but can become «основной»; it is sent back as it is', () => {
+    let rows = contactsToDraft(sortContacts([...contacts, ...fromOnec]));
+    const onec = rows.find((row) => row.contactId === 7);
+    expect(onec?.fromOnec).toBe(true);
+    expect(removeDraftRow(rows, onec?.rowKey as string)).toEqual(rows);
+    expect(changeDraftKind(rows, onec?.rowKey as string, 'email')).toEqual(rows);
+    rows = setDraftPrimary(rows, onec?.rowKey as string);
+    const body = draftToInput(rows);
+    expect('contacts' in body && body.contacts.find((contact) => contact.contactId === 7)).toEqual({
+      contactId: 7, kind: 'phone', value: '+7 (701) 555-11-01', isPrimary: true, note: null,
+    });
+  });
+
+  it('an address is shown as written and sorted after the other kinds; rows from 1C do not count against the limit', () => {
+    expect(formatContact(fromOnec[1])).toBe('Алматы, ул. Тестовая, 1');
+    expect(sortContacts([...fromOnec, ...contacts]).map((contact) => contact.kind)).toEqual(['phone', 'phone', 'phone', 'email', 'address']);
+    const own = Array.from({ length: 20 }, (_, index) => ({ contactId: 100 + index, kind: 'email' as const, value: `u${index}@t.kz`,
+      valueNormalized: `u${index}@t.kz`, isPrimary: index === 0, note: null }));
+    expect('contacts' in draftToInput(contactsToDraft([...own, ...fromOnec]))).toBe(true);
+  });
+});
