@@ -22,6 +22,7 @@ export const PaymentsPage: React.FC<IResourceComponentsProps> = (props) => {
   if (!canSeeOnecReceiptsTab()) return <PaymentList {...props} />;
   return (
     <Tabs
+      className="payments-page-tabs"
       activeKey={tab}
       onChange={(key) => setTab(key === 'onec' ? 'onec' : 'payments')}
       destroyInactiveTabPane

@@ -42,6 +42,8 @@ export interface EvolutionHeaderUtilitiesProps {
   actionsClassName?: string;
   operational?: boolean;
   tablet?: boolean;
+  /** «NewLine» keeps quick search in the sidebar, so the top bar holds only the actions. */
+  hideSearch?: boolean;
 }
 
 export const EvolutionHeaderUtilities: React.FC<EvolutionHeaderUtilitiesProps> = ({
@@ -51,6 +53,7 @@ export const EvolutionHeaderUtilities: React.FC<EvolutionHeaderUtilitiesProps> =
   actionsClassName = '',
   operational = false,
   tablet = false,
+  hideSearch = false,
 }) => {
   const { data: identity } = useGetIdentity<UserIdentity>();
   const { mutate: logout } = useLogout();
@@ -79,6 +82,7 @@ export const EvolutionHeaderUtilities: React.FC<EvolutionHeaderUtilitiesProps> =
           />
         ) : null}
         {!tablet ? (
+          hideSearch ? null : (
           <Button
             aria-label="Открыть быстрый переход"
             className="evolution-header__search"
@@ -89,6 +93,7 @@ export const EvolutionHeaderUtilities: React.FC<EvolutionHeaderUtilitiesProps> =
             <span>{searchLabel}</span>
             <kbd>Ctrl K</kbd>
           </Button>
+          )
         ) : null}
       </div>
 

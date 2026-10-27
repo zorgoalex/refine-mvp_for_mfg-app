@@ -21,15 +21,34 @@ import { useGlobalUnloadGuard } from '../../hooks/useTabDirty';
 import { useUiVariant } from '../../ui-variant/UiVariantProvider';
 import { EvolutionAirNavigation } from './EvolutionAirNavigation';
 import { EvolutionHeader } from './EvolutionHeader';
+import { EvolutionHeaderUtilities } from './EvolutionHeaderUtilities';
+import { WorkbenchMobileTabBar } from './WorkbenchMobileTabBar';
 import { EvolutionMobileNavigation } from './EvolutionMobileNavigation';
 import { EvolutionSider } from './EvolutionSider';
 import { EvolutionTabletNavigation } from './EvolutionTabletNavigation';
 import { EvolutionWorkspaceTabs } from './EvolutionWorkspaceTabs';
+import { WorkbenchReferenceRail } from './WorkbenchReferenceRail';
 import { nextTabletHeaderCompactState } from './tabletHeaderScroll';
 import { resolveModernRouteFamily, resolveOperationalPageKind } from './tabletRouteFamily';
 import '../styles/evolution.css';
 import '../../ui-operational/operational.css';
 import '../styles/tablet.css';
+import '../styles/workbench.css';
+import '../styles/workbench-orders.css';
+import '../styles/workbench-calendar.css';
+import '../styles/workbench-cut.css';
+import '../styles/workbench-board.css';
+import '../styles/workbench-procurement.css';
+import '../styles/workbench-payments.css';
+import '../styles/workbench-lists.css';
+import '../styles/workbench-stock.css';
+import '../styles/workbench-refs.css';
+import '../styles/workbench-config.css';
+import '../styles/workbench-bazis.css';
+import '../styles/workbench-scan.css';
+import '../styles/workbench-audit.css';
+import '../styles/workbench-profile.css';
+import '../styles/workbench-mobile.css';
 
 const EvolutionRouteSkeleton: React.FC = () => (
   <div
@@ -82,6 +101,31 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
   const isOperational = variant === 'line' || variant === 'air';
   const isAirDesktop = variant === 'air' && !isMobile && !isTablet;
   const effectiveCollapsed = isOperational ? false : collapsed;
+  // «NewLine» on desktop: one top bar — workspace tabs on the left, utilities on the right.
+  const isWorkbenchDesktop = variant === 'workbench' && !isMobile && !isTablet;
+  // «NewLine» on a phone: sections in a bottom tab bar, the full menu behind «Ещё».
+  const isWorkbenchPhone = variant === 'workbench' && isMobile;
+
+  // NewLine: the height of the top bar (utilities row + however many rows of tabs) as a CSS variable,
+  // for full-height screens (boards) that must end exactly at the bottom of the window.
+  const workbenchTopbarRef = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    const root = document.documentElement;
+    const bar = workbenchTopbarRef.current;
+    if (!isWorkbenchDesktop || !bar) {
+      root.style.removeProperty('--wb-chrome-height');
+      return undefined;
+    }
+    const publish = () => root.style.setProperty('--wb-chrome-height', `${Math.round(bar.getBoundingClientRect().height)}px`);
+    publish();
+    if (typeof ResizeObserver === 'undefined') return () => root.style.removeProperty('--wb-chrome-height');
+    const observer = new ResizeObserver(publish);
+    observer.observe(bar);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty('--wb-chrome-height');
+    };
+  }, [isWorkbenchDesktop]);
 
   useTabSync();
   useGlobalUnloadGuard();
@@ -150,6 +194,8 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
     effectiveCollapsed && !isAirDesktop ? 'evolution-shell--collapsed' : '',
     isAirDesktop ? 'evolution-shell--air-desktop' : '',
     isTablet ? 'evolution-shell--tablet' : '',
+    isWorkbenchDesktop ? 'evolution-shell--topbar' : '',
+    isWorkbenchPhone ? 'evolution-shell--wb-phone' : '',
   ].filter(Boolean).join(' ');
 
   return (
@@ -173,15 +219,22 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
         )
       ) : null}
       <Layout className="evolution-shell__main">
-        {!isAirDesktop && !isTabletLandscape ? (
+        {isWorkbenchDesktop ? (
+          <div className="wb-topbar" ref={workbenchTopbarRef}>
+            <EvolutionWorkspaceTabs />
+            <div className="wb-topbar__actions">
+              <EvolutionHeaderUtilities hideSearch />
+            </div>
+          </div>
+        ) : !isAirDesktop && !isTabletLandscape ? (
           <EvolutionHeader
-            onOpenSider={isMobile || isTabletPortrait ? () => setIsNavigationOpen(true) : undefined}
+            onOpenSider={(isMobile && !isWorkbenchPhone) || isTabletPortrait ? () => setIsNavigationOpen(true) : undefined}
             operational={isOperational}
             tablet={isTabletPortrait}
           />
         ) : null}
         <FrontendVersionNotice />
-        {!isOperational ? <EvolutionWorkspaceTabs /> : null}
+        {isWorkbenchDesktop ? null : (!isOperational ? <EvolutionWorkspaceTabs /> : null)}
         <Layout.Content
           className="evolution-shell__content"
           data-modern-route={routeFamily}
@@ -192,6 +245,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
           tabIndex={-1}
         >
           <GlobalTableTopScrollbars />
+          {isWorkbenchDesktop ? <WorkbenchReferenceRail /> : null}
           <div className="evolution-screen-frame" data-modern-route={routeFamily}>
             <React.Suspense fallback={<EvolutionRouteSkeleton />}>
               <KeepAliveOutlet />
@@ -201,6 +255,9 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
         </Layout.Content>
         <AppFooter />
       </Layout>
+      {isWorkbenchPhone ? (
+        <WorkbenchMobileTabBar moreOpen={isNavigationOpen} onOpenMore={() => setIsNavigationOpen(true)} />
+      ) : null}
       {isMobile || isTablet ? (
         <EvolutionMobileNavigation
           onClose={() => setIsNavigationOpen(false)}

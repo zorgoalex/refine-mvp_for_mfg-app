@@ -103,5 +103,13 @@ export interface NotificationEventContext {
    * event has superseded this one.
    */
   isCurrentDeadlineEvent: boolean;
+  /** Номер заказа (`orders.order_name`) и названия статусов события — для русского текста уведомления. */
+  orderName?: string | null;
+  orderStatusName?: string | null;
+  previousOrderStatusName?: string | null;
+  productionStatusName?: string | null;
+  previousProductionStatusName?: string | null;
+  paymentStatusName?: string | null;
+  previousPaymentStatusName?: string | null;
   payload: Record<string, unknown>;
 }

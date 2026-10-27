@@ -1,0 +1,69 @@
+.order-production-flow__stages {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.order-production-flow__stage {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--app-border-soft, var(--app-border));
+  border-radius: 8px;
+  background: var(--app-surface);
+}
+
+.order-production-flow__stage[data-empty='true'] {
+  background: transparent;
+  color: var(--app-text-muted);
+}
+
+.order-production-flow__name {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-production-flow__stage[data-empty='true'] .order-production-flow__name {
+  font-weight: 500;
+}
+
+.order-production-flow__count {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.order-production-flow__bar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--wb-progress-track, var(--app-surface-muted));
+}
+
+.order-production-flow__bar > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--wb-progress-done, var(--app-text-muted));
+}
+
+.order-production-flow__stage[data-unassigned='true'] .order-production-flow__bar > i {
+  background: var(--wb-progress-start, var(--app-text-muted));
+}
+
+.order-production-flow__caption,
+.order-production-flow__empty {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.order-production-flow__caption {
+  margin-top: 8px;
+}

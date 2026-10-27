@@ -37,7 +37,19 @@ import {
 const { Text } = Typography;
 const { TextArea } = Input;
 
-const TEMPLATE_PLACEHOLDERS = ['{orderId}', '{clientId}', '{orderStatusId}', '{eventType}'];
+const TEMPLATE_PLACEHOLDERS = [
+  '{orderName}',
+  '{orderStatusName}',
+  '{previousOrderStatusName}',
+  '{productionStatusName}',
+  '{previousProductionStatusName}',
+  '{paymentStatusName}',
+  '{previousPaymentStatusName}',
+  '{orderId}',
+  '{clientId}',
+  '{orderStatusId}',
+  '{eventType}',
+];
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   'order.status_changed': 'Изменение статуса заказа',
@@ -63,10 +75,17 @@ const PROCUREMENT_CHANGE_LABELS: Record<string, string> = {
 const ALLOCATION_ROLE_LABELS: Record<string, string> = { receipt: 'приход', payment: 'оплата' };
 
 const TEMPLATE_PLACEHOLDER_LABELS: Record<string, string> = {
-  '{orderId}': 'заказ',
-  '{clientId}': 'клиент',
-  '{orderStatusId}': 'статус заказа',
-  '{eventType}': 'тип события',
+  '{orderName}': 'номер заказа',
+  '{orderStatusName}': 'статус заказа',
+  '{previousOrderStatusName}': 'прежний статус заказа',
+  '{productionStatusName}': 'статус производства',
+  '{previousProductionStatusName}': 'прежний статус производства',
+  '{paymentStatusName}': 'статус оплаты',
+  '{previousPaymentStatusName}': 'прежний статус оплаты',
+  '{orderId}': 'id заказа',
+  '{clientId}': 'id клиента',
+  '{orderStatusId}': 'id статуса заказа',
+  '{eventType}': 'код события',
 };
 
 const RESOLVER_LABELS: Record<RecipientResolverKind, string> = {
@@ -929,7 +948,7 @@ export function NotificationRulesConfig() {
             <Input
               value={draft.titleTemplate}
               onChange={(event) => updateDraft({ titleTemplate: event.target.value })}
-              placeholder="Оставьте пустым для значения по умолчанию"
+              placeholder="Пусто — «Заказ <номер>: статус заказа «<статус>»»"
             />
           </Form.Item>
 
@@ -949,7 +968,7 @@ export function NotificationRulesConfig() {
               value={draft.messageTemplate}
               onChange={(event) => updateDraft({ messageTemplate: event.target.value })}
               rows={3}
-              placeholder="У заказа {orderId} истёк срок"
+              placeholder="Пусто — «Заказ <номер>: статус заказа изменён с «<было>» на «<стало>».»"
             />
           </Form.Item>
             </>

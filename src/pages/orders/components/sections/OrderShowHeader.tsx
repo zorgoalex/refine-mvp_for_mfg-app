@@ -2,9 +2,9 @@
 // Adapted from OrderHeaderSummary for use with props instead of store
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Tag, Space, Typography, Dropdown } from 'antd';
+import { Button, Tag, Space, Typography, Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
-import { StarOutlined, EyeOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, StarOutlined, EyeOutlined, PhoneOutlined, WalletOutlined } from '@ant-design/icons';
 import { useList } from '../../../../query/orderLifecycleQueries';
 import { useNavigate } from 'react-router-dom';
 import { formatNumber } from '../../../../utils/numberFormat';
@@ -26,6 +26,9 @@ import { featureFlags } from '../../../../config/featureFlags';
 import { collectOrderBasisProjects } from './orderBasisProjects';
 import { buildOrderHeaderMaterialSummaryItems } from '../../orderMaterialsSummary';
 import type { OrderHdfDetail } from '../../../../types/orders';
+import { useOptionalUiVariant } from '../../../../ui-variant/UiVariantProvider';
+import { orderDeadlineHint, orderStatusTone, paymentStatusTone } from '../../orderListWorkbench';
+import { initials as clientInitials } from './OrderShowWorkbenchSide';
 
 const { Text } = Typography;
 
@@ -41,6 +44,13 @@ interface OrderShowHeaderProps {
   headerMaterialName?: string | null;
   showFinancials?: boolean;
   hdfDetails?: OrderHdfDetail[];
+  /** «NewLine» page head: page-level actions rendered at the right of the title. */
+  actions?: React.ReactNode;
+  /** «NewLine» compact bar: the short action set shown while the head is scrolled away. */
+  compactActions?: React.ReactNode;
+  /** «NewLine» page head: project code shown in the sub line. */
+  projectLabel?: string | null;
+  onAddPayment?: () => void;
 }
 
 export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
@@ -52,9 +62,14 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
   headerMaterialName,
   showFinancials = true,
   hdfDetails = [],
+  actions,
+  compactActions,
+  projectLabel,
+  onAddPayment,
 }) => {
   const navigate = useNavigate();
   const isOperational = useOperationalUi();
+  const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
   const { getSetting } = useOrderAppSettings();
   const canViewEmployees = !featureFlags.useBackendPermissions || can('employees.view');
   const canViewReferences = !featureFlags.useBackendPermissions || can('references.view');
@@ -341,6 +356,250 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             <small>{`Оплачено ${formatNumber(paidAmount, 0)} ${CURRENCY_SYMBOL}`}</small>
           </div>
         )}
+      </div>
+    );
+  }
+
+  if (isWorkbench) {
+    // «NewLine»: шапка страницы и плитки показателей из тех же данных, что сводка ниже.
+    const orderStatusName = record?.order_status_name || 'Не назначен';
+    const paymentStatusName = record?.payment_status_name || 'Не назначен';
+    const deadlineAt = record?.planned_completion_date ? dayjs(record.planned_completion_date) : null;
+    const deadlineHint = orderDeadlineHint(record ?? {});
+    const discountPercent = totalAmount > 0 ? (discount / totalAmount) * 100 : 0;
+    const paidShare = finalAmount > 0 ? Math.min(1, paidAmount / finalAmount) : 0;
+    // тиын показываем только когда они есть: «160 381 ₸», но «7 818,65 ₸»
+    const money = (value: number) => `${formatNumber(value, Math.abs(value * 100 - Math.round(value) * 100) < 0.5 ? 0 : 2)} ${CURRENCY_SYMBOL}`;
+    const constructorName = basisProjects.length === 0
+      ? (latestDowelingLink?.doweling_order?.design_engineer_id
+        ? employeesMap.get(latestDowelingLink.doweling_order.design_engineer_id) || '—'
+        : !latestDowelingLink && record?.design_engineer ? record.design_engineer : null)
+      : null;
+    const statusPills = (
+      <>
+        <span className="wb-pill wb-pill--lg" data-tone={orderStatusTone(record?.order_status_name)}>
+          {orderStatusName}
+        </span>
+        {showFinancials && (
+          <span className="wb-pill wb-pill--lg" data-tone={paymentStatusTone(record?.payment_status_name)}>
+            {paymentStatusName}
+          </span>
+        )}
+      </>
+    );
+
+    if (compactSticky) {
+      return (
+        <div className="wb-order-bar" aria-label="Сводка заказа">
+          <b className="wb-order-bar__title">Заказ {record?.order_name || ''}</b>
+          {statusPills}
+          <span className="wb-order-bar__meta">
+            {record?.client_name || '—'}
+            {deadlineAt ? ` · срок ${deadlineAt.format('DD.MM')}` : ''}
+          </span>
+          <span className="wb-order-bar__fact" title="Состав заказа">
+            {formatNumber(totals.parts_count, 0)} дет. · {formatNumber(totals.total_area, 2)} м²
+          </span>
+          {showFinancials && (
+            <span className="wb-order-bar__fact" title="Сумма заказа и оплата">
+              <b>{money(finalAmount)}</b>
+              {remainingAmount > 0
+                ? <> · <span data-tone="warning">остаток {money(remainingAmount)}</span></>
+                : <> · <span data-tone="ready">оплачен полностью</span></>}
+            </span>
+          )}
+          {currentProductionStatusCodes.length > 0 && (
+            <span className="wb-order-bar__production">
+              <ProductionStagesDisplay
+                passedCodes={currentProductionStatusCodes}
+                displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
+                codeToLetter={productionWorkflowDisplay?.codeToLetter}
+                codeToName={productionWorkflowDisplay?.codeToName}
+                fontSize={12}
+                passedColor="#52c41a"
+                showTooltip={true}
+              />
+            </span>
+          )}
+          <span className="wb-order-bar__spacer" />
+          {compactActions}
+        </div>
+      );
+    }
+
+    const clientName = (
+      <span className="wb-order-head__client" style={record?.client_id ? { cursor: 'context-menu' } : undefined}>
+        {record?.client_name || '—'}
+      </span>
+    );
+
+    // телефон (мокап 22): главные действия — в нижней панели; на компьютере она скрыта стилями
+    const phoneActions = primaryPhone || onAddPayment ? (
+      <div className="wb-mactions" aria-label="Действия с заказом">
+        {primaryPhone ? (
+          <Button className="wb-mactions__btn" href={`tel:${primaryPhone.replace(/[^+\d]/g, '')}`} icon={<PhoneOutlined />}>
+            Позвонить
+          </Button>
+        ) : null}
+        {onAddPayment ? (
+          <Button className="wb-mactions__btn wb-mactions__btn--primary" type="primary" onClick={onAddPayment} icon={<WalletOutlined />}>
+            Добавить платёж
+          </Button>
+        ) : null}
+      </div>
+    ) : null;
+
+    return (
+      <div className="order-show-header wb-order-head" aria-label="Сводка заказа">
+        {phoneActions}
+        <div className="wb-order-head__top">
+          <div className="wb-order-head__identity">
+            <div className="wb-order-head__title">
+              {/* телефон (мокап 22): «Назад» вместо хлебных крошек; на компьютере скрыта стилями */}
+              <Button
+                className="wb-order-head__back"
+                type="text"
+                aria-label="Назад к заказам"
+                icon={<ArrowLeftOutlined />}
+                onClick={() => navigate('/orders')}
+              />
+              <h1 className="wb-order-head__number">Заказ {record?.order_name || ''}</h1>
+              {statusPills}
+              <span className="wb-order-head__priority" title="Приоритет">
+                <StarOutlined
+                  aria-hidden
+                  style={{ color: record?.priority && record.priority <= 50 ? 'var(--evo-warning)' : undefined }}
+                />
+                {record?.priority !== undefined ? formatNumber(record.priority, 0) : '—'}
+              </span>
+            </div>
+            <div className="wb-order-head__meta">
+              <span className="wb-avatar wb-order-head__avatar" aria-hidden>
+                {clientInitials(record?.client_name || '') || '—'}
+              </span>
+              {record?.client_id ? (
+                <Dropdown
+                  menu={{ items: clientMenuItems }}
+                  trigger={['contextMenu']}
+                  open={clientMenuOpen}
+                  onOpenChange={setClientMenuOpen}
+                >
+                  {clientName}
+                </Dropdown>
+              ) : clientName}
+              {primaryPhone && (
+                <span className="wb-order-head__meta-item wb-order-head__meta-item--plain">
+                  <PhoneOutlined aria-hidden />
+                  <a href={`tel:${primaryPhone.replace(/[^+\d]/g, '')}`}>{primaryPhone}</a>
+                </span>
+              )}
+              <span className="wb-order-head__meta-item">
+                от {record?.order_date ? dayjs(record.order_date).format('DD.MM.YYYY') : '—'}
+              </span>
+              {record?.created_by_label ? (
+                <span className="wb-order-head__meta-item" title="Создал заказ">{record.created_by_label}</span>
+              ) : null}
+              {projectLabel ? <span className="wb-order-head__meta-item">{projectLabel}</span> : null}
+              {basisProjectSummary ? (
+                <span className="wb-order-head__meta-item" title={basisProjectSummary}>
+                  Базис-проект: <strong>{basisProjectSummary}</strong>
+                  {basisProjects.length === 0 && dowelingLinks.length > 1 && ` +${dowelingLinks.length - 1}`}
+                </span>
+              ) : null}
+              {basisProjectSummary && constructorName ? (
+                <span className="wb-order-head__meta-item">Конструктор: {constructorName}</span>
+              ) : null}
+            </div>
+          </div>
+          {actions ? <div className="wb-order-head__actions">{actions}</div> : null}
+        </div>
+
+        <div className="wb-order-head__tiles">
+          {showFinancials && (
+            <div className="wb-order-head__tile">
+              <span className="wb-order-head__label">Сумма</span>
+              <span className="wb-order-head__value">
+                {money(Number(record?.final_amount || record?.total_amount || 0))}
+              </span>
+              <span className="wb-order-head__sub">
+                {discount > 0 && (
+                  <span data-tone="danger">
+                    скидка {formatNumber(discountPercent, 1)}% · −{money(discount)}
+                  </span>
+                )}
+                {surcharge > 0 && (
+                  <span>наценка +{money(surcharge)}</span>
+                )}
+                {discount <= 0 && surcharge <= 0 && (
+                  <span>{formatNumber(totals.total_area, 2)} м² · без скидки</span>
+                )}
+              </span>
+            </div>
+          )}
+          {showFinancials && (
+            <div className="wb-order-head__tile">
+              <span className="wb-order-head__label">Оплачено</span>
+              <span className="wb-order-head__value">
+                <span className="wb-order-head__amount">{money(paidAmount)}</span>
+                {' '}
+                <span className="wb-order-head__of">из {money(finalAmount)}</span>
+              </span>
+              <span className="wb-order-head__bar" data-tone={remainingAmount > 0 ? 'warning' : 'ready'} aria-hidden>
+                <i style={{ width: `${Math.round(paidShare * 100)}%` }} />
+              </span>
+              <span className="wb-order-head__sub">
+                {remainingAmount > 0
+                  ? <span>остаток <b data-tone="warning">{money(remainingAmount)}</b></span>
+                  : <span data-tone="ready">оплачен полностью</span>}
+                {remainingAmount > 0 && onAddPayment ? (
+                  <button type="button" className="wb-link" onClick={onAddPayment}>внести</button>
+                ) : null}
+              </span>
+            </div>
+          )}
+          <div className="wb-order-head__tile">
+            <span className="wb-order-head__label">Срок выполнения</span>
+            <span className="wb-order-head__value">
+              {deadlineAt ? `${deadlineAt.format('DD.MM')} · ${deadlineAt.format('dd')}` : '—'}
+            </span>
+            <span className="wb-order-head__sub">
+              <span data-tone={deadlineHint?.tone ?? 'neutral'}>{deadlineHint?.text ?? 'срок не указан'}</span>
+            </span>
+          </div>
+          <div className="wb-order-head__tile">
+            <span className="wb-order-head__label">Состав</span>
+            <span className="wb-order-head__value">
+              {formatNumber(totals.parts_count, 0)} дет.
+            </span>
+            <span className="wb-order-head__sub">
+              <span>{formatNumber(totals.positions_count, 0)} поз. · {formatNumber(totals.total_area, 2)} м²</span>
+            </span>
+          </div>
+          <div className="wb-order-head__tile">
+            <span className="wb-order-head__label">Материал</span>
+            <span className="wb-order-head__value wb-order-head__value--text" title={materialsSummary}>
+              {materialSummaryItems.length === 0 ? '—' : materialSummaryItems.map((item, index) => (
+                <React.Fragment key={item.key}>
+                  {index > 0 && ', '}
+                  <span className="wb-order-head__material" style={{ '--wb-material-color': getMaterialColor(item.colorName) } as React.CSSProperties}>{item.label}</span>
+                </React.Fragment>
+              ))}
+            </span>
+            <span className="wb-order-head__sub wb-order-head__sub--production">
+              {currentProductionStatusCodes.length > 0 ? (
+                <ProductionStagesDisplay
+                  passedCodes={currentProductionStatusCodes}
+                  displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
+                  codeToLetter={productionWorkflowDisplay?.codeToLetter}
+                  codeToName={productionWorkflowDisplay?.codeToName}
+                  fontSize={12}
+                  passedColor="#52c41a"
+                  showTooltip={true}
+                />
+              ) : null}
+            </span>
+          </div>
+        </div>
       </div>
     );
   }

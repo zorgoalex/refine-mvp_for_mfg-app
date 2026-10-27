@@ -1,0 +1,234 @@
+/* «NewLine»: обычные экраны-списки (класс `wb-list` на обёртке страницы): таблица в карточке,
+   плотные строки, одна тонкая линия, без «зебры». Только оформление. */
+
+/* antd 5.0.5 красит отсортированный заголовок полупрозрачным colorFillSecondary: у закреплённой колонки
+   сквозь него видны уехавшие под неё заголовки. Любая таблица NewLine; в `wb-list` фон ниже задан свой. */
+:root[data-ui-variant="workbench"] .ant-table-thead > tr > th.ant-table-column-sort:is(.ant-table-cell-fix-left, .ant-table-cell-fix-right) {
+  background: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .wb-list .ant-table-wrapper {
+  overflow: hidden;
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .wb-list .ant-table-wrapper .ant-table-thead > tr > th {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--evo-border);
+  background: var(--evo-surface);
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-list .ant-table-wrapper .ant-table-thead > tr > th::before {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-list .ant-table-wrapper .ant-table-tbody > tr > td {
+  padding: 7px 12px;
+  border-top: 0;
+  border-bottom: 1px solid var(--evo-border);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* !important: общая «зебра» таблиц задаёт фон строк с !important */
+:root[data-ui-variant="workbench"] .wb-list .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:not(.highlighted-row):not(.order-deleted-reference-row) > td {
+  background-color: var(--evo-surface) !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-list .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:not(.highlighted-row):not(.order-deleted-reference-row):hover > td {
+  background-color: color-mix(in srgb, var(--evo-primary) 4%, var(--evo-surface)) !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-list .ant-table-wrapper .ant-table-tbody > tr:last-child > td {
+  border-bottom: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-list .ant-table-wrapper .ant-pagination {
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--evo-border);
+  font-size: 12.5px;
+}
+
+/* главное в строке — название; служебный id приглушён */
+:root[data-ui-variant="workbench"] .wb-list .wb-list__title {
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-list .wb-list__muted {
+  color: var(--evo-text-secondary);
+}
+
+/* действия в строке — спокойные иконки без рамок */
+:root[data-ui-variant="workbench"] .wb-list .ant-table-tbody > tr > td .ant-btn-icon-only.ant-btn-sm {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-list .ant-table-tbody > tr > td .ant-btn-icon-only.ant-btn-sm:hover {
+  background: var(--evo-surface-muted);
+  color: var(--evo-text);
+}
+
+/* блок фильтров над таблицей */
+:root[data-ui-variant="workbench"] .wb-list .ant-page-header-content > div > .ant-card {
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-lg);
+  box-shadow: none;
+}
+
+/* --- «+Клиенты»: быстрые наборы и итоги страницы в тонах NewLine --- */
+:root[data-ui-variant="workbench"] .wb-list .ca-presets__item {
+  border-color: var(--evo-border);
+  background: var(--evo-surface);
+  color: var(--evo-text-secondary);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-list .ca-presets__item:hover {
+  border-color: var(--evo-border-strong, var(--evo-border));
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-list .ca-presets__item[aria-pressed="true"] {
+  border-color: var(--evo-primary);
+  background: color-mix(in srgb, var(--evo-primary) 10%, var(--evo-surface));
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-list .ca-presets__count,
+:root[data-ui-variant="workbench"] .wb-list .ca-totals {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-list .ca-totals b {
+  color: var(--evo-text);
+}
+
+/* --- дашборды и карточка клиента в тонах NewLine --- */
+:root[data-ui-variant="workbench"] .pa-panel,
+:root[data-ui-variant="workbench"] .ca-card__money {
+  border-color: var(--evo-border);
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .pa-panel__head span,
+:root[data-ui-variant="workbench"] .pa-dash__range,
+:root[data-ui-variant="workbench"] .pa-dash__state,
+:root[data-ui-variant="workbench"] .pa-rows__note,
+:root[data-ui-variant="workbench"] .ca-dash__legend,
+:root[data-ui-variant="workbench"] .ca-card__muted,
+:root[data-ui-variant="workbench"] .date-bars__label {
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .pa-dash__period {
+  border-color: var(--evo-border);
+  background: var(--evo-surface);
+  color: var(--evo-text-secondary);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .pa-dash__period[aria-pressed="true"] {
+  border-color: var(--evo-primary);
+  background: color-mix(in srgb, var(--evo-primary) 10%, var(--evo-surface));
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .pa-rows__bar,
+:root[data-ui-variant="workbench"] .ca-card__paid {
+  background: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .date-bars__track,
+:root[data-ui-variant="workbench"] .ca-months__track {
+  border-bottom-color: var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .pa-debtors td {
+  border-top-color: var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .ca-card__tag:not([data-recency]) {
+  background: var(--evo-surface-muted);
+}
+
+/* --- «Пользователи»: панель как у справочников, поиск и отбор над таблицей --- */
+:root[data-ui-variant="workbench"] .wb-users__counts {
+  display: inline-flex;
+  gap: 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-users__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-users__search {
+  width: 290px;
+  max-width: 100%;
+}
+
+:root[data-ui-variant="workbench"] .wb-users__who {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-users__names {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+:root[data-ui-variant="workbench"] .wb-users__name {
+  color: var(--evo-text);
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-users__login {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-users__role {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--evo-radius-sm, 6px);
+  background: var(--evo-surface-muted);
+  color: var(--evo-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-users .reference-table .ant-table-tbody > tr.ant-table-row > td {
+  height: 48px;
+}
+
+/* у пользователей первая колонка — имя, а не служебный id: не приглушаем */
+:root[data-ui-variant="workbench"] .wb-users .reference-table .ant-table-tbody > tr.ant-table-row > td:first-child {
+  color: inherit;
+}
+
+:root[data-ui-variant="workbench"] .wb-users .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
