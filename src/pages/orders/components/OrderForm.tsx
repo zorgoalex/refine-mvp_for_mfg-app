@@ -40,6 +40,7 @@ import { orderCatalogSubtotal } from '../../../utils/orderCatalogLines';
 import { can } from '../../../utils/permissions';
 import { ClientScreenFrameSlot } from '../../clientScreen/ClientScreenFrameSlot';
 import { ClientScreenOrderHeader } from '../../clientScreen/ClientScreenOrderHeader';
+import { useWorkbenchCustomerSection } from '../../clientScreen/workbenchCustomerSection';
 import { authSession } from '../../../api/authSession';
 import { useOrderFinancialVisibility } from '../../../hooks/useOrderFinancialVisibility';
 import { resolveOrderTabLabel } from '../../../utils/tabLabels';
@@ -163,6 +164,8 @@ interface BazisDraftRuntime {
 const ORDER_FORM_COMPACT_HEADER_STICKY_HEIGHT = 40;
 // «NewLine» hybrid form: these tabs become always-open sections of one page, the rest are folds.
 const WORKBENCH_FORM_BAR_HEIGHT = 52;
+// the customer screen follows the section in view once scrolling has rested this long
+const WORKBENCH_CUSTOMER_SPY_SETTLE_MS = 250;
 const HYBRID_MAIN_SECTION_KEYS: readonly string[] = ['basic', 'dates', 'details', 'services', 'finance'];
 const HYBRID_MAIN_SECTION_ORDER: readonly string[] = ['basic', 'details', 'services', 'finance'];
 
@@ -260,9 +263,13 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const [workbenchAnchorsStuck, setWorkbenchAnchorsStuck] = useState(false);
   const workbenchAnchorsRef = useRef<HTMLElement>(null);
   const [workbenchSpySection, setWorkbenchSpySection] = useState<string | null>(null);
+  // the same for the customer screen, skipping closed folds (the manager sees only their heading)
+  const [workbenchOpenSpySection, setWorkbenchOpenSpySection] = useState<string | null>(null);
   // the anchor the user clicked stays current until they scroll the form themselves
   // (a short last section cannot reach the top of the screen)
   const [workbenchPinnedSection, setWorkbenchPinnedSection] = useState<string | null>(null);
+  // every navigation counts, also to the section already current (the customer screen follows it)
+  const [workbenchNavigationSeq, setWorkbenchNavigationSeq] = useState(0);
   const isMobile = useIsMobile();
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const orderKey = mode === 'create' ? NEW_ORDER_KEY : String(orderId);
@@ -501,11 +508,22 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const [hybridOpenSections, setHybridOpenSections] = useState<string[]>([]);
   const hybridSectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const hybridInitialTabRef = useRef(true);
+  const keepAliveActive = useKeepAlive().isActive;
   const isFormSectionActive = (key: string) => (
     isWorkbench
       ? HYBRID_MAIN_SECTION_KEYS.includes(key) || hybridOpenSections.includes(key)
       : activeTab === key
   );
+  const workbenchCustomerSection = useWorkbenchCustomerSection({
+    orderKey,
+    active: keepAliveActive,
+    activeTab,
+    pinned: workbenchPinnedSection,
+    spy: workbenchOpenSpySection,
+    isOpen: isFormSectionActive,
+    foldsKey: hybridOpenSections.join('\u0001'),
+    navigationSeq: workbenchNavigationSeq,
+  });
   const hybridSpacerRef = useRef<HTMLDivElement>(null);
   const [hybridSpacerHeight, setHybridSpacerHeight] = useState(0);
   const hybridSpacerHeightRef = useRef(0);
@@ -549,6 +567,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     }
     setActiveTab(key);
     setWorkbenchPinnedSection(key);
+    setWorkbenchNavigationSeq((value) => value + 1);
     scrollToFormSection(key);
   }, [scrollToFormSection]);
   // every existing jump (`?tab=finance`, save validation → details, Ctrl+Tab) lands on its section
@@ -2081,11 +2100,22 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   }, [activeTab, details.length, isMobile, isWorkbench, workspaceTabsHeight]);
 
   // «NewLine»: the compact bar appears once the page head has scrolled under the app chrome.
+  // A form kept alive under another workspace page measures nothing and keeps its pin: what is
+  // scrolled there is not this form (it is measured again when its page comes back).
   useEffect(() => {
-    if (!isWorkbench) return;
+    if (!isWorkbench || !workspaceTabActive) return;
     let frame = 0;
+    // The page is hidden by the workspace before this effect is cleaned up: a scroll in between must not
+    // measure the hidden form (all its boxes are empty then).
+    const formShown = () => {
+      const node = workbenchAnchorsRef.current ?? orderFormStickySentinelRef.current;
+      return !node || node.getClientRects().length > 0;
+    };
+    let customerSpyTimer = 0;
+    let customerSpyPending: string | null | undefined;
     const update = () => {
       frame = 0;
+      if (!formShown()) return;
       const head = orderFormStickySentinelRef.current?.parentElement?.querySelector('.wb-order-head__top');
       const next = head ? head.getBoundingClientRect().bottom < workbenchChromeBottom : false;
       setWorkbenchHeadHidden((prev) => (prev === next ? prev : next));
@@ -2098,6 +2128,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       const line = workbenchChromeBottom + WORKBENCH_FORM_BAR_HEIGHT + (anchors?.offsetHeight ?? 0) + 24;
       let current: string | null = null;
       let currentTop = -Infinity;
+      let currentOpen: string | null = null;
+      let currentOpenTop = -Infinity;
       for (const [key, node] of Object.entries(hybridSectionRefs.current)) {
         if (!node || key === 'dates') continue;
         const top = node.getBoundingClientRect().top;
@@ -2105,8 +2137,24 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
           current = key;
           currentTop = top;
         }
+        if (top <= line && top > currentOpenTop && (HYBRID_MAIN_SECTION_KEYS.includes(key) || hybridOpenSections.includes(key))) {
+          currentOpen = key;
+          currentOpenTop = top;
+        }
       }
       setWorkbenchSpySection((prev) => (prev === current ? prev : current));
+      // at the top of the page no section has reached the line yet: the manager sees the first one
+      const customerSection = currentOpen ?? (Object.values(hybridSectionRefs.current).some(Boolean) ? HYBRID_MAIN_SECTION_ORDER[0] : null);
+      // Taken a moment later and only if the form is still shown: leaving for another page scrolls the
+      // window to the top while this form is still on screen, and that must not move the customer.
+      if (customerSection !== customerSpyPending) {
+        customerSpyPending = customerSection;
+        window.clearTimeout(customerSpyTimer);
+        customerSpyTimer = window.setTimeout(() => {
+          if (formShown()) setWorkbenchOpenSpySection((prev) => (prev === customerSection ? prev : customerSection));
+          customerSpyPending = undefined;
+        }, WORKBENCH_CUSTOMER_SPY_SETTLE_MS);
+      }
     };
     // the extra room is dropped once the user has scrolled away from it (it is below the screen then)
     const dropSpacer = () => {
@@ -2120,6 +2168,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       frame = window.requestAnimationFrame(update);
     };
     const unpin = () => {
+      if (!formShown()) return;
       hybridScrollTimersRef.current.forEach((timer) => window.clearTimeout(timer));
       hybridScrollTimersRef.current = [];
       setWorkbenchPinnedSection(null);
@@ -2132,12 +2181,13 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     window.addEventListener('touchmove', unpin, { passive: true });
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
+      window.clearTimeout(customerSpyTimer);
       window.removeEventListener('scroll', schedule, { capture: true });
       window.removeEventListener('resize', schedule);
       window.removeEventListener('wheel', unpin);
       window.removeEventListener('touchmove', unpin);
     };
-  }, [isWorkbench, orderKey, setHybridSpacer, workbenchChromeBottom]);
+  }, [hybridOpenSections, isWorkbench, orderKey, setHybridSpacer, workbenchChromeBottom, workspaceTabActive]);
 
   useEffect(() => {
     const update = () => {
@@ -2267,11 +2317,14 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   }
 
   // Customer screen (second monitor): present this order, hide, emergency switch-off. Read-only for the form.
+  // «NewLine» shows the sections on one page: the customer follows the section the manager is at
+  // (see workbenchCustomerSection.ts), not only the last anchor clicked.
+  const clientScreenTab = isWorkbench ? workbenchCustomerSection : activeTab;
   const clientScreenControl = (
     <ClientScreenOrderHeader
       orderKey={orderKey}
       orderNumber={(headerNameData?.data as { order_full_number?: string | null } | undefined)?.order_full_number ?? null}
-      activeTab={activeTab}
+      activeTab={clientScreenTab}
       operational={isOperational}
       cutTab={cutTabEnabled}
     />
@@ -2602,7 +2655,13 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
                         setHybridOpenSections((current) => (
                           current.includes(key) ? current.filter((value) => value !== key) : [...current, key]
                         ));
-                        if (!open) setActiveTab(key);
+                        if (!open) {
+                          setActiveTab(key);
+                          setWorkbenchNavigationSeq((value) => value + 1);
+                        } else if (workbenchPinnedSection === key) {
+                          // a closed fold is no longer the place the anchor stands for
+                          setWorkbenchPinnedSection(null);
+                        }
                       }}
                     >
                       <RightOutlined className="wb-form-section__chevron" aria-hidden />

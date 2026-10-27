@@ -22,6 +22,7 @@ import { useOrderFilmStock } from '../../../inventory/useOrderFilmStock';
 import { filmStockAvailability } from '../../../inventory/filmStock';
 import { buildOrderMaterialsMirror } from '../../../clientScreen/orderMaterialsMirror';
 import { clearOrderTabMirror, publishOrderTabMirror } from '../../../clientScreen/orderTabMirror';
+import { featureFlags } from '../../../../config/featureFlags';
 
 const { Text } = Typography;
 
@@ -180,6 +181,8 @@ export const OrderMaterialsTab: React.FC = () => {
   // the manager may see it). Write-only for the tab; nothing here changes the tab or the order.
   const draftStoreApi = useOrderDraftStoreApi();
   useEffect(() => {
+    // Without the customer screen nobody reads the record: the tab does no extra work for it.
+    if (!featureFlags.clientScreen) return;
     publishOrderTabMirror(draftStoreApi, 'requirements', buildOrderMaterialsMirror({
       filmRows: filmMaterialRows,
       sheetRows: sheetMaterialRows,

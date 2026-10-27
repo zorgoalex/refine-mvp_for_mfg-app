@@ -3465,6 +3465,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const mirrorSortKey = String(activeSorter.key ?? '');
   const mirrorSortOrder = activeSorter.order ?? null;
   useEffect(() => {
+    // Without the customer screen nobody reads the record: the table does no extra work for it.
+    if (!featureFlags.clientScreen) return;
     const columnKeys = mirrorColumnKeys.split('\u0001').filter(Boolean);
     // The table component sorts its whole data source by the active visible column (empty grid rows
     // included); a grouped table is not sorted. The record carries the rows as they end up on screen.
