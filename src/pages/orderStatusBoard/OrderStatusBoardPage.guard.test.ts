@@ -496,7 +496,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).not.toContain('--status-board-cnc-order-column-offset-y');
     expect(css).not.toContain('--status-board-cnc-order-column-visual-height');
     expect(css).toMatch(
-      /\.status-board-page--cnc \.cnc-today-column--orders,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued\s*\{[^}]*position: sticky;[^}]*top: 4px;[^}]*align-self: start;[^}]*\}/s,
+      /\.status-board-page--cnc \.cnc-today-column--orders,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued\s*\{[^}]*position: sticky;[^}]*top: calc\(-1 \* var\(--status-board-cnc-column-top-border, 3px\)\);[^}]*align-self: start;[^}]*\}/s,
     );
     expect(css).not.toContain('translateY(var(--status-board-cnc-order-column-offset-y))');
     expect(css).not.toContain('will-change: transform');
@@ -1239,6 +1239,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     // inline updates: unchanged cards keep their objects and shared inputs; the move entry point is stable
     expect(page).toContain('reuseUnchangedCncColumns(stableCncPeriodColumnsRef.current, columns)');
     expect(page).toContain('renderDependencies={cncOrderCardRenderDependencies({');
+    // a packet card navigates without subscribing to the location (no re-render of every card on a route change)
+    expect(page).toContain('const { navigator } = useContext(UNSAFE_NavigationContext);');
+    expect(page).toContain('navigator.push(cutJobPath);');
+    // column headers stick under the toolbar while the board scrolls (columns clip, not scroll)
+    expect(css).toContain('.status-board-page--cnc .status-board-columns--cnc > .status-board-column {\n  overflow: clip;');
+    expect(css).toContain('> .status-board-column > .status-board-column__header {\n  position: sticky;\n  top: 0;');
     // the app-wide capture scroll listener reads column rects once per frame and never while the board is hidden
     expect(page).toContain("if (viewport?.closest('[hidden]')) return;");
     expect(page).toContain('if (frame) window.cancelAnimationFrame(frame);');
