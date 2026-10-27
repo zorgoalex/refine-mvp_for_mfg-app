@@ -21,6 +21,8 @@ import {
   buildCncOrderReadiness,
   cncOrderReadinessProgress,
   buildCncOrderStatusBoardRequestKey,
+  cncOrderStatusBoardKeyCovers,
+  narrowCncOrderStatusBoard,
   cncRelationStatePriority,
   cncManualMoveDestinations,
   cncManualMoveStorageKey,
@@ -655,6 +657,23 @@ describe('order status board model', () => {
     expect(buildCncOrderStatusBoardRequestKey([3, 7], sort, false)).not.toBe(
       buildCncOrderStatusBoardRequestKey([3, 7], sort),
     );
+  });
+
+  it('reuses a loaded order board for a narrower order set instead of reading it again', () => {
+    const sort = { sortBy: 'orderNumber' as const, sortOrder: 'asc' as const };
+    const loaded = buildCncOrderStatusBoardRequestKey([3, 7, 9], sort, false);
+    expect(cncOrderStatusBoardKeyCovers(loaded, buildCncOrderStatusBoardRequestKey([7, 3], sort, false))).toBe(true);
+    expect(cncOrderStatusBoardKeyCovers(loaded, buildCncOrderStatusBoardRequestKey([3, 8], sort, false))).toBe(false);
+    expect(cncOrderStatusBoardKeyCovers(loaded, buildCncOrderStatusBoardRequestKey([3], sort))).toBe(false);
+    expect(cncOrderStatusBoardKeyCovers(loaded,
+      buildCncOrderStatusBoardRequestKey([3], { ...sort, sortOrder: 'desc' }, false))).toBe(false);
+    expect(cncOrderStatusBoardKeyCovers(null, loaded)).toBe(false);
+    const full = board([column('new', [card(3), card(9)], 2, null), column('cut', [card(7)], 1, null)]);
+    const narrowed = narrowCncOrderStatusBoard(full, [3, 7]);
+    expect(narrowed.columns.map((c) => [c.key, c.total, c.cards.map((x) => x.orderId)])).toEqual([
+      ['new', 1, [3]], ['cut', 1, [7]],
+    ]);
+    expect(full.columns[0].cards).toHaveLength(2);
   });
 
   it('sorts CNC relation cards by active and related state before dimmed cards', () => {
