@@ -44,6 +44,7 @@ import { authSession } from "./api/authSession";
 import { cncTelegramApi } from "./api/cncTelegramApi";
 import { MDF_BOARD_PREFETCH_EVENT } from "./utils/siderMenuItems";
 import { markMdfBoardSnapshotReady } from "./utils/mdfBoardPrewarm";
+import { prefetchMdfBoardOpen } from "./api/mdfBoardOpenPrefetch";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
@@ -234,12 +235,31 @@ const SheetMaterialShow = lazy(async () => ({ default: (await import('./pages/sh
 const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
 const MDF_PREFETCH_COOLDOWN_MS = 25_000;
 
-function mdfDefaultDateRange(now = new Date()): { dateFrom: string; dateTo: string; operationalWindow: 'two_months' } {
+function mdfDefaultDateRange(now = new Date(), period?: CncOrderSearchPeriod): {
+  dateFrom: string; dateTo: string; operationalWindow: 'two_months';
+} {
   const dateTo = formatLocalDate(now);
   // the board opens on the period the user picked last, a month until then
-  const days = mdfBoardPeriodDays(readMdfBoardPeriod(authSession.getUser()?.id) ?? '1m');
+  const days = mdfBoardPeriodDays(period ?? readMdfBoardPeriod(authSession.getUser()?.id) ?? '1m');
   const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1));
   return { dateFrom: formatLocalDate(from), dateTo, operationalWindow: 'two_months' };
+}
+
+type CncOrderSearchPeriod = Parameters<typeof mdfBoardPeriodDays>[0];
+const MDF_BOARD_PERIODS: ReadonlySet<string> = new Set<CncOrderSearchPeriod>(['1d', '1w', '2w', '1m']);
+
+/** The board's first-load range when the current URL is a plain opening of the board for today (a reload keeps the
+ * board's own `?flow=…&date=…&period=…`); null for a focused card or another day — the page reads those itself. */
+function mdfBoardOpenRange(location: Location, now = new Date()): ReturnType<typeof mdfDefaultDateRange> | null {
+  if (location.pathname !== '/mdf-work-board') return null;
+  const params = new URLSearchParams(location.search);
+  if (params.has('cardKind') || params.has('cardId') || params.get('plannedToday') === '1') return null;
+  const date = params.get('date');
+  if (date && date !== formatLocalDate(now)) return null;
+  // the page's opening rule: the period the user left wins over the URL's
+  const period = params.get('period');
+  return mdfDefaultDateRange(now, readMdfBoardPeriod(authSession.getUser()?.id)
+    ?? (period && MDF_BOARD_PERIODS.has(period) ? period as CncOrderSearchPeriod : undefined));
 }
 
 function formatLocalDate(value: Date): string {
@@ -303,6 +323,29 @@ const ThemedApp = () => {
   }, []);
 
   useEffect(() => {
+    if (!featureFlags.orderStatusBoard || !featureFlags.cncTelegram) return undefined;
+    // Direct open of the board (reload, bookmark): its reads start once the session is known instead of after the
+    // workspace shell and the page mount; the page takes them over (same queries as its default first load).
+    if (!mdfBoardOpenRange(window.location)) return undefined;
+    let started = false;
+    const start = () => {
+      if (started || !authSession.getAccessToken() || !authSession.getUser()) return;
+      started = true;
+      const range = mdfBoardOpenRange(window.location);
+      if (!range) return;
+      prefetchMdfBoardOpen({ dateTo: range.dateTo, displayFrom: range.dateFrom });
+      const sessionGeneration = authSession.getSessionGeneration();
+      void Promise.all([loadOrderStatusBoardModule(), cncTelegramApi.prefetchToday(range)])
+        .then(([module, response]) => module.prefetchMdfOrderStatusBoard(response, range.dateFrom, sessionGeneration))
+        .then((stored) => { if (stored) markMdfBoardSnapshotReady(); })
+        .catch(() => undefined);
+    };
+    const unsubscribe = authSession.subscribe(start);
+    start();
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
     if (!featureFlags.orderStatusBoard || !featureFlags.cncTelegram) return;
     let warming = false;
     let lastWarmStartedAt = 0;
@@ -314,10 +357,12 @@ const ThemedApp = () => {
       if (warming || now - lastWarmStartedAt < MDF_PREFETCH_COOLDOWN_MS) return;
       warming = true;
       lastWarmStartedAt = now;
-      const boardPromise = cncTelegramApi.prefetchToday(mdfDefaultDateRange());
+      const sessionGeneration = authSession.getSessionGeneration();
+      const range = mdfDefaultDateRange();
+      const boardPromise = cncTelegramApi.prefetchToday(range);
       void Promise.all([loadOrderStatusBoardModule(), boardPromise])
-        .then(([module, response]) => module.prefetchMdfOrderStatusBoard(response))
-        .then(markMdfBoardSnapshotReady)
+        .then(([module, response]) => module.prefetchMdfOrderStatusBoard(response, range.dateFrom, sessionGeneration))
+        .then((stored) => { if (stored) markMdfBoardSnapshotReady(); })
         .catch(() => {
           lastWarmStartedAt = 0;
         })

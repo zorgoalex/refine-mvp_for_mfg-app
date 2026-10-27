@@ -33,8 +33,11 @@ import {
   type CncBoardManualMoveState,
   type CncRelationCardState,
 } from './OrderStatusBoardPage';
+import { authSession } from '../../api/authSession';
+import { mdfBoardPeriodDays } from '../../utils/mdfBoardDailyPeriod';
 import {
   applyMdfBoardHiddenCardRulesToColumns,
+  mdfOpeningPeriod,
   applyMdfHiddenRulesToReadinessSources,
   buildCncOrderSearchDateRange,
   buildCncOrderFilterOptions,
@@ -554,6 +557,45 @@ describe('order status board model', () => {
     expect(filterCncHistoricalBathReadiness(facts, columns, ['2706'], false)).toEqual([]);
   });
 
+  it('opens on the period the user left, and its range is the one the prefetch reads', () => {
+    expect(mdfOpeningPeriod('1m', '1d', false)).toBe('1m'); // bookmark ?period=1d, 1m left
+    expect(mdfOpeningPeriod(null, '1d', false)).toBe('1d');
+    expect(mdfOpeningPeriod('1m', '1d', true)).toBe('1d'); // «planned today» keeps its own
+    // App's opening prefetch counts the same days (mdfBoardPeriodDays) as the page's range
+    for (const period of ['1d', '1w', '2w', '1m'] as const) {
+      const days = mdfBoardPeriodDays(period);
+      expect(buildCncOrderSearchDateRange('2026-10-27', period).days).toBe(days);
+    }
+  });
+
+  it('stores no initial board snapshot when the session changed during the prefetch', async () => {
+    const bath = cncBath('cut-result:100', ['2706'], [2706]);
+    const columns: CncTelegramTodayColumn[] = [{
+      key: 'baths', title: 'Карты ванн', total: 1, packets: [], bazisCutSets: [], baths: [bath],
+    }];
+    const today = { workday: '2026-09-08', generatedAt: '2026-09-08T00:00:00Z', columns };
+    let generation = 7;
+    const session = vi.spyOn(authSession, 'getSessionGeneration').mockImplementation(() => generation);
+    const prefetch = vi.spyOn(orderStatusBoardApi, 'prefetchGet').mockImplementation(async () => {
+      generation = 8; // re-login while the order board is read
+      return board([]);
+    });
+    const moves = vi.spyOn(orderStatusBoardApi, 'listMdfManualMoves').mockResolvedValue({
+      generatedAt: '2026-09-08T00:00:00Z', moves: [],
+    });
+    try {
+      await expect(prefetchMdfOrderStatusBoard(today, '2026-08-09', 7)).resolves.toBe(false);
+      prefetch.mockClear();
+      await expect(prefetchMdfOrderStatusBoard(today, '2026-08-09', 7)).resolves.toBe(false); // read under an older session
+      expect(prefetch).not.toHaveBeenCalled();
+      await expect(prefetchMdfOrderStatusBoard(today, '2026-08-09', 8)).resolves.toBe(true);
+    } finally {
+      session.mockRestore();
+      prefetch.mockRestore();
+      moves.mockRestore();
+    }
+  });
+
   it('prefetches orders of ordinary baths without machine files or BASIS cards', async () => {
     const bath = cncBath('cut-result:100', ['2706', '2707'], [2706, 2707]);
     const columns: CncTelegramTodayColumn[] = [{
@@ -565,7 +607,7 @@ describe('order status board model', () => {
       generatedAt: '2026-09-08T00:00:00Z', moves: [],
     });
     try {
-      await prefetchMdfOrderStatusBoard({ workday: '2026-09-08', generatedAt: '2026-09-08T00:00:00Z', columns });
+      await prefetchMdfOrderStatusBoard({ workday: '2026-09-08', generatedAt: '2026-09-08T00:00:00Z', columns }, '2026-08-09');
       expect(prefetch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ orderIds: [2706, 2707] }));
       expect(moves).toHaveBeenCalledTimes(1);
       expect(JSON.stringify(columns)).toBe(before);

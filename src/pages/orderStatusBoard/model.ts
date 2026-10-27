@@ -1008,6 +1008,16 @@ export function buildCncOrderSearchDateRange(
   };
 }
 
+/** The period the MDF board settles on when it opens: the one the user left wins over the URL's, except for
+ * «planned today», which keeps its own. */
+export function mdfOpeningPeriod(
+  stored: CncOrderSearchPeriod | null,
+  current: CncOrderSearchPeriod | undefined,
+  plannedTodayOnly: boolean,
+): CncOrderSearchPeriod | undefined {
+  return plannedTodayOnly ? current : stored ?? current;
+}
+
 export function cncOrderSearchPeriodDays(
   period: CncOrderSearchPeriod | undefined,
 ): number {

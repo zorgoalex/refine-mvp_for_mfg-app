@@ -10,6 +10,7 @@ import {
   isMdfBoardGenerationCurrent,
   type MdfBoardGenerationState,
 } from './mdfBoardGeneration';
+import { takePrefetchedMdfEngineMode, takePrefetchedMdfSnapshot } from '../../api/mdfBoardOpenPrefetch';
 import { selectMdfBoardMode, type MdfBoardMode, type MdfEngineModeFetchResult } from './mdfBoardMode';
 import { isMdfEngineModeEndpointMissing } from './mdfReturnSelection';
 import { planMdfPublishedSearchOrderIds } from './mdfPublishedBoard';
@@ -107,11 +108,14 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     });
     // Unless the board is known to be legacy, the snapshot is requested beside the mode instead of after it;
     // the mode still decides whether that result is used at all.
-    const earlyRead = modeRef.current === 'legacy' ? null : readPublished();
+    // A direct open may have started both reads already (mdfBoardOpenPrefetch); its default query only.
+    const plainQuery = !(focusKind && focusId) && !searchOrderIdsRef.current.length && !orderIdsRef.current.length;
+    const earlyRead = modeRef.current === 'legacy' ? null
+      : (plainQuery ? takePrefetchedMdfSnapshot({ dateTo: workday, displayFrom }) : null) ?? readPublished();
     earlyRead?.catch(() => undefined);
     let engineModeFetch: MdfEngineModeFetchResult;
     try {
-      const engineMode = await mdfCorrectionApi.getEngineMode();
+      const engineMode = await (takePrefetchedMdfEngineMode() ?? mdfCorrectionApi.getEngineMode());
       engineModeFetch = { kind: 'ok', engineMode };
     } catch (error) {
       engineModeFetch = isMdfEngineModeEndpointMissing(error) ? { kind: 'endpointMissing' } : { kind: 'error' };
