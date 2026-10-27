@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-27", title: "Уведомления по правилам — на русском, с номером заказа",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Уведомление по правилу без своего текста теперь выглядит так: «Заказ 1258тест: статус заказа «Готов к выдаче»» и «статус заказа изменён с «В работе» на «Готов к выдаче»» — вместо технического «Order 11551 event order.status_changed (status 6)». Так же — для статусов производства и оплаты.",
+      "В заголовке и тексте правила можно использовать номер заказа {orderName} и названия статусов: {orderStatusName}, {previousOrderStatusName}, {productionStatusName}, {previousProductionStatusName}, {paymentStatusName}, {previousPaymentStatusName}.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-23", title: "Новый дизайн «NewLine» и аналитика платежей и клиентов",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

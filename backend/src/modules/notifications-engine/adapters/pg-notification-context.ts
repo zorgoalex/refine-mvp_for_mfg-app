@@ -10,6 +10,16 @@ interface OrderTopUpRow {
   completion_date: string | Date | null;
 }
 
+interface TextLabelsRow {
+  order_name: string | null;
+  order_status_name: string | null;
+  previous_order_status_name: string | null;
+  production_status_name: string | null;
+  previous_production_status_name: string | null;
+  payment_status_name: string | null;
+  previous_payment_status_name: string | null;
+}
+
 interface DeadlineEventCurrentRow {
   exists: boolean;
 }
@@ -75,6 +85,7 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
     const deadlineEntityType = await this.resolveDeadlineEntityType(client, deadlineInstanceId);
     const groupIds = await this.resolveGroupIds(client, orderId, deadlineInstanceId);
     const isCurrentDeadlineEvent = await this.resolveIsCurrentDeadlineEvent(client, event, orderId);
+    const labels = await this.resolveTextLabels(client, orderId, orderStatusId, payload);
 
     return {
       eventType: resolveEffectiveEventType(event),
@@ -91,7 +102,54 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
       orderStatusId,
       isOrderCompleted,
       isCurrentDeadlineEvent,
+      ...labels,
       payload,
+    };
+  }
+
+  /** Номер заказа и названия статусов — только для текста уведомления (условия правил их не используют). */
+  private async resolveTextLabels(
+    client: DatabaseClient,
+    orderId: number | null,
+    orderStatusId: number | null,
+    payload: Record<string, unknown>,
+  ): Promise<Partial<NotificationEventContext>> {
+    if (orderId == null) {
+      return {};
+    }
+
+    const result = await client.query<TextLabelsRow>(
+      `SELECT
+         (SELECT o.order_name FROM public.orders o WHERE o.order_id = $1::bigint) AS order_name,
+         (SELECT s.order_status_name FROM public.order_statuses s WHERE s.order_status_id = $2::int) AS order_status_name,
+         (SELECT s.order_status_name FROM public.order_statuses s WHERE s.order_status_id = $3::int) AS previous_order_status_name,
+         (SELECT s.production_status_name FROM public.production_statuses s WHERE s.production_status_id = $4::int) AS production_status_name,
+         (SELECT s.production_status_name FROM public.production_statuses s WHERE s.production_status_id = $5::int) AS previous_production_status_name,
+         (SELECT s.payment_status_name FROM public.payment_statuses s WHERE s.payment_status_id = $6::int) AS payment_status_name,
+         (SELECT s.payment_status_name FROM public.payment_statuses s WHERE s.payment_status_id = $7::int) AS previous_payment_status_name`,
+      [
+        orderId,
+        orderStatusId,
+        toNullableNumber(payload.previousOrderStatusId),
+        toNullableNumber(payload.productionStatusId),
+        toNullableNumber(payload.previousProductionStatusId),
+        toNullableNumber(payload.paymentStatusId),
+        toNullableNumber(payload.previousPaymentStatusId),
+      ],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return {};
+    }
+
+    return {
+      orderName: toNullableString(row.order_name),
+      orderStatusName: toNullableString(row.order_status_name),
+      previousOrderStatusName: toNullableString(row.previous_order_status_name),
+      productionStatusName: toNullableString(row.production_status_name),
+      previousProductionStatusName: toNullableString(row.previous_production_status_name),
+      paymentStatusName: toNullableString(row.payment_status_name),
+      previousPaymentStatusName: toNullableString(row.previous_payment_status_name),
     };
   }
 

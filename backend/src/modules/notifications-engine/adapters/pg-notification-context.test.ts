@@ -284,7 +284,7 @@ describe('PgNotificationContextBuilder', () => {
     const ctx = await builder.buildContext(client, orderEnvelope);
 
     expect(ctx.isCurrentDeadlineEvent).toBe(true);
-    expect(queryCalls).toBe(2); // order top-up + group attribution
+    expect(queryCalls).toBe(3); // order top-up + group attribution + text labels
   });
 
   it('defaults isCurrentDeadlineEvent=true for a deadline envelope missing payload.deadlineEventId (cannot evaluate staleness)', async () => {
@@ -338,5 +338,45 @@ describe('PgNotificationContextBuilder', () => {
 
     expect(ctx.isCurrentDeadlineEvent).toBe(true);
     expect(queryCalls).toBe(2);
+  });
+
+  it('adds the order number and status names for the notification text', async () => {
+    const queries: Array<{ text: string; values: unknown[] }> = [];
+    const responses: FakeQueryResult[] = [
+      { rows: [{ order_status_id: 6, client_id: 42, completion_date: null }] },
+      { rows: [] },
+      {
+        rows: [{
+          order_name: '1258тест',
+          order_status_name: 'В работе',
+          previous_order_status_name: 'Новый',
+          production_status_name: null,
+          previous_production_status_name: null,
+          payment_status_name: null,
+          previous_payment_status_name: null,
+        }],
+      },
+    ];
+    const client = {
+      query: async (text: string, values: unknown[]) => {
+        queries.push({ text, values });
+        return (responses[queries.length - 1] ?? { rows: [] }) as unknown as QueryResult;
+      },
+    } as unknown as DatabaseClient;
+
+    const ctx = await new PgNotificationContextBuilder().buildContext(client, {
+      outboxEventId: '00000000-0000-0000-0000-000000000009',
+      eventType: 'order.status_changed',
+      aggregateType: 'order',
+      aggregateId: '11551',
+      payload: { orderId: 11551, orderStatusId: 6, previousOrderStatusId: 1 },
+    });
+
+    expect(ctx.orderName).toBe('1258тест');
+    expect(ctx.orderStatusName).toBe('В работе');
+    expect(ctx.previousOrderStatusName).toBe('Новый');
+    expect(ctx.productionStatusName).toBeNull();
+    const labels = queries.find((q) => q.text.includes('order_status_name'));
+    expect(labels?.values).toEqual([11551, 6, 1, null, null, null, null]);
   });
 });
