@@ -11,6 +11,8 @@ export function keepsShownMdfBoard(shownKey: string | null, currentKey: string, 
 
 /** Everything the board shows from its reads — each part must be dropped on a session change. */
 export interface MdfBoardSessionData {
+  /** A prefetched initial snapshot the page has not applied yet: it belongs to the old session as well. */
+  dropInitialSnapshot(): void;
   dropAuxiliaryReads(): void;
   clearBoard(): void;
   clearToday(): void;
@@ -26,6 +28,7 @@ export interface MdfBoardSessionData {
 export function resetMdfBoardForNewSession(data: MdfBoardSessionData, input: {
   shown: boolean; datasetKey: string; sessionGeneration: number;
 }): void {
+  data.dropInitialSnapshot();
   data.dropAuxiliaryReads();
   data.clearBoard();
   data.clearToday();
