@@ -161,6 +161,8 @@ interface BazisDraftRuntime {
 const ORDER_FORM_COMPACT_HEADER_STICKY_HEIGHT = 40;
 // «NewLine» hybrid form: these tabs become always-open sections of one page, the rest are folds.
 const WORKBENCH_FORM_BAR_HEIGHT = 52;
+// the customer screen follows the section in view once scrolling has rested this long
+const WORKBENCH_CUSTOMER_SPY_SETTLE_MS = 250;
 const HYBRID_MAIN_SECTION_KEYS: readonly string[] = ['basic', 'dates', 'details', 'services', 'finance'];
 const HYBRID_MAIN_SECTION_ORDER: readonly string[] = ['basic', 'details', 'services', 'finance'];
 
@@ -2086,6 +2088,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       const node = workbenchAnchorsRef.current ?? orderFormStickySentinelRef.current;
       return !node || node.getClientRects().length > 0;
     };
+    let customerSpyTimer = 0;
+    let customerSpyPending: string | null | undefined;
     const update = () => {
       frame = 0;
       if (!formShown()) return;
@@ -2118,7 +2122,16 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       setWorkbenchSpySection((prev) => (prev === current ? prev : current));
       // at the top of the page no section has reached the line yet: the manager sees the first one
       const customerSection = currentOpen ?? (Object.values(hybridSectionRefs.current).some(Boolean) ? HYBRID_MAIN_SECTION_ORDER[0] : null);
-      setWorkbenchOpenSpySection((prev) => (prev === customerSection ? prev : customerSection));
+      // Taken a moment later and only if the form is still shown: leaving for another page scrolls the
+      // window to the top while this form is still on screen, and that must not move the customer.
+      if (customerSection !== customerSpyPending) {
+        customerSpyPending = customerSection;
+        window.clearTimeout(customerSpyTimer);
+        customerSpyTimer = window.setTimeout(() => {
+          if (formShown()) setWorkbenchOpenSpySection((prev) => (prev === customerSection ? prev : customerSection));
+          customerSpyPending = undefined;
+        }, WORKBENCH_CUSTOMER_SPY_SETTLE_MS);
+      }
     };
     // the extra room is dropped once the user has scrolled away from it (it is below the screen then)
     const dropSpacer = () => {
@@ -2145,6 +2158,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     window.addEventListener('touchmove', unpin, { passive: true });
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
+      window.clearTimeout(customerSpyTimer);
       window.removeEventListener('scroll', schedule, { capture: true });
       window.removeEventListener('resize', schedule);
       window.removeEventListener('wheel', unpin);
