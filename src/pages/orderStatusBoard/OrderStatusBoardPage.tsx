@@ -4375,7 +4375,17 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       .map((columnKey) => orderColumnRefs.current[columnKey])
       .find(Boolean)
       ?.closest<HTMLElement>('.status-board-viewport') ?? null;
-    const sync = () => syncAllOrderColumnScrollTopButtons();
+    // One layout read per frame, and none while the board is hidden on another screen (the capture-phase scroll
+    // listener hears every scroll of the app; reading column rects there forced a layout on each of them).
+    let frame = 0;
+    const sync = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        if (viewport?.closest('[hidden]')) return;
+        syncAllOrderColumnScrollTopButtons();
+      });
+    };
     sync();
     viewport?.addEventListener('scroll', sync, { passive: true });
     window.addEventListener('resize', sync);
@@ -4390,6 +4400,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       if (cardList) resizeObserver?.observe(cardList);
     }
     return () => {
+      if (frame) window.cancelAnimationFrame(frame);
       viewport?.removeEventListener('scroll', sync);
       window.removeEventListener('resize', sync);
       window.removeEventListener('scroll', sync, true);
