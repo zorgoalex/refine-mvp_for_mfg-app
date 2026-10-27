@@ -1229,7 +1229,24 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("operationalWindow: 'two_months'");
     expect(page).toContain('historicalReadinessSources={cncHistoricalReadinessSources}');
     expect(page).toContain('CNC_ORDER_STATUS_REFRESH_MS');
-    expect(page).toContain('const alreadyLoaded = cncOrderBoardRequestKeyRef.current === requestKey;');
+    expect(page).toContain('let alreadyLoaded = cncOrderBoardRequestKeyRef.current === requestKey;');
+    expect(page).toContain('cncOrderStatusBoardKeyCovers(cncOrderBoardKeyOf(loadedBoard), requestKey)');
+    expect(page).toContain('if (!cncStrongRefreshInFlightRef.current) setCncOrderBoardLoading(false);');
+    // returning to the persistent board keeps it on screen and refreshes in the background
+    expect(page).toContain('const shownKey = mdfShownDataKey(datasetKey, authSession.getSessionGeneration());');
+    expect(page).toContain('useSessionGenerationReset({ active, revisionRef: datasetRevisionRef, onReset: (shown) => resetMdfBoardForNewSession({');
+    expect(page).toContain('preserveInitialMdfSnapshotRef.current = false;\n      preserveInitialMdfOrderBoardRef.current = false;\n      preserveInitialMdfManualMovesRef.current = false;');
+    // inline updates: unchanged cards keep their objects and shared inputs; the move entry point is stable
+    expect(page).toContain('reuseUnchangedCncColumns(stableCncPeriodColumnsRef.current, columns)');
+    expect(page).toContain('renderDependencies={cncOrderCardRenderDependencies({');
+    // the app-wide capture scroll listener reads column rects once per frame and never while the board is hidden
+    expect(page).toContain("if (viewport?.closest('[hidden]')) return;");
+    expect(page).toContain('if (frame) window.cancelAnimationFrame(frame);');
+    expect(page).toContain('onMove={stableMoveCncCard}');
+    expect(page).toContain('moveCncCardRef.current = moveCncCard;');
+    expect(page).toContain('allColumns={orderStatusOptions}');
+    expect(page).toContain('if (keepsShownMdfBoard(shownDatasetKeyRef.current, shownKey, Boolean(shownCncTodayRef.current || shownBoardRef.current))) {');
+    expect(page).toContain('buildCncOrderStatusBoardRequestKey(orderIds, DEFAULT_MDF_ORDER_CARD_SORT, includeBazisAllocation));');
     expect(page).toContain('if (!alreadyLoaded) void loadOrderBoard();');
     expect(page).toContain('const timer = window.setInterval(() => {');
     expect(page).toContain('}, CNC_ORDER_STATUS_REFRESH_MS);');

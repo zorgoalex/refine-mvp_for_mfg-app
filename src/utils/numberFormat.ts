@@ -18,11 +18,20 @@ export const formatNumber = (
   // Ensure precision is a valid integer between 0 and 20
   const validPrecision = Math.max(0, Math.min(20, Math.floor(precision || 0)));
 
-  return new Intl.NumberFormat('ru-RU', {
-    minimumFractionDigits: validPrecision,
-    maximumFractionDigits: validPrecision,
-  }).format(value);
+  return numberFormatFor(validPrecision).format(value);
 };
+
+// Creating an Intl.NumberFormat is far costlier than formatting: one per precision, reused (boards format
+// thousands of numbers per render).
+const numberFormats = new Map<number, Intl.NumberFormat>();
+function numberFormatFor(precision: number): Intl.NumberFormat {
+  let format = numberFormats.get(precision);
+  if (!format) {
+    format = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: precision, maximumFractionDigits: precision });
+    numberFormats.set(precision, format);
+  }
+  return format;
+}
 
 /**
  * Parse formatted number string back to number

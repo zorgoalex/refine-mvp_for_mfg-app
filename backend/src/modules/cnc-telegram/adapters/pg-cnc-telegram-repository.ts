@@ -3000,7 +3000,7 @@ function manualSvgPresetSnapshot(preset: CncTelegramManualSvgCommentPresetDto): 
 
 function packetSelectSql(
   whereSql: string,
-  options: { coalesceSourceCreatedAt?: boolean; compact?: boolean } = {},
+  options: { coalesceSourceCreatedAt?: boolean; compact?: boolean; layoutSummary?: boolean } = {},
 ): string {
   return `
     SELECT
@@ -3033,7 +3033,9 @@ function packetSelectSql(
       ${options.compact ? 'NULL' : 'p.analysis_warnings_json'} AS analysis_warnings_json,
       p.ocr_engine,
       p.parser_version,
-      ${options.compact ? 'NULL' : 'p.cut_layout_json'} AS cut_layout_json,
+      ${options.compact ? 'NULL' : options.layoutSummary
+        // The board shows only the layout status: the placed items (with their SVG bodies) are most of its payload.
+        ? `p.cut_layout_json - 'items' - 'renderOnlyContours'` : 'p.cut_layout_json'} AS cut_layout_json,
       p.svg_cut_job_id,
       svg_job.source_display_number AS svg_cut_job_display_number,
       p.svg_cut_result_id,
@@ -7380,7 +7382,8 @@ async function loadBoundedToday(
     bazisPredicate: "cut_set.created_at >= $1::date AND cut_set.created_at < ($2::date + INTERVAL '1 day')",
   })} SELECT order_id, detail_id, completed_quantity FROM mdf_cut_quantities`, [dateFrom, dateTo]);
   const [packets, baths, basis] = await Promise.all([
-    database.query<PacketJoinedRow>(packetSelectSql(`p.workday BETWEEN $1::date AND $2::date AND ${packetVisibility}`), [displayFrom, dateTo]),
+    database.query<PacketJoinedRow>(packetSelectSql(`p.workday BETWEEN $1::date AND $2::date AND ${packetVisibility}`,
+      { layoutSummary: true }), [displayFrom, dateTo]),
     cutQuantitiesPromise.then(result => loadBathCards(database, dateFrom, dateTo, {
       bounded: { dateFrom, displayFrom, cutQuantities: result.rows }, focusBathCardId,
     })),
