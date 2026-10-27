@@ -705,6 +705,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncOrderSearchTodayRef = useRef<CncTelegramTodayResponse | null>(null);
   const [cncOrderBoard, setCncOrderBoard] =
     useState<OrderStatusBoardResponse | null>(initialMdfSnapshot?.orderBoard ?? null);
+  const cncOrderBoardRef = useRef(cncOrderBoard);
+  cncOrderBoardRef.current = cncOrderBoard;
   const [cncOrderBoardLoading, setCncOrderBoardLoading] = useState(false);
   const [loading, setLoading] = useState(!initialMdfSnapshot);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -970,6 +972,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 orderIds,
                 currentViewState,
               );
+              rememberCncOrderBoardKey(orderBoardResponse, cncOrderBoardRequestKeyRef.current);
               startTransition(() => setCncOrderBoard(orderBoardResponse));
               return true;
             } finally {
@@ -1036,6 +1039,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 currentViewState,
                 false,
               );
+              rememberCncOrderBoardKey(prefetchedOrderBoard, cncOrderBoardRequestKeyRef.current);
               setCncOrderBoard(prefetchedOrderBoard);
             }
             setCncOrderBoardLoading(!orderBoardWasPrefetched);
@@ -1058,6 +1062,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               currentViewState,
               false,
             );
+            rememberCncOrderBoardKey(orderBoardResponse, cncOrderBoardRequestKeyRef.current);
             startTransition(() => setCncOrderBoard(orderBoardResponse));
             return true;
           } finally {
@@ -1868,7 +1873,19 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       preserveInitialMdfOrderBoardRef.current = false;
       cncOrderBoardRequestKeyRef.current = requestKey;
     }
-    const alreadyLoaded = cncOrderBoardRequestKeyRef.current === requestKey;
+    let alreadyLoaded = cncOrderBoardRequestKeyRef.current === requestKey;
+    // The board narrowing its orders reuses the read it already has (that read's own key, not the ref's).
+    const loadedBoard = cncOrderBoardRef.current;
+    if (!alreadyLoaded && loadedBoard
+      && cncOrderStatusBoardKeyCovers(cncOrderBoardKeyOf(loadedBoard), requestKey)) {
+      const narrowed = narrowCncOrderStatusBoard(loadedBoard, cncOrderIds);
+      cncOrderBoardRequestKeyRef.current = requestKey;
+      rememberCncOrderBoardKey(narrowed, requestKey);
+      setCncOrderBoard(narrowed);
+      // a superseded wider read (cancelled below) no longer ends its own loading state
+      if (!cncStrongRefreshInFlightRef.current) setCncOrderBoardLoading(false);
+      alreadyLoaded = true;
+    }
     let cancelled = false;
     let inFlight = false;
     let initialLoad = !alreadyLoaded;
@@ -1891,6 +1908,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
           && cncAuxiliaryRefreshRevisionRef.current === requestRevision
         ) {
           cncOrderBoardRequestKeyRef.current = requestKey;
+          rememberCncOrderBoardKey(response, requestKey);
           setCncOrderBoard(response);
         }
       } catch (error) {
@@ -8571,6 +8589,44 @@ function cncOrderStatusBoardQuery(
     orderIds,
     sortBy: sortPreference.sortBy,
     sortOrder: sortPreference.sortOrder,
+  };
+}
+
+const cncOrderBoardKeys = new WeakMap<OrderStatusBoardResponse, string>();
+
+/** The request key an order board response was read for (null when unknown). */
+function cncOrderBoardKeyOf(board: OrderStatusBoardResponse): string | null {
+  return cncOrderBoardKeys.get(board) ?? null;
+}
+
+function rememberCncOrderBoardKey(board: OrderStatusBoardResponse | null, key: string | null): void {
+  if (board && key) cncOrderBoardKeys.set(board, key);
+}
+
+/** True when the order board loaded for `loadedKey` already holds every order of `requestKey` (same sort and kind):
+ * the board narrowing its orders (period, hidden statuses) then needs no new read. */
+export function cncOrderStatusBoardKeyCovers(loadedKey: string | null, requestKey: string): boolean {
+  if (!loadedKey) return false;
+  const [loadedSort, loadedOrder, loadedIds = '', loadedKind = ''] = loadedKey.split('|');
+  const [sort, order, ids = '', kind = ''] = requestKey.split('|');
+  if (loadedSort !== sort || loadedOrder !== order || loadedKind !== kind || !ids) return false;
+  const loaded = new Set(loadedIds.split(','));
+  return ids.split(',').every((id) => loaded.has(id));
+}
+
+/** The loaded order board restricted to `orderIds` — what a read of exactly those orders returns (cards are per
+ * order; column totals are card counts, as in the merged chunk responses). */
+export function narrowCncOrderStatusBoard(
+  board: OrderStatusBoardResponse,
+  orderIds: readonly number[],
+): OrderStatusBoardResponse {
+  const keep = new Set(orderIds);
+  return {
+    ...board,
+    columns: board.columns.map((column) => {
+      const cards = column.cards.filter((card) => keep.has(card.orderId));
+      return { ...column, cards, total: cards.length };
+    }),
   };
 }
 
