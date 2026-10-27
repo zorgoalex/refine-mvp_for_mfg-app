@@ -25,14 +25,19 @@ interface Props {
   finished?: boolean; trajectories?: boolean; dimension?: string | null; onVisible?: (ids: string[]) => void;
   changed?: Set<string>; ordinals?: Map<string, { number: number; total: number }>;
   onViewportSize?: (width: number, height: number) => void; fitOnOpen?: boolean; fitKey?: string; layoutAspect?: number | null;
+  /** Controlled tool, for toolbars and the command palette outside the canvas. */
+  tool?: CadTool; onToolChange?: (tool: CadTool) => void;
 }
+export type CadTool = 'select' | 'pan' | 'measure';
 export function CadCanvas({ documentId, groups, sources, job, readOnly, selected, onSelect, onChange, hiddenLayers, expanded,
-  finished = false, trajectories = true, dimension, onVisible, changed, ordinals, onViewportSize, fitOnOpen = false, fitKey, layoutAspect }: Props) {
+  finished = false, trajectories = true, dimension, onVisible, changed, ordinals, onViewportSize, fitOnOpen = false, fitKey, layoutAspect,
+  tool: controlledTool, onToolChange }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 900, height: 650 });
   const [camera, setCamera] = useState(() => loadCamera(documentId) ?? { x: 30, y: 620, zoom: .25 });
   useEffect(() => { const timer = setTimeout(() => saveCamera(documentId, camera), 200); return () => clearTimeout(timer); }, [documentId, camera]);
-  const [tool, setTool] = useState<'select' | 'pan' | 'measure'>('select');
+  const [ownTool, setOwnTool] = useState<CadTool>('select');
+  const tool = controlledTool ?? ownTool, setTool = onToolChange ?? setOwnTool;
   const pan = tool === 'pan', measure = tool === 'measure';
   const [points, setPoints] = useState<Array<{ x: number; y: number }>>([]);
   const [measureCursor, setMeasureCursor] = useState({ x: 0, y: 0 });

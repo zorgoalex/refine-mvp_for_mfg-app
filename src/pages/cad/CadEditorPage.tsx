@@ -1,25 +1,26 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Alert, Button, Checkbox, Drawer, Empty, Grid, Input, Modal, Select, Space, Spin, Tabs, Tag, message } from 'antd';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Button, Checkbox, Drawer, Dropdown, Empty, Grid, Input, Modal, Select, Space, Spin, Tabs, message } from 'antd';
+import { EllipsisOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
+import { useQuery } from '@tanstack/react-query';
+import { useKBar } from '@refinedev/kbar';
 import { useNavigate, useParams } from 'react-router-dom';
-import type { CadGroup, CadVariant, JsonValue } from '@shared/cad-workspace';
-import { validateComposition } from '@shared/cad-workspace';
+import type { CadVariant } from '@shared/cad-workspace';
 import { cadApi } from '../../api/cadApi';
 import { ordersApi } from '../../api/ordersApi';
 import { can } from '../../utils/permissions';
 import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
-import { useTabStore } from '../../stores/tabStore';
-import { loadCadTabs, saveCadTabs } from './cadViewState';
-import { useCadRecipeCatalog } from './useCadRecipeCatalog';
-import { CadAutosave, type CadDraft } from './cadAutosave';
-import { useCadPreview } from './useCadPreview';
-import { CadCanvas, cadPathData } from './CadCanvas';
-import { CadParameterField } from './CadParameterField';
+import { Segmented } from '../../ui/Segmented';
+import { Tooltip } from '../../ui/tooltipDelay';
+import { loadCadTabs } from './cadViewState';
+import { CadCanvas, type CadTool } from './CadCanvas';
 import { CadSidePanel } from './CadSidePanel';
-import { expandInstances, differsFromPosition } from './cadInstances';
-import { isInitialPositionLayout, layoutPositionBlocks } from './cadPositionLayout';
 import { CadExportDialog } from './CadExportDialog';
 import { CadImportDialog, CadMappingDialog } from './CadLibraryDialogs';
+import { CadInspector, CadIssueList } from './CadInspector';
+import { CadCompositionTree, useCadTreeState } from './CadCompositionTree';
+import { CadCommandPalette } from './CadCommandPalette';
+import { findShortcut, isTextTarget, type CadCommand } from './cadCommands';
+import { useCadEditorController, type CadEditorController } from './useCadEditorController';
 import './cad.css';
 
 export function CadEditorPage() {
@@ -51,174 +52,166 @@ export function CadEditorPage() {
   const variants = workspace.data?.variants ?? [];
   const variant = variants.find(v => v.id === selectedVariant) ?? variants.find(v => v.kind === 'working') ?? variants[0];
   const switchTo = async (fn: () => void) => { try { await leave.current(); fn(); } catch (e) { message.warning(e instanceof Error ? e.message : 'Сначала сохраните или разрешите конфликт изменений'); } };
-  const header = <header className="cad-editor-header"><h1>CAD</h1><Select popupClassName="cad-compact" aria-label="Выбрать заказ" showSearch filterOption={false} onSearch={setSearch} placeholder="Найти заказ" value={orderId || undefined} options={orders.data?.data.map(o => ({ value: o.orderId, label: o.orderName }))} onChange={id => void switchTo(() => navigate(`/cad/orders/${id}`))} />
-      {can('references.manage') && <Button onClick={() => setMapping(true)}>Соответствия</Button>}</header>;
+  const openOrder = useCallback((id: number) => void switchTo(() => navigate(`/cad/orders/${id}`)), [navigate]);
+  const orderPicker = <header className="cad-editor-header"><h1>CAD</h1><Select popupClassName="cad-compact" aria-label="Выбрать заказ" showSearch filterOption={false} onSearch={setSearch} placeholder="Найти заказ" value={orderId || undefined} options={orders.data?.data.map(o => ({ value: o.orderId, label: o.orderName }))} onChange={openOrder} /></header>;
   if (!allowed) return <Alert type="warning" message="Нет доступа к CAD" />;
   return <div ref={editorRoot} className="cad-page cad-editor">
-    {!variant && header}
+    {!variant && <div className="cad-topbar">{orderPicker}{can('references.manage') && <Button className="cad-topbar-end" onClick={() => setMapping(true)}>Соответствия</Button>}</div>}
     {workspace.isLoading && orderId > 0 && <Spin />}
     {workspace.isError && <Alert type="error" message="Не удалось открыть отрисовку" action={<Button onClick={() => void workspace.refetch()}>Повторить</Button>} />}
     {!orderId && <Empty description="Выберите заказ, чтобы отрисовать его детали и фрезеровки" />}
     {orderId > 0 && !variant && !workspace.isLoading && !workspace.isError && <Empty description="У заказа ещё нет отрисовки"><Button type="primary" disabled={!can('cad.edit')} loading={busy} onClick={async () => { setBusy(true); try { await cadApi.create(orderId); await workspace.refetch(); } catch { message.error('Не удалось отрисовать заказ'); } finally { setBusy(false); } }}>Отрисовать заказ</Button></Empty>}
-    {variant && <CadEditorDocument header={header} key={variant.id} variant={variant} variants={variants} orderId={orderId} active={active} tabKey={activity.tabKey || `/cad/orders/${orderId}`} registerLeave={registerLeave} onActivate={id => setSelectedVariant(id)} />}
+    {variant && <CadEditorDocument orderPicker={orderPicker} onMapping={() => setMapping(true)} onOpenOrder={openOrder} key={variant.id} variant={variant} variants={variants} orderId={orderId} active={active} tabKey={activity.tabKey || `/cad/orders/${orderId}`} registerLeave={registerLeave} onActivate={id => setSelectedVariant(id)} />}
     <CadMappingDialog open={mapping} active={active} onClose={() => setMapping(false)} />
   </div>;
 }
 
-interface DocumentProps { header: React.ReactNode; variant: CadVariant; variants: CadVariant[]; orderId: number; active: boolean; tabKey: string;
+interface DocumentProps { orderPicker: React.ReactNode; onMapping: () => void; onOpenOrder: (orderId: number) => void; variant: CadVariant; variants: CadVariant[]; orderId: number; active: boolean; tabKey: string;
   registerLeave: (fn: () => Promise<unknown>) => void; onActivate: (id: string) => void }
-function CadEditorDocument({ header, variant, variants, orderId, active, tabKey, registerLeave, onActivate }: DocumentProps) {
-  const queryClient = useQueryClient(), screens = Grid.useBreakpoint(), tablet = !screens.xl;
-  const [queue] = useState(() => new CadAutosave(variant, cadApi.save));
-  const state = useSyncExternalStore(queue.subscribe, queue.snapshot);
-  const { base } = state;
-  const [initialAspect, setInitialAspect] = useState<number | null>(null);
-  const viewportAspect = useRef(1.6);
-  const [layoutRevision, setLayoutRevision] = useState(0);
-  const viewportChanged = useCallback((width: number, height: number) => {
-    if (width <= 100 || height <= 100) return;
-    const aspect = (width - 64) / (height - 64);
-    viewportAspect.current = aspect;
-    setInitialAspect(old => old ?? aspect);
-  }, []);
-  const automaticLayout = state.draft.groups === base.groups && isInitialPositionLayout(base.groups, base.sources, base.version);
-  const instanceIds = useRef(new Map<string, string>());
-  const copyId = useCallback((id: string, index: number) => {
-    const key = `${id}:${index}`;
-    if (!instanceIds.current.has(key)) instanceIds.current.set(key, crypto.randomUUID());
-    return instanceIds.current.get(key)!;
-  }, []);
-  const expansion = useMemo(() => {
-    try {
-      const groups = expandInstances(state.draft.groups, state.draft.sources, copyId);
-      return { groups: automaticLayout ? layoutPositionBlocks(groups, state.draft.sources, initialAspect ?? 1.6) : groups, error: null };
-    }
-    catch (error) { return { groups: state.draft.groups, error: error instanceof Error ? error.message : 'Некорректное количество экземпляров' }; }
-  }, [state.draft, copyId, automaticLayout, initialAspect]);
-  const draft = useMemo(() => ({ ...state.draft, groups: expansion.groups }), [state.draft, expansion.groups]);
-  const [selected, setSelected] = useState<string[]>([]), [visible, setVisible] = useState<string[]>(variant.groups.slice(0, 20).map(g => g.id));
-  const [multiSelect, setMultiSelect] = useState(false);
-  const [advanced, setAdvanced] = useState(false), [trajectories, setTrajectories] = useState(true), [materialView, setMaterialView] = useState(false);
-  const [hidden, setHidden] = useState<Set<string>>(new Set()), [dimension, setDimension] = useState<string | null>(null);
-  const [panel, setPanel] = useState<'parts' | 'properties' | 'issues' | null>(null), [filter, setFilter] = useState(''), [scroll, setScroll] = useState(0);
-  const [partsOpen, setPartsOpen] = useState(false), [propertiesOpen, setPropertiesOpen] = useState(false);
-  const listScroll = useRef(0); listScroll.current = scroll;
-  const listNode = useRef<HTMLDivElement>(null);
-  const restoreListScroll = () => { if (listNode.current) listNode.current.scrollTop = listScroll.current; };
-  useEffect(() => { if (!tablet && partsOpen) restoreListScroll(); }, [tablet, partsOpen]);
-  const [importOpen, setImportOpen] = useState(false), [exportOpen, setExportOpen] = useState(false);
-  const [clone, setClone] = useState<'clone' | 'refresh' | 'fork' | null>(null), [name, setName] = useState(''), [busy, setBusy] = useState(false);
-  const [history, setHistory] = useState<CadDraft[]>([]), [redo, setRedo] = useState<CadDraft[]>([]);
-  const invalid = useRef(new Set<string>()), forkKey = useRef(crypto.randomUUID());
-  const readOnly = base.kind === 'original' || !can('cad.edit') || Boolean(expansion.error), technical = can('cad.technology');
-  const dirty = state.status !== 'saved' || state.incomplete;
-  const flush = useCallback(() => queue.flush(), [queue]);
-  useEffect(() => { registerLeave(flush); return () => registerLeave(async () => undefined); }, [registerLeave, flush]);
-  useEffect(() => () => queue.dispose(), [queue]);
-  useEffect(() => queue.accept(variant), [queue, variant]);
-  useEffect(() => {
-    queryClient.setQueryData<{ workspaceId: string | null; variants: CadVariant[] }>(['cad-workspace', orderId], old => old ? { ...old, variants: old.variants.map(v => v.id === base.id && v.version < base.version ? base : v) } : old);
-  }, [base, orderId, queryClient]);
-  useEffect(() => { if (active) saveCadTabs(orderId, { activeId: base.id, openIds: variants.map(v => v.id) }); }, [active, base.id, variants, orderId]);
-  useEffect(() => {
-    useTabStore.getState().setDirty(tabKey, dirty);
-    const warn = (e: BeforeUnloadEvent) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } };
-    window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty, tabKey]);
-  useEffect(() => { useTabStore.getState().openTab({ key: `/cad/orders/${orderId}`, path: `/cad/orders/${orderId}`, label: `CAD · ${base.sources.find(s => s.orderId === orderId)?.orderName ?? orderId}`, resource: 'cad', preserveLabel: true }); }, [base.id, orderId]);
-  const catalog = useCadRecipeCatalog(true, active, advanced);
-  const run = useQuery(['cad-run', base.id, base.version], () => cadApi.run(base.id, base.version), { enabled: active, retry: false,
-    refetchInterval: data => active && data?.run && ['queued', 'running'].includes(data.run.status) ? 2000 : false });
-  const source = useQuery(['cad-source-status', base.id, base.version], () => cadApi.sourceStatus(base.id), { enabled: active, retry: false, refetchInterval: active ? 60000 : false });
-  const wanted = useMemo(() => [...new Set([...selected, ...visible])], [selected, visible]);
-  const preview = useCadPreview(base, draft, run.data?.job ?? null, active, wanted);
-  const group = selected.length === 1 ? draft.groups.find(g => g.id === selected[0]) : undefined;
-  const part = draft.sources.find(s => s.id === group?.sourceSnapshotId)?.parts.find(p => p.detailId === group?.detailId);
-  const recipe = catalog.data?.recipes.find(r => r.code === group?.recipe?.code && r.version === group.recipe.version);
-  const item = preview.scene.items.find(i => i.part_id === group?.id);
-  const issues = useMemo(() => [
-    ...validateComposition(draft.groups, draft.sources),
-    ...draft.groups.filter(g => !g.recipe).map(g => ({ groupId: g.id, code: 'RECIPE_MISSING', message: 'Не выбрана фрезеровка. Выберите одобренный вариант.' })),
-    ...preview.scene.items.flatMap(i => (i.result?.errors ?? []).map(e => ({ groupId: i.part_id, code: e.code, message: e.message ?? 'Параметры не подходят детали. Проверьте настройки фрезеровки.' }))),
-  ], [draft, preview.scene.items]);
-  const act = async (fn: () => Promise<void>) => { if (busy) return; setBusy(true); try { await fn(); } catch (e) { message.error(e instanceof Error ? e.message : 'Не удалось выполнить действие'); } finally { setBusy(false); } };
-  const edit = (next: CadDraft, immediate = false) => { if (readOnly) return; const groups = expandInstances(next.groups, next.sources, copyId); setHistory(h => [...h.slice(-49), draft]); setRedo([]); queue.edit({ ...next, groups }, immediate); };
-  const changeGroup = (patch: Partial<CadGroup>) => { if (group) edit({ ...draft, groups: draft.groups.map(g => g.id === group.id ? { ...g, ...patch } : g) }); };
-  const validity = useCallback((key: string, valid: boolean) => { if (valid) invalid.current.delete(key); else invalid.current.add(key); queue.setIncomplete(invalid.current.size > 0); }, [queue]);
-  const select = (ids: string[]) => { if (state.incomplete) { message.warning('Завершите ввод параметра перед сменой детали'); return; } setSelected(ids); setDimension(null); };
-  const toggleProperties = () => {
-    if (propertiesOpen && state.incomplete) { message.warning('Сначала завершите ввод параметра'); return; }
-    setPropertiesOpen(open => !open);
+type RightTab = 'properties' | 'issues';
+
+/** «Мастерская»: верхняя панель, тулбар, состав | холст | свойства, статус-бар. Логика документа — в контроллере. */
+function CadEditorDocument({ orderPicker, onMapping, onOpenOrder, ...props }: DocumentProps) {
+  const c = useCadEditorController(props);
+  const { state, base, draft, variants, readOnly, selected, issues } = c;
+  const screens = Grid.useBreakpoint(), tablet = !screens.xl;
+  const tree = useCadTreeState();
+  const { query: erpSearch } = useKBar();
+  const [treeOpen, setTreeOpen] = useState(true), [propertiesOpen, setPropertiesOpen] = useState(true), [rightTab, setRightTab] = useState<RightTab>('properties');
+  const [panel, setPanel] = useState<'parts' | 'properties' | 'issues' | null>(null);
+  const [tool, setTool] = useState<CadTool>('select'), [fitRequest, setFitRequest] = useState(0), [palette, setPalette] = useState(false);
+  const blocked = () => { if (!state.incomplete) return false; message.warning('Сначала завершите ввод параметра'); return true; };
+  const toggleProperties = () => { if (propertiesOpen && blocked()) return; setPropertiesOpen(open => !open); };
+  const showRight = (tab: RightTab) => {
+    if (tablet) { if (!blocked()) setPanel(tab === 'issues' ? 'issues' : 'properties'); return; }
+    setRightTab(tab); setPropertiesOpen(true);
   };
-  const activate = (id: string) => void act(async () => { await flush(); onActivate(id); });
-  const recipeName = (g: CadGroup) => catalog.data?.recipes.find(r => r.code === g.recipe?.code && r.version === g.recipe.version)?.display_name ?? (g.recipe ? 'Сохранённая фрезеровка' : 'Нет фрезеровки');
-  const fields = recipe ? Object.entries(recipe.parameter_schema).filter(([, s]) => advanced || s.manager_editable) : [];
-  const layers = [...new Set(item?.result?.geometry?.milling.map(p => p.layer) ?? [])];
-  const defaultsFor = (g: CadGroup) => catalog.data?.recipes.find(r => r.code === g.recipe?.code && r.version === g.recipe.version)?.defaults ?? {};
-  const changed = new Set(draft.groups.filter(g => {
-    const p = draft.sources.find(s => s.id === g.sourceSnapshotId)?.parts.find(p => p.detailId === g.detailId);
-    return p && differsFromPosition(g.recipe, p.recipe, defaultsFor(g));
-  }).map(g => g.id));
-  const ordinals = new Map<string, { number: number; total: number }>();
-  const totals = new Map<string, number>(), seen = new Map<string, number>();
-  for (const g of draft.groups) { const key = `${g.sourceSnapshotId}:${g.detailId}`; totals.set(key, (totals.get(key) ?? 0) + 1); }
-  for (const g of draft.groups) { const key = `${g.sourceSnapshotId}:${g.detailId}`; const number = (seen.get(key) ?? 0) + 1; seen.set(key, number); ordinals.set(g.id, { number, total: totals.get(key)! }); }
-  const filtered = draft.groups.filter(g => { const p = draft.sources.find(s => s.id === g.sourceSnapshotId)?.parts.find(p => p.detailId === g.detailId); return `${p?.detailNumber} ${g.orderId} ${recipeName(g)}`.toLowerCase().includes(filter.toLowerCase()); });
-  const firstRow = Math.max(0, Math.floor(scroll / 48) - 2), rows = filtered.slice(firstRow, firstRow + 24);
-  const partsPanel = <><div className="cad-panel-title"><h2>Детали <span>{draft.groups.length}</span></h2><Button disabled={readOnly} onClick={() => setImportOpen(true)}>Добавить</Button></div>
-    <Input.Search aria-label="Найти деталь" placeholder="Позиция или фрезеровка" value={filter} onChange={e => { setFilter(e.target.value); setScroll(0); listScroll.current = 0; if (listNode.current) listNode.current.scrollTop = 0; }} />
-    <Checkbox checked={multiSelect} onChange={e => setMultiSelect(e.target.checked)}>Выбрать несколько</Checkbox>
-    <div className="cad-part-list" ref={listNode} onScroll={e => setScroll(e.currentTarget.scrollTop)}><div style={{ height: filtered.length * 48, position: 'relative' }}>{rows.map((g, i) => {
-      const p = draft.sources.find(s => s.id === g.sourceSnapshotId)?.parts.find(p => p.detailId === g.detailId), drawn = preview.scene.items.find(i => i.part_id === g.id);
-      return <button key={g.id} type="button" style={{ top: (firstRow + i) * 48 }} aria-pressed={selected.includes(g.id)} className={`cad-part-card ${selected.includes(g.id) ? 'selected' : ''}`} onClick={e => select(multiSelect || e.ctrlKey || e.shiftKey ? selected.includes(g.id) ? selected.filter(id => id !== g.id) : [...selected, g.id] : [g.id])}>
-        <svg width="24" height="34" viewBox={`-8 -8 ${(p?.widthMm ?? 100) + 16} ${(p?.heightMm ?? 100) + 16}`} aria-hidden="true"><g transform={`translate(0 ${p?.heightMm ?? 100}) scale(1 -1)`}><rect width={p?.widthMm ?? 100} height={p?.heightMm ?? 100} fill="#f4e8ce" stroke="#87919c" strokeWidth={6} />{drawn?.result?.geometry?.milling.slice(0, 100).map(path => <path key={path.path_id} d={cadPathData(path)} fill="none" stroke="#9c7641" strokeWidth={5} />)}</g></svg>
-        <span><strong>Позиция {p?.detailNumber} <small>· {ordinals.get(g.id)?.number}/{ordinals.get(g.id)?.total}</small> {changed.has(g.id) && <span className="cad-instance-warning" title="Фрезеровка отличается от позиции" aria-label="Фрезеровка отличается от позиции">⚠</span>}</strong><small>{p?.widthMm} × {p?.heightMm} · {recipeName(g)}{issues.some(i => i.groupId === g.id) ? ' · Нужно исправить' : drawn?.status !== 'succeeded' ? ' · Ожидание' : ''}</small></span></button>;
-    })}</div></div><Button danger disabled={readOnly || !selected.length} onClick={() => { edit({ ...draft, groups: draft.groups.filter(g => !selected.includes(g.id)) }); setSelected([]); }}>Убрать выбранные из варианта</Button><p className="cad-hint">Исходные заказы не изменяются.</p></>;
-  const inspector = <><div className="cad-panel-title"><h2>{group ? 'Деталь' : selected.length > 1 ? `Выбрано: ${selected.length}` : 'Свойства'}</h2></div>
-    {group && part ? <><h3>Позиция {part.detailNumber} · экземпляр {ordinals.get(group.id)?.number}/{ordinals.get(group.id)?.total}</h3><p>{part.widthMm} × {part.heightMm} × {part.thicknessMm ?? '?'} мм<br />{part.material}</p><p className="cad-hint">Заказ {draft.sources.find(s => s.id === group.sourceSnapshotId)?.orderName} · обкат: {part.edgeName || '—'}</p>
-      {item?.status !== 'succeeded' && <Alert type="warning" message={item?.status === 'failed' ? 'Фрезеровка не рассчитана' : 'Ожидается предпросмотр'} description="Контур на поле ещё не подтверждает правильность фрезеровки." />}
-      {item?.result?.visualization?.quality !== 'exact' && item?.status === 'succeeded' && <Alert type="info" message="Схематичный вид" description="Профиль фрезы отсутствует или не подтверждён. Показаны траектории; точный вид снятого материала недоступен." />}
-      <label className="cad-field-label">Фрезеровка<Select popupClassName="cad-compact" aria-label="Фрезеровка детали" disabled={readOnly || state.incomplete} value={group.recipe ? `${group.recipe.code}@${group.recipe.version}` : undefined} placeholder="Выберите фрезеровку" options={catalog.data?.recipes.filter(r => r.manager_ready || technical).map(r => ({ value: `${r.code}@${r.version}`, label: `${r.display_name} · ${r.version}${r.manager_ready ? '' : ' · требует проверки'}` }))} onChange={value => { const r = catalog.data?.recipes.find(r => `${r.code}@${r.version}` === value); if (r) changeGroup({ recipe: { code: r.code, version: r.version, parameters: {} } }); }} /></label>
-      {changed.has(group.id) && <div className="cad-instance-difference" role="status">⚠ Фрезеровка отличается от общей для позиции.<Button disabled={readOnly || state.incomplete} onClick={() => changeGroup({ recipe: structuredClone(part.recipe) })}>Вернуть фрезеровку позиции</Button></div>}
-      {fields.map(([key, schema]) => <CadParameterField key={`${group.id}:${recipe!.code}:${recipe!.version}:${key}`} name={key} schema={schema} value={group.recipe && Object.hasOwn(group.recipe.parameters, key) ? group.recipe.parameters[key] : schema.default} disabled={readOnly || !technical && !schema.manager_editable} bounded={!technical || !advanced} tools={recipe!.available_tools} onValidity={validity} onFocus={setDimension} onChange={(value: JsonValue) => { if (group.recipe) changeGroup({ recipe: { ...group.recipe, parameters: { ...group.recipe.parameters, [key]: value } } }); }} />)}
-      {!advanced && !fields.length && <p className="cad-hint">Размеры фрезеровки рассчитываются автоматически. Технологические настройки скрыты.</p>}
-      <details><summary>Положение на поле</summary>{(['xMm', 'yMm', 'rotationDeg'] as const).map(key => <CadParameterField key={`${group.id}:${key}`} name={key} schema={{ type: 'number', default: 0, label: key === 'xMm' ? 'По горизонтали' : key === 'yMm' ? 'По вертикали' : 'Поворот', unit: key === 'rotationDeg' ? '°' : 'мм', integer: false, nullable: false, manager_editable: true }} value={group[key]} bounded={false} disabled={readOnly} tools={[]} onValidity={validity} onFocus={() => setDimension(null)} onChange={v => { if (typeof v === 'number') changeGroup({ [key]: v }); }} />)}</details>
-      {advanced && <details><summary>Траектории и технические данные</summary>{layers.map(layer => <Checkbox key={layer} checked={!hidden.has(layer)} onChange={e => setHidden(old => { const next = new Set(old); if (e.target.checked) next.delete(layer); else next.add(layer); return next; })}>{layer}</Checkbox>)}{item?.result?.geometry?.milling.map(p => <p key={p.path_id} className="cad-hint">{p.layer} · {p.tool_id} · место {p.slot ?? '—'} · глубина {p.depth_mm ?? '—'} мм</p>)}<code className="cad-hash">{item?.snapshot_hash}</code></details>}
-    </> : <p className="cad-hint">{selected.length > 1 ? 'Настройки фрезеровки доступны для одной детали. Выбранные детали можно перемещать вместе.' : 'Выберите деталь на поле или в списке.'}</p>}
-    {selected.length > 1 && <Button disabled={readOnly} onClick={() => { const id = crypto.randomUUID(); edit({ ...draft, groups: draft.groups.map(g => selected.includes(g.id) ? { ...g, placementGroupId: id } : g) }); }}>Объединить перемещение</Button>}
-    {selected.length > 0 && <Button disabled={readOnly} onClick={() => edit({ ...draft, groups: draft.groups.map(g => selected.includes(g.id) ? { ...g, placementGroupId: undefined } : g) })}>Разъединить перемещение</Button>}
+  const toggleTree = () => { if (tablet) setPanel(p => p === 'parts' ? null : 'parts'); else setTreeOpen(open => !open); };
+  const openIssue = (groupId: string) => { if (blocked()) return; c.select([groupId]); if (tablet) setPanel('properties'); else showRight('properties'); };
+  const newVariantAllowed = can('cad.edit') && !c.busy;
+  const commands: CadCommand[] = [
+    { id: 'undo', group: 'Правка', label: 'Отменить', keys: 'Ctrl+Z', enabled: c.canUndo, run: c.undo },
+    { id: 'redo', group: 'Правка', label: 'Повторить', keys: 'Ctrl+Shift+Z', enabled: c.canRedo, run: c.redo },
+    { id: 'layout', group: 'Правка', label: 'Разложить по позициям', keys: 'L', enabled: c.canLayout, run: c.layout, terms: 'раскладка расставить' },
+    { id: 'rotate', group: 'Правка', label: 'Повернуть на 90°', keys: 'R', enabled: !readOnly && selected.length > 0, run: c.rotate },
+    { id: 'link', group: 'Правка', label: 'Связать перемещение', keys: 'Ctrl+G', enabled: !readOnly && selected.length > 1, run: c.link, terms: 'объединить группа' },
+    { id: 'unlink', group: 'Правка', label: 'Разъединить перемещение', keys: 'Ctrl+Shift+G', enabled: !readOnly && selected.length > 0, run: c.unlink },
+    { id: 'select-all', group: 'Правка', label: 'Выбрать все детали', keys: 'Ctrl+A', enabled: draft.groups.length > 0, run: () => c.select(draft.groups.map(g => g.id)) },
+    { id: 'add', group: 'Правка', label: 'Добавить детали из заказов', enabled: !readOnly, run: () => c.setImportOpen(true), terms: 'импорт' },
+    { id: 'remove', group: 'Правка', label: 'Убрать выбранные из варианта', enabled: !readOnly && selected.length > 0, run: c.removeSelected, terms: 'удалить' },
+    { id: 'tool-select', group: 'Инструменты', label: 'Выбор', keys: 'V', enabled: true, run: () => setTool('select') },
+    { id: 'tool-pan', group: 'Инструменты', label: 'Панорама', keys: 'H', enabled: true, run: () => setTool('pan'), terms: 'рука' },
+    { id: 'tool-measure', group: 'Инструменты', label: 'Измерить', keys: 'M', enabled: true, run: () => setTool('measure'), terms: 'линейка расстояние' },
+    { id: 'fit', group: 'Инструменты', label: 'Показать весь комплект', keys: 'F', enabled: draft.groups.length > 0, run: () => setFitRequest(n => n + 1), terms: 'масштаб вписать' },
+    { id: 'trajectories', group: 'Вид', label: `Траектории: ${c.trajectories ? 'скрыть' : 'показать'}`, enabled: true, run: () => c.setTrajectories(v => !v) },
+    { id: 'material', group: 'Вид', label: `Материал: ${c.materialView ? 'скрыть' : 'показать'}`, enabled: true, run: () => c.setMaterialView(v => !v) },
+    { id: 'mode', group: 'Вид', label: c.advanced ? 'Режим менеджера' : 'Режим технолога (расширенный)', enabled: !state.incomplete, run: () => c.setAdvanced(v => !v), terms: 'расширенный режим' },
+    { id: 'tree', group: 'Вид', label: 'Панель «Состав»', enabled: true, run: toggleTree, terms: 'детали список' },
+    { id: 'properties', group: 'Вид', label: 'Панель «Свойства»', enabled: true, run: () => showRight('properties') },
+    { id: 'issues', group: 'Вид', label: `Проверки${issues.length ? ` (${issues.length})` : ''}`, enabled: true, run: () => showRight('issues'), terms: 'ошибки' },
+    { id: 'export', group: 'Вариант', label: 'Скачать фрезеровки', enabled: c.canExport, run: () => c.setExportOpen(true), terms: 'выгрузка zip dxf svg' },
+    { id: 'new-variant', group: 'Вариант', label: 'Новый вариант', enabled: newVariantAllowed, run: () => c.startClone('clone') },
+    { id: 'refresh-variant', group: 'Вариант', label: 'Новый вариант из актуальных данных', enabled: can('cad.edit'), run: () => c.startClone('refresh') },
+    { id: 'retry-save', group: 'Вариант', label: 'Повторить сохранение', enabled: state.status === 'error' && !c.busy, run: c.retrySave },
+    ...variants.filter(v => v.id !== base.id).map(v => ({ id: `variant:${v.id}`, group: 'Вариант', label: `Открыть вариант ${v.name}`, enabled: !c.busy, run: () => c.activate(v.id) })),
+    { id: 'erp-search', group: 'Настройки', label: 'Общий поиск ERP', enabled: true, run: () => erpSearch.toggle(), terms: 'kbar меню разделы' },
+    ...(can('references.manage') ? [{ id: 'mapping', group: 'Настройки', label: 'Соответствия типов фрезеровок', enabled: true, run: onMapping }] : []),
+  ];
+  const command = (id: string) => commands.find(cmd => cmd.id === id)!;
+  const paletteBlocked = palette || c.exportOpen || c.importOpen || c.clone !== null;
+  // Ctrl+K belongs to the global ERP search (Refine KBar) elsewhere. On the active CAD tab the capture
+  // listener runs first and keeps it from KBar; KBar stays reachable as the palette's «Общий поиск ERP».
+  useEffect(() => {
+    if (!props.active) return;
+    const open = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'k') return;
+      e.preventDefault(); e.stopPropagation();
+      if (!paletteBlocked) setPalette(true);
+    };
+    window.addEventListener('keydown', open, true); return () => window.removeEventListener('keydown', open, true);
+  }, [props.active, paletteBlocked]);
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.defaultPrevented || isTextTarget(e.target)) return;
+    const cmd = findShortcut(commands, e);
+    if (cmd) { e.preventDefault(); if (cmd.enabled) cmd.run(); }
+  };
+  const tip = (cmd: CadCommand) => cmd.keys ? `${cmd.label} (${cmd.keys})` : cmd.label;
+  const cmdButton = (id: string, text: string, ariaLabel?: string) => {
+    const cmd = command(id);
+    return <Tooltip title={tip(cmd)}><Button aria-label={ariaLabel} disabled={!cmd.enabled} onClick={cmd.run}>{text}</Button></Tooltip>;
+  };
+  const saveText = base.kind === 'original' ? 'Оригинал · только просмотр' : state.incomplete ? 'Завершите ввод' : ({ saved: 'Все изменения сохранены', dirty: 'Есть изменения', saving: 'Сохраняем…', error: 'Не удалось сохранить', conflict: 'Конфликт версий' })[state.status];
+  const partsTitle = `Состав (${draft.groups.length})`;
+  const rightBody = <>
+    <Segmented className="cad-right-tabs" block size="small" value={rightTab} onChange={value => setRightTab(value as RightTab)}
+      options={[{ value: 'properties', label: 'Свойства' }, { value: 'issues', label: `Проверки${issues.length ? ` ${issues.length}` : ''}` }]} />
+    {/* Both stay mounted: a half-typed parameter must survive a look at the issue list. */}
+    <div hidden={rightTab !== 'properties'}><CadInspector c={c} /></div>
+    <div hidden={rightTab !== 'issues'}><CadIssueList c={c} onOpen={openIssue} /></div>
   </>;
-  return <>
-    <div className="cad-top-row">{header}<div className="cad-editor-toolbar">
-      <Space wrap><Button disabled={!can('cad.edit') || busy} onClick={() => { setName(`Рабочая ${variants.length}`); setClone('clone'); }}>Новый вариант</Button>
-        <Button disabled={readOnly || state.incomplete || state.status === 'conflict' || initialAspect === null} onClick={() => {
-          try { edit({ ...draft, groups: layoutPositionBlocks(draft.groups, draft.sources, viewportAspect.current) }, true); setLayoutRevision(n => n + 1); }
-          catch (error) { message.error(error instanceof Error ? error.message : 'Не удалось разложить детали'); }
-        }}>Разложить по позициям</Button>
-        <Button aria-label="Отменить последнее изменение" disabled={readOnly || !history.length || state.incomplete} onClick={() => { const prev = history.at(-1); if (prev) { setRedo(r => [...r, draft]); setHistory(h => h.slice(0, -1)); queue.edit(prev); } }}>↶</Button><Button aria-label="Повторить изменение" disabled={readOnly || !redo.length || state.incomplete} onClick={() => { const next = redo.at(-1); if (next) { setHistory(h => [...h, draft]); setRedo(r => r.slice(0, -1)); queue.edit(next); } }}>↷</Button>
-        <Checkbox checked={advanced} disabled={state.incomplete} onChange={e => setAdvanced(e.target.checked)}>Расширенный режим</Checkbox><Button type="primary" disabled={!can('cad.export') || Boolean(expansion.error) || state.incomplete || state.status === 'conflict'} onClick={() => setExportOpen(true)}>Скачать фрезеровки</Button></Space></div></div>
-    {state.status === 'error' && <Alert type="error" message="Изменения остались в этой вкладке" description="Не закрывайте её. Повторное сохранение не создаст дубль." action={<Button loading={busy} onClick={() => void act(async () => { await flush(); })}>Повторить сохранение</Button>} />}
-    {state.status === 'conflict' && <Alert type="warning" message="Коллега уже изменил этот вариант" description="Ваши изменения сохранены локально. Выберите отдельный вариант или загрузите изменения коллеги." action={<Space><Button onClick={() => { forkKey.current = crypto.randomUUID(); setName(`${base.name} · мои изменения`); setClone('fork'); }}>Сохранить мои в новый вариант</Button><Button onClick={() => Modal.confirm({ className: 'cad-compact', title: 'Отбросить мои несохранённые изменения?', content: 'Будет загружен текущий вариант коллеги.', onOk: async () => { const current = await cadApi.workspace(orderId); const fresh = current.variants.find(v => v.id === base.id); if (fresh) { invalid.current.clear(); queue.reset(fresh); setHistory([]); setRedo([]); await queryClient.invalidateQueries(['cad-workspace', orderId]); } } })}>Загрузить вариант коллеги</Button></Space>} />}
-    {source.data?.some(s => s.stale) && <Alert type="warning" message="Исходные заказы изменились. Этот вариант сохранён без изменений." action={<Button disabled={!can('cad.edit')} onClick={() => { setName(`Актуальный состав ${variants.length}`); setClone('refresh'); }}>Новый вариант из актуальных данных</Button>} />}
-    {source.isError && <Alert type="warning" message="Актуальность заказов пока не проверена" />}
-    <div className="cad-view-bar"><Space>{tablet && <><Button aria-expanded={panel === 'parts'} onClick={() => setPanel('parts')}>Детали ({draft.groups.length})</Button><Button aria-expanded={panel === 'properties'} onClick={() => setPanel('properties')}>Свойства</Button></>}<Checkbox checked={trajectories} onChange={e => setTrajectories(e.target.checked)}>Траектории</Checkbox><Checkbox checked={materialView} onChange={e => setMaterialView(e.target.checked)}>Материал</Checkbox><span className="cad-hint">{preview.pending ? 'Обновляем предпросмотр…' : 'Вид детали · 2D'}</span></Space><Button aria-expanded={panel === 'issues'} type={issues.length ? 'default' : 'text'} danger={issues.length > 0} onClick={() => setPanel('issues')}>Проверки{issues.length ? ` (${issues.length})` : ''}</Button></div>
-    {preview.error && <Alert type="warning" message={preview.error} />}
+  return <div className="cad-workbench" onKeyDown={onKeyDown}>
+    <div className="cad-topbar">
+      {orderPicker}
+      <Tabs className="cad-variant-tabs" activeKey={base.id} onChange={c.activate} items={variants.map(v => ({ key: v.id, label: `${v.kind === 'original' ? '🔒 ' : ''}${v.name}${v.id === base.id && c.dirty ? ' •' : ''}` }))} />
+      <Tooltip title="Новый вариант"><Button aria-label="Новый вариант" icon={<PlusOutlined />} disabled={!newVariantAllowed} onClick={() => c.startClone('clone')} /></Tooltip>
+      <span className="cad-topbar-end" />
+      <Tooltip title="Все команды и поиск заказа (Ctrl+K)"><Button className="cad-palette-button" icon={<SearchOutlined />} onClick={() => setPalette(true)}>Команды <kbd>Ctrl+K</kbd></Button></Tooltip>
+      <Tooltip title="Технолог видит технологические параметры, траектории и данные расчёта"><Segmented aria-label="Режим редактора" size="small" disabled={state.incomplete} value={c.advanced ? 'tech' : 'manager'} onChange={value => c.setAdvanced(value === 'tech')}
+        options={[{ value: 'manager', label: 'Менеджер' }, { value: 'tech', label: 'Технолог' }]} /></Tooltip>
+      <Button type="primary" disabled={!c.canExport} onClick={() => c.setExportOpen(true)}>Скачать фрезеровки</Button>
+    </div>
+    <div className="cad-editor-toolbar" role="toolbar" aria-label="Команды редактора">
+      {tablet && <><Button aria-expanded={panel === 'parts'} onClick={() => setPanel('parts')}>{partsTitle}</Button><Button aria-expanded={panel === 'properties'} onClick={() => setPanel('properties')}>Свойства</Button><span className="cad-toolbar-sep" /></>}
+      {cmdButton('undo', '↶', 'Отменить последнее изменение')}{cmdButton('redo', '↷', 'Повторить изменение')}
+      <span className="cad-toolbar-sep" />
+      {cmdButton('layout', 'Разложить по позициям')}{cmdButton('rotate', 'Повернуть')}{cmdButton('link', 'Связать')}{cmdButton('unlink', 'Разъединить')}
+      <span className="cad-toolbar-sep" />
+      <Checkbox checked={c.trajectories} onChange={e => c.setTrajectories(e.target.checked)}>Траектории</Checkbox><Checkbox checked={c.materialView} onChange={e => c.setMaterialView(e.target.checked)}>Материал</Checkbox>
+      <span className="cad-topbar-end" />
+      <span className="cad-hint">{c.preview.pending ? 'Обновляем предпросмотр…' : 'Вид детали · 2D'}</span>
+      <Button aria-expanded={tablet ? panel === 'issues' : propertiesOpen && rightTab === 'issues'} danger={issues.length > 0} onClick={() => showRight('issues')}>Проверки{issues.length ? ` (${issues.length})` : ''}</Button>
+      <Dropdown trigger={['click']} overlayClassName="cad-compact" menu={{ items: [
+        { key: 'add', label: 'Добавить детали из заказов', disabled: readOnly },
+        { key: 'refresh', label: 'Новый вариант из актуальных данных', disabled: !can('cad.edit') },
+        ...(can('references.manage') ? [{ key: 'mapping', label: 'Соответствия типов фрезеровок' }] : []),
+      ], onClick: ({ key }) => { if (key === 'add') c.setImportOpen(true); if (key === 'refresh') c.startClone('refresh'); if (key === 'mapping') onMapping(); } }}>
+        <Button aria-label="Ещё команды" icon={<EllipsisOutlined />} />
+      </Dropdown>
+    </div>
     <div className="cad-editor-layout">
-      {expansion.error ? <Alert type="error" message={expansion.error} /> : active ? <CadCanvas documentId={base.id} groups={draft.groups} sources={draft.sources} job={preview.scene} readOnly={readOnly} selected={selected} onSelect={select} onChange={groups => edit({ ...draft, groups }, true)} hiddenLayers={hidden} expanded={false} finished={materialView} trajectories={trajectories} changed={changed} ordinals={ordinals} dimension={dimension} onVisible={setVisible} onViewportSize={viewportChanged} fitOnOpen={automaticLayout} fitKey={`${layoutRevision}`} layoutAspect={initialAspect} /> : <div className="cad-canvas-shell" />}
-      {!tablet && <div className="cad-right-dock"><CadSidePanel side="right" kind="parts" title={`Детали (${draft.groups.length})`} open={partsOpen} onToggle={() => setPartsOpen(open => !open)}>{partsPanel}</CadSidePanel><CadSidePanel side="right" title="Свойства" open={propertiesOpen} onToggle={toggleProperties}>{inspector}</CadSidePanel></div>}</div>
-    <footer className="cad-document-footer"><Tabs className="cad-variant-tabs" activeKey={base.id} onChange={activate} items={variants.map(v => ({ key: v.id, label: `${v.kind === 'original' ? '🔒 ' : ''}${v.name}${v.id === base.id && dirty ? ' •' : ''}` }))} /><div role="status" aria-live="polite">{base.kind === 'original' ? 'Оригинал · только просмотр' : state.incomplete ? 'Завершите ввод' : ({ saved: 'Все изменения сохранены', dirty: 'Есть изменения', saving: 'Сохраняем…', error: 'Не удалось сохранить', conflict: 'Конфликт версий' })[state.status]}</div></footer>
-    <Drawer rootClassName="cad-compact" open={panel !== null} placement="right" width={Math.min(420, window.innerWidth)} title={panel === 'parts' ? 'Детали' : panel === 'properties' ? 'Свойства детали' : 'Что нужно проверить'} afterOpenChange={open => { if (open && panel === 'parts') restoreListScroll(); }} onClose={() => { if (state.incomplete) message.warning('Сначала завершите ввод параметра'); else setPanel(null); }}>
-      {panel === 'parts' ? partsPanel : panel === 'properties' ? inspector : <>{!issues.length && <Alert type="info" message="Ошибок предпросмотра не обнаружено" description="Полная проверка всех деталей и одобрений выполняется перед скачиванием." />}{issues.map((i, n) => <div key={n} className="cad-export-issue"><p>{i.message}</p>{advanced && <code>{i.code}</code>}{i.groupId && <Button onClick={() => { if (state.incomplete) { message.warning('Сначала завершите ввод параметра'); return; } select([i.groupId!]); if (tablet) setPanel('properties'); else { setPanel(null); setPropertiesOpen(true); } }}>Перейти к детали</Button>}</div>)}<p className="cad-hint">Пунктирный контур означает, что фрезеровка ещё не рассчитана. Схематичный вид не заменяет проверку в CAM.</p></>}
+      {!tablet && <CadSidePanel side="left" kind="parts" title={partsTitle} open={treeOpen} onToggle={() => setTreeOpen(open => !open)}><CadCompositionTree c={c} tree={tree} open={treeOpen} /></CadSidePanel>}
+      <div className="cad-canvas-area">
+        <CadDocumentAlerts c={c} />
+        {c.preview.error && <Alert type="warning" message={c.preview.error} />}
+        {c.expansion.error ? <Alert type="error" message={c.expansion.error} /> : props.active ? <CadCanvas documentId={base.id} groups={draft.groups} sources={draft.sources} job={c.preview.scene} readOnly={readOnly} selected={selected} onSelect={c.select} onChange={groups => c.edit({ ...draft, groups }, true)} hiddenLayers={c.hidden} expanded={false} finished={c.materialView} trajectories={c.trajectories} changed={c.changed} ordinals={c.ordinals} dimension={c.dimension} onVisible={c.setVisible} onViewportSize={c.viewportChanged} fitOnOpen={c.automaticLayout} fitKey={`${c.layoutRevision}:${fitRequest}`} layoutAspect={c.initialAspect} tool={tool} onToolChange={setTool} /> : <div className="cad-canvas-shell" />}
+      </div>
+      {!tablet && <CadSidePanel side="right" title="Свойства" open={propertiesOpen} onToggle={toggleProperties}>{rightBody}</CadSidePanel>}
+    </div>
+    <footer className="cad-document-footer cad-statusbar">
+      <div role="status" aria-live="polite" className={`cad-save-state is-${base.kind === 'original' ? 'locked' : state.incomplete ? 'incomplete' : state.status}`}>{saveText}</div>
+      <span>Выбрано {selected.length} из {draft.groups.length}</span>
+      {c.preview.pending && <span>Обновляем предпросмотр…</span>}
+      <span className="cad-topbar-end" />
+      <button type="button" className={`cad-status-issues${issues.length ? ' has-issues' : ''}`} onClick={() => showRight('issues')}>{issues.length ? `Ошибок: ${issues.length}` : 'Ошибок нет'}</button>
+    </footer>
+    <Drawer rootClassName="cad-compact" open={panel !== null} placement="right" width={Math.min(420, window.innerWidth)} title={panel === 'parts' ? 'Состав' : panel === 'properties' ? 'Свойства детали' : 'Что нужно проверить'} afterOpenChange={open => { if (open && panel === 'parts') tree.restoreScroll(); }} onClose={() => { if (!blocked()) setPanel(null); }}>
+      {panel === 'parts' ? <CadCompositionTree c={c} tree={tree} open rowHeight={40} /> : panel === 'properties' ? <CadInspector c={c} /> : <CadIssueList c={c} onOpen={openIssue} />}
     </Drawer>
-    <Modal className="cad-compact" open={clone !== null} title={clone === 'fork' ? 'Сохранить мои изменения отдельно' : clone === 'refresh' ? 'Вариант из актуальных данных' : 'Новый рабочий вариант'} onCancel={() => setClone(null)} confirmLoading={busy} okButtonProps={{ disabled: !name.trim() }} onOk={() => void act(async () => {
-      const next = clone === 'fork' ? await cadApi.fork(base, draft.groups, draft.sources.map(s => s.id), name, forkKey.current) : await cadApi.clone((await flush()).id, name, clone === 'refresh');
-      await queryClient.invalidateQueries(['cad-workspace', orderId]); useTabStore.getState().setDirty(tabKey, false); setClone(null); onActivate(next.id);
-    })}><Input aria-label="Имя нового варианта" value={name} maxLength={100} onChange={e => setName(e.target.value)} /><p>Оригинал и предыдущие варианты останутся неизменными.</p></Modal>
-    <CadImportDialog open={importOpen} draft={draft} onChange={edit} onClose={() => setImportOpen(false)} />
-    <CadExportDialog open={exportOpen} flush={async () => {
-      if (expansion.error) throw new Error(expansion.error);
-      if (!readOnly && (automaticLayout || state.draft.groups.some(g => g.quantity > 1))) queue.edit(draft, true);
-      return flush();
-    }} onClose={() => setExportOpen(false)} />
-  </>;
+    <Modal className="cad-compact" open={c.clone !== null} title={c.clone === 'fork' ? 'Сохранить мои изменения отдельно' : c.clone === 'refresh' ? 'Вариант из актуальных данных' : 'Новый рабочий вариант'} onCancel={() => c.setClone(null)} confirmLoading={c.busy} okButtonProps={{ disabled: !c.name.trim() }} onOk={c.submitClone}>
+      <Input aria-label="Имя нового варианта" value={c.name} maxLength={100} onChange={e => c.setName(e.target.value)} /><p>Оригинал и предыдущие варианты останутся неизменными.</p></Modal>
+    <CadImportDialog open={c.importOpen} draft={draft} onChange={c.edit} onClose={() => c.setImportOpen(false)} />
+    <CadExportDialog open={c.exportOpen} flush={c.exportFlush} onClose={() => c.setExportOpen(false)} />
+    <CadCommandPalette open={palette} commands={commands} onClose={() => setPalette(false)} onOpenOrder={onOpenOrder} currentOrderId={props.orderId} />
+  </div>;
+}
+
+/** Save/conflict/source banners float over the canvas instead of pushing it down. */
+function CadDocumentAlerts({ c }: { c: CadEditorController }) {
+  const { state, source } = c;
+  return <div className="cad-canvas-alerts">
+    {state.status === 'error' && <Alert type="error" message="Изменения остались в этой вкладке" description="Не закрывайте её. Повторное сохранение не создаст дубль." action={<Button loading={c.busy} onClick={c.retrySave}>Повторить сохранение</Button>} />}
+    {state.status === 'conflict' && <Alert type="warning" message="Коллега уже изменил этот вариант" description="Ваши изменения сохранены локально. Выберите отдельный вариант или загрузите изменения коллеги." action={<Space><Button onClick={() => c.startClone('fork')}>Сохранить мои в новый вариант</Button><Button onClick={c.loadColleague}>Загрузить вариант коллеги</Button></Space>} />}
+    {source.data?.some(s => s.stale) && <Alert type="warning" message="Исходные заказы изменились. Этот вариант сохранён без изменений." action={<Button disabled={!can('cad.edit')} onClick={() => c.startClone('refresh')}>Новый вариант из актуальных данных</Button>} />}
+    {source.isError && <Alert type="warning" message="Актуальность заказов пока не проверена" />}
+  </div>;
 }

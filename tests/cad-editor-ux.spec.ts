@@ -62,51 +62,46 @@ async function setup(page: Page, count = 2, technical = false) {
   return { variants, original, working, control };
 }
 
-test('CAD side panels start collapsed, expand independently and preserve selection and scroll', async ({ page }) => {
+test('CAD workbench panels start open, collapse independently and preserve selection and scroll', async ({ page }) => {
   const { control } = await setup(page, 500);
   await page.setViewportSize({ width: 1500, height: 1000 }); await page.goto('/cad/orders/1');
-  const parts = page.getByRole('button', { name: 'Детали (2000)', exact: true });
+  // The first test pays for the cold dev-server compile.
+  test.setTimeout(180000);
+  await expect(page.getByRole('heading', { name: 'CAD', exact: true })).toBeVisible({ timeout: 60000 });
+  const parts = page.getByRole('button', { name: 'Состав (2000)', exact: true });
   const properties = page.getByRole('button', { name: 'Свойства', exact: true });
-  await expect(parts).toHaveAttribute('aria-expanded', 'false');
-  await expect(properties).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.getByRole('button', { name: 'Проверки', exact: true })).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.getByLabel('Найти деталь')).toBeHidden();
-  const canvas = page.getByRole('application', { name: /Поле CAD/ });
-  const fullWidth = (await canvas.boundingBox())!.width;
-  await page.screenshot({ path: 'test-results/cad-editor-ux/desktop-collapsed.png', fullPage: true });
-  await parts.focus(); await page.keyboard.press('Enter');
   await expect(parts).toHaveAttribute('aria-expanded', 'true');
+  await expect(properties).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('button', { name: 'Проверки', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByLabel('Найти деталь')).toBeVisible();
+  const canvas = page.getByRole('application', { name: /Поле CAD/ });
+  const openWidth = (await canvas.boundingBox())!.width;
+  await page.screenshot({ path: 'test-results/cad-editor-ux/desktop-workbench.png', fullPage: true });
   await page.locator('.cad-part-card').first().click();
-  await expect(properties).toHaveAttribute('aria-expanded', 'false');
-  await properties.focus(); await page.keyboard.press('Space');
   await expect(page.getByRole('heading', { name: 'Позиция 1 · экземпляр 1/4' })).toBeVisible();
-  await expect.poll(async () => (await canvas.boundingBox())!.width).toBeLessThan(fullWidth - 240);
-  await page.screenshot({ path: 'test-results/cad-editor-ux/desktop-expanded.png', fullPage: true });
+  await expect(page.getByText('Выбрано 1 из 2000', { exact: true })).toBeVisible();
   const list = page.locator('.cad-part-list');
   await list.evaluate(el => { el.scrollTop = 5000; });
-  await expect(page.locator('.cad-part-card').first()).not.toContainText('Позиция 1 ');
-  const firstVisible = await page.locator('.cad-part-card').first().textContent();
-  await parts.click(); await expect(page.getByLabel('Найти деталь')).toBeHidden();
+  await expect(page.locator('.cad-part-card').first()).not.toHaveAttribute('title', /^Позиция 1 /);
+  const firstVisible = await page.locator('.cad-part-card').first().getAttribute('title');
+  await parts.focus(); await page.keyboard.press('Enter');
+  await expect(parts).toHaveAttribute('aria-expanded', 'false'); await expect(page.getByLabel('Найти деталь')).toBeHidden();
   await expect(properties).toHaveAttribute('aria-expanded', 'true');
   await parts.click();
   await expect.poll(() => list.evaluate(el => el.scrollTop)).toBe(5000);
-  await expect(page.locator('.cad-part-card').first()).toHaveText(firstVisible!);
+  await expect(page.locator('.cad-part-card').first()).toHaveAttribute('title', firstVisible!);
   await expect(page.getByRole('heading', { name: 'Позиция 1 · экземпляр 1/4' })).toBeVisible();
-  await parts.click(); await properties.click();
-  await expect.poll(async () => (await canvas.boundingBox())!.width).toBe(fullWidth);
+  await parts.click(); await properties.focus(); await page.keyboard.press('Space');
+  await expect(properties).toHaveAttribute('aria-expanded', 'false');
+  await expect.poll(async () => (await canvas.boundingBox())!.width).toBeGreaterThan(openWidth + 400);
   expect(control.saves).toEqual([]);
   await page.getByRole('tab', { name: /Оригинал/ }).click();
-  await expect(parts).toHaveAttribute('aria-expanded', 'false');
-  await expect(properties).toHaveAttribute('aria-expanded', 'false');
-  await page.reload();
-  await expect(parts).toHaveAttribute('aria-expanded', 'false');
-  await expect(properties).toHaveAttribute('aria-expanded', 'false');
+  await expect(parts).toHaveAttribute('aria-expanded', 'true');
+  await expect(properties).toHaveAttribute('aria-expanded', 'true');
 });
 
 async function selectFirstDesktopPart(page: Page) {
-  await page.getByRole('button', { name: 'Детали (8)', exact: true }).click();
   await page.locator('.cad-part-card').first().click();
-  await page.getByRole('button', { name: 'Свойства', exact: true }).click();
 }
 
 test('CAD controls have desktop density in panels, portals and tablet shell only', async ({ page }) => {
@@ -145,8 +140,6 @@ test('CAD controls have desktop density in panels, portals and tablet shell only
   await height('.cad-compact .ant-modal-body input');
   await height('.cad-compact .ant-modal-footer .ant-btn');
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
-  await page.getByRole('button', { name: 'Детали (8)', exact: true }).click();
-  await page.getByRole('button', { name: 'Свойства', exact: true }).click();
   await page.setViewportSize({ width: 1024, height: 850 });
   // Exercise the physical tablet hit-box override without changing non-CAD controls.
   await page.addStyleTag({ path: 'src/ui-evolution/styles/tablet.css' });
@@ -161,7 +154,7 @@ test('CAD controls have desktop density in panels, portals and tablet shell only
   });
   await height('.cad-editor-toolbar .ant-btn');
   await expect.poll(async () => (await page.locator('#non-cad-density-probe').boundingBox())!.height).toBeGreaterThanOrEqual(44);
-  await page.getByRole('button', { name: 'Детали (8)', exact: true }).click();
+  await page.getByRole('button', { name: 'Состав (8)', exact: true }).click();
   await height('.cad-compact .ant-input-search input');
   await height('.cad-compact .ant-input-search-button');
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
@@ -172,18 +165,20 @@ test('CAD controls have desktop density in panels, portals and tablet shell only
   expect(control.saves).toEqual([]);
 });
 
-test('issues open the collapsed desktop inspector without a duplicate drawer form', async ({ page }) => {
+test('issues open in the right panel and lead to the desktop inspector without a duplicate drawer form', async ({ page }) => {
   const { working } = await setup(page); working.groups[0].recipe = null;
   await page.setViewportSize({ width: 1500, height: 1000 }); await page.goto('/cad/orders/1');
   const properties = page.getByRole('button', { name: 'Свойства', exact: true });
-  await expect(properties).toHaveAttribute('aria-expanded', 'false');
+  await properties.click(); await expect(properties).toHaveAttribute('aria-expanded', 'false');
   await page.getByRole('button', { name: 'Проверки (4)', exact: true }).click();
+  await expect(properties).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('button', { name: 'Проверки (4)', exact: true })).toHaveAttribute('aria-expanded', 'true');
   await page.getByRole('button', { name: 'Перейти к детали', exact: true }).first().click();
   await expect(properties).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByRole('dialog')).toBeHidden();
   await expect(page.getByRole('combobox', { name: 'Фрезеровка детали', exact: true })).toHaveCount(1);
   await expect(page.getByRole('combobox', { name: 'Фрезеровка детали', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Детали (8)', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('button', { name: 'Проверки (4)', exact: true })).toHaveAttribute('aria-expanded', 'false');
 });
 
 test('manager starts in working variant; human parameters autosave; original remains locked', async ({ page }) => {
@@ -198,7 +193,7 @@ test('manager starts in working variant; human parameters autosave; original rem
   await expect(page.getByText('Все изменения сохранены', { exact: true })).toBeVisible();
   expect(state.variants.find(v => v.id === state.working.id)?.groups[0].recipe?.parameters.border_mm).toBe(30);
   expect(state.original.groups[0].recipe?.parameters).toEqual({});
-  await page.getByRole('checkbox', { name: 'Расширенный режим' }).check();
+  await page.locator('.ant-segmented-item', { hasText: 'Технолог' }).click();
   await expect(page.getByLabel('Глубина, мм', { exact: true })).toBeDisabled();
   await page.getByRole('tab', { name: /Оригинал/ }).click(); await expect(page.getByText('Оригинал · только просмотр', { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
@@ -254,11 +249,12 @@ test('tablet drawers, keyboard placement and 500-group virtualization', async ({
   const { control } = await setup(page, 500); await page.setViewportSize({ width: 1024, height: 768 }); await page.goto('/cad/orders/1');
   const initialCanvas = page.getByRole('application', { name: /Поле CAD/ });
   await expect(initialCanvas).toHaveAttribute('data-visible-instance-count', '2000');
-  await expect(page.getByRole('button', { name: 'Детали (2000)' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('button', { name: 'Состав (2000)' })).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByRole('button', { name: 'Свойства', exact: true })).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Детали (2000)' }).click();
-  await expect(page.locator('.cad-part-card')).toHaveCount(24); await page.locator('.cad-part-card').first().click();
+  await page.getByRole('button', { name: 'Состав (2000)' }).click();
+  await expect(page.locator('.cad-part-card').first()).toBeVisible();
+  expect(await page.locator('.cad-part-card').count()).toBeLessThan(40); await page.locator('.cad-part-card').first().click();
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click(); await page.getByRole('button', { name: 'Свойства', exact: true }).click();
   await expect(page.getByLabel('Ширина рамки, мм', { exact: true })).toBeVisible();
   await page.getByText('Положение на поле', { exact: true }).click();
@@ -269,12 +265,12 @@ test('tablet drawers, keyboard placement and 500-group virtualization', async ({
   await page.getByRole('button', { name: 'Панорама', exact: true }).click(); await expect(page.getByRole('button', { name: 'Выбор', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await canvas.focus(); await page.keyboard.press('m'); await page.keyboard.press('Enter'); await page.keyboard.press('Shift+ArrowRight'); await page.keyboard.press('Enter');
   await expect(page.getByText('Расстояние: 10.00 мм', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Детали (2000)' }).click(); await page.getByRole('checkbox', { name: 'Выбрать несколько' }).check(); await page.locator('.cad-part-card').nth(1).click();
+  await page.getByRole('button', { name: 'Состав (2000)' }).click(); await page.getByRole('checkbox', { name: 'Выбрать несколько' }).check(); await page.locator('.cad-part-card').nth(1).click();
   await expect(page.locator('.cad-part-card[aria-pressed="true"]')).toHaveCount(2);
   await page.locator('.cad-part-list').evaluate(el => { el.scrollTop = 5000; });
-  await expect(page.locator('.cad-part-card').first()).not.toContainText('Позиция 1 ');
+  await expect(page.locator('.cad-part-card').first()).not.toHaveAttribute('title', /^Позиция 1 /);
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
-  await page.getByRole('button', { name: 'Детали (2000)' }).click();
+  await page.getByRole('button', { name: 'Состав (2000)' }).click();
   await expect.poll(() => page.locator('.cad-part-list').evaluate(el => el.scrollTop)).toBe(5000);
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
   await page.screenshot({ path: 'test-results/cad-editor-ux/tablet-500.png', fullPage: true });
@@ -283,7 +279,7 @@ test('tablet drawers, keyboard placement and 500-group virtualization', async ({
 test('technologist edits depth and waits for scoped approval receipt before ZIP', async ({ page }) => {
   const { control } = await setup(page, 2, true); control.requireApproval = true;
   await page.setViewportSize({ width: 1500, height: 1000 }); await page.goto('/cad/orders/1');
-  await selectFirstDesktopPart(page); await page.getByRole('checkbox', { name: 'Расширенный режим' }).check();
+  await selectFirstDesktopPart(page); await page.locator('.ant-segmented-item', { hasText: 'Технолог' }).click();
   await page.getByLabel('Глубина, мм', { exact: true }).fill('7');
   await expect(page.getByText('Все изменения сохранены', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Скачать фрезеровки', exact: true }).click();
@@ -341,8 +337,7 @@ test('every copy moves and changes milling independently, persists and warns aga
   await expect(tabs).toBeInViewport();
   await expect.poll(async () => (await tabs.boundingBox())!.y + (await tabs.boundingBox())!.height).toBeLessThan(960);
   expect(control.saves).toHaveLength(0);
-  await page.getByRole('button', { name: 'Детали (8)', exact: true }).click();
-  await expect(page.locator('.cad-right-dock .cad-part-card')).toHaveCount(8);
+  await expect(page.locator('.cad-side-panel-left .cad-part-card')).toHaveCount(8);
   await page.locator('.cad-part-card').nth(1).click();
   await canvas.focus(); await page.keyboard.press('ArrowRight');
   await expect.poll(() => control.saves.length).toBe(1);
@@ -350,7 +345,6 @@ test('every copy moves and changes milling independently, persists and warns aga
   expect(firstSave).toHaveLength(8);
   expect(firstSave.every(g => g.quantity === 1)).toBe(true);
   expect(firstSave[0].xMm - firstSave[1].xMm).toBe(449); // 450mm pitch, only second instance moved +1.
-  await page.getByRole('button', { name: 'Свойства', exact: true }).click();
   await page.getByLabel('Ширина рамки, мм', { exact: true }).fill('30');
   await expect(page.locator('.cad-instance-difference')).toBeVisible();
   await expect.poll(() => control.saves.length).toBe(2);
@@ -359,10 +353,8 @@ test('every copy moves and changes milling independently, persists and warns aga
   expect(saved.groups.filter((_, i) => i !== 1).map(g => g.recipe?.parameters)).toEqual(Array.from({ length: 7 }, () => ({})));
   expect(saved.groups.map(g => [g.id, g.xMm, g.yMm])).toEqual(firstSave.map(g => [g.id, g.xMm, g.yMm]));
   await page.reload();
-  await page.getByRole('button', { name: 'Детали (8)', exact: true }).click();
   await expect(page.locator('.cad-part-card').nth(1).locator('.cad-instance-warning')).toBeVisible();
   await page.locator('.cad-part-card').nth(1).click();
-  await page.getByRole('button', { name: 'Свойства', exact: true }).click();
   await expect(page.getByLabel('Ширина рамки, мм', { exact: true })).toHaveValue('30');
   await page.getByLabel('Ширина рамки, мм', { exact: true }).fill('20');
   await expect(page.locator('.cad-instance-difference')).toHaveCount(0);
@@ -379,9 +371,7 @@ test('position layout fits initially, stays fixed on resize, and explicit rearra
   await expect(canvas).toHaveAttribute('data-visible-instance-count', '48');
   await page.screenshot({ path: 'test-results/cad-editor-ux/position-blocks.png', fullPage: true });
   expect(control.saves).toHaveLength(0);
-  await page.getByRole('button', { name: 'Детали (48)', exact: true }).click();
   await page.locator('.cad-part-card').first().click();
-  await page.getByRole('button', { name: 'Свойства', exact: true }).click();
   await page.getByText('Положение на поле', { exact: true }).click();
   const xField = page.getByLabel('По горизонтали, мм', { exact: true });
   const initialX = await xField.inputValue();
@@ -407,9 +397,7 @@ test('position layout fits initially, stays fixed on resize, and explicit rearra
   // Workflow auth fixture intentionally clears localStorage on every navigation,
   // so reload verifies server coordinates, not a camera erased by that fixture.
   await page.reload();
-  await page.getByRole('button', { name: 'Детали (48)', exact: true }).click();
   await page.locator('.cad-part-card').first().click();
-  await page.getByRole('button', { name: 'Свойства', exact: true }).click();
   await page.getByText('Положение на поле', { exact: true }).click();
   await expect(page.getByLabel('По горизонтали, мм', { exact: true })).toHaveValue(String(moved[0].xMm));
   await expect(page.getByLabel('По вертикали, мм', { exact: true })).toHaveValue(String(moved[0].yMm));
@@ -417,4 +405,49 @@ test('position layout fits initially, stays fixed on resize, and explicit rearra
   await page.getByRole('tab', { name: /Оригинал/ }).click();
   await expect(page.getByRole('button', { name: 'Разложить по позициям', exact: true })).toBeDisabled();
   expect(original).toEqual(originalBefore);
+});
+
+test('command palette, editor shortcuts and composition filters drive the same commands', async ({ page }) => {
+  const { control, working } = await setup(page, 3); working.groups[0].recipe = null;
+  await page.setViewportSize({ width: 1500, height: 1000 }); await page.goto('/cad/orders/1');
+  const canvas = page.getByRole('application', { name: /Поле CAD/ });
+  await expect(canvas).toHaveAttribute('data-instance-count', '12');
+  // Tree: positions group instances; filters narrow them; a position row selects all its instances.
+  await page.getByRole('button', { name: 'Без фрезеровки 4', exact: true }).click();
+  await expect(page.locator('.cad-side-panel-left .cad-part-card')).toHaveCount(4);
+  await page.getByRole('button', { name: 'Выбрать все экземпляры: Позиция 1' }).click();
+  await expect(page.getByText('Выбрано 4 из 12', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Все', exact: true }).click();
+  await page.getByRole('button', { name: 'Свернуть: Позиция 2' }).click();
+  await expect(page.locator('.cad-side-panel-left .cad-part-card')).toHaveCount(8);
+  // Shortcuts work while focus is inside the editor and not in a field.
+  await canvas.focus(); await page.keyboard.press('Control+g');
+  await expect.poll(() => control.saves.length).toBe(1);
+  expect(new Set(control.saves[0].groups.slice(0, 4).map(g => g.placementGroupId)).size).toBe(1);
+  expect(control.saves[0].groups[0].placementGroupId).toBeTruthy();
+  await page.keyboard.press('r');
+  await expect.poll(() => control.saves.length).toBe(2);
+  expect(control.saves[1].groups.slice(0, 4).every(g => g.rotationDeg === 90)).toBe(true);
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => control.saves.length).toBe(3);
+  expect(control.saves[2].groups.slice(0, 4).every(g => g.rotationDeg === 0)).toBe(true);
+  await page.getByLabel('Найти деталь').fill('r');
+  expect(control.saves).toHaveLength(3);
+  await page.getByLabel('Найти деталь').fill('');
+  // Palette: Ctrl+K, search, Enter runs the command; disabled commands are listed but inert.
+  await page.keyboard.press('Control+k');
+  const palette = page.getByRole('combobox', { name: 'Команда или заказ' });
+  await expect(palette).toBeFocused();
+  await palette.fill('связать');
+  await expect(page.getByRole('option', { name: /Связать перемещение/ })).toBeVisible();
+  await palette.fill('панорама'); await page.keyboard.press('Enter');
+  await expect(palette).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Панорама', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Control+k'); await palette.fill('проверки'); await page.keyboard.press('Enter');
+  await expect(page.getByRole('button', { name: 'Перейти к детали', exact: true }).first()).toBeVisible();
+  await page.keyboard.press('Control+k'); await palette.fill('повторить сохранение');
+  await expect(page.getByRole('option', { name: /Повторить сохранение/ })).toHaveAttribute('aria-disabled', 'true');
+  await page.keyboard.press('Enter'); await expect(palette).toBeVisible();
+  await page.keyboard.press('Escape'); await expect(palette).toBeHidden();
+  await page.screenshot({ path: 'test-results/cad-editor-ux/workbench-commands.png', fullPage: true });
 });
