@@ -95,6 +95,7 @@ function demandLine(overrides: Partial<ProjectedResourceLine> = {}): ProjectedRe
     refId: 11,
     name: 'E2E-Тест ЛДСП Белый',
     supplierName: 'E2E-Тест Поставщик Листов',
+    supplierRole: 'supplier',
     quantity: 2.5,
     unit: 'm2',
     areaM2: 2.5,
@@ -204,6 +205,25 @@ describe('demandFingerprint', () => {
 // --- projectOrders -----------------------------------------------------------
 
 describe('projectOrders', () => {
+  it('the supplier of a line is the main supplier, not the film manufacturer (migr 280)', () => {
+    const input = {
+      orders: [order()],
+      details: [
+        detail({ detail_id: 1, height: 500, width: 500, quantity: 1, film_id: 7, film_name: 'E2E-Тест Плёнка', vendor_id: 4, vendor_name: 'E2E-Тест Производитель' }),
+        detail({ detail_id: 2, height: 500, width: 500, quantity: 1, sheet_material_type_id: 11, sheet_material_name: 'E2E-Тест ЛДСП', supplier_id: 31, supplier_name: 'E2E-Тест Основной' }),
+      ],
+      detailCutJobs: [],
+      cutGroups: [],
+      cutSheets: [],
+    };
+    const chosen = projectOrders({ ...input, mainSuppliers: new Map([['film:7', 'E2E-Тест Поставщик Плёнки']]) });
+    expect(chosen.lines.get(101)!.find((line) => line.kind === 'film')?.supplierName).toBe('E2E-Тест Поставщик Плёнки');
+    expect(chosen.lines.get(101)!.find((line) => line.kind === 'sheet_material')?.supplierName).toBe('E2E-Тест Основной');
+    expect(chosen.base[0].films[0]).toMatchObject({ vendorName: 'E2E-Тест Производитель', supplierName: 'E2E-Тест Поставщик Плёнки' });
+    const none = projectOrders({ ...input, mainSuppliers: new Map() });
+    expect(none.lines.get(101)!.find((line) => line.kind === 'film')?.supplierName).toBeNull();
+  });
+
   it('produces a sheet line in m2 with quantity equal to the rounded detail area', () => {
     const result = projectOrders({
       orders: [order()],

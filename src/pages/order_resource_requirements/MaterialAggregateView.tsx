@@ -10,7 +10,7 @@ import type {
   OrderResourceMaterialAggregateDto,
 } from '../../api/types/orderApi.types';
 import { KindTitle, numericStyle } from './ResourceDemandParts';
-import { canBulkMarkParticipants, formatAggregateTotal, isAggregateCurrent, ordersLabel } from './resourceKinds';
+import { aggregateSupplierText, canBulkMarkParticipants, formatAggregateTotal, isAggregateCurrent, ordersLabel } from './resourceKinds';
 
 export interface MaterialAggregateState {
   data: OrderResourceMaterialAggregateDto[];
@@ -176,8 +176,8 @@ export function MaterialAggregateTable({
       />
       <Table.Column<OrderResourceMaterialAggregateDto>
         key="supplier"
-        title="Поставщик / производитель"
-        render={(_, row) => <Typography.Text type="secondary">{row.supplierName ?? '—'}</Typography.Text>}
+        title="Поставщик"
+        render={(_, row) => <Typography.Text type="secondary">{aggregateSupplierText(row)}</Typography.Text>}
       />
       <Table.Column<OrderResourceMaterialAggregateDto>
         key="totalQuantity"

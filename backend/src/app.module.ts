@@ -14,6 +14,7 @@ import { ClientPhonesModule } from './modules/client-phones/client-phones.module
 import { ClientScreenModule } from './modules/client-screen/client-screen.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { PartyContactsModule } from './modules/party-contacts/party-contacts.module';
+import { MaterialSuppliersModule } from './modules/material-suppliers/material-suppliers.module';
 import { ClientContactsModule } from './modules/client-contacts/client-contacts.module';
 import { IntegrationDuplicatesModule } from './modules/integration-duplicates/integration-duplicates.module';
 import { ClientMergeModule } from './modules/client-merge/client-merge.module';
@@ -66,6 +67,7 @@ import { OnecSyncModule } from './modules/onec-sync/onec-sync.module';
     ClientScreenModule,
     EmployeesModule,
     PartyContactsModule,
+    MaterialSuppliersModule,
     ClientContactsModule,
     IntegrationDuplicatesModule,
     ClientMergeModule,

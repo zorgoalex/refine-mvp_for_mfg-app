@@ -15,10 +15,11 @@ import { useNavigate } from 'react-router-dom';
 import { getLoadedRuntimeConfig } from '../../config/runtimeConfig';
 import { useRefHeight, useSelectorHeight, useStickyBottom } from '../../hooks/useElementHeight';
 import './films.css';
+import { materialSuppliersApi, type FilmSuppliersDto } from "../../api/materialSuppliersApi";
 
 // Узкие колонки фиксированной ширины: список помещается без горизонтальной прокрутки, «Название» берёт остаток.
 // Сумма 960px: при ширине окна 1440 «Названию» остаётся ~200px.
-const WIDTH = { id: 56, sort: 84, nomenclatureType: 84, category: 84, note: 110, filmType: 84, vendor: 100, texture: 70, key: 90, active: 92, actions: 76, catalog: 64 } as const;
+const WIDTH = { id: 56, sort: 84, nomenclatureType: 84, category: 84, note: 110, filmType: 84, vendor: 100, suppliers: 120, texture: 70, key: 90, active: 92, actions: 76, catalog: 64 } as const;
 
 export const FilmList: React.FC<IResourceComponentsProps> = () => {
   const [filtersVisible, setFiltersVisible] = useState(false);
@@ -127,6 +128,19 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
     return map;
   }, [typesData]);
 
+  // Поставщики плёнок страницы — одним запросом к backend (таблица поставщиков в Hasura не видна).
+  const filmIds = useMemo(() => ((tableProps?.dataSource as Array<{ film_id?: number }>) ?? [])
+    .map((row) => row.film_id).filter((id): id is number => typeof id === 'number'), [tableProps?.dataSource]);
+  const [filmSuppliers, setFilmSuppliers] = useState<Record<number, FilmSuppliersDto>>({});
+  useEffect(() => {
+    if (filmIds.length === 0) { setFilmSuppliers({}); return; }
+    let active = true;
+    void materialSuppliersApi.films(filmIds)
+      .then((items) => { if (active) setFilmSuppliers(Object.fromEntries(items.map((item) => [item.filmId, item]))); })
+      .catch(() => { if (active) setFilmSuppliers({}); });
+    return () => { active = false; };
+  }, [filmIds]);
+
   const vendorMap = useMemo(() => {
     const map: Record<string | number, string> = {};
     (vendorsData?.data || []).forEach((v: any) => {
@@ -174,8 +188,8 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12} lg={6}>
-                  <Form.Item name="vendor_id" label="Поставщик плёнки">
-                    <Select {...vendorSelectProps} allowClear placeholder="Все поставщики" />
+                  <Form.Item name="vendor_id" label="Производитель">
+                    <Select {...vendorSelectProps} allowClear placeholder="Все производители" />
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12} lg={6}>
@@ -260,12 +274,25 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
         />
         <Table.Column
           dataIndex="vendor_id"
-          title="Поставщик плёнки"
+          title="Производитель"
           width={WIDTH.vendor}
           ellipsis
           render={(_, record: any) =>
             vendorMap[record?.vendor_id] ?? record?.vendor_id
           }
+        />
+        <Table.Column
+          key="suppliers"
+          title="Поставщики"
+          width={WIDTH.suppliers}
+          ellipsis
+          render={(_, record: any) => {
+            const item = filmSuppliers[record?.film_id];
+            if (!item) return null;
+            const names = item.suppliers.map((s) => s.name).join(', ');
+            const onec = item.onecSuppliers.length > 0 ? `По приходам 1С: ${item.onecSuppliers.map((s) => s.name).join(', ')}` : '';
+            return <Tooltip title={[names, onec].filter(Boolean).join('\n') || undefined}><span>{names || (onec ? '1С' : '')}</span></Tooltip>;
+          }}
         />
         <Table.Column dataIndex="film_texture" title="Фактура" width={WIDTH.texture} render={(value: boolean) => value ? "Да" : "Нет"} />
         <Table.Column

@@ -351,3 +351,24 @@ describe('resolveByMaterialPeriod', () => {
     });
   });
 });
+
+describe('поставщик в сводке и строках (migr 280)', () => {
+  it('производитель от прежнего backend не выдаётся за поставщика', async () => {
+    const { aggregateSupplierText, lineSupplierLabel } = await import('./resourceKinds');
+    expect(aggregateSupplierText({ kind: 'film', supplierName: 'Kira', supplierRole: 'supplier' })).toBe('Kira');
+    expect(aggregateSupplierText({ kind: 'film', supplierName: 'Kira' })).toBe('Kira (производитель)');
+    expect(aggregateSupplierText({ kind: 'sheet_material', supplierName: 'Alpi' })).toBe('Alpi');
+    expect(aggregateSupplierText({ kind: 'film', supplierName: null })).toBe('—');
+    expect(lineSupplierLabel({ kind: 'sheet_material', supplierName: 'Alpi' })).toBe('Поставщик: Alpi');
+  });
+});
+
+describe('колонка «Поставщик» таблиц (migr 280)', () => {
+  it('сохраняет пометку производителя от прежнего backend, поставщика показывает без подписи', async () => {
+    const { supplierColumnText, lineSupplierLabel } = await import('./resourceKinds');
+    expect(supplierColumnText(lineSupplierLabel({ kind: 'film', supplierName: 'Kira', supplierRole: 'supplier' }))).toBe('Kira');
+    expect(supplierColumnText(lineSupplierLabel({ kind: 'film', supplierName: 'Kira' }))).toBe('Kira (производитель)');
+    expect(supplierColumnText(lineSupplierLabel({ kind: 'sheet_material', supplierName: 'Alpi' }))).toBe('Alpi');
+    expect(supplierColumnText(null)).toBe('—');
+  });
+});

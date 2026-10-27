@@ -45,6 +45,10 @@ const extraResourceBodySchema = z.object({
   comment: z.string().trim().max(1000).optional(),
   isActive: z.boolean().optional(),
   sortOrder: z.number().int().min(0).max(32767).optional(),
+  // Производитель и поставщики (migr 280): не переданы — не менять.
+  vendorId: z.number().int().positive().nullable().optional(),
+  supplierIds: z.array(z.number().int().positive()).max(20)
+    .refine((ids) => new Set(ids).size === ids.length, 'supplierIds must not repeat a supplier').nullable().optional(),
 }).strict();
 
 const hdfMillingBodySchema = z.object({

@@ -11,10 +11,18 @@ export type SheetMaterialHasuraRecord = Record<string, any> & { version?: number
 export function sheetMaterialEditSource(
   snapshot: SheetMaterialTypeDto | undefined,
   record: SheetMaterialHasuraRecord | undefined,
-): { values: Partial<SheetMaterialTypeInput>; expectedVersion: number | undefined; fromBackend: boolean } | null {
+): {
+  values: Partial<SheetMaterialTypeInput> & { supplierIds?: number[] };
+  expectedVersion: number | undefined;
+  fromBackend: boolean;
+  /** Полный список поставщиков есть только в снимке backend (migr 280); иначе правится лишь основной, дополнительные не отправляются. */
+  supplierListEditable: boolean;
+} | null {
   if (snapshot) {
+    const supplierListEditable = Array.isArray(snapshot.suppliers);
     return {
       fromBackend: true,
+      supplierListEditable,
       expectedVersion: snapshot.version,
       values: {
         name: snapshot.name, materialTypeId: snapshot.materialTypeId, unitId: snapshot.unitId,
@@ -25,12 +33,14 @@ export function sheetMaterialEditSource(
         nomenclatureType: snapshot.nomenclatureType ?? undefined,
         nomenclatureCategory: snapshot.nomenclatureCategory ?? undefined,
         note: snapshot.note ?? undefined,
+        ...(supplierListEditable ? { supplierIds: snapshot.suppliers!.map((supplier) => supplier.id) } : {}),
       },
     };
   }
   if (!record) return null;
   return {
     fromBackend: false,
+    supplierListEditable: false,
     expectedVersion: record.version,
     values: {
       name: record.name, materialTypeId: record.material_type_id, unitId: record.unit_id,
@@ -40,4 +50,18 @@ export function sheetMaterialEditSource(
       isActive: record.is_active, isCuttable: record.is_cuttable ?? true, sortOrder: record.sort_order,
     },
   };
+}
+
+/**
+ * Поставщики в теле PUT/POST. Со списком (backend migr 280): основной = первый, дополнительные = остальные. Без него
+ * (старый backend или запасной снимок Hasura без дополнительных) — только основной `supplierId`, а
+ * `additionalSupplierIds` не отправляется: дополнительные на сервере не меняются.
+ */
+export function sheetSupplierPayload(
+  values: { supplierId?: number | null; supplierIds?: number[] },
+  supplierListEditable: boolean,
+): { supplierId: number | null; additionalSupplierIds?: number[] } {
+  if (!supplierListEditable) return { supplierId: values.supplierId ?? null };
+  const ids = values.supplierIds ?? [];
+  return { supplierId: ids[0] ?? null, additionalSupplierIds: ids.slice(1) };
 }

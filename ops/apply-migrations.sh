@@ -3143,6 +3143,14 @@ probe_file() {
       "$(q_col mdf_published_source_members covered_quantity)" \
       "$(q_con_on mdf_published_source_members mdf_published_member_covered_quantity_check)" \
       ;;
+    # Поставщики (список) у плёнок, листовых и доп. ресурсов; производитель доп. ресурса.
+    280_material_suppliers*) probe_all \
+      "$(q_tbl material_suppliers)" \
+      "$(q_con chk_material_suppliers_one_ref)" \
+      "$(q_idx uq_material_suppliers_sheet_supplier)" \
+      "$(q_idx uq_material_suppliers_extra_position)" \
+      "$(q_col extra_resources vendor_id)" \
+      ;;
     # MDF bath readiness from credited cut: declared coverage + republish job marker.
     277_mdf_bath_declared_coverage*) probe_all \
       "$(q_col mdf_published_source_members declared_covered_quantity)" \
@@ -3394,6 +3402,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     277_mdf_bath_declared_coverage*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    280_material_suppliers*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     186_bitrix24_product_import*)

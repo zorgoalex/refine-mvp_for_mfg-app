@@ -9,7 +9,8 @@ import { sheetMaterialsApi, type SheetMaterialTypeInput } from '../../api/sheetM
 import { useRecordTabTitle } from '../../utils/recordTitle';
 import { NomenclatureFormItems, nomenclaturePayload } from '../../components/NomenclatureFields';
 import { useSheetMaterialCapabilities } from './useSheetMaterialNomenclature';
-import { sheetMaterialEditSource } from './editSource';
+import { sheetMaterialEditSource, sheetSupplierPayload } from './editSource';
+import { SuppliersSelect } from '../../components/materialSuppliers/SuppliersSelect';
 import { OnecItemField } from './OnecItemField';
 import { fillNomenclatureFromOnec } from './onecItemFill';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -18,7 +19,7 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
   const canManage = can('sheet_materials.manage');
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const [form] = Form.useForm<SheetMaterialTypeInput>();
+  const [form] = Form.useForm<SheetMaterialTypeInput & { supplierIds?: number[] }>();
   const [saving, setSaving] = useState(false);
   const queryClient = useQueryClient();
 
@@ -46,6 +47,8 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
   const source = snapshotReady ? sheetMaterialEditSource(backendQuery.data, record) : null;
   const expectedVersion = source?.expectedVersion;
   const nomenclatureEditable = nomenclatureSupported && source?.fromBackend === true;
+  // Список поставщиков правится только по снимку backend: в запасном снимке Hasura дополнительных нет.
+  const supplierListEditable = source?.supplierListEditable === true;
 
   useRecordTabTitle({
     resourceLabel: 'Листовые материалы',
@@ -96,8 +99,12 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
     if (!record || !id || expectedVersion === undefined) return;
     setSaving(true);
     try {
-      const { nomenclatureType, nomenclatureCategory, note, ...values } = await form.validateFields();
-      await sheetMaterialsApi.update(Number(id), { ...values, ...nomenclaturePayload({ nomenclatureType, nomenclatureCategory, note }, nomenclatureEditable) }, expectedVersion);
+      const { nomenclatureType, nomenclatureCategory, note, supplierIds, supplierId, ...values } = await form.validateFields();
+      await sheetMaterialsApi.update(Number(id), {
+        ...values,
+        ...sheetSupplierPayload({ supplierId, supplierIds }, supplierListEditable),
+        ...nomenclaturePayload({ nomenclatureType, nomenclatureCategory, note }, nomenclatureEditable),
+      }, expectedVersion);
       // Список и карточка читают новые поля из кеша backend-списка: без сброса показали бы прежние значения.
       await queryClient.invalidateQueries({ queryKey: ['sheet-materials'] });
       message.success('Листовой материал обновлён');
@@ -146,9 +153,15 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
             </Form.Item>
           </Col>
           <Col xs={24} sm={12} md={8}>
-            <Form.Item name="supplierId" label="Поставщик">
-              <Select {...supplierSelectProps} allowClear />
-            </Form.Item>
+            {supplierListEditable ? (
+              <Form.Item name="supplierIds" label="Поставщики" extra="Первый — основной">
+                <SuppliersSelect />
+              </Form.Item>
+            ) : (
+              <Form.Item name="supplierId" label="Поставщик" extra="Дополнительные поставщики сейчас недоступны и не изменятся">
+                <Select {...supplierSelectProps} allowClear />
+              </Form.Item>
+            )}
           </Col>
           <Col xs={24} sm={12} md={8}>
             <Form.Item name="vendorId" label="Производитель">

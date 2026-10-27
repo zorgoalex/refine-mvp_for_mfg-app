@@ -106,6 +106,8 @@ export interface OrderResourceDemandLineDto {
   refId: number;
   name: string;
   supplierName: string | null;
+  /** Есть у backend с миграции 280: supplierName — поставщик. Без него у плёнки там производитель. */
+  supplierRole?: 'supplier';
   /** null — количество не посчитано (нет готового раскроя у плёнки). */
   quantity: number | null;
   unit: OrderResourceUnit;
@@ -159,6 +161,8 @@ export interface OrderFilmDemandDto {
   hasCutData: boolean;
   vendorId: number | null;
   vendorName: string | null;
+  /** Основной поставщик плёнки (backend с миграции 280); производитель — vendorName, справочно. */
+  supplierName?: string | null;
 }
 
 export interface OrderResourceDemandDto {
@@ -222,6 +226,7 @@ export interface OrderResourceMaterialAggregateDto {
   refId: number;
   name: string;
   supplierName: string | null;
+  supplierRole?: 'supplier';
   unit: OrderResourceUnit;
   totalQuantity: number;
   ordersCount: number;

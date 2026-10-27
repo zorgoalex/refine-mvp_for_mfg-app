@@ -158,9 +158,7 @@ export function mapBackendResourceLine(
     kind: line.kind,
     refId: line.refId,
     name: line.name,
-    supplierLabel: line.supplierName
-      ? `${line.kind === 'film' ? 'Производитель' : 'Поставщик'}: ${line.supplierName}`
-      : null,
+    supplierLabel: lineSupplierLabel(line),
     quantity: line.quantity,
     unit: line.unit,
     secondaryText: line.kind === 'film' ? formatArea(line.areaM2) : null,
@@ -366,4 +364,31 @@ export function resolveByMaterialPeriod(
   }
   if (skipDefaultPeriod) return { isDefault: false };
   return { dateFrom: defaultFrom, dateTo: defaultTo, isDefault: true };
+}
+
+/**
+ * Подпись поставщика строки. Новый backend (migr 280) кладёт в supplierName основного поставщика и помечает это
+ * `supplierRole: 'supplier'`; прежний backend у плёнок клал туда производителя — его не выдаём за поставщика.
+ */
+export function lineSupplierLabel(line: { kind: ResourceKind; supplierName: string | null; supplierRole?: 'supplier' }): string | null {
+  if (!line.supplierName) return null;
+  const isSupplier = line.kind === 'sheet_material' || line.supplierRole === 'supplier';
+  return `${isSupplier ? 'Поставщик' : 'Производитель'}: ${line.supplierName}`;
+}
+
+/** Значение колонки «Поставщик» сводки: производитель от прежнего backend — с пометкой. */
+export function aggregateSupplierText(row: { kind: ResourceKind; supplierName: string | null; supplierRole?: 'supplier' }): string {
+  if (!row.supplierName) return '—';
+  return row.kind === 'sheet_material' || row.supplierRole === 'supplier' ? row.supplierName : `${row.supplierName} (производитель)`;
+}
+
+/**
+ * Значение колонки «Поставщик» таблиц из подписи строки (`lineSupplierLabel`): «Поставщик: X» → «X»; производитель от
+ * прежнего backend («Производитель: X») сохраняет пометку — «X (производитель)».
+ */
+export function supplierColumnText(label: string | null | undefined): string {
+  if (!label) return '—';
+  const match = /^([^:]+):\s*(.*)$/.exec(label);
+  if (!match) return label;
+  return match[1] === 'Производитель' ? `${match[2]} (производитель)` : match[2];
 }
