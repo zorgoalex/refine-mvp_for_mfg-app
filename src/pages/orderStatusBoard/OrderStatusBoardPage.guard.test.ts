@@ -1236,6 +1236,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     // returning to the persistent board keeps it on screen and refreshes in the background
     expect(page).toContain('const shownKey = mdfShownDataKey(datasetKey, authSession.getSessionGeneration());');
     expect(page).toContain('useSessionGenerationReset({ active, revisionRef: datasetRevisionRef, onReset: (shown) => resetMdfBoardForNewSession({');
+    // inline updates: unchanged cards keep their objects and shared inputs; the move entry point is stable
+    expect(page).toContain('reuseUnchangedCncColumns(stableCncPeriodColumnsRef.current, columns)');
+    expect(page).not.toContain('MdfHybridMoveContext');
+    expect(page).toContain("hybridEntry={hybridMoveMeta?.get(cncManualMoveStorageKey('packet', packet.packetId))}");
+    expect(page).toContain('renderDependencies={cncOrderCardRenderDependencies({');
+    expect(page).toContain('onMove={stableMoveCncCard}');
+    expect(page).toContain('moveCncCardRef.current = moveCncCard;');
+    expect(page).toContain('allColumns={orderStatusOptions}');
     expect(page).toContain('if (keepsShownMdfBoard(shownDatasetKeyRef.current, shownKey, Boolean(shownCncTodayRef.current || shownBoardRef.current))) {');
     expect(page).toContain('buildCncOrderStatusBoardRequestKey(orderIds, DEFAULT_MDF_ORDER_CARD_SORT, includeBazisAllocation));');
     expect(page).toContain('if (!alreadyLoaded) void loadOrderBoard();');
@@ -1918,7 +1926,7 @@ describe('hybrid MDF board wiring (engine active/read_only)', () => {
     expect(page).toContain('buildMdfHybridBoard({ legacyColumns: cncToday.columns, snapshot: mdfHybridSnapshot,');
     expect(page).toContain('searchOrderIds: mdfPublishedBoard.searchOrderIds })');
     expect(page.split('mdfHybridSnapshot?.unregisteredTruncated &&').length - 1).toBe(2);
-    expect(page).toContain(': mdfHybridBoard?.columns ?? cncToday?.columns ?? [],');
+    expect(page).toContain(': mdfHybridBoard?.columns ?? cncToday?.columns ?? [];');
     expect(page).toContain('mdfHybrid={mdfHybridBoard && mdfHybridSnapshot ? { board: mdfHybridBoard, snapshot: mdfHybridSnapshot } : null}');
   });
 
@@ -1958,7 +1966,7 @@ describe('hybrid MDF board wiring (engine active/read_only)', () => {
 
   it('the card frame gates drags by the engine state and explains the block', () => {
     const frame = slice('const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({', 'interface CncDetailedMachineMapsProps');
-    expect(frame).toContain('React.useContext(MdfHybridMoveContext)');
+    expect(frame).toContain('hybridCardMoveGate(hybridEntry ?? undefined, sourceColumn)');
     expect(frame).toContain('const moveAvailable = movesEnabled && (!hybrid || hybrid.allowed) && destinations.length > 0;');
     expect(frame).toContain('|| !isMdfBackwardMove(kind, sourceColumn, destination.key)');
     expect(frame).toContain('cnc-mdf-engine-badge cnc-mdf-engine-badge--');

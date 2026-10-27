@@ -24,6 +24,14 @@ import {
   type MdfHybridCardMeta,
 } from './mdfHybridBoard';
 import { keepsShownMdfBoard, mdfShownDataKey, resetMdfBoardForNewSession } from './mdfBoardSessionData';
+import {
+  orderStatusOptionColumns,
+  reuseIfSameData,
+  reuseUnchangedCncColumns,
+  reuseUnchangedMap,
+  reuseUnchangedOrderBoardColumns,
+  reuseUnchangedOrderEntries,
+} from './stableBoardData';
 import { useSessionGenerationReset } from './useSessionGenerationReset';
 import { useMdfPublishedBoard } from './useMdfPublishedBoard';
 import React, {
@@ -1026,8 +1034,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               cncOrderSearchTodayRef.current = null;
               setCncToday(null);
               setCncOrderSearchToday(null);
-              cncManualMovesRef.current = manualMoves;
-              setCncManualMoves(manualMoves);
+              // unchanged moves keep their object (every card depends on them)
+              cncManualMovesRef.current = reuseIfSameData(cncManualMovesRef.current, manualMoves);
+              setCncManualMoves(cncManualMovesRef.current);
               if (!options.preserveLoading) setCncOrderBoard(null);
               boardRef.current = null;
               setBoard(null);
@@ -1101,8 +1110,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             setCncToday(response);
             setCncOrderSearchToday(response);
             setCncOriginalBoard(null);
-            cncManualMovesRef.current = manualMoves;
-            setCncManualMoves(manualMoves);
+            // unchanged moves keep their object (every card depends on them)
+            cncManualMovesRef.current = reuseIfSameData(cncManualMovesRef.current, manualMoves);
+            setCncManualMoves(cncManualMovesRef.current);
             if (!options.preserveLoading) setCncOrderBoard(null);
             boardRef.current = null;
             setBoard(null);
@@ -1660,12 +1670,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     () => mdfHybridBoard ? mdfHybridManualMoves(cncManualMoves, mdfHybridBoard.meta) : cncManualMoves,
     [cncManualMoves, mdfHybridBoard],
   );
-  const cncPeriodColumns = useMemo(
-    () => cncOriginalView
+  // A refresh keeps the objects of unchanged cards (and the inputs every card shares), so only changed cards
+  // re-render instead of the whole board.
+  const stableCncPeriodColumnsRef = useRef<CncTelegramTodayColumn[] | null>(null);
+  const cncPeriodColumns = useMemo(() => {
+    const columns = cncOriginalView
       ? buildCncOriginalSourceColumns(cncOriginalBoard)
-      : mdfHybridBoard?.columns ?? cncToday?.columns ?? [],
-    [cncOriginalBoard, cncOriginalView, cncToday?.columns, mdfHybridBoard],
-  );
+      : mdfHybridBoard?.columns ?? cncToday?.columns ?? [];
+    const stable = reuseUnchangedCncColumns(stableCncPeriodColumnsRef.current, columns);
+    stableCncPeriodColumnsRef.current = stable;
+    return stable;
+  }, [cncOriginalBoard, cncOriginalView, cncToday?.columns, mdfHybridBoard]);
   const cncOrderFilterOptions = useMemo(
     () =>
       buildCncOrderFilterOptions(cncPeriodColumns).map((orderName) => ({
@@ -1684,10 +1699,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     () => cncOriginalView ? [] : cncToday?.historicalBathReadiness ?? [],
     [cncOriginalView, cncToday?.historicalBathReadiness],
   );
-  const cncOrderBoardColumns = useMemo(
-    () => filterBoardColumns('production', cncOrderBoard?.columns ?? [], true),
-    [cncOrderBoard?.columns],
-  );
+  const stableCncOrderBoardColumnsRef = useRef<OrderStatusBoardColumn[] | null>(null);
+  const cncOrderBoardColumns = useMemo(() => {
+    const stable = reuseUnchangedOrderBoardColumns(stableCncOrderBoardColumnsRef.current,
+      filterBoardColumns('production', cncOrderBoard?.columns ?? [], true));
+    stableCncOrderBoardColumnsRef.current = stable;
+    return stable;
+  }, [cncOrderBoard?.columns]);
   const cncOrderStatusCards = useMemo(
     () => buildCncOrderStatusCards(cncOrderBoardColumns, cncOrderIds),
     [cncOrderBoardColumns, cncOrderIds],
@@ -1979,14 +1997,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       mdfBoardHiddenStatusesSetting,
     ],
   );
-  const cncOriginalCurrentLocations = useMemo(
-    () => buildCncOriginalCurrentLocations(
+  // passed to every card: an equal map keeps its object (a new `{}` would re-render the whole board)
+  const stableCncCurrentLocationsRef = useRef<CncOriginalCurrentLocationMap | null>(null);
+  const cncOriginalCurrentLocations = useMemo(() => {
+    const locations = reuseIfSameData(stableCncCurrentLocationsRef.current, buildCncOriginalCurrentLocations(
       cncOriginalBoard,
       cncOriginalCurrentRuleColumns,
       cncManualMoves,
-    ),
-    [cncManualMoves, cncOriginalBoard, cncOriginalCurrentRuleColumns],
-  );
+    ));
+    stableCncCurrentLocationsRef.current = locations;
+    return locations;
+  }, [cncManualMoves, cncOriginalBoard, cncOriginalCurrentRuleColumns]);
   const cncOriginalOrderCreatedAt = useMemo(
     () => buildCncOriginalOrderCreatedAt(cncOriginalBoard),
     [cncOriginalBoard],
@@ -2091,8 +2112,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
           !cancelled
           && cncAuxiliaryRefreshRevisionRef.current === requestRevision
         ) {
-          cncManualMovesRef.current = moves;
-          setCncManualMoves(moves);
+          // unchanged moves keep their object (every card depends on them)
+          cncManualMovesRef.current = reuseIfSameData(cncManualMovesRef.current, moves);
+          setCncManualMoves(cncManualMovesRef.current);
         }
       } catch (error) {
         if (!cancelled && !warned) {
@@ -2365,6 +2387,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       });
   }, [fetchInitial, mdfPublishedBoard, resolveMdfReturnDialog]);
 
+  // Cards keep their rendered content while their data is unchanged; the move they call must still act on the
+  // current board (mode, command tokens, snapshot) — a stable entry point to the latest handler.
+  const moveCncCardRef = useRef<typeof moveCncCard | null>(null);
+  const stableMoveCncCard = useCallback(
+    (...args: Parameters<typeof moveCncCard>) => moveCncCardRef.current?.(...args),
+    [],
+  ) as typeof moveCncCard;
   const moveCncCard = useCallback((
     kind: CncManualCardKind,
     cardId: string,
@@ -2526,8 +2555,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 cncStrongRefreshInFlightRef.current
                 || cncAuxiliaryRefreshRevisionRef.current !== moveRefreshRevision
               ) return;
-              cncManualMovesRef.current = moves;
-              setCncManualMoves(moves);
+              // unchanged moves keep their object (every card depends on them)
+              cncManualMovesRef.current = reuseIfSameData(cncManualMovesRef.current, moves);
+              setCncManualMoves(cncManualMovesRef.current);
             })
             .catch(() => undefined);
         }
@@ -2542,6 +2572,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     replacePending,
     resolveMdfReturnDialog,
   ]);
+  moveCncCardRef.current = moveCncCard;
 
   const syncCncBoardScrollTopButton = useCallback((viewportOverride?: HTMLElement | null) => {
     const viewport = viewportOverride ?? boardViewportRef.current;
@@ -3514,7 +3545,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                   : undefined}
                 onOpenOrder={(orderId) => navigate(`/orders/show/${orderId}`)}
                 onOpenBazisCut={(setId) => navigate(`/bazis-cut/${setId}`)}
-                onMove={moveCncCard}
+                onMove={stableMoveCncCard}
                 showFinancials={canViewFinancials}
               />
               </>
@@ -3715,9 +3746,6 @@ interface CncTelegramTodayColumnsProps {
   /** Engine active/read_only: the board's MDF facts come from the engine (`mdfHybridBoard.ts`). */
   mdfHybrid?: { board: MdfHybridBoard; snapshot: MdfPublishedSnapshot } | null;
 }
-
-/** Hybrid MDF board: per-card engine state for the move gate and the card badge (null outside the hybrid board). */
-const MdfHybridMoveContext = React.createContext<ReadonlyMap<string, MdfHybridCardMeta> | null>(null);
 
 export type CncTelegramTodayDisplayColumnKey =
   | CncTelegramTodayColumn['key']
@@ -4213,16 +4241,33 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     () => buildCncOrderMissingDetails(orderCards, readinessColumns, historicalReadinessSources),
     [orderCards, readinessColumns, historicalReadinessSources],
   );
-  const currentOrderDisplayCards = useMemo(
-    () => splitCncOrderCardsByManualColumn(
+  // An unchanged order keeps its entry (card, readiness, missing details): only changed order cards re-render.
+  const stableCurrentOrderDisplayCardsRef = useRef<ReturnType<typeof splitCncOrderCardsByManualColumn> | null>(null);
+  const currentOrderDisplayCards = useMemo(() => {
+    const split = reuseUnchangedOrderEntries(stableCurrentOrderDisplayCardsRef.current, splitCncOrderCardsByManualColumn(
       orderCards,
       orderReadinessByOrderId,
       manualMoves,
       orderSort,
       orderMissingDetailsByOrderId,
-    ),
-    [manualMoves, orderCards, orderMissingDetailsByOrderId, orderReadinessByOrderId, orderSort],
-  );
+    ));
+    stableCurrentOrderDisplayCardsRef.current = split;
+    return split;
+  }, [manualMoves, orderCards, orderMissingDetailsByOrderId, orderReadinessByOrderId, orderSort]);
+  // order cards need the columns only as status options (not their cards)
+  const stableOrderStatusOptionsRef = useRef<OrderStatusBoardColumn[] | null>(null);
+  const orderStatusOptions = useMemo(() => {
+    const options = orderStatusOptionColumns(stableOrderStatusOptionsRef.current, orderStatusColumns);
+    stableOrderStatusOptionsRef.current = options;
+    return options;
+  }, [orderStatusColumns]);
+  // the context every card frame reads: unchanged card gates keep the same map
+  const stableHybridMetaRef = useRef<ReadonlyMap<string, MdfHybridCardMeta> | null>(null);
+  const hybridMoveMeta = useMemo(() => {
+    const meta = mdfHybrid ? reuseUnchangedMap(stableHybridMetaRef.current, mdfHybrid.board.meta) : null;
+    stableHybridMetaRef.current = meta;
+    return meta;
+  }, [mdfHybrid]);
   const orderDisplayCards = useMemo(
     () => originalMode
       ? splitCncOrderCardsByManualColumn(
@@ -4244,6 +4289,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       originalOrderCreatedAt,
     ],
   );
+  const stableCurrentOrderLocationsRef = useRef<CncOriginalCurrentLocationMap | null>(null);
   const currentOrderLocations = useMemo(() => {
     const locations: CncOriginalCurrentLocationMap = {};
     for (const columnKey of CNC_ORDER_DISPLAY_COLUMN_KEYS) {
@@ -4252,7 +4298,9 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
           cncColumnTitleByKey(columnKey);
       }
     }
-    return locations;
+    const stable = reuseIfSameData(stableCurrentOrderLocationsRef.current, locations);
+    stableCurrentOrderLocationsRef.current = stable;
+    return stable;
   }, [currentOrderDisplayCards]);
   const manualDisplayColumns = useMemo(
     () => applyCncManualMovesToColumns(columns, originalMode ? {} : manualMoves, {
@@ -4383,7 +4431,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   };
 
   return (
-    <MdfHybridMoveContext.Provider value={mdfHybrid?.board.meta ?? null}>
+    <>
       <div
         className={[
           'status-board-columns status-board-columns--cnc',
@@ -4610,18 +4658,23 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         )}
                         fallbackLabel={card.orderName || String(card.orderId)}
                         contentIdentity={card}
-                        renderDependencies={[
+                        renderDependencies={cncOrderCardRenderDependencies({
+                          orderMovesEnabled,
+                          pending: pendingOrderIds.has(card.orderId),
                           readiness,
                           missingDetails,
                           summaryOnly,
-                          mutedOrderIds.has(card.orderId),
-                          orderStatusColumns,
+                          muted: mutedOrderIds.has(card.orderId),
+                          orderStatusOptions,
                           relationContext,
                           relationsEnabled,
-                          Boolean(onSelectOrderHistory),
+                          historySelectable: Boolean(onSelectOrderHistory),
                           originalMode,
                           currentOrderLocations,
-                        ]}
+                          cardDisplayMode,
+                          detailedBathActive,
+                          showFinancials,
+                        })}
                       >
                       <CncManualCardFrame
                         kind="order"
@@ -4644,7 +4697,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         board="production"
                         card={card}
                         sourceColumn={column.key}
-                        allColumns={orderStatusColumns}
+                        allColumns={orderStatusOptions}
                         finePointer={false}
                         mutationsEnabled={false}
                         pending={false}
@@ -4722,6 +4775,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         fallbackLabel={formatCncBathCardCutNumber(bath)}
                         contentIdentity={bath}
                         renderDependencies={[
+                          hybridMoveMeta?.get(cncManualMoveStorageKey('bath', bath.bathCardId)),
+                          Boolean(hybridMoveMeta),
                           summaryOnly,
                           relationContext,
                           relationsEnabled,
@@ -4734,6 +4789,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                       >
                       <CncManualCardFrame
                         kind="bath"
+                        hybridActive={Boolean(hybridMoveMeta)}
+                        hybridEntry={hybridMoveMeta?.get(cncManualMoveStorageKey('bath', bath.bathCardId))}
                         cardId={bath.bathCardId}
                         sourceColumn={column.key}
                         onMove={onMove}
@@ -4810,6 +4867,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         fallbackLabel={`Раскрой №${bazisCutSet.bazisCutSetId}`}
                         contentIdentity={bazisCutSet}
                         renderDependencies={[
+                          hybridMoveMeta?.get(cncManualMoveStorageKey('bazisCutSet', String(bazisCutSet.bazisCutSetId))),
+                          Boolean(hybridMoveMeta),
                           state,
                           summaryOnly,
                           relationContext,
@@ -4823,6 +4882,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                       >
                       <CncManualCardFrame
                         kind="bazisCutSet"
+                        hybridActive={Boolean(hybridMoveMeta)}
+                        hybridEntry={hybridMoveMeta?.get(cncManualMoveStorageKey('bazisCutSet', String(bazisCutSet.bazisCutSetId)))}
                         cardId={String(bazisCutSet.bazisCutSetId)}
                         sourceColumn={column.key}
                         onMove={onMove}
@@ -4884,6 +4945,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                       fallbackLabel={`Раскрой №${formatCncPacketCompactNumber(packet)}`}
                       contentIdentity={packet}
                       renderDependencies={[
+                        hybridMoveMeta?.get(cncManualMoveStorageKey('packet', packet.packetId)),
+                        Boolean(hybridMoveMeta),
                         packetState,
                         summaryOnly,
                         relationContext,
@@ -4897,6 +4960,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                     >
                     <CncManualCardFrame
                       kind="packet"
+                      hybridActive={Boolean(hybridMoveMeta)}
+                      hybridEntry={hybridMoveMeta?.get(cncManualMoveStorageKey('packet', packet.packetId))}
                       cardId={packet.packetId}
                       sourceColumn={column.key}
                       onMove={onMove}
@@ -5004,7 +5069,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
         />,
         document.body,
       )}
-    </MdfHybridMoveContext.Provider>
+    </>
   );
 };
 
@@ -5093,16 +5158,46 @@ const CncDeferredCardComponent: React.FC<CncDeferredCardProps> = ({
   );
 };
 
-const CncDeferredCard = memo(
-  CncDeferredCardComponent,
-  (previous, next) =>
-    previous.defer === next.defer
+/** Everything an order card renders from besides its own data: each input is a dependency, so the card is
+ * re-rendered when any of them changes (and kept as is otherwise). */
+export function cncOrderCardRenderDependencies(input: {
+  orderMovesEnabled: boolean;
+  pending: boolean;
+  readiness: unknown;
+  missingDetails: unknown;
+  summaryOnly: boolean;
+  muted: boolean;
+  orderStatusOptions: unknown;
+  relationContext: unknown;
+  relationsEnabled: boolean;
+  historySelectable: boolean;
+  originalMode: boolean;
+  currentOrderLocations: unknown;
+  cardDisplayMode: CncCardDisplayMode;
+  detailedBathActive: boolean;
+  showFinancials: boolean;
+}): unknown[] {
+  return [input.orderMovesEnabled, input.pending, input.readiness, input.missingDetails, input.summaryOnly, input.muted,
+    input.orderStatusOptions, input.relationContext, input.relationsEnabled, input.historySelectable,
+    input.originalMode, input.currentOrderLocations, input.cardDisplayMode, input.detailedBathActive,
+    input.showFinancials];
+}
+
+/** A card re-renders only when its own data object or one of its own dependencies changed. */
+export function cncDeferredCardPropsEqual(
+  previous: { defer: boolean; fallbackLabel: string; contentIdentity: unknown; renderDependencies: readonly unknown[] },
+  next: { defer: boolean; fallbackLabel: string; contentIdentity: unknown; renderDependencies: readonly unknown[] },
+): boolean {
+  return previous.defer === next.defer
     && previous.fallbackLabel === next.fallbackLabel
     && previous.contentIdentity === next.contentIdentity
     && previous.renderDependencies.length === next.renderDependencies.length
-    && previous.renderDependencies.every(
-      (dependency, index) => dependency === next.renderDependencies[index],
-    ),
+    && previous.renderDependencies.every((dependency, index) => dependency === next.renderDependencies[index]);
+}
+
+const CncDeferredCard = memo(
+  CncDeferredCardComponent,
+  cncDeferredCardPropsEqual,
 );
 
 const CncColumnCardPlaceholders: React.FC<{ displayMode: CncCardDisplayMode }> = ({
@@ -5274,6 +5369,9 @@ interface CncManualCardFrameProps {
   onMove: CncTelegramTodayColumnsProps['onMove'];
   movesEnabled: boolean;
   currentLocation?: string;
+  /** Hybrid MDF board: this card's engine state for the move gate (`hybridActive` false outside the hybrid board). */
+  hybridActive?: boolean;
+  hybridEntry?: MdfHybridCardMeta | null;
   children: () => React.ReactElement;
 }
 
@@ -5284,6 +5382,8 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
   onMove,
   movesEnabled,
   currentLocation,
+  hybridActive = false,
+  hybridEntry,
   children,
 }) => {
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -5294,10 +5394,9 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
   const touchDragPointRef = useRef<{ x: number; y: number } | null>(null);
   const touchDragFrameRef = useRef<number | null>(null);
   const [touchReady, setTouchReady] = useState(false);
-  const hybridMeta = React.useContext(MdfHybridMoveContext);
-  const hybrid = hybridMeta && kind !== 'order'
-    ? hybridCardMoveGate(hybridMeta.get(cncManualMoveStorageKey(kind, cardId)), sourceColumn)
-    : null;
+  // The card's own engine gate is a prop (part of the card's render dependencies): a change of another card's gate
+  // does not re-render this one.
+  const hybrid = hybridActive && kind !== 'order' ? hybridCardMoveGate(hybridEntry ?? undefined, sourceColumn) : null;
   const destinations = useMemo(
     () => cncManualMoveDestinations(kind, sourceColumn)
       // A non-MDF file under the engine moves forward only.
