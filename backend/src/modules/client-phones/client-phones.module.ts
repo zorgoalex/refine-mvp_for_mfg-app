@@ -23,5 +23,6 @@ import { ClientPhonesController } from './http/client-phones.controller';
       inject: [DatabaseService],
     },
   ],
+  exports: [ClientPhoneService, ClientPhonesRuntimeConfigService],
 })
 export class ClientPhonesModule {}

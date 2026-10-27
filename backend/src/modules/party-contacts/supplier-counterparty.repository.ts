@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { auditService } from '../../common/audit/audit.service';
 import { ApiError } from '../../common/errors/api-error';
 import { DatabaseService } from '../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../database/database.types';
 import type { CurrentUser } from '../../permissions/current-user';
+import { dropSupplierOnecCopy, readSupplierOnecProfile, type SupplierOnecProfile } from './supplier-onec-contacts.repository';
 
 const SOURCE = 'erp_party_contacts';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -19,7 +21,11 @@ export interface SupplierCounterparty {
   supplierName: string | null;
 }
 
-export interface SupplierLink { supplierId: number; supplierName: string; refKey1c: string | null; counterpartyName: string | null }
+export interface SupplierLink {
+  supplierId: number; supplierName: string; refKey1c: string | null; counterpartyName: string | null;
+  /** What the last 1C contacts sync saw of the linked counterparty (null — not synced yet or not linked). */
+  onec: SupplierOnecProfile | null;
+}
 
 export function parseRefKey1c(value: unknown): string {
   const key = typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -57,7 +63,10 @@ export class SupplierCounterpartyRepository {
     const row = (await client.query<{ supplier_name: string; ref: string | null }>(
       'SELECT supplier_name, lower(ref_key_1c::text) AS ref FROM suppliers WHERE supplier_id = $1', [supplierId])).rows[0];
     if (!row) throw new ApiError(404, 'SUPPLIER_NOT_FOUND', 'Поставщик не найден');
-    return { supplierId, supplierName: row.supplier_name, refKey1c: row.ref, counterpartyName: row.ref ? await this.name(client, row.ref) : null };
+    return {
+      supplierId, supplierName: row.supplier_name, refKey1c: row.ref, counterpartyName: row.ref ? await this.name(client, row.ref) : null,
+      onec: row.ref ? await readSupplierOnecProfile(client, supplierId) : null,
+    };
   }
 
   /**
@@ -75,13 +84,16 @@ export class SupplierCounterpartyRepository {
       }
       const counterpartyName = refKey1c ? await this.requireKnown(tx, refKey1c) : null;
       await tx.query('UPDATE suppliers SET ref_key_1c = $2::uuid, edited_by = $3 WHERE supplier_id = $1', [supplierId, refKey1c, Number(actor.id)]);
-      await auditService.record(tx, {
+      // The copy of the previous counterparty goes with the link, in this transaction (plan K4 v3.2).
+      const removedOnecContacts = await dropSupplierOnecCopy(tx, supplierId);
+      const auditId = await auditService.record(tx, {
         event: refKey1c ? 'supplier.counterparty_linked' : 'supplier.counterparty_unlinked', entityType: 'supplier', entityId: supplierId,
         actorUserId: Number(actor.id), actorUsername: actor.username, actorRole: actor.role, requestId, source: SOURCE,
         relatedEntities: [{ entityType: 'supplier', entityId: supplierId }],
         before: { refKey1c: row.ref }, after: { refKey1c },
-        metadata: { counterpartyName },
+        metadata: { counterpartyName, removedOnecContacts },
       });
+      await linkEvent(tx, refKey1c ? 'party.counterparty_linked' : 'party.counterparty_unlinked', supplierId, row.ref, refKey1c, auditId, actor, requestId);
       return this.link(supplierId, tx);
     }).catch((error: unknown) => { throw taken(error); });
   }
@@ -107,12 +119,13 @@ export class SupplierCounterpartyRepository {
       const actorId = Number(actor.id);
       const supplierId = Number((await tx.query<{ supplier_id: string }>(`INSERT INTO suppliers (supplier_name, ref_key_1c, is_active, created_by, edited_by)
         VALUES ($1, $2::uuid, true, $3, $3) RETURNING supplier_id`, [name.slice(0, 250), refKey1c, actorId])).rows[0].supplier_id);
-      await auditService.record(tx, {
+      const auditId = await auditService.record(tx, {
         event: 'supplier.created_from_counterparty', entityType: 'supplier', entityId: supplierId,
         actorUserId: actorId, actorUsername: actor.username, actorRole: actor.role, requestId, source: SOURCE,
         relatedEntities: [{ entityType: 'supplier', entityId: supplierId }],
         after: { supplierName: name, refKey1c },
       });
+      await linkEvent(tx, 'party.counterparty_linked', supplierId, null, refKey1c, auditId, actor, requestId);
       return { ...(await this.link(supplierId, tx)), created: true };
     }).catch((error: unknown) => { throw taken(error); });
   }
@@ -155,6 +168,18 @@ export class SupplierCounterpartyRepository {
     }
     return null;
   }
+}
+
+/** The domain event of a link change, in the command's transaction; keyed by the audit row of this very change. */
+async function linkEvent(tx: TransactionClient, eventType: string, supplierId: number, before: string | null, after: string | null, auditId: string,
+  actor: CurrentUser, requestId: string): Promise<void> {
+  await tx.query(`INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+    VALUES ($1, 'supplier', $2, $3::jsonb, $4) ON CONFLICT DO NOTHING`, [
+    eventType, String(supplierId), JSON.stringify({
+      eventId: randomUUID(), eventType, party: 'supplier', supplierId, refKey1cBefore: before, refKey1c: after, auditId,
+      actorUserId: Number(actor.id), requestId, correlationId: requestId, source: SOURCE,
+    }), `${eventType}:supplier:${supplierId}:${auditId}`,
+  ]);
 }
 
 function toCounterparty(row: { ref: string; name: string; is_supplier: boolean | null; supplier_id: string | null; supplier_name: string | null }): SupplierCounterparty {

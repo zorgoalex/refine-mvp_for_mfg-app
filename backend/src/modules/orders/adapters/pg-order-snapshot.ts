@@ -1329,7 +1329,8 @@ async function importSnapshotInTransaction(
   return response(status, orderId, orderName, payloadHash, snapshot);
 }
 
-async function upsertClient(
+/** Exported for the lock-order integration test of client phone writers (client-contacts). */
+export async function upsertClient(
   tx: TransactionClient,
   snapshot: OrderSnapshotDto,
   payloadHash: string,
@@ -1360,6 +1361,9 @@ async function upsertClient(
     : null;
   const byName = byRef ?? await readOptionalId(tx, 'SELECT client_id AS id FROM clients WHERE client_name = $1', [client.clientName]);
 
+  // An existing client is locked like in the mapped branch (its UPDATE): every writer of a client's phones takes the
+  // client first, then the phones (the contacts screen, the card commands, the Bitrix24 reverse sync).
+  if (byName !== null) await tx.query('SELECT 1 FROM clients WHERE client_id = $1 FOR NO KEY UPDATE', [byName]);
   const clientId = byName ?? await insertClient(tx, client);
   await upsertMap(tx, { source, entityType: SNAPSHOT_ENTITY_TYPES.client, sourceId: client.sourceId, localId: String(clientId), localOrderId: null, payloadHash });
   return clientId;
@@ -1538,7 +1542,8 @@ async function upsertOrderChildren(
   await recordOrderCatalogLinesChange(tx, orderId, catalogPlan, command.currentUser, command.requestId ?? 'orders-snapshot-import');
 }
 
-async function upsertClientPhones(
+/** Exported for the lock-order integration test of client phone writers (client-contacts). */
+export async function upsertClientPhones(
   tx: TransactionClient,
   snapshot: OrderSnapshotDto,
   clientId: number,
@@ -1546,6 +1551,9 @@ async function upsertClientPhones(
   payloadHash: string,
 ): Promise<void> {
   const source = snapshot.source.sourceInstanceId;
+  // Client first, then its phones in id order (the lock order of every writer of client phones).
+  await tx.query('SELECT 1 FROM clients WHERE client_id = $1 FOR NO KEY UPDATE', [clientId]);
+  await tx.query('SELECT phone_id FROM client_phones WHERE client_id = $1 ORDER BY phone_id FOR UPDATE', [clientId]);
   for (const phone of snapshot.data.clientPhones) {
     const mapped = await getMap(tx, source, SNAPSHOT_ENTITY_TYPES.clientPhone, phone.sourceId);
     const phoneId = mapped

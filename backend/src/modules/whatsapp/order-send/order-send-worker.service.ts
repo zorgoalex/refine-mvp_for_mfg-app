@@ -117,7 +117,15 @@ export class OrderSendWorker implements OnModuleInit, OnModuleDestroy {
         return;
       }
       try {
-        const check = await this.waha.checkPhone(row.phone_normalized);
+        const phone = row.phone_normalized;
+        // A supplier phone that is gone, or came from 1C data that may no longer be used, never reaches WAHA.
+        const check = supplier
+          ? await (this.suppliers as SupplierSendRepository).whileContactUsable(row, () => this.waha.checkPhone(phone))
+          : await this.waha.checkPhone(phone);
+        if (check === null) {
+          await this.repository.finishBeforeIntent(row.send_id, { state: 'cancelled', reason: 'recipient_removed' });
+          return;
+        }
         if (!check.exists || !check.chatId) {
           await this.repository.finishBeforeIntent(row.send_id, {
             state: 'failed', errorCode: supplier ? 'SUPPLIER_NOT_ON_WHATSAPP'

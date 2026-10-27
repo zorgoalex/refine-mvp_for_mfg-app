@@ -61,8 +61,12 @@ describe.skipIf(!databaseUrl)('party contacts and the supplier ↔ 1C counterpar
           '7 701 555 01 01 вн 5', '8701555010', '870155501011', '+7 701 555 01 0a', '  87015550102  ', '8-701-555-01-03/04', 'нет']) WITH ORDINALITY AS t(p, n);
       SELECT setval(pg_get_serial_sequence('suppliers', 'supplier_id'), 200);
       INSERT INTO vendors(vendor_id, vendor_name) VALUES (1, 'Тест Производитель');
-      INSERT INTO clients VALUES (1, 'Тест Клиент');`);
+      INSERT INTO clients VALUES (1, 'Тест Клиент');
+      CREATE TABLE outbox_events(outbox_event_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), event_type text NOT NULL, aggregate_type text NOT NULL,
+        aggregate_id text NOT NULL, payload_json jsonb NOT NULL, idempotency_key text UNIQUE);`);
     await q(await migration());
+    // The origin columns and the 1C availability function of K4a (the phone sync of 242 is applied by its own test).
+    await q(await readFile(new URL('../../../db/migrations/243_supplier_contacts_onec.sql', import.meta.url), 'utf8'));
     const database = {
       isConfigured: true,
       query: <T extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []) => pool.query<T>(text, [...params]),
@@ -294,7 +298,7 @@ describe.skipIf(!databaseUrl)('party contacts and the supplier ↔ 1C counterpar
     expect(parseRefKey1c(REF(1).toUpperCase())).toBe(REF(1));
     expect(await code(Promise.resolve().then(() => parseRefKey1c(`c:${REF(1)}`)))).toBe('VALIDATION_ERROR');
     const linked = await counterparties.setLink(2, REF(1), null, admin, 'req-l1');
-    expect(linked).toEqual({ supplierId: 2, supplierName: 'Тест Поставщик Два', refKey1c: REF(1), counterpartyName: 'Тест Контрагент 1' });
+    expect(linked).toEqual({ supplierId: 2, supplierName: 'Тест Поставщик Два', refKey1c: REF(1), counterpartyName: 'Тест Контрагент 1', onec: null });
     // The answer was lost and the command repeated: same state, no second audit.
     await counterparties.setLink(2, REF(1), null, admin, 'req-l1-repeat');
     // A second editor still sees «not linked» and tries to link another counterparty / unlink: refused, nothing overwritten.

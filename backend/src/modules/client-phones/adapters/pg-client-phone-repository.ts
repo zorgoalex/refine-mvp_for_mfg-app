@@ -11,12 +11,14 @@ import type {
   ClientPhoneRepositoryPort,
   CreateClientPhoneCommand,
   DeleteClientPhoneCommand,
+  ReplaceClientPhoneSetCommand,
   UpdateClientPhoneCommand,
 } from '../application/client-phone.types';
 import type {
   ClientPhoneDto,
   ClientPhoneResponseDto,
   DeleteClientPhoneResponseDto,
+  ReplaceClientPhoneSetResponseDto,
   UpdateClientPhoneRequestDto,
 } from '../dto/client-phone.dto';
 import {
@@ -28,6 +30,8 @@ import {
   ClientPhoneIdempotencyKeyReusedError,
   ClientPhoneNotFoundError,
   ClientPhoneRefKeyDuplicateError,
+  ClientPhoneSetInvalidError,
+  ClientPhonesStaleError,
 } from '../errors/client-phone.errors';
 
 const SOURCE = 'backend-client-phones-command';
@@ -52,14 +56,21 @@ interface LockedClientRow extends QueryResultRow {
 interface IdempotencyRow extends QueryResultRow {
   idempotency_key: string;
   request_hash: string;
-  response_json: ClientPhoneResponseDto | DeleteClientPhoneResponseDto | string | null;
+  response_json: StoredResponse | string | null;
   status: 'processing' | 'completed' | 'failed';
 }
 
 type ClientPhoneCommandName =
   | 'client_phones.create'
   | 'client_phones.update'
-  | 'client_phones.delete';
+  | 'client_phones.delete'
+  | 'client_phones.replace_set';
+
+type StoredResponse = ClientPhoneResponseDto | DeleteClientPhoneResponseDto | ReplaceClientPhoneSetResponseDto;
+
+/** Phones of one client at most (the set command of the contacts screen). */
+export const CLIENT_PHONE_SET_MAX = 20;
+const PHONE_FORMAT = /^\+?[0-9\s\-()]{7,20}$/;
 
 export class PgClientPhoneRepository implements ClientPhoneRepositoryPort {
   constructor(private readonly database: DatabaseService) {}
@@ -161,10 +172,7 @@ export class PgClientPhoneRepository implements ClientPhoneRepositoryPort {
         return idempotency.completedResponse as ClientPhoneResponseDto;
       }
 
-      const existing = await loadClientPhoneForUpdate(tx, command.phoneId);
-      if (!existing) {
-        throw new ClientPhoneNotFoundError(command.phoneId);
-      }
+      const existing = await loadClientPhoneLockingClientFirst(tx, command.phoneId);
       const previous = mapClientPhoneRow(existing);
       if (
         command.dto.clientId !== undefined &&
@@ -176,7 +184,6 @@ export class PgClientPhoneRepository implements ClientPhoneRepositoryPort {
           command.dto.clientId,
         );
       }
-      await loadClientForUpdate(tx, previous.clientId);
 
       if (command.dto.phoneNumber !== undefined) {
         await assertNoDuplicatePhone(
@@ -249,12 +256,8 @@ export class PgClientPhoneRepository implements ClientPhoneRepositoryPort {
         return idempotency.completedResponse as DeleteClientPhoneResponseDto;
       }
 
-      const existing = await loadClientPhoneForUpdate(tx, command.phoneId);
-      if (!existing) {
-        throw new ClientPhoneNotFoundError(command.phoneId);
-      }
+      const existing = await loadClientPhoneLockingClientFirst(tx, command.phoneId);
       const phone = mapClientPhoneRow(existing);
-      await loadClientForUpdate(tx, phone.clientId);
       await tx.query('DELETE FROM client_phones WHERE phone_id = $1', [command.phoneId]);
       const auditId = await writeAudit(tx, {
         event: 'client_phones.delete',
@@ -289,6 +292,256 @@ export class PgClientPhoneRepository implements ClientPhoneRepositoryPort {
       return response;
     });
   }
+
+  /**
+   * The whole phone set of one client (the contacts screen). The idempotency key is looked up first: a completed command
+   * with the same body answers as before (a lost answer never turns into a stale error), another body is refused. Then
+   * the client and its phones are locked (client first, as every writer of the phones) and the stored set — ids,
+   * numbers, types, the primary — must equal what the screen saw; any difference is 409 with the current set and
+   * nothing is written (the failed transaction does not keep the key). Removed phones go first, then changes with the
+   * primary flag taken off, then the new primary, then new phones — the unique indexes only see valid states. Every
+   * changed phone gets the same audit and outbox events as the card, each event under its own key.
+   */
+  replaceClientPhoneSet(command: ReplaceClientPhoneSetCommand): Promise<ReplaceClientPhoneSetResponseDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+
+      const requestId = requestIdOrFallback(command.requestId);
+      const key = command.dto.idempotencyKey;
+      const idempotency = await reconcileIdempotency(tx, {
+        idempotencyKey: key,
+        commandName: 'client_phones.replace_set',
+        currentUser: command.currentUser,
+        entityType: 'client',
+        entityId: String(command.clientId),
+        requestShape: {
+          actorUserId: command.currentUser.id,
+          commandName: 'client_phones.replace_set',
+          clientId: command.clientId,
+          expected: command.dto.expected,
+          phones: command.dto.phones,
+        },
+      });
+      if (idempotency.completedResponse) {
+        return idempotency.completedResponse as ReplaceClientPhoneSetResponseDto;
+      }
+
+      await loadClientForUpdate(tx, command.clientId);
+      const stored = (await tx.query<ClientPhoneRow>(
+        `
+        SELECT
+          phone_id, client_id, phone_number, phone_type, is_primary, ref_key_1c,
+          created_by, edited_by, created_at, updated_at
+        FROM client_phones
+        WHERE client_id = $1
+        ORDER BY phone_id
+        FOR UPDATE
+        `,
+        [command.clientId],
+      )).rows.map(mapClientPhoneRow);
+      if (!samePhoneSet(stored, command.dto.expected)) {
+        throw new ClientPhonesStaleError(command.clientId, stored.map(publicPhone));
+      }
+      const plan = planPhoneSet(stored, command.dto.phones);
+
+      const context = { currentUser: command.currentUser, requestId, source: command.source };
+      for (const phone of plan.deleted) {
+        await tx.query('DELETE FROM client_phones WHERE phone_id = $1', [phone.phoneId]);
+        await recordPhoneChange(tx, context, 'delete', `${key}:delete:${phone.phoneId}`, phone, null);
+      }
+      // A number moving to another phone of the set (two phones swap numbers): the phones giving a number away are
+      // parked on a placeholder first — UNIQUE(phone_number, client_id) is checked per statement.
+      // Placeholders never meet a number of the client now or after the command, nor each other.
+      const used = new Set([...stored.map((phone) => phone.phoneNumber), ...command.dto.phones.map((line) => line.phoneNumber.trim())]);
+      const parked = plan.updated.filter((change) => change.before.phoneNumber !== change.after.phoneNumber
+        && plan.updated.some((other) => other !== change && other.after.phoneNumber === change.before.phoneNumber));
+      for (const change of parked) {
+        const placeholder = parkedNumber(change.before.phoneId, used);
+        used.add(placeholder);
+        await tx.query('UPDATE client_phones SET phone_number = $2 WHERE phone_id = $1', [change.before.phoneId, placeholder]);
+      }
+      // Changes that leave a phone without «основной» first: the partial unique index sees at most one primary.
+      const ordered = [...plan.updated].sort((left, right) => Number(left.after.isPrimary) - Number(right.after.isPrimary));
+      for (const change of ordered) {
+        const updated = mapClientPhoneRow(await updateClientPhoneRow(tx, change.before.phoneId, {
+          phoneNumber: change.after.phoneNumber,
+          phoneType: change.after.phoneType,
+          isPrimary: change.after.isPrimary,
+          idempotencyKey: key,
+        }));
+        const onlyDemoted = change.before.isPrimary && !updated.isPrimary
+          && change.before.phoneNumber === updated.phoneNumber && change.before.phoneType === updated.phoneType;
+        await recordPhoneChange(tx, context, onlyDemoted ? 'primary_demote' : 'update',
+          `${key}:${onlyDemoted ? 'primary-demote' : 'update'}:${updated.phoneId}`, change.before, updated);
+      }
+      for (const line of plan.created) {
+        const phone = mapClientPhoneRow(await insertClientPhone(tx, {
+          clientId: command.clientId,
+          phoneNumber: line.phoneNumber,
+          phoneType: line.phoneType,
+          isPrimary: line.isPrimary,
+          refKey1c: null,
+        }));
+        await recordPhoneChange(tx, context, 'create', `${key}:create:${phone.phoneId}`, null, phone);
+      }
+
+      const after = (await tx.query<ClientPhoneRow>(
+        `
+        SELECT
+          phone_id, client_id, phone_number, phone_type, is_primary, ref_key_1c,
+          created_by, edited_by, created_at, updated_at
+        FROM client_phones
+        WHERE client_id = $1
+        ORDER BY is_primary DESC, phone_id
+        `,
+        [command.clientId],
+      )).rows.map(mapClientPhoneRow);
+      const response: ReplaceClientPhoneSetResponseDto = {
+        clientId: command.clientId,
+        phones: after,
+        created: plan.created.length,
+        updated: plan.updated.length,
+        deleted: plan.deleted.length,
+        requestId,
+      };
+      await completeIdempotency(tx, key, response);
+      return response;
+    }).catch((error: unknown) => {
+      // The card's duplicate error carries the number; this screen answers without it.
+      if (error instanceof ClientPhoneDuplicateError) throw new ClientPhoneSetInvalidError('Такой телефон у клиента уже есть');
+      throw error;
+    });
+  }
+}
+
+type SetAction = 'create' | 'update' | 'delete' | 'primary_demote';
+
+const SET_EVENTS: Record<SetAction, { audit: 'client_phones.create' | 'client_phones.update' | 'client_phones.delete' | 'client_phones.primary_demote'; outbox: string }> = {
+  create: { audit: 'client_phones.create', outbox: 'client_phone.created' },
+  update: { audit: 'client_phones.update', outbox: 'client_phone.updated' },
+  delete: { audit: 'client_phones.delete', outbox: 'client_phone.deleted' },
+  primary_demote: { audit: 'client_phones.primary_demote', outbox: 'client_phone.primary_demoted' },
+};
+
+/** One phone of the set command: the card's audit and outbox event, the source of the caller, its own event key. */
+async function recordPhoneChange(
+  tx: TransactionClient,
+  context: { currentUser: CurrentUser; requestId: string; source: string },
+  action: SetAction,
+  eventKey: string,
+  before: ClientPhoneDto | null,
+  after: ClientPhoneDto | null,
+): Promise<void> {
+  const phone = (after ?? before) as ClientPhoneDto;
+  await writeAudit(tx, {
+    event: SET_EVENTS[action].audit,
+    currentUser: context.currentUser,
+    requestId: context.requestId,
+    phoneId: phone.phoneId,
+    clientId: phone.clientId,
+    beforeJson: before ? mutablePhoneJson(before) : null,
+    afterJson: after ? mutablePhoneJson(after) : null,
+    diffJson: after === null
+      ? { deleted: { from: false, to: true } }
+      : computeDiff(before ? mutablePhoneJson(before) : null, mutablePhoneJson(after)),
+    metadataJson: { ...metadataJson(action, phone, context.requestId, []), source: context.source, setCommand: true },
+  });
+  await enqueueOutbox(tx, {
+    eventType: SET_EVENTS[action].outbox,
+    aggregateType: 'client_phone',
+    aggregateId: String(phone.phoneId),
+    idempotencyKey: eventKey,
+    payload: outboxPayload(SET_EVENTS[action].outbox, action, context.currentUser, context.requestId, phone, {
+      source: context.source,
+      idempotencyKey: eventKey,
+    }),
+  });
+}
+
+/**
+ * A placeholder number for a parked phone: «+», a lead digit and the phone id (19 digits, valid for the format check),
+ * the first lead digit whose number is not in `used` (the client's numbers now and after the command, earlier placeholders).
+ */
+export function parkedNumber(phoneId: number, used: ReadonlySet<string>): string {
+  for (let lead = 0; lead <= 9; lead += 1) {
+    const number = `+${lead}${String(phoneId).padStart(18, '0')}`;
+    if (!used.has(number)) return number;
+  }
+  throw new ClientPhoneSetInvalidError('Не удалось поменять номера местами; сохраните изменения в два шага');
+}
+
+/** The stored set equals what the screen saw: the same ids with the same number, type and primary flag. */
+export function samePhoneSet(
+  stored: readonly ClientPhoneDto[],
+  expected: readonly { phoneId: number; phoneNumber: string; phoneType: string | null; isPrimary: boolean | null }[],
+): boolean {
+  if (stored.length !== expected.length) return false;
+  const byId = new Map(expected.map((phone) => [phone.phoneId, phone]));
+  if (byId.size !== expected.length) return false;
+  return stored.every((phone) => {
+    const seen = byId.get(phone.phoneId);
+    return seen !== undefined && seen.phoneNumber === phone.phoneNumber && seen.phoneType === phone.phoneType
+      && seen.isPrimary === phone.isPrimary;
+  });
+}
+
+export interface PhoneSetPlan {
+  deleted: ClientPhoneDto[];
+  updated: Array<{ before: ClientPhoneDto; after: { phoneNumber: string; phoneType: ClientPhoneDto['phoneType']; isPrimary: boolean } }>;
+  created: Array<{ phoneNumber: string; phoneType: ClientPhoneDto['phoneType']; isPrimary: boolean }>;
+}
+
+/**
+ * The wanted set against the stored one (already equal to what the screen saw): at most CLIENT_PHONE_SET_MAX phones,
+ * a known id at most once, a number at most once (by its digits), at most one primary.
+ */
+export function planPhoneSet(
+  stored: readonly ClientPhoneDto[],
+  wanted: readonly { phoneId: number | null; phoneNumber: string; phoneType: ClientPhoneDto['phoneType']; isPrimary: boolean }[],
+): PhoneSetPlan {
+  if (wanted.length > CLIENT_PHONE_SET_MAX) {
+    throw new ClientPhoneSetInvalidError(`Не больше ${CLIENT_PHONE_SET_MAX} телефонов у клиента`);
+  }
+  const byId = new Map(stored.map((phone) => [phone.phoneId, phone]));
+  const named = new Set<number>();
+  const numbers = new Set<string>();
+  const lines = wanted.map((line) => ({ ...line, phoneNumber: line.phoneNumber.trim() }));
+  for (const [index, line] of lines.entries()) {
+    // Messages name the line, never the number (error payloads are not masked).
+    if (!PHONE_FORMAT.test(line.phoneNumber)) {
+      throw new ClientPhoneSetInvalidError(`Телефон в строке ${index + 1} указан неверно`, { line: index + 1, phoneId: line.phoneId });
+    }
+    if (line.phoneId !== null) {
+      if (!byId.has(line.phoneId) || named.has(line.phoneId)) {
+        throw new ClientPhoneSetInvalidError('Телефон указан дважды или не принадлежит клиенту', { phoneId: line.phoneId });
+      }
+      named.add(line.phoneId);
+    }
+    const digits = line.phoneNumber.replace(/\D/g, '');
+    if (numbers.has(digits)) throw new ClientPhoneSetInvalidError(`Телефон в строке ${index + 1} указан дважды`, { line: index + 1 });
+    numbers.add(digits);
+  }
+  if (lines.filter((line) => line.isPrimary).length > 1) {
+    throw new ClientPhoneSetInvalidError('Основным может быть только один телефон');
+  }
+  const plan: PhoneSetPlan = { deleted: stored.filter((phone) => !named.has(phone.phoneId)), updated: [], created: [] };
+  for (const line of lines) {
+    const after = { phoneNumber: line.phoneNumber, phoneType: line.phoneType, isPrimary: line.isPrimary };
+    if (line.phoneId === null) {
+      plan.created.push(after);
+      continue;
+    }
+    const before = byId.get(line.phoneId) as ClientPhoneDto;
+    if (before.phoneNumber !== after.phoneNumber || before.phoneType !== after.phoneType || before.isPrimary !== after.isPrimary) {
+      plan.updated.push({ before, after });
+    }
+  }
+  return plan;
+}
+
+/** A phone in the stale answer: what the screen needs to show the current set. */
+function publicPhone(phone: ClientPhoneDto) {
+  return { phoneId: phone.phoneId, phoneNumber: phone.phoneNumber, phoneType: phone.phoneType, isPrimary: phone.isPrimary };
 }
 
 async function setSessionUser(tx: TransactionClient, userId: string): Promise<void> {
@@ -305,7 +558,7 @@ async function reconcileIdempotency(
     entityId: string;
     requestShape: Record<string, unknown>;
   },
-): Promise<{ completedResponse?: ClientPhoneResponseDto | DeleteClientPhoneResponseDto }> {
+): Promise<{ completedResponse?: StoredResponse }> {
   const requestHash = hashRequest(input.requestShape);
   const inserted = await tx.query<IdempotencyRow>(
     `
@@ -359,7 +612,7 @@ async function reconcileIdempotency(
 async function completeIdempotency(
   tx: TransactionClient,
   idempotencyKey: string,
-  response: ClientPhoneResponseDto | DeleteClientPhoneResponseDto,
+  response: StoredResponse,
 ): Promise<void> {
   await tx.query(
     `
@@ -387,6 +640,26 @@ async function loadClientForUpdate(tx: TransactionClient, clientId: number): Pro
   if (!result.rows[0]) {
     throw new ClientPhoneClientNotFoundError(clientId);
   }
+}
+
+/**
+ * Lock order of every writer of a client's phones: the client row first, then its phones (the Bitrix24 reverse sync
+ * updates the client and then replaces its phones; the order snapshot import and the set command of the contacts
+ * screen lock the client too). The owner is read without a lock, the client locked, then the phone locked and its
+ * owner checked again: a phone moved or replaced meanwhile is reported as not found.
+ */
+async function loadClientPhoneLockingClientFirst(tx: TransactionClient, phoneId: number): Promise<ClientPhoneRow> {
+  const owner = await tx.query<LockedClientRow>('SELECT client_id FROM client_phones WHERE phone_id = $1', [phoneId]);
+  if (!owner.rows[0]) {
+    throw new ClientPhoneNotFoundError(phoneId);
+  }
+  const clientId = toNumber(owner.rows[0].client_id);
+  await loadClientForUpdate(tx, clientId);
+  const locked = await loadClientPhoneForUpdate(tx, phoneId);
+  if (!locked || toNumber(locked.client_id) !== clientId) {
+    throw new ClientPhoneNotFoundError(phoneId);
+  }
+  return locked;
 }
 
 async function loadClientPhoneForUpdate(
@@ -676,14 +949,20 @@ function mutableUpdateShape(dto: UpdateClientPhoneRequestDto): Record<string, un
   return shape;
 }
 
+/** Audit view of a phone: the number only masked (it is personal data), never as typed. */
 function mutablePhoneJson(phone: ClientPhoneDto): Record<string, unknown> {
   return {
     clientId: phone.clientId,
-    phoneNumber: phone.phoneNumber,
+    phoneNumber: maskedNumber(phone.phoneNumber),
     phoneType: phone.phoneType,
     isPrimary: phone.isPrimary,
     refKey1c: phone.refKey1c,
   };
+}
+
+function maskedNumber(phoneNumber: string): string {
+  const digits = phoneNumber.replace(/\D/g, '');
+  return digits.length >= 4 ? `***${digits.slice(-4)}` : '***';
 }
 
 function createdDiff(phone: ClientPhoneDto): Record<string, unknown> {
@@ -811,10 +1090,10 @@ function stableStringify(value: unknown): string {
 }
 
 function parseStoredResponse(
-  responseJson: ClientPhoneResponseDto | DeleteClientPhoneResponseDto | string,
-): ClientPhoneResponseDto | DeleteClientPhoneResponseDto {
+  responseJson: StoredResponse | string,
+): StoredResponse {
   return typeof responseJson === 'string'
-    ? (JSON.parse(responseJson) as ClientPhoneResponseDto | DeleteClientPhoneResponseDto)
+    ? (JSON.parse(responseJson) as StoredResponse)
     : responseJson;
 }
 

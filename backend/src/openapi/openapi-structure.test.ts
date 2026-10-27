@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
+import {
+  PARTY_ADDRESS_MAX, PARTY_CONTACT_KINDS, PARTY_NOTE_MAX, PARTY_ONEC_CONTACTS_MAX, PARTY_OWN_CONTACTS_MAX,
+} from '../modules/party-contacts/party-contacts';
 
 const contract = load(readFileSync(new URL('../../contracts/04-api-contract.openapi.yaml', import.meta.url), 'utf8')) as Record<string, any>;
 const methods = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'options']);
@@ -203,5 +206,31 @@ describe('OpenAPI document structure', () => {
       expect(contract.paths[`/api/v1/cnc-telegram/worker-logs/technical${suffix}`].get['x-permission']).toBe('audit.technical.view');
     }
     expect(contract.paths['/api/v1/cnc-telegram/worker-logs/technical/batch'].post.responses).toHaveProperty('409');
+  });
+
+  it('documents party contacts with the kinds, limits and origin the backend uses (not the employee schema)', () => {
+    const contact = contract.components.schemas.PartyContact;
+    expect(contact.properties.kind.enum).toEqual([...PARTY_CONTACT_KINDS]);
+    expect(contact.properties.origin.enum).toEqual(['erp', 'onec']);
+    expect(contact.properties.value.maxLength).toBe(PARTY_ADDRESS_MAX);
+    expect(contract.components.schemas.PartyContacts.required).toContain('kinds');
+    const replace = contract.components.schemas.PartyContactsReplace;
+    expect(replace.properties.contacts.maxItems).toBe(PARTY_OWN_CONTACTS_MAX + PARTY_ONEC_CONTACTS_MAX);
+    expect(replace.properties.contacts.items.properties.kind.enum).toEqual([...PARTY_CONTACT_KINDS]);
+    expect(replace.properties.contacts.items.properties.value.maxLength).toBe(PARTY_ADDRESS_MAX);
+    expect(replace.properties.contacts.items.properties.note.maxLength).toBe(PARTY_NOTE_MAX);
+    for (const owner of ['suppliers', 'vendors', 'clients']) {
+      const route = contract.paths[`/api/v1/${owner}/{id}/contacts`];
+      expect(route.put.requestBody.content['application/json'].schema.$ref).toBe('#/components/schemas/PartyContactsReplace');
+      for (const method of ['get', 'put']) {
+        expect(route[method].responses['200'].content['application/json'].schema.$ref).toBe('#/components/schemas/PartyContacts');
+      }
+    }
+    // the client phones of the «Контакты клиентов» screen come back as stored: type and primary are nullable columns
+    const phones = contract.paths['/api/v1/client-contacts/{clientId}/phones'].put.requestBody.content['application/json'].schema;
+    expect(phones.properties.expected.items.properties.phoneType.nullable).toBe(true);
+    expect(phones.properties.expected.items.properties.isPrimary.nullable).toBe(true);
+    const row = contract.components.schemas.ClientContactsRow.properties.phones.items.properties;
+    expect(row.phoneType.nullable && row.isPrimary.nullable).toBe(true);
   });
 });

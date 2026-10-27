@@ -2642,6 +2642,25 @@ probe_file() {
     # 233: queue instead of refusals (no «one active» index), manual cancel, image forms + their pages.
     # 230's probe checks its end state: 233 drops the one-active index, so 230 does not require it.
     # 235: employee work contacts + an employee as an order card send recipient.
+    # 243: K4a — supplier contacts from 1C: origin columns on the three contact tables, 1C profile and sync state,
+    # availability/lock functions, the narrowed phone sync, the profile cleanup trigger, version save marker.
+    243_supplier_contacts_onec*) probe_all \
+      "$(q_col supplier_contacts onec_snapshot_version)" \
+      "$(q_col vendor_contacts onec_snapshot_version)" \
+      "$(q_col client_contacts onec_snapshot_version)" \
+      "$(q_tbl party_onec_profiles)" \
+      "$(q_tbl party_onec_sync_state)" \
+      "SELECT to_regprocedure('public.party_onec_contacts_available(bigint,timestamp with time zone)') IS NOT NULL AND to_regprocedure('public.party_onec_contacts_lock(bigint,timestamp with time zone)') IS NOT NULL;" \
+      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'supplier_phone_contact_sync' AND prosrc LIKE '%origin = ''erp''%');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'party_contact_versions_saved' AND prosrc LIKE '%erp.party_contacts_onec_sync%');" \
+      "$(q_trg trg_supplier_drop_onec_profile)" ;;
+    # 269: «Контакты клиентов» — wider kind/value checks of client_contacts (validated) and the screen permissions.
+    269_client_contacts_screen*) probe_all \
+      "SELECT (SELECT count(*) FROM pg_constraint WHERE conrelid = 'public.client_contacts'::regclass AND convalidated AND conname IN ('ck_client_contacts_kind', 'ck_client_contacts_value_normalized', 'ck_client_contacts_other_note')) = 3;" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.client_contacts'::regclass AND conname = 'ck_client_contacts_kind' AND pg_get_constraintdef(oid) LIKE '%whatsapp%');" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.client_contacts'::regclass AND conname IN ('client_contacts_kind_check', 'client_contacts_check'));" \
+      "SELECT (SELECT count(*) FROM permissions_catalog WHERE permission_name IN ('clients.contacts.view', 'clients.contacts.manage') AND is_active) = 2;" \
+      "SELECT (SELECT count(*) FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'top_manager' AND rp.permission_name IN ('clients.contacts.view', 'clients.contacts.manage')) = 2;" ;;
     # 244: permissions of the 1C counterparty data in the client card (manager and above).
     244_client_onec_permissions*) probe_all \
       "SELECT (SELECT count(*) FROM permissions_catalog WHERE permission_name IN ('clients.onec_data.view','clients.onec_documents.view') AND is_active) = 2;" \
@@ -3010,7 +3029,7 @@ verify_applied_effect() {
     193_onec_agent_foundation*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
-    231_cut_result_render_v2*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|245_onec_operator_role*|246_clients_analytics_view_real_orders*|247_onec_agent_expected_silence*|244_client_onec_permissions*|248_authorization_snapshot*|249_role_checks_to_permissions*|251_whatsapp_calendar_send_permission*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|255_crm_sync_paid_payment_operations*|253_references_quick_create_permission*|256_doweling_order_version_triggers*|257_status_automation_clear_details_action*|258_financial_projections*|259_payment_audit_capture*|260_crm_sync_payment_notifications*|261_whatsapp_notification_deliveries*|262_onec_alert_episodes*|263_mandatory_balloons_delivery_checks*|264_onec_alert_notifications*|265_onec_alert_whatsapp*|266_order_stage_marks_from_details*|240_payment_onec_matches*|250_onec_stock_snapshots*|241_client_screen_settings*)
+    231_cut_result_render_v2*|208_user_preferences_ui_variant_neutral*|223_user_preferences_ui_variant_workbench*|224_whatsapp_calendar_send*|226_bitrix24_reconcile_retention*|230_whatsapp_order_send*|233_whatsapp_order_send_queue*|235_employee_work_contacts*|236_party_contacts*|237_whatsapp_order_send_client_phone*|238_whatsapp_supplier_send*|242_supplier_phone_contact_sync*|243_supplier_contacts_onec*|245_onec_operator_role*|246_clients_analytics_view_real_orders*|247_onec_agent_expected_silence*|244_client_onec_permissions*|248_authorization_snapshot*|249_role_checks_to_permissions*|251_whatsapp_calendar_send_permission*|252_superadmin_group_batch_link*|254_trim_text_fields_json_escape*|255_crm_sync_paid_payment_operations*|253_references_quick_create_permission*|256_doweling_order_version_triggers*|257_status_automation_clear_details_action*|258_financial_projections*|259_payment_audit_capture*|260_crm_sync_payment_notifications*|261_whatsapp_notification_deliveries*|262_onec_alert_episodes*|263_mandatory_balloons_delivery_checks*|264_onec_alert_notifications*|265_onec_alert_whatsapp*|266_order_stage_marks_from_details*|240_payment_onec_matches*|250_onec_stock_snapshots*|269_client_contacts_screen*|241_client_screen_settings*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     173_inbound_signals*)

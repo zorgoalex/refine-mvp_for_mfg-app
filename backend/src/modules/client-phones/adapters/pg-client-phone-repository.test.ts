@@ -48,7 +48,10 @@ describe('PgClientPhoneRepository', () => {
     );
     expect(createAuditQuery).toBeDefined();
     const createDiff = JSON.parse(createAuditQuery!.params[21] as string);
-    expect(createDiff.phoneNumber).toEqual({ from: null, to: '+7 700 000 01 01' });
+    // the number is personal data: the audit keeps only its last four digits
+    expect(createDiff.phoneNumber).toEqual({ from: null, to: '***0101' });
+    expect(JSON.stringify(database.queries.filter((q) => normalizeSql(q.text).startsWith('INSERT INTO audit_log')).map((q) => q.params)))
+      .not.toContain('700 000 01 01');
     expect(createDiff).not.toHaveProperty('phoneNumber.before');
     expect(createDiff).not.toHaveProperty('phoneNumber.after');
 
@@ -153,9 +156,26 @@ describe('PgClientPhoneRepository', () => {
     );
     expect(updateAuditQuery).toBeDefined();
     const updateDiff = JSON.parse(updateAuditQuery!.params[21] as string);
-    expect(updateDiff.phoneNumber).toEqual({ from: '+7 700 000 01 01', to: '+7 700 000 99 99' });
+    expect(updateDiff.phoneNumber).toEqual({ from: '***0101', to: '***9999' });
     expect(updateDiff).not.toHaveProperty('phoneNumber.before');
     expect(updateDiff).not.toHaveProperty('phoneNumber.after');
+  });
+
+  it('locks the client before the phone on update and delete (the lock order of every phone writer)', async () => {
+    for (const run of ['update', 'delete'] as const) {
+      const database = createDatabase();
+      const repository = new PgClientPhoneRepository(database.service);
+      if (run === 'update') {
+        await repository.updateClientPhone({ currentUser: currentUser(), phoneId: 10, dto: { phoneType: 'work', idempotencyKey: 'client-phone-order-key' } });
+      } else {
+        await repository.deleteClientPhone({ currentUser: currentUser(), phoneId: 10, dto: { idempotencyKey: 'client-phone-order-key' } });
+      }
+      const sql = database.queries.map((q) => normalizeSql(q.text));
+      const client = sql.findIndex((text) => text.startsWith('SELECT client_id FROM clients') && text.includes('FOR UPDATE'));
+      const phone = sql.findIndex((text) => text.startsWith('SELECT phone_id, client_id') && text.includes('WHERE phone_id = $1') && text.includes('FOR UPDATE'));
+      expect(client).toBeGreaterThan(-1);
+      expect(phone).toBeGreaterThan(client);
+    }
   });
 
   it('delete audit diff uses {from:false,to:true} for deleted field', async () => {
@@ -322,6 +342,10 @@ function createDatabase(options: {
           ],
           rowCount: 1,
         };
+      }
+
+      if (normalized.startsWith('SELECT client_id FROM client_phones WHERE phone_id')) {
+        return { rows: [{ client_id: 1 }], rowCount: 1 };
       }
 
       if (normalized.startsWith('SELECT client_id FROM clients')) {
