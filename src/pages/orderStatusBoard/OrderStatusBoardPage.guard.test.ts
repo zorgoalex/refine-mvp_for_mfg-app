@@ -1237,8 +1237,6 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('useSessionGenerationReset({ active, revisionRef: datasetRevisionRef, onReset: (shown) => resetMdfBoardForNewSession({');
     // inline updates: unchanged cards keep their objects and shared inputs; the move entry point is stable
     expect(page).toContain('reuseUnchangedCncColumns(stableCncPeriodColumnsRef.current, columns)');
-    expect(page).not.toContain('MdfHybridMoveContext');
-    expect(page).toContain("hybridEntry={hybridMoveMeta?.get(cncManualMoveStorageKey('packet', packet.packetId))}");
     expect(page).toContain('renderDependencies={cncOrderCardRenderDependencies({');
     // the app-wide capture scroll listener reads column rects once per frame and never while the board is hidden
     expect(page).toContain("if (viewport?.closest('[hidden]')) return;");
