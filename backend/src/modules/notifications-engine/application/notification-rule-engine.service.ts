@@ -55,7 +55,19 @@ export interface ProcessEventResult {
  * field — templates are operator-authored but context can carry sensitive
  * producer payload data that must never be echoed back into a notification.
  */
-const TEMPLATE_FIELD_WHITELIST = ['orderId', 'clientId', 'orderStatusId', 'eventType'] as const;
+const TEMPLATE_FIELD_WHITELIST = [
+  'orderId',
+  'clientId',
+  'orderStatusId',
+  'eventType',
+  'orderName',
+  'orderStatusName',
+  'previousOrderStatusName',
+  'productionStatusName',
+  'previousProductionStatusName',
+  'paymentStatusName',
+  'previousPaymentStatusName',
+] as const;
 type TemplateField = (typeof TEMPLATE_FIELD_WHITELIST)[number];
 
 function whitelistedValues(ctx: NotificationEventContext): Record<TemplateField, string> {
@@ -64,6 +76,13 @@ function whitelistedValues(ctx: NotificationEventContext): Record<TemplateField,
     clientId: ctx.clientId != null ? String(ctx.clientId) : '',
     orderStatusId: ctx.orderStatusId != null ? String(ctx.orderStatusId) : '',
     eventType: ctx.eventType,
+    orderName: ctx.orderName ?? '',
+    orderStatusName: ctx.orderStatusName ?? '',
+    previousOrderStatusName: ctx.previousOrderStatusName ?? '',
+    productionStatusName: ctx.productionStatusName ?? '',
+    previousProductionStatusName: ctx.previousProductionStatusName ?? '',
+    paymentStatusName: ctx.paymentStatusName ?? '',
+    previousPaymentStatusName: ctx.previousPaymentStatusName ?? '',
   };
 }
 
@@ -83,18 +102,62 @@ function interpolateWhitelisted(template: string, values: Record<TemplateField, 
   });
 }
 
-function defaultTitle(values: Record<TemplateField, string>): string {
-  return `Order ${values.orderId} — ${values.eventType}`;
+/** Тексты по умолчанию для событий смены статуса: что сменилось и как назвать. */
+const STATUS_CHANGE_TEXT: Record<string, {
+  label: string;
+  current: (ctx: NotificationEventContext) => string | null | undefined;
+  previous: (ctx: NotificationEventContext) => string | null | undefined;
+}> = {
+  'order.status_changed': {
+    label: 'статус заказа',
+    current: (ctx) => ctx.orderStatusName,
+    previous: (ctx) => ctx.previousOrderStatusName,
+  },
+  'order.production_status_changed': {
+    label: 'статус производства',
+    current: (ctx) => ctx.productionStatusName,
+    previous: (ctx) => ctx.previousProductionStatusName,
+  },
+  'order.payment_status_changed': {
+    label: 'статус оплаты',
+    current: (ctx) => ctx.paymentStatusName,
+    previous: (ctx) => ctx.previousPaymentStatusName,
+  },
+};
+
+const EVENT_TEXT: Record<string, string> = {
+  DEADLINE_EXPIRED: 'истёк срок',
+  'order.resource_procurement_changed': 'изменился закуп материала',
+  'order.resource_demand_changed_after_mark': 'потребность изменилась после отметки «Закуплено»',
+};
+
+function orderLabel(ctx: NotificationEventContext): string {
+  if (ctx.orderName) return `Заказ ${ctx.orderName}`;
+  if (ctx.orderId != null) return `Заказ #${ctx.orderId}`;
+  return 'Заказ';
 }
 
-function defaultMessage(ctx: NotificationEventContext, values: Record<TemplateField, string>): string {
-  const statusSuffix = ctx.orderStatusId != null ? ` (status ${values.orderStatusId})` : '';
-  return `Order ${values.orderId} event ${values.eventType}${statusSuffix}`;
+function defaultText(ctx: NotificationEventContext): { title: string; message: string } {
+  const order = orderLabel(ctx);
+  const status = STATUS_CHANGE_TEXT[ctx.eventType];
+  if (status) {
+    const current = status.current(ctx);
+    const previous = status.previous(ctx);
+    const title = current ? `${order}: ${status.label} «${current}»` : `${order}: изменён ${status.label}`;
+    const message = current && previous
+      ? `${order}: ${status.label} изменён с «${previous}» на «${current}».`
+      : current
+        ? `${order}: новый ${status.label} «${current}».`
+        : `${order}: изменён ${status.label}.`;
+    return { title, message };
+  }
+  const text = EVENT_TEXT[ctx.eventType] ?? 'новое событие';
+  return { title: `${order}: ${text}`, message: `${order}: ${text}.` };
 }
 
 /**
  * Renders rule title/message using ONLY a fixed whitelist of context fields
- * (`orderId`, `clientId`, `orderStatusId`, `eventType`). Never reads
+ * (`TEMPLATE_FIELD_WHITELIST`: ids, order name, status names). Never reads
  * `ctx.payload` or any finance/phone/secret field — this is the redaction
  * boundary that keeps producer payload data out of user-facing notifications.
  */
@@ -103,10 +166,10 @@ export function renderNotificationText(
   ctx: NotificationEventContext,
 ): { title: string; message: string } {
   const values = whitelistedValues(ctx);
-  const title = rule.titleTemplate != null ? interpolateWhitelisted(rule.titleTemplate, values) : defaultTitle(values);
-  const message = rule.messageTemplate != null
-    ? interpolateWhitelisted(rule.messageTemplate, values)
-    : defaultMessage(ctx, values);
+  const fallback = defaultText(ctx);
+  // Пустое поле в форме правила = текст по умолчанию (пробелы — тоже пусто).
+  const title = rule.titleTemplate?.trim() ? interpolateWhitelisted(rule.titleTemplate, values) : fallback.title;
+  const message = rule.messageTemplate?.trim() ? interpolateWhitelisted(rule.messageTemplate, values) : fallback.message;
   return { title, message };
 }
 
