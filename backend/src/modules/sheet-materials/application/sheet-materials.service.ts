@@ -46,10 +46,13 @@ export class SheetMaterialsService {
     return this.repo.list(query);
   }
 
-  /** Что умеет этот backend (FE решает, показывать ли поля): тип/категория номенклатуры и примечание — с миграции 234. */
-  async capabilities(query: ListSheetMaterialTypesQuery): Promise<{ nomenclatureFields: true; onecItemPicker: true }> {
+  /**
+   * Что умеет этот backend (FE решает, показывать ли поля): тип/категория номенклатуры и примечание — с миграции 234,
+   * список поставщиков (основной + дополнительные) — с миграции 280.
+   */
+  async capabilities(query: ListSheetMaterialTypesQuery): Promise<{ nomenclatureFields: true; onecItemPicker: true; supplierList: true }> {
     await this.require(query.currentUser, VIEW, query.requestId);
-    return { nomenclatureFields: true, onecItemPicker: true };
+    return { nomenclatureFields: true, onecItemPicker: true, supplierList: true };
   }
 
   /**

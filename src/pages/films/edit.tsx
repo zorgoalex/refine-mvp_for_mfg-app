@@ -4,6 +4,7 @@ import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Switch, Select, Checkbox, Typography } from "antd";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
 import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
+import { FilmSuppliersBlock } from "../../components/materialSuppliers/FilmSuppliersBlock";
 
 export const FilmEdit: React.FC<IResourceComponentsProps> = () => {
   const { formProps, saveButtonProps, queryResult } = useFormWithHighlight({
@@ -42,7 +43,7 @@ export const FilmEdit: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Film Type" name="film_type_id">
           <Select {...typeSelectProps} />
         </Form.Item>
-        <Form.Item label="Поставщик" name="vendor_id" rules={[{ required: true, message: 'Выберите поставщика' }]}>
+        <Form.Item label="Производитель" name="vendor_id" rules={[{ required: true, message: 'Выберите производителя' }]}>
           <Select {...vendorSelectProps} />
         </Form.Item>
         <Form.Item label="Тип номенклатуры" name="nomenclature_type" rules={[{ max: 50, message: 'Максимум 50 символов' }]}><Input maxLength={50} /></Form.Item>
@@ -57,6 +58,8 @@ export const FilmEdit: React.FC<IResourceComponentsProps> = () => {
         </Form.Item>
         <ReferenceSortOrderFormItem />
       </Form>
+      {/* Поставщики — своя команда и своя кнопка, не часть формы плёнки. */}
+      <FilmSuppliersBlock filmId={current?.film_id} />
     </Edit>
   );
 };

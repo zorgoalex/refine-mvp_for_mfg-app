@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { loadMainSupplierNames } from '../../material-suppliers/adapters/pg-material-suppliers';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseService } from '../../../database/database.service';
@@ -159,6 +160,8 @@ interface FilmAccumulator {
   sheets: number;
   vendorId: number | null;
   vendorName: string | null;
+  /** Основной поставщик (не производитель): первый выбранный, иначе по приходам 1С. */
+  supplierName: string | null;
   sources: LineSourceRef[];
   cutJobIds: Set<number>;
 }
@@ -170,6 +173,8 @@ interface ProjectionInput {
   detailCutJobs: DetailCutJobRow[];
   cutGroups: ResourceDemandCutGroupRow[];
   cutSheets: ResourceDemandCutSheetRow[];
+  /** Основные поставщики позиций (`loadMainSupplierNames`); без них — основной листового из справочника, у плёнки — нет. */
+  mainSuppliers?: Map<string, string>;
 }
 
 export type OrderResourceDemandBaseDto = Omit<OrderResourceDemandDto, 'lines' | 'procurementSummary'>;
@@ -181,6 +186,8 @@ export interface ProjectedResourceLine {
   refId: number;
   name: string;
   supplierName: string | null;
+  /** «supplierName — поставщик» (с migr 280; прежний backend у плёнок клал сюда производителя). */
+  supplierRole: 'supplier';
   quantity: number | null;
   unit: OrderResourceUnit;
   areaM2: number;
@@ -522,6 +529,14 @@ export async function loadProjectedOrders(
         [cutGroupIds],
       );
 
+  const mainSuppliers = await loadMainSupplierNames(
+    client,
+    uniqueNumbers([
+      ...detailResult.rows.map((row) => row.sheet_material_type_id),
+      ...hdfResult.rows.map((row) => row.hdf_sheet_material_type_id),
+    ].filter((id) => id !== null && id !== undefined)),
+    uniqueNumbers(detailResult.rows.map((row) => row.film_id).filter((id) => id !== null && id !== undefined)),
+  );
   const full = projectOrders({
     orders: orderRows,
     details: detailResult.rows,
@@ -529,6 +544,7 @@ export async function loadProjectedOrders(
     detailCutJobs: detailCutJobs.rows,
     cutGroups: cutGroups.rows,
     cutSheets: cutSheets.rows,
+    mainSuppliers,
   });
   const legacyBase = query && hasResourceFilters(query)
     ? projectOrders({
@@ -538,6 +554,7 @@ export async function loadProjectedOrders(
         detailCutJobs: detailCutJobs.rows,
         cutGroups: cutGroups.rows,
         cutSheets: cutSheets.rows,
+        mainSuppliers,
       }).base
     : full.base;
 
@@ -765,6 +782,7 @@ export function orphanLine(row: ResourceProcurementRow, extras: ApplyProcurement
     refId,
     name: cleanName(row.resource_name) ?? `ID: ${refId}`,
     supplierName: null,
+    supplierRole: 'supplier',
     quantity: 0,
     unit: kind === 'film' ? 'lm' : 'm2',
     areaM2: 0,
@@ -801,6 +819,7 @@ export function aggregateByMaterial(
         refId: line.refId,
         name: line.name,
         supplierName: line.supplierName,
+        supplierRole: 'supplier',
         unit: line.unit,
         totalQuantity: 0,
         ordersCount: 0,
@@ -882,6 +901,7 @@ export function projectOrders(input: ProjectionInput): ProjectionResult {
         sheets: 0,
         vendorId: toNullableNumber(detail.vendor_id),
         vendorName: cleanName(detail.vendor_name),
+        supplierName: null,
         sources: [],
         cutJobIds: new Set<number>(),
       };
@@ -961,6 +981,16 @@ export function projectOrders(input: ProjectionInput): ProjectionResult {
     }
   }
 
+  // Поставщик строки — основной поставщик позиции (правило снабжения), а не производитель.
+  if (input.mainSuppliers) {
+    for (const rows of sheetByOrder.values()) {
+      for (const row of rows.values()) row.supplierName = input.mainSuppliers.get(resourceKey('sheet_material', row.sheetMaterialTypeId)) ?? row.supplierName;
+    }
+    for (const rows of filmByOrder.values()) {
+      for (const row of rows.values()) row.supplierName = input.mainSuppliers.get(resourceKey('film', row.filmId)) ?? null;
+    }
+  }
+
   const lines = new Map<number, ProjectedResourceLine[]>();
   const base = input.orders.map<OrderResourceDemandBaseDto>((order) => {
     const orderId = toNumber(order.order_id);
@@ -994,6 +1024,7 @@ function projectSheetLines(rows: Map<number, SheetAccumulator> | undefined): Pro
         refId: row.sheetMaterialTypeId,
         name: row.name,
         supplierName: row.supplierName,
+        supplierRole: 'supplier',
         quantity,
         unit: 'm2',
         areaM2: quantity,
@@ -1025,7 +1056,8 @@ function projectFilmLines(rows: Map<number, FilmAccumulator> | undefined): Proje
         kind: 'film',
         refId: row.filmId,
         name: row.name,
-        supplierName: row.vendorName,
+        supplierName: row.supplierName,
+        supplierRole: 'supplier',
         quantity,
         unit: 'lm',
         areaM2: roundAreaMm2(row.areaMm2),
@@ -1175,6 +1207,7 @@ function mapFilmRows(rows: Map<number, FilmAccumulator> | undefined): OrderFilmD
       hasCutData: row.linearMeters > 0,
       vendorId: row.vendorId,
       vendorName: row.vendorName,
+      supplierName: row.supplierName,
     }))
     .sort((left, right) => left.name.localeCompare(right.name, 'ru') || left.filmId - right.filmId);
 }

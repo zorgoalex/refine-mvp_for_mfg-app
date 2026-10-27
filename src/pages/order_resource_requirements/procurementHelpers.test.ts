@@ -87,11 +87,15 @@ describe('mapBackendResourceLine (backend lines[] → ResourceDemandLine)', () =
     });
   });
 
-  it('плёнка: подпись «Производитель», secondaryText — площадь в м²', () => {
+  it('плёнка: подпись «Поставщик» (основной поставщик, не производитель), secondaryText — площадь в м²', () => {
     const line = mapBackendResourceLine(makeBackendLine({
-      resourceKey: 'film:7', kind: 'film', refId: 7, unit: 'lm', areaM2: 3.5, supplierName: 'Фокус прайм',
+      resourceKey: 'film:7', kind: 'film', refId: 7, unit: 'lm', areaM2: 3.5, supplierName: 'Фокус прайм', supplierRole: 'supplier',
     }));
-    expect(line.supplierLabel).toBe('Производитель: Фокус прайм');
+    expect(line.supplierLabel).toBe('Поставщик: Фокус прайм');
+    // Прежний backend (без supplierRole) клал в supplierName плёнки производителя — подпись «Производитель».
+    expect(mapBackendResourceLine(makeBackendLine({
+      resourceKey: 'film:7', kind: 'film', refId: 7, unit: 'lm', areaM2: 3.5, supplierName: 'Фокус прайм',
+    })).supplierLabel).toBe('Производитель: Фокус прайм');
     expect(line.secondaryText).toBe('3,5 м²');
   });
 

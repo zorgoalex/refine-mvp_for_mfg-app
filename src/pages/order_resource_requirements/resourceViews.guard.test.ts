@@ -91,3 +91,14 @@ describe('order resource requirements — устаревшие create/edit уд�
     expect(showSource).not.toMatch(/dataProvider/i);
   });
 });
+
+describe('колонка «Поставщик»: производитель от прежнего backend не выдаётся за поставщика (migr 280)', () => {
+  it('таблицы материалов и карточки берут текст через supplierColumnText, сводка — через aggregateSupplierText', () => {
+    for (const source of [materialRowsViewSource, resourceDemandPartsSource]) {
+      expect(source).toContain('supplierColumnText(');
+      expect(source).not.toMatch(/supplierLabel\?\.replace\(/);
+    }
+    expect(materialAggregateViewSource).toContain('aggregateSupplierText(row)');
+    expect(resourceKindsSource).toContain("supplierLabel: lineSupplierLabel(line)");
+  });
+});

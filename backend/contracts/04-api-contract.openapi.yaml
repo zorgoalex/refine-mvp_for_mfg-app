@@ -1166,6 +1166,40 @@ paths:
         '404': {description: 'Owner not found'}
         '409': {description: 'PARTY_CONTACTS_VERSION_CONFLICT'}
         '422': {description: 'PARTY_CONTACT_INVALID, PARTY_CONTACT_DUPLICATE or VALIDATION_ERROR'}
+  /api/v1/films/suppliers:
+    get:
+      tags: [Material suppliers]
+      operationId: listFilmSuppliers
+      summary: 'Suppliers of films: the chosen list and the suppliers seen in 1C receipts'
+      security: [{bearerAuth: []}]
+      x-permissions: [references.view]
+      parameters:
+        - {name: ids, in: query, required: false, schema: {type: string, description: 'Comma-separated film ids, at most 500'}}
+      responses:
+        '200': {description: Suppliers per film, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/FilmSuppliers'}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {description: 'VALIDATION_ERROR'}
+  /api/v1/films/{id}/suppliers:
+    put:
+      tags: [Material suppliers]
+      operationId: replaceFilmSuppliers
+      summary: 'Replace the chosen suppliers of a film'
+      description: 'Ordered list (the first is the main supplier), at most 20, no repeats. Compare-and-swap on expectedSupplierIds (the list the user saw). New suppliers must be active. Audited as film.suppliers_changed with every touched supplier as a related entity; the same list is a no-op.'
+      security: [{bearerAuth: []}]
+      x-permissions: [references.manage]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, additionalProperties: false, required: [supplierIds, expectedSupplierIds], properties: {supplierIds: {type: array, maxItems: 20, items: {type: integer, minimum: 1}}, expectedSupplierIds: {type: array, maxItems: 20, items: {type: integer, minimum: 1}}}}}}
+      responses:
+        '200': {description: Suppliers of the film, content: {application/json: {schema: {$ref: '#/components/schemas/FilmSuppliers'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'FILM_NOT_FOUND'}
+        '409': {description: 'FILM_SUPPLIERS_STALE'}
+        '422': {description: 'MATERIAL_SUPPLIER_INVALID or VALIDATION_ERROR'}
   /api/v1/supplier-contacts:
     get:
       tags: [Party contacts]
@@ -15432,6 +15466,7 @@ paths:
       tags: [ProductionTechSettings]
       operationId: createExtraResource
       summary: Create independent extra resource directory item
+      description: 'Optional vendorId (manufacturer) and supplierIds (ordered, first = main, at most 20); absent = unchanged, null = clear (migr 280).'
       security: [{ bearerAuth: [] }]
       x-permission: settings.manage
       parameters:
@@ -15454,6 +15489,7 @@ paths:
       tags: [ProductionTechSettings]
       operationId: updateExtraResource
       summary: Update independent extra resource directory item
+      description: 'Optional vendorId (manufacturer) and supplierIds (ordered, first = main, at most 20); absent = unchanged, null = clear (migr 280).'
       security: [{ bearerAuth: [] }]
       x-permission: settings.manage
       parameters:
@@ -16711,6 +16747,7 @@ paths:
         - SheetMaterials
       operationId: createSheetMaterialType
       summary: Create a sheet material type
+      description: 'supplierId is the main supplier (legacy field: absent = none). Optional additionalSupplierIds (ordered, at most 20; the main one is dropped from them); absent = unchanged (migr 280). Responses carry suppliers (main first) and additionalSupplierIds.'
       security:
         - bearerAuth: []
       x-permission: sheet_materials.manage
@@ -16759,6 +16796,7 @@ paths:
         - SheetMaterials
       operationId: updateSheetMaterialType
       summary: Update a sheet material type
+      description: 'supplierId is the main supplier (legacy field: absent = none). Optional additionalSupplierIds (ordered, at most 20; the main one is dropped from them); absent = unchanged (migr 280). Responses carry suppliers (main first) and additionalSupplierIds.'
       security:
         - bearerAuth: []
       x-permission: sheet_materials.manage
@@ -21602,6 +21640,20 @@ components:
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   schemas:
+    MaterialSupplierRef:
+      type: object
+      required: [id, name, isActive]
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        isActive: {type: boolean}
+    FilmSuppliers:
+      type: object
+      required: [filmId, suppliers, onecSuppliers]
+      properties:
+        filmId: {type: integer}
+        suppliers: {type: array, items: {$ref: '#/components/schemas/MaterialSupplierRef'}}
+        onecSuppliers: {type: array, items: {type: object, required: [key, name], properties: {key: {type: string}, name: {type: string}}}}
     ClientScreenSettings:
       type: object
       required: [enabled, visibleCodes, version, updatedAt]

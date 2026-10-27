@@ -36,6 +36,8 @@ export interface OrderFilmDemandDto {
   hasCutData: boolean;
   vendorId: number | null;
   vendorName: string | null;
+  /** Основной поставщик плёнки (первый выбранный, иначе по приходам 1С); производитель — vendorName, справочно. */
+  supplierName: string | null;
 }
 
 export type OrderResourceKind = 'sheet_material' | 'film';
@@ -62,6 +64,8 @@ export interface OrderResourceDemandLineDto {
   refId: number;
   name: string;
   supplierName: string | null;
+  /** «supplierName — поставщик» (с migr 280; прежний backend у плёнок клал сюда производителя). */
+  supplierRole: 'supplier';
   /** null — количество не посчитано (нет готового раскроя у плёнки). */
   quantity: number | null;
   unit: OrderResourceUnit;
@@ -173,6 +177,7 @@ export interface OrderResourceMaterialAggregateDto {
   refId: number;
   name: string;
   supplierName: string | null;
+  supplierRole: 'supplier';
   unit: OrderResourceUnit;
   totalQuantity: number;
   ordersCount: number;
