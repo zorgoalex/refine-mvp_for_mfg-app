@@ -506,7 +506,9 @@
 .status-board-page--cnc .cnc-today-column--orders_ready,
 .status-board-page--cnc .cnc-today-column--orders_issued {
   position: sticky;
-  top: 4px;
+  /* stuck, the column's top border goes above the viewport edge (as it scrolls away on the other columns), so
+     every column header lines up at the top of the board; the width differs per interface variant */
+  top: calc(-1 * var(--status-board-cnc-column-top-border, 3px));
   z-index: 16;
   align-self: start;
 }
@@ -4306,4 +4308,23 @@
   .mdf-history__header-button.ant-btn {
     transition: none;
   }
+}
+
+/* MDF board: column headers stay on screen under the toolbar while the board scrolls. The viewport is the scroll
+   container; columns clip their rounded corners without becoming scroll containers themselves (overflow: clip), so
+   each header sticks to the top of the viewport, exactly above its own column. */
+.status-board-page--cnc .status-board-columns--cnc > .status-board-column {
+  overflow: clip;
+}
+
+.status-board-page--cnc .status-board-columns--cnc > .status-board-column > .status-board-column__header {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+}
+
+/* the top border width of an MDF board column (see the sticky order columns): 3px here and in «air», 1px in the
+   variants that draw a thin border all around */
+:root:where([data-ui-variant="workbench"], [data-ui-variant="line"]) .status-board-page--cnc {
+  --status-board-cnc-column-top-border: 1px;
 }
