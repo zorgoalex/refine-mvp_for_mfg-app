@@ -44,24 +44,40 @@ export function nextWorkbenchCustomerSection(
   }
 }
 
-export function useWorkbenchCustomerSection(input: {
+export interface WorkbenchCustomerInputs {
   activeTab: string;
   pinned: string | null;
   spy: string | null;
-  isOpen: (key: string) => boolean;
   /** Changes whenever the set of open folds changes. */
   foldsKey: string;
-}): string {
+  /** Grows with every navigation the manager makes, also to the section already current. */
+  navigationSeq: number;
+}
+
+/** The events one commit of the form brings, in the order they are applied. */
+export function workbenchCustomerEvents(previous: WorkbenchCustomerInputs | null, next: WorkbenchCustomerInputs): WorkbenchCustomerEvent[] {
+  const events: WorkbenchCustomerEvent[] = [];
+  if (!previous || previous.spy !== next.spy) events.push({ kind: 'spy', key: next.spy });
+  if (!previous || previous.pinned !== next.pinned) events.push({ kind: 'pin', key: next.pinned });
+  // a navigation that also pins (anchor click) ends on its own key
+  if (!previous || previous.activeTab !== next.activeTab || previous.navigationSeq !== next.navigationSeq) {
+    events.push({ kind: 'navigate', key: next.activeTab });
+  }
+  if (!previous || previous.foldsKey !== next.foldsKey) events.push({ kind: 'folds' });
+  return events;
+}
+
+export function useWorkbenchCustomerSection(input: WorkbenchCustomerInputs & { isOpen: (key: string) => boolean }): string {
   const [section, setSection] = useState(input.activeTab);
-  const context = useRef<WorkbenchCustomerContext>(input);
-  context.current = { pinned: input.pinned, spy: input.spy, isOpen: input.isOpen };
-  const apply = (event: WorkbenchCustomerEvent) => (
-    setSection((current) => nextWorkbenchCustomerSection(current, event, context.current))
-  );
-  // Effects run in this order within one commit: a navigation that also pins (anchor click) ends on its key.
-  useEffect(() => { apply({ kind: 'spy', key: input.spy }); }, [input.spy]);
-  useEffect(() => { apply({ kind: 'pin', key: input.pinned }); }, [input.pinned]);
-  useEffect(() => { apply({ kind: 'navigate', key: input.activeTab }); }, [input.activeTab]);
-  useEffect(() => { apply({ kind: 'folds' }); }, [input.foldsKey]);
+  const previous = useRef<WorkbenchCustomerInputs | null>(null);
+  const { activeTab, pinned, spy, foldsKey, navigationSeq, isOpen } = input;
+  useEffect(() => {
+    const next = { activeTab, pinned, spy, foldsKey, navigationSeq };
+    const events = workbenchCustomerEvents(previous.current, next);
+    previous.current = next;
+    if (events.length === 0) return;
+    const context: WorkbenchCustomerContext = { pinned, spy, isOpen };
+    setSection((current) => events.reduce((value, event) => nextWorkbenchCustomerSection(value, event, context), current));
+  }, [activeTab, pinned, spy, foldsKey, navigationSeq, isOpen]);
   return section;
 }

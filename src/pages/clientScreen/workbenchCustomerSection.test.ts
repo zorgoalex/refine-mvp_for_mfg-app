@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   nextWorkbenchCustomerSection,
+  workbenchCustomerEvents,
+  type WorkbenchCustomerInputs,
   WORKBENCH_CUSTOMER_FALLBACK,
   type WorkbenchCustomerContext,
   type WorkbenchCustomerEvent,
@@ -76,5 +78,62 @@ describe('NewLine: the section the customer follows', () => {
 
   it('above the first section (no section under the line) keeps the last one', () => {
     expect(play('details', [[{ kind: 'spy', key: null }, { spy: null }]])).toEqual(['details']);
+  });
+});
+
+/** Commits of the form, as the hook sees them: each one turned into events and applied in order. */
+function commits(open: (inputs: WorkbenchCustomerInputs) => string[], steps: WorkbenchCustomerInputs[]) {
+  let previous: WorkbenchCustomerInputs | null = null;
+  let section = steps[0].activeTab;
+  const seen: string[] = [];
+  for (const next of steps) {
+    const openNow = open(next);
+    const context = { pinned: next.pinned, spy: next.spy, isOpen: (key: string) => MAIN.includes(key) || openNow.includes(key) };
+    for (const event of workbenchCustomerEvents(previous, next)) section = nextWorkbenchCustomerSection(section, event, context);
+    previous = next;
+    seen.push(section);
+  }
+  return seen;
+}
+const folds = (inputs: WorkbenchCustomerInputs) => (inputs.foldsKey ? inputs.foldsKey.split(',') : []);
+
+describe('NewLine: what one commit of the form brings', () => {
+  it('a commit that changes nothing brings nothing', () => {
+    const inputs = { activeTab: 'details', pinned: null, spy: 'details', foldsKey: '', navigationSeq: 3 };
+    expect(workbenchCustomerEvents(inputs, { ...inputs })).toEqual([]);
+  });
+
+  it('a navigation to the section already current is still a navigation', () => {
+    const inputs = { activeTab: 'hdf', pinned: 'hdf', spy: 'details', foldsKey: 'hdf', navigationSeq: 3 };
+    expect(workbenchCustomerEvents(inputs, { ...inputs, navigationSeq: 4 })).toEqual([{ kind: 'navigate', key: 'hdf' }]);
+  });
+
+  it('anchor to a fold → the fold closed → reopened by its heading: the customer is back on it', () => {
+    expect(commits(folds, [
+      { activeTab: 'details', pinned: null, spy: 'details', foldsKey: '', navigationSeq: 0 },
+      // anchor «ХДФ»: opened, current, pinned
+      { activeTab: 'hdf', pinned: 'hdf', spy: 'details', foldsKey: 'hdf', navigationSeq: 1 },
+      { activeTab: 'hdf', pinned: 'hdf', spy: 'hdf', foldsKey: 'hdf', navigationSeq: 1 },
+      // closed by its heading: the pin goes with it, the open section in view takes its place
+      { activeTab: 'hdf', pinned: null, spy: 'finance', foldsKey: '', navigationSeq: 1 },
+      // reopened by its heading: same activeTab, a new navigation
+      { activeTab: 'hdf', pinned: null, spy: 'finance', foldsKey: 'hdf', navigationSeq: 2 },
+    ])).toEqual(['details', 'hdf', 'hdf', 'finance', 'hdf']);
+  });
+
+  it('the same anchor clicked again after the fold was closed brings the customer back too', () => {
+    expect(commits(folds, [
+      { activeTab: 'hdf', pinned: 'hdf', spy: 'hdf', foldsKey: 'hdf', navigationSeq: 1 },
+      { activeTab: 'hdf', pinned: null, spy: 'finance', foldsKey: '', navigationSeq: 1 },
+      { activeTab: 'hdf', pinned: 'hdf', spy: 'finance', foldsKey: 'hdf', navigationSeq: 2 },
+    ])).toEqual(['hdf', 'finance', 'hdf']);
+  });
+
+  it('a form under another workspace page gets no commits: the customer keeps its section', () => {
+    // the form measures nothing while hidden, so its inputs do not change; back on it, the spy is fresh
+    expect(commits(folds, [
+      { activeTab: 'finance', pinned: null, spy: 'finance', foldsKey: '', navigationSeq: 0 },
+      { activeTab: 'finance', pinned: null, spy: 'finance', foldsKey: '', navigationSeq: 0 },
+    ])).toEqual(['finance', 'finance']);
   });
 });

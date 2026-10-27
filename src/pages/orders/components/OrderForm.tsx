@@ -262,6 +262,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   // the anchor the user clicked stays current until they scroll the form themselves
   // (a short last section cannot reach the top of the screen)
   const [workbenchPinnedSection, setWorkbenchPinnedSection] = useState<string | null>(null);
+  // every navigation counts, also to the section already current (the customer screen follows it)
+  const [workbenchNavigationSeq, setWorkbenchNavigationSeq] = useState(0);
   const isMobile = useIsMobile();
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const orderKey = mode === 'create' ? NEW_ORDER_KEY : String(orderId);
@@ -508,6 +510,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     spy: workbenchOpenSpySection,
     isOpen: isFormSectionActive,
     foldsKey: hybridOpenSections.join('\u0001'),
+    navigationSeq: workbenchNavigationSeq,
   });
   const hybridSpacerRef = useRef<HTMLDivElement>(null);
   const [hybridSpacerHeight, setHybridSpacerHeight] = useState(0);
@@ -552,6 +555,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     }
     setActiveTab(key);
     setWorkbenchPinnedSection(key);
+    setWorkbenchNavigationSeq((value) => value + 1);
     scrollToFormSection(key);
   }, [scrollToFormSection]);
   // every existing jump (`?tab=finance`, save validation → details, Ctrl+Tab) lands on its section
@@ -2071,8 +2075,10 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   }, [activeTab, details.length, isMobile, isWorkbench, workspaceTabsHeight]);
 
   // «NewLine»: the compact bar appears once the page head has scrolled under the app chrome.
+  // A form kept alive under another workspace page measures nothing and keeps its pin: what is
+  // scrolled there is not this form (it is measured again when its page comes back).
   useEffect(() => {
-    if (!isWorkbench) return;
+    if (!isWorkbench || !workspaceTabActive) return;
     let frame = 0;
     const update = () => {
       frame = 0;
@@ -2136,7 +2142,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       window.removeEventListener('wheel', unpin);
       window.removeEventListener('touchmove', unpin);
     };
-  }, [hybridOpenSections, isWorkbench, orderKey, setHybridSpacer, workbenchChromeBottom]);
+  }, [hybridOpenSections, isWorkbench, orderKey, setHybridSpacer, workbenchChromeBottom, workspaceTabActive]);
 
   useEffect(() => {
     const update = () => {
@@ -2585,7 +2591,13 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
                         setHybridOpenSections((current) => (
                           current.includes(key) ? current.filter((value) => value !== key) : [...current, key]
                         ));
-                        if (!open) setActiveTab(key);
+                        if (!open) {
+                          setActiveTab(key);
+                          setWorkbenchNavigationSeq((value) => value + 1);
+                        } else if (workbenchPinnedSection === key) {
+                          // a closed fold is no longer the place the anchor stands for
+                          setWorkbenchPinnedSection(null);
+                        }
                       }}
                     >
                       <RightOutlined className="wb-form-section__chevron" aria-hidden />
