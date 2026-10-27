@@ -44,7 +44,15 @@ describe('hasuraReportQuery', () => {
     await expect(hasuraReportQuery('q', {})).rejects.toMatchObject({
       name: 'HasuraReportError',
       code: 'HTTP_ERROR',
+      message: 'Не удалось получить отчёт (код 405)',
     });
+  });
+
+  it('reports an invalid JSON body and a GraphQL error without text in Russian', async () => {
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true, text: async () => 'not json' });
+    await expect(hasuraReportQuery('q', {})).rejects.toMatchObject({ code: 'GRAPHQL_ERROR', message: 'Отчёт вернул некорректный ответ' });
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true, text: async () => JSON.stringify({ errors: [{}] }) });
+    await expect(hasuraReportQuery('q', {})).rejects.toMatchObject({ code: 'GRAPHQL_ERROR', message: 'Не удалось получить отчёт' });
   });
 
   it('does not send a request when the Hasura URL is not configured', async () => {

@@ -17,7 +17,7 @@ export const UnitEdit: React.FC<IResourceComponentsProps> = () => {
           const code = (values?.unit_code ?? "").trim();
           const name = (values?.unit_name ?? "").trim();
           if (!code || !name) {
-            message.error("Code and Name are required");
+            message.error("Укажите код и название");
             return;
           }
           return formProps.onFinish?.({

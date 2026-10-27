@@ -23,11 +23,11 @@ export const MaterialTransactionTypeEdit: React.FC<IResourceComponentsProps> = (
         onFinish={(values) => {
           const name = (values?.transaction_type_name ?? "").trim();
           if (!name) {
-            message.error("Name is required");
+            message.error("Укажите название");
             return;
           }
           if (!values?.direction_type_id) {
-            message.error("Direction is required");
+            message.error("Укажите направление");
             return;
           }
           return formProps.onFinish?.({

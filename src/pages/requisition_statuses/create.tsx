@@ -16,7 +16,7 @@ export const RequisitionStatusCreate: React.FC<IResourceComponentsProps> = () =>
         onFinish={async (values) => {
           const name = (values?.requisition_status_name ?? "").trim();
           if (!name) {
-            message.error("Name is required");
+            message.error("Укажите название");
             return;
           }
           return formProps.onFinish?.({

@@ -23,7 +23,7 @@ describe('dataProvider missing Hasura URL guard', () => {
     const provider = dataProvider('');
 
     const missingHasuraError = {
-      message: 'Legacy Hasura GraphQL URL is not configured',
+      message: 'Не настроен адрес Hasura (GraphQL)',
       statusCode: 503,
     };
 
@@ -50,7 +50,7 @@ describe('dataProvider missing Hasura URL guard', () => {
         variables: { material_name: 'MDF' },
       }),
     ).rejects.toMatchObject({
-      message: 'Legacy Hasura GraphQL URL is not configured',
+      message: 'Не настроен адрес Hasura (GraphQL)',
       statusCode: 503,
     });
 

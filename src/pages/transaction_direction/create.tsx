@@ -18,11 +18,11 @@ export const TransactionDirectionCreate: React.FC<IResourceComponentsProps> = ()
           const code = (values?.direction_code ?? "").trim();
           const name = (values?.direction_name ?? "").trim();
           if (!code) {
-            message.error("Code is required");
+            message.error("Укажите код");
             return;
           }
           if (!name) {
-            message.error("Name is required");
+            message.error("Укажите название");
             return;
           }
           return formProps.onFinish?.({

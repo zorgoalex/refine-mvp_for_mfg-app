@@ -38,7 +38,7 @@ interface HasuraRequestOptions {
 }
 
 const HASURA_NOT_CONFIGURED_ERROR = {
-  message: 'Legacy Hasura GraphQL URL is not configured',
+  message: 'Не настроен адрес Hasura (GraphQL)',
   statusCode: 503,
 };
 
@@ -1561,7 +1561,7 @@ function requireOrderDeleteVersion(meta?: AnyObject): number {
   const version = meta?.version ?? meta?.orderVersion;
 
   if (!Number.isInteger(version) || version < 0) {
-    throw { message: 'Order version is required for backend delete', statusCode: 400 };
+    throw { message: 'Не удалось удалить заказ: неизвестна версия заказа, обновите страницу', statusCode: 400 };
   }
 
   return version;
@@ -1905,7 +1905,7 @@ export const dataProvider = (_apiUrl: string) => {
       `;
       const data = await gqlRequest(query);
       const record = data[resource]?.[0];
-      if (!record) throw { message: "Not found", statusCode: 404 };
+      if (!record) throw { message: "Запись не найдена", statusCode: 404 };
       return { data: flattenFinancials(resource, record) };
     },
 
@@ -1922,7 +1922,7 @@ export const dataProvider = (_apiUrl: string) => {
       }
 
       if (resource === "orders_view") {
-        throw { message: "orders_view is read-only", statusCode: 400 };
+        throw { message: "Список заказов только для чтения: изменяйте заказ в его карточке", statusCode: 400 };
       }
       assertNotRbacBackendOwnedWrite(resource);
       assertHasuraWriteAccess(resource, 'insert');
@@ -1971,11 +1971,11 @@ export const dataProvider = (_apiUrl: string) => {
         const val = cleaned[key];
         if (typeof val === "string") {
           if (val.trim().length === 0) {
-            throw { message: `Field \"${key}\" is required`, statusCode: 400 };
+            throw { message: `Не заполнено обязательное поле «${key}»`, statusCode: 400 };
           }
         }
         if (val === undefined) {
-          throw { message: `Field \"${key}\" is required`, statusCode: 400 };
+          throw { message: `Не заполнено обязательное поле «${key}»`, statusCode: 400 };
         }
       }
 
@@ -2013,7 +2013,7 @@ export const dataProvider = (_apiUrl: string) => {
       }
 
       if (resource === "orders_view") {
-        throw { message: "orders_view is read-only", statusCode: 400 };
+        throw { message: "Список заказов только для чтения: изменяйте заказ в его карточке", statusCode: 400 };
       }
       assertNotRbacBackendOwnedWrite(resource);
       assertHasuraWriteAccess(resource, 'update');
@@ -2073,7 +2073,7 @@ export const dataProvider = (_apiUrl: string) => {
       }
 
       if (resource === "orders_view") {
-        throw { message: "orders_view is read-only", statusCode: 400 };
+        throw { message: "Список заказов только для чтения: изменяйте заказ в его карточке", statusCode: 400 };
       }
       assertNotRbacBackendOwnedWrite(resource);
       assertHasuraWriteAccess(resource, 'delete');

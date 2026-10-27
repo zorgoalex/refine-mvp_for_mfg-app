@@ -60,7 +60,7 @@ export async function hasuraReportQuery<T>(
   }
   const hasuraUrl = getConfiguredHasuraUrl();
   if (!hasuraUrl) {
-    throw new HasuraReportError('CONFIGURATION_ERROR', 'Hasura report URL is not configured');
+    throw new HasuraReportError('CONFIGURATION_ERROR', 'Не настроен адрес Hasura для отчётов');
   }
 
   const response = await fetch(hasuraUrl, {
@@ -79,14 +79,14 @@ export async function hasuraReportQuery<T>(
   if (!response.ok) {
     throw new HasuraReportError(
       'HTTP_ERROR',
-      errorMessage || `Hasura report request failed (HTTP ${response.status})`,
+      errorMessage || `Не удалось получить отчёт (код ${response.status})`,
     );
   }
   if (!body) {
-    throw new HasuraReportError('GRAPHQL_ERROR', 'Hasura report returned an invalid JSON response');
+    throw new HasuraReportError('GRAPHQL_ERROR', 'Отчёт вернул некорректный ответ');
   }
   if (errors.length) {
-    throw new HasuraReportError('GRAPHQL_ERROR', errorMessage || 'Hasura report query failed');
+    throw new HasuraReportError('GRAPHQL_ERROR', errorMessage || 'Не удалось получить отчёт');
   }
   return body.data as T;
 }

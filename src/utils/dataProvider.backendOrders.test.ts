@@ -296,7 +296,7 @@ describe('dataProvider backend orders read routing', () => {
     await expect(
       dataProvider('').deleteOne({ resource: 'orders', id: 15 }),
     ).rejects.toMatchObject({
-      message: 'Order version is required for backend delete',
+      message: 'Не удалось удалить заказ: неизвестна версия заказа, обновите страницу',
       statusCode: 400,
     });
 

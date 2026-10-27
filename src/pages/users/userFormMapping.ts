@@ -107,7 +107,7 @@ export function mapLegacyUserFormToHasuraPayload(
 function requiredText(value: string | null | undefined, field: string): string {
   const normalized = nullableText(value);
   if (!normalized) {
-    throw new Error(`${field} is required`);
+    throw new Error(field === 'username' ? 'Укажите логин' : `Не заполнено поле «${field}»`);
   }
 
   return normalized;
