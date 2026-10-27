@@ -496,7 +496,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).not.toContain('--status-board-cnc-order-column-offset-y');
     expect(css).not.toContain('--status-board-cnc-order-column-visual-height');
     expect(css).toMatch(
-      /\.status-board-page--cnc \.cnc-today-column--orders,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued\s*\{[^}]*position: sticky;[^}]*top: 4px;[^}]*align-self: start;[^}]*\}/s,
+      /\.status-board-page--cnc \.cnc-today-column--orders,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued\s*\{[^}]*position: sticky;[^}]*top: calc\(-1 \* var\(--status-board-cnc-column-top-border, 3px\)\);[^}]*align-self: start;[^}]*\}/s,
     );
     expect(css).not.toContain('translateY(var(--status-board-cnc-order-column-offset-y))');
     expect(css).not.toContain('will-change: transform');
