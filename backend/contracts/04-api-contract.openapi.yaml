@@ -7435,6 +7435,80 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/orders/{orderId}/rework/deadline-suggestion:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    post:
+      tags:
+        - Orders
+      operationId: suggestOrderReworkDeadline
+      summary: Предложить срок готовности круга переделки
+      description: |
+        Только чтение. Срок по «Схеме этапов и сроки» для оставшихся этапов круга (этапы возврата выбранных и уже
+        возвращённых деталей + всё, что за ними). `required` — заказ возвращается после готовности, срок обязателен.
+        Схема не заполнена / этап вне схемы → `suggestedDate: null`, срок вводится вручную.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.rework
+        - orders.update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderReworkDeadlineSuggestionRequest'
+      responses:
+        '200':
+          description: Предложение срока
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderReworkDeadlineSuggestion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/{orderId}/rework/deadline-reconcile:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    post:
+      tags:
+        - Orders
+      operationId: reconcileOrderFinalDeadline
+      summary: Сверить итоговый дедлайн заказа (ремонт)
+      description: |
+        Сверяет итоговый дедлайн заказа с его сроком и кругами переделки (то же, что делает фоновый проход).
+        Пишет как системный исполнитель, пользователь — инициатор. Отказ (403) ничего не меняет и пишет аудит отказа.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - deadlines.manage
+        - orders.update
+      x-transactional: true
+      responses:
+        '200':
+          description: Сверено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderFinalDeadlineReconcileResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/orders/{orderId}/rework/rounds:
     parameters:
       - $ref: '#/components/parameters/OrderId'
@@ -22762,6 +22836,50 @@ components:
             properties:
               detailId: {type: integer, minimum: 1}
               productionStatusId: {type: integer, minimum: 1}
+        plannedCompletionDate:
+          type: string
+          format: date
+          nullable: true
+          description: |
+            Срок готовности заказа после переделки (YYYY-MM-DD, не раньше сегодняшнего дня Asia/Almaty). Обязателен
+            при возврате после готовности; при переделке в производстве и добавлении деталей — по желанию
+            (добавление переносит срок только на более поздний). Входит в idempotency-запрос.
+    OrderReworkDeadlineSuggestionRequest:
+      type: object
+      additionalProperties: false
+      required: [details]
+      properties:
+        details:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [detailId, productionStatusId]
+            properties:
+              detailId: {type: integer, minimum: 1}
+              productionStatusId: {type: integer, minimum: 1}
+    OrderReworkDeadlineSuggestion:
+      type: object
+      required: [suggestedDate, plannedOrderDays, stageIds, scheduleConfigured, required, today, orderPlannedCompletionDate, roundPlannedCompletionDate]
+      properties:
+        suggestedDate: {type: string, format: date, nullable: true}
+        plannedOrderDays: {type: integer, nullable: true}
+        stageIds:
+          type: array
+          items: {type: integer}
+        scheduleConfigured: {type: boolean}
+        required: {type: boolean}
+        today: {type: string, format: date}
+        orderPlannedCompletionDate: {type: string, format: date, nullable: true}
+        roundPlannedCompletionDate: {type: string, format: date, nullable: true}
+    OrderFinalDeadlineReconcileResponse:
+      type: object
+      required: [orderId, reconciled]
+      properties:
+        orderId: {type: integer}
+        reconciled: {type: boolean, enum: [true]}
     OrderReworkReasonRequest:
       type: object
       additionalProperties: false
@@ -22822,6 +22940,9 @@ components:
         reasonClarifiedAt: {type: string, format: date-time, nullable: true}
         closedAt: {type: string, format: date-time, nullable: true}
         closeReason: {type: string, nullable: true, enum: [ready, issued, completed, false_positive, null]}
+        plannedCompletionDate: {type: string, format: date, nullable: true, description: Срок готовности, заданный кругом}
+        plannedCompletionSource: {type: string, nullable: true, enum: [schedule, manual, null]}
+        fromPlannedCompletionDate: {type: string, format: date, nullable: true, description: Срок заказа до круга}
         details:
           type: array
           items:

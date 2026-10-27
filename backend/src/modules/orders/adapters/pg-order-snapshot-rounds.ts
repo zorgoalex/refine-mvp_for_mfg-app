@@ -20,6 +20,7 @@ type AnyRow = QueryResultRow & Record<string, unknown>;
 const smallint = z.number().int().min(1).max(32767);
 const isoTimestamp = z.string().min(1).max(64).refine((value) => !Number.isNaN(Date.parse(value)));
 const sourceId = z.string().min(1).max(200);
+const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const userId = z.number().int().positive().nullable();
 
 const roundSchema = z.object({
@@ -41,6 +42,12 @@ const roundSchema = z.object({
   closedBy: userId,
   closeReason: z.enum(['ready', 'issued', 'completed', 'false_positive']).nullable(),
   eventSeq: z.number().int().min(0).max(32767),
+  // «Переделка» 1.1 — optional (older snapshots have none).
+  plannedCompletionDate: dateOnly.nullable().optional(),
+  plannedCompletionSource: z.enum(['schedule', 'manual']).nullable().optional(),
+  suggestedPlannedCompletionDate: dateOnly.nullable().optional(),
+  fromPlannedCompletionDate: dateOnly.nullable().optional(),
+  fromCompletionDate: dateOnly.nullable().optional(),
   details: z.array(z.object({
     detailSourceId: sourceId,
     fromProductionStatusId: z.number().int().positive().nullable(),
@@ -211,7 +218,11 @@ export async function readSnapshotProductionRounds(
 ): Promise<OrderSnapshotProductionRoundsDto | undefined> {
   const lastRoundNo = Number(header.last_round_no ?? 1);
   const rounds = (await tx.query<AnyRow>(
-    `SELECT r.*, reason.code AS reason_code, reason.name AS reason_name
+    `SELECT r.*, reason.code AS reason_code, reason.name AS reason_name,
+            r.planned_completion_date::text AS planned_completion_text,
+            r.suggested_planned_completion_date::text AS suggested_planned_completion_text,
+            r.from_planned_completion_date::text AS from_planned_completion_text,
+            r.from_completion_date::text AS from_completion_text
      FROM order_production_rounds r
      JOIN order_rework_reasons reason ON reason.order_rework_reason_id = r.reason_id
      WHERE r.order_id = $1
@@ -263,6 +274,11 @@ export async function readSnapshotProductionRounds(
         closedBy: nullableNumber(round.closed_by),
         closeReason: (round.close_reason ?? null) as OrderSnapshotProductionRoundDto['closeReason'],
         eventSeq: Number(round.event_seq),
+        plannedCompletionDate: nullableString(round.planned_completion_text),
+        plannedCompletionSource: (round.planned_completion_source ?? null) as OrderSnapshotProductionRoundDto['plannedCompletionSource'],
+        suggestedPlannedCompletionDate: nullableString(round.suggested_planned_completion_text),
+        fromPlannedCompletionDate: nullableString(round.from_planned_completion_text),
+        fromCompletionDate: nullableString(round.from_completion_text),
         details: roundDetails.filter((row) => String(row.order_production_round_id) === id).map((row) => ({
           detailSourceId: String(row.detail_id),
           fromProductionStatusId: nullableNumber(row.from_production_status_id),
@@ -382,14 +398,19 @@ export async function restoreSnapshotProductionRounds(
       `INSERT INTO order_production_rounds (
          order_id, round_no, mode, reason_id, reason_comment, from_order_status_id, from_order_production_round,
          source, source_cut_job_id, source_packet_id, started_at, started_by, reason_clarified_at,
-         reason_clarified_by, closed_at, closed_by, close_reason, event_seq, request_id, idempotency_key
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::bigint, $10::bigint, $11, $12, $13, $14, $15, $16, $17, $18, NULL, NULL)
+         reason_clarified_by, closed_at, closed_by, close_reason, event_seq, request_id, idempotency_key,
+         planned_completion_date, planned_completion_source, suggested_planned_completion_date,
+         from_planned_completion_date, from_completion_date
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::bigint, $10::bigint, $11, $12, $13, $14, $15, $16, $17, $18, NULL, NULL,
+         $19::date, $20, $21::date, $22::date, $23::date)
        RETURNING order_production_round_id AS id`,
       [
         orderId, round.roundNo, round.mode, reasonIds.get(round.reasonCode), round.reasonComment,
         round.fromOrderStatusId, round.fromOrderProductionRound, round.source, round.sourceCutJobId,
         round.sourcePacketId, round.startedAt, round.startedBy, round.reasonClarifiedAt,
         round.reasonClarifiedBy, round.closedAt, round.closedBy, round.closeReason, round.eventSeq,
+        round.plannedCompletionDate ?? null, round.plannedCompletionDate ? round.plannedCompletionSource ?? 'manual' : null,
+        round.suggestedPlannedCompletionDate ?? null, round.fromPlannedCompletionDate ?? null, round.fromCompletionDate ?? null,
       ],
     )).rows[0].id);
     for (const detail of round.details) {

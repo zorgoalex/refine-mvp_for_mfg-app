@@ -31,6 +31,11 @@ export const startOrExtendReworkRequestSchema = z
     /** Required when a round is started; must be absent when details join the open round. */
     reasonId: z.number().int().positive().optional(),
     comment: commentSchema,
+    /**
+     * «Переделка» 1.1: срок готовности круга (YYYY-MM-DD). Обязателен при «Вернуть в переделку»; при старте
+     * в производстве и добавлении деталей — необязателен (без него срок не меняется).
+     */
+    plannedCompletionDate: z.string().max(10).nullable().optional(),
     details: z
       .array(
         z
@@ -46,6 +51,11 @@ export const startOrExtendReworkRequestSchema = z
   .strict();
 
 export type StartOrExtendReworkRequest = z.infer<typeof startOrExtendReworkRequestSchema>;
+
+/** «Переделка» 1.1: the details the rework form selected, for the deadline suggestion. */
+export const deadlineSuggestionRequestSchema = z
+  .object({ details: startOrExtendReworkRequestSchema.shape.details })
+  .strict();
 
 export const clarifyReworkReasonRequestSchema = z
   .object({

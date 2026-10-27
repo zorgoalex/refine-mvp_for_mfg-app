@@ -6,6 +6,7 @@ import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import type { OrderDto } from '../dto/order.dto';
+import { almatyToday } from '../domain/order-rework-deadline';
 import { OrderReworkService } from './order-rework.service';
 import { enterMdfCommand } from '../../mdf-board/application/mdf-command-boundary';
 import { OrderDetailTransferService } from './order-detail-transfer.service';
@@ -26,6 +27,12 @@ import { OrderReworkReasonCatalogService } from './order-rework-reason-catalog.s
 // REWORK_INTEGRATION_DATABASE_URL (scratch DB: erp schema + migrations 274–276).
 // Creates and removes its own `E2E-Тест` fixtures.
 const databaseUrl = process.env.REWORK_INTEGRATION_DATABASE_URL;
+
+const roundDeadline = (() => {
+  const value = new Date(`${almatyToday()}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + 30);
+  return value.toISOString().slice(0, 10);
+})();
 
 describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
   let pool: Pool;
@@ -134,6 +141,13 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
       isEnabled: () => true,
       readOrder: async () => ({}) as OrderDto,
     });
+    // Since 1.1 «Вернуть в переделку» needs the round deadline; these stage-1 scenarios do not test it, so a start
+    // refused for the missing date is repeated with a fixed one (deadline behaviour: order-rework-deadline.integration).
+    const startOrExtend = service.startOrExtend.bind(service);
+    service.startOrExtend = (input) => startOrExtend(input).catch((error: { code?: string }) => {
+      if (error?.code !== 'ORDER_REWORK_PLANNED_COMPLETION_REQUIRED') throw error;
+      return startOrExtend({ ...input, dto: { ...input.dto, plannedCompletionDate: roundDeadline } });
+    });
     status = Object.fromEntries((await pool.query('SELECT order_status_code, order_status_id FROM order_statuses')).rows
       .map((row) => [row.order_status_code, Number(row.order_status_id)]));
     stage = Object.fromEntries((await pool.query('SELECT production_status_code, production_status_id FROM production_statuses')).rows
@@ -210,7 +224,7 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
     const idempotencyKey = key();
     const command = {
       currentUser: admin, orderId, version: await version(orderId), idempotencyKey,
-      dto: { reasonId: reasons.workshop_defect, comment: ' скол ', details: [{ detailId: detailIds[0], productionStatusId: stage.drawn }] },
+      dto: { reasonId: reasons.workshop_defect, comment: ' скол ', plannedCompletionDate: roundDeadline, details: [{ detailId: detailIds[0], productionStatusId: stage.drawn }] },
     };
     const result = await service.startOrExtend(command);
     expect(result).toMatchObject({ orderId, roundNo: 2, mode: 'after_ready', action: 'started', detailIds: [detailIds[0]] });
@@ -227,17 +241,21 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
     const events = (await pool.query('SELECT production_status_id, round_no FROM production_status_events WHERE detail_id = $1 ORDER BY round_no', [detailIds[0]])).rows;
     expect(events.map((e) => [Number(e.production_status_id), Number(e.round_no)])).toEqual([[stage.packed, 1], [stage.drawn, 2]]);
     const audit = (await pool.query(`SELECT event FROM audit_log WHERE related_order_id = $1 AND ${commandAudit} ORDER BY event`, [orderId])).rows.map((r) => r.event);
-    expect(audit).toEqual(['order.rework_started', 'orders.status_change']);
+    // 1.1: the round deadline changes the order date → also an `orders.update` fact (order history).
+    expect(audit).toEqual(['order.rework_started', 'orders.status_change', 'orders.update']);
     // Order stage marks (266): the original run keeps its mark, the new round gets its own.
     expect(await orderMarks(orderId)).toEqual([['packed', 1], ['drawn', 2]]);
     const outbox = (await pool.query("SELECT event_type, idempotency_key FROM outbox_events WHERE aggregate_id = $1 AND event_type LIKE 'order.%' ORDER BY event_type", [String(orderId)])).rows;
-    expect(outbox.map((o) => o.event_type)).toEqual(['order.rework_started', 'order.status_changed']);
-    expect(outbox[0].idempotency_key).toBe(`order:${orderId}:rework:2:started:1`);
+    // 1.1: the round deadline is a change of the order's planned completion date too.
+    expect(outbox.map((o) => o.event_type)).toEqual(['order.planned_completion_date_changed', 'order.rework_started', 'order.status_changed']);
+    expect(outbox[1].idempotency_key).toBe(`order:${orderId}:rework:2:started:1`);
+    expect(outbox[0].idempotency_key).toBe(`order:${orderId}:rework:2:started:1:planned-completion`);
 
     // Idempotent replay: same result, no new rows.
     const replay = await service.startOrExtend(command);
     expect(replay).toMatchObject({ roundNo: 2, action: 'started', version: result.version });
-    expect(Number((await pool.query(`SELECT count(*) FROM audit_log WHERE related_order_id = $1 AND ${commandAudit}`, [orderId])).rows[0].count)).toBe(2);
+    // Replay adds nothing: started + status change + the date fact (`orders.update`, 1.1).
+    expect(Number((await pool.query(`SELECT count(*) FROM audit_log WHERE related_order_id = $1 AND ${commandAudit}`, [orderId])).rows[0].count)).toBe(3);
 
     // Extend: a new detail joins round 2; an already included detail is a no-op.
     const extended = await service.startOrExtend({

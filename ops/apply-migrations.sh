@@ -2954,6 +2954,18 @@ probe_file() {
     276_order_rework_round_closure*) probe_all \
       "$(q_trg trg_orders_close_rework_round)" \
       "$(q_fun_hash 'public.trg_orders_close_rework_round()' b5591f65ae646e55dd5232ad77f8cac7)" ;;
+    # «Переделка» 1.1: срок готовности круга и отметка сверки итогового дедлайна (аддитивно).
+    281_order_rework_round_deadline*) probe_all \
+      "$(q_col order_production_rounds planned_completion_date)" \
+      "$(q_col order_production_rounds planned_completion_source)" \
+      "$(q_col order_production_rounds suggested_planned_completion_date)" \
+      "$(q_col order_production_rounds from_planned_completion_date)" \
+      "$(q_col order_production_rounds from_completion_date)" \
+      "$(q_col order_production_rounds deadline_sync_requested_at)" \
+      "$(q_col order_production_rounds deadline_sync_request_id)" \
+      "$(q_col order_production_rounds deadline_sync_requested_by)" \
+      "$(q_con_on order_production_rounds chk_order_production_rounds_planned_source)" \
+      "$(q_idx idx_order_production_rounds_deadline_sync)" ;;
     # Сид 203 — хотя бы один склад (склад можно переименовать; после 205 повторный сид без ключа 1С невозможен).
     203_film_stock*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM public.warehouses)" \
@@ -3372,6 +3384,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     276_order_rework_round_closure*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    281_order_rework_round_deadline*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

@@ -211,6 +211,12 @@ export interface OrderSnapshotProductionRoundDto {
   closedBy: number | null;
   closeReason: 'ready' | 'issued' | 'completed' | 'false_positive' | null;
   eventSeq: number;
+  /** «Переделка» 1.1 (optional — snapshots before it have none): the round deadline and the order dates before it. */
+  plannedCompletionDate?: string | null;
+  plannedCompletionSource?: 'schedule' | 'manual' | null;
+  suggestedPlannedCompletionDate?: string | null;
+  fromPlannedCompletionDate?: string | null;
+  fromCompletionDate?: string | null;
   details: Array<{
     detailSourceId: string;
     fromProductionStatusId: number | null;

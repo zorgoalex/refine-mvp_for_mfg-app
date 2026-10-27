@@ -44,6 +44,8 @@ export interface Fixture { orderId: number; orderName: string; detailIds: number
 /** An order with N details on one stage, written like the integration fixtures (backend stage-event writer). */
 export function createOrder(input: {
   name: string; createdBy: number; orderStatus: string; detailStage: string; details?: number; clientName?: string;
+  /** «Переделка» 1.1: the order's planned/completion dates (YYYY-MM-DD); the order date is a month earlier. */
+  plannedDate?: string; completionDate?: string;
 }): Fixture {
   const count = input.details ?? 3;
   const out = psql(`
@@ -57,10 +59,13 @@ export function createOrder(input: {
       SELECT 'E2E-RQA-' || substr(md5('${q(input.name)}'), 1, 10), '${q(`${PREFIX} группа ${input.name}`)}', c.client_id, ${input.createdBy}
       FROM c RETURNING project_id
     ), o AS (
-      INSERT INTO orders (order_name, client_id, project_id, order_status_id, payment_status_id, created_by, manager_id)
+      INSERT INTO orders (order_name, client_id, project_id, order_status_id, payment_status_id, created_by, manager_id,
+                          order_date, planned_completion_date, completion_date)
       SELECT '${q(input.name)}', c.client_id, p.project_id,
              (SELECT order_status_id FROM order_statuses WHERE order_status_code = '${q(input.orderStatus)}'),
-             (SELECT min(payment_status_id) FROM payment_statuses), ${input.createdBy}, ${input.createdBy}
+             (SELECT min(payment_status_id) FROM payment_statuses), ${input.createdBy}, ${input.createdBy},
+             current_date - 30, ${input.plannedDate ? `'${input.plannedDate}'::date` : 'NULL'},
+             ${input.completionDate ? `'${input.completionDate}'::date` : 'NULL'}
       FROM c, p RETURNING order_id
     ), d AS (
       INSERT INTO order_details
@@ -111,6 +116,55 @@ export function rounds(orderId: number): Array<{ round: number; closed: boolean;
     });
 }
 
+/** «Переделка» 1.1: the order dates. */
+export function orderDates(orderId: number): { planned: string | null; completion: string | null } {
+  const [planned, completion] = psql(`SELECT coalesce(planned_completion_date::text, ''), coalesce(completion_date::text, '')
+    FROM orders WHERE order_id = ${orderId};`).split('|');
+  return { planned: planned || null, completion: completion || null };
+}
+
+/** The round's deadline fields. */
+export function roundDeadline(orderId: number, roundNo: number): { planned: string | null; source: string | null; fromPlanned: string | null; mark: boolean } {
+  const [planned, source, fromPlanned, mark] = psql(`SELECT coalesce(planned_completion_date::text, ''), coalesce(planned_completion_source, ''),
+    coalesce(from_planned_completion_date::text, ''), deadline_sync_requested_at IS NOT NULL
+    FROM order_production_rounds WHERE order_id = ${orderId} AND round_no = ${roundNo};`).split('|');
+  return { planned: planned || null, source: source || null, fromPlanned: fromPlanned || null, mark: mark === 't' };
+}
+
+/** Final-deadline instances of the order: status, date (UTC day) and round tag. */
+export function finalDeadlines(orderId: number): Array<{ status: string; at: string; round: number | null }> {
+  return psql(`SELECT status, (deadline_at AT TIME ZONE 'UTC')::date, coalesce(metadata_json->>'reworkRoundNo', '')
+    FROM deadline_instances WHERE entity_type = 'order' AND entity_id = '${orderId}' ORDER BY created_at, deadline_id;`)
+    .split('\n').filter(Boolean).map((row) => {
+      const [status, at, round] = row.split('|');
+      return { status, at, round: round ? Number(round) : null };
+    });
+}
+
+/** «Схема этапов и сроки»: the stored state (to restore) and a fill — every active stage `days`, reserve `reserve`. */
+export function saveSchedule(): { durations: string; reserve: string } {
+  return {
+    durations: psql(`SELECT coalesce(json_agg(d)::text, '[]') FROM deadline_default_stage_durations d;`),
+    reserve: psql('SELECT reserve_days FROM deadline_default_schedule_config WHERE config_id = 1;'),
+  };
+}
+
+export function fillSchedule(days: number, reserve: number): void {
+  psql(`BEGIN; DELETE FROM deadline_default_stage_durations;
+    INSERT INTO deadline_default_stage_durations (production_status_id, position, duration_days, parallel_with_previous)
+    SELECT production_status_id, row_number() OVER (ORDER BY sort_order, production_status_id), ${days}, false
+      FROM production_statuses WHERE is_active = true;
+    UPDATE deadline_default_schedule_config SET reserve_days = ${reserve} WHERE config_id = 1; COMMIT;`);
+}
+
+export function restoreSchedule(saved: { durations: string; reserve: string }): void {
+  psql(`BEGIN; DELETE FROM deadline_default_stage_durations;
+    INSERT INTO deadline_default_stage_durations (production_status_id, position, duration_days, parallel_with_previous)
+    SELECT production_status_id, position, duration_days, parallel_with_previous
+      FROM json_populate_recordset(NULL::deadline_default_stage_durations, '${q(saved.durations)}'::json);
+    UPDATE deadline_default_schedule_config SET reserve_days = ${Number(saved.reserve)} WHERE config_id = 1; COMMIT;`);
+}
+
 /** Every QA fixture goes away: orders (cascade), clients, users, the audit/outbox they produced. */
 export function cleanup(): void {
   psql(`
@@ -122,6 +176,7 @@ export function cleanup(): void {
     DELETE FROM outbox_events WHERE aggregate_type = 'order' AND aggregate_id IN (SELECT order_id::text FROM qa_orders);
     DELETE FROM command_idempotency_keys WHERE entity_type = 'order' AND entity_id IN (SELECT order_id::text FROM qa_orders);
     DELETE FROM realtime_event_log WHERE order_id IN (SELECT order_id FROM qa_orders);
+    DELETE FROM audit_log WHERE entity_type = 'deadline' AND related_order_id IN (SELECT order_id FROM qa_orders);
     SET LOCAL session_replication_role = replica;
     DELETE FROM mdf_board_history_state WHERE order_id IN (SELECT order_id FROM qa_orders);
     DELETE FROM mdf_board_history_coverage WHERE order_id IN (SELECT order_id FROM qa_orders);

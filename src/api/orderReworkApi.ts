@@ -49,7 +49,23 @@ export interface OrderReworkRound {
   reasonClarifiedAt: string | null;
   closedAt: string | null;
   closeReason: 'ready' | 'issued' | 'completed' | 'false_positive' | null;
+  /** «Переделка» 1.1: the round deadline (YYYY-MM-DD), its source and the order deadline before the round. */
+  plannedCompletionDate?: string | null;
+  plannedCompletionSource?: 'schedule' | 'manual' | null;
+  fromPlannedCompletionDate?: string | null;
   details: OrderReworkRoundDetail[];
+}
+
+/** «Переделка» 1.1: the deadline the form pre-fills from «Схема этапов и сроки». */
+export interface OrderReworkDeadlineSuggestion {
+  suggestedDate: string | null;
+  plannedOrderDays: number | null;
+  stageIds: number[];
+  scheduleConfigured: boolean;
+  required: boolean;
+  today: string;
+  orderPlannedCompletionDate: string | null;
+  roundPlannedCompletionDate: string | null;
 }
 
 export interface OrderReworkState {
@@ -96,9 +112,19 @@ export const orderReworkApi = {
   startOrExtend(
     orderId: number,
     version: number,
-    body: { reasonId?: number; comment?: string | null; details: Array<{ detailId: number; productionStatusId: number }> },
+    body: {
+      reasonId?: number;
+      comment?: string | null;
+      plannedCompletionDate?: string | null;
+      details: Array<{ detailId: number; productionStatusId: number }>;
+    },
   ): Promise<OrderReworkCommandResult> {
     return httpClient.request(orderPath(orderId), { method: 'POST', headers: commandHeaders(version), body: JSON.stringify(body) });
+  },
+  suggestDeadline(orderId: number, details: Array<{ detailId: number; productionStatusId: number }>): Promise<OrderReworkDeadlineSuggestion> {
+    return httpClient.request(`${orderPath(orderId)}/deadline-suggestion`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ details }),
+    });
   },
   clarifyReason(orderId: number, roundNo: number, version: number, body: { reasonId: number; comment?: string | null }): Promise<OrderReworkCommandResult> {
     return httpClient.request(`${orderPath(orderId)}/rounds/${roundNo}/reason`, {

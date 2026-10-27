@@ -36,7 +36,15 @@ export function isReworkTargetAllowed(
 }
 
 export type ReworkRequestResult =
-  | { ok: true; body: { reasonId?: number; comment?: string | null; details: Array<{ detailId: number; productionStatusId: number }> } }
+  | {
+    ok: true;
+    body: {
+      reasonId?: number;
+      comment?: string | null;
+      plannedCompletionDate?: string;
+      details: Array<{ detailId: number; productionStatusId: number }>;
+    };
+  }
   | { ok: false; message: string | null };
 
 export function buildReworkRequest(input: {
@@ -49,6 +57,9 @@ export function buildReworkRequest(input: {
   comment: string;
   needsReason: boolean;
   reasons: readonly OrderReworkReason[];
+  /** «Переделка» 1.1: the round deadline (YYYY-MM-DD) and whether it is required («Вернуть в переделку»). */
+  plannedCompletionDate?: string | null;
+  deadlineRequired?: boolean;
 }): ReworkRequestResult {
   if (input.selected.size === 0) return { ok: false, message: 'Выберите детали' };
   const stages = [...input.stageById.values()];
@@ -64,12 +75,14 @@ export function buildReworkRequest(input: {
     }
     items.push({ detailId: detail.id, productionStatusId: target });
   }
-  if (!input.needsReason) return { ok: true, body: { details: items } };
+  if (input.deadlineRequired && !input.plannedCompletionDate) return { ok: false, message: 'Укажите срок готовности' };
+  const deadline = input.plannedCompletionDate ? { plannedCompletionDate: input.plannedCompletionDate } : {};
+  if (!input.needsReason) return { ok: true, body: { ...deadline, details: items } };
   const reason = input.reasons.find((r) => r.reasonId === input.reasonId);
   if (!reason) return { ok: false, message: 'Выберите причину' };
   const comment = input.comment.trim();
   if (reason.requiresComment && !comment) return { ok: false, message: 'Для этой причины нужен комментарий' };
-  return { ok: true, body: { reasonId: reason.reasonId, comment: comment || null, details: items } };
+  return { ok: true, body: { reasonId: reason.reasonId, comment: comment || null, ...deadline, details: items } };
 }
 
 /**

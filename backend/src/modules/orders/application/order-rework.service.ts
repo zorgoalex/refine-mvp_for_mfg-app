@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { Logger } from '@nestjs/common';
 import type { QueryResultRow } from 'pg';
 import { auditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
@@ -8,7 +9,14 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import { markStageEventWriter } from '../../../shared/production-status/stage-event-writer';
+import { ORDER_FINAL_DEADLINE_SYSTEM_ACTOR } from '../../deadlines/domain/order-final-deadline';
+import type { DeadlineDefaultScheduleDto } from '../../deadlines/dto/deadline-default-schedule.dto';
 import type { OrderDto } from '../dto/order.dto';
+import {
+  almatyToday,
+  parseReworkPlannedCompletionDate,
+  suggestReworkPlannedCompletion,
+} from '../domain/order-rework-deadline';
 import { OrderNotFoundError, OrderVersionConflictError } from '../errors/order.errors';
 import {
   assertUniqueReworkDetails,
@@ -33,6 +41,18 @@ import {
  */
 
 const SOURCE = 'backend-order-rework';
+const reworkLogger = new Logger('OrderReworkService');
+
+interface RoundDeadlineDecision {
+  apply: boolean;
+  date: string | null;
+  source: 'schedule' | 'manual' | null;
+  suggested: string | null;
+  /** Returned after readiness: the manual completion date is cleared. */
+  clearCompletion: boolean;
+  before: { planned: string | null; completion: string | null };
+  stageIds: number[];
+}
 const IDEMPOTENCY_STALE_MS = 10 * 60 * 1000;
 const RETRYABLE_SQLSTATES = new Set(['40P01', '40001']);
 const MAX_ATTEMPTS = 3;
@@ -47,6 +67,22 @@ export interface OrderReworkCommandResultDto {
   version: number;
   detailIds: number[];
   requestId: string;
+  /** «Переделка» 1.1: the round deadline was changed by this command (the final deadline is then reconciled). */
+  plannedCompletionChanged?: boolean;
+}
+
+export interface OrderReworkDeadlineSuggestionDto {
+  /** By «Схема этапов и сроки»; null — the schedule is not filled / stages outside it → the date is entered manually. */
+  suggestedDate: string | null;
+  plannedOrderDays: number | null;
+  stageIds: number[];
+  scheduleConfigured: boolean;
+  /** «Вернуть в переделку»: a date is required. */
+  required: boolean;
+  today: string;
+  orderPlannedCompletionDate: string | null;
+  /** Open round: its current deadline (adding details only moves it later). */
+  roundPlannedCompletionDate: string | null;
 }
 
 export interface OrderReworkResponseDto extends OrderReworkCommandResultDto {
@@ -106,6 +142,10 @@ export interface OrderReworkRoundDto {
   reasonClarifiedAt: string | null;
   closedAt: string | null;
   closeReason: string | null;
+  /** «Переделка» 1.1: the round deadline, its source and the order deadline before the round. */
+  plannedCompletionDate: string | null;
+  plannedCompletionSource: 'schedule' | 'manual' | null;
+  fromPlannedCompletionDate: string | null;
   details: OrderReworkRoundDetailDto[];
 }
 
@@ -141,6 +181,19 @@ export interface OrderReworkServicePorts {
    * (`order_realtime_deferred`); the periodic sweeper covers a crash before it.
    */
   requestRealtimeDrain?: (orderIds: number[]) => void;
+  /** «Переделка» 1.1: «Схема этапов и сроки» (deadlines module), read in the command transaction. */
+  loadDeadlineSchedule?: (client: TransactionClient) => Promise<DeadlineDefaultScheduleDto>;
+  /**
+   * «Переделка» 1.1 §6.3: reconciliation of the order's final deadline after commit (own transaction; the
+   * `deadline_sync_requested_at` mark makes a failure here recoverable by the background pass).
+   */
+  reconcileOrderDeadline?: (input: {
+    orderId: number;
+    /** The command's user, or `system:order-final-deadline-reconcile` (repair, background pass). */
+    actorUserId: string;
+    requestId: string;
+    context?: { correlationId?: string | null; initiatorUserId?: string | null };
+  }) => Promise<void>;
 }
 
 interface LockedOrderRow extends QueryResultRow {
@@ -262,7 +315,8 @@ export class OrderReworkService {
       `SELECT r.round_no, r.mode, r.source, r.reason_id, rr.code AS reason_code, rr.name AS reason_name,
               rr.is_system AS reason_is_system, r.reason_comment, r.started_at, r.started_by,
               u.username AS started_by_username, r.reason_clarified_at, r.closed_at, r.close_reason,
-              r.order_production_round_id
+              r.order_production_round_id, r.planned_completion_date::text AS planned_completion_date,
+              r.planned_completion_source, r.from_planned_completion_date::text AS from_planned_completion_date
        FROM order_production_rounds r
        JOIN order_rework_reasons rr ON rr.order_rework_reason_id = r.reason_id
        LEFT JOIN users u ON u.user_id = r.started_by
@@ -331,6 +385,9 @@ export class OrderReworkService {
         reasonClarifiedAt: row.reason_clarified_at ? toIso(row.reason_clarified_at) : null,
         closedAt: row.closed_at ? toIso(row.closed_at) : null,
         closeReason: row.close_reason ?? null,
+        plannedCompletionDate: row.planned_completion_date ?? null,
+        plannedCompletionSource: row.planned_completion_source ?? null,
+        fromPlannedCompletionDate: row.from_planned_completion_date ?? null,
         details: byRound.get(String(row.order_production_round_id)) ?? [],
       })),
     };
@@ -347,6 +404,7 @@ export class OrderReworkService {
     const result = await this.withRetry(() =>
       this.ports.database.transaction((tx) => this.startOrExtendInTransaction(tx, command, requestId)),
     );
+    if (result.plannedCompletionChanged) await this.reconcileDeadlineAfterCommit(result, command.currentUser);
     return this.withOrder(result, command.currentUser);
   }
 
@@ -367,7 +425,89 @@ export class OrderReworkService {
     const result = await this.withRetry(() =>
       this.ports.database.transaction((tx) => this.falsePositiveInTransaction(tx, command, requestId)),
     );
+    if (result.plannedCompletionChanged) await this.reconcileDeadlineAfterCommit(result, command.currentUser);
     return this.withOrder(result, command.currentUser);
+  }
+
+  /**
+   * «Переделка» 1.1 §7: the deadline the rework form pre-fills for the selected details (read-only; the command
+   * recomputes and validates). `required` — the order returns after readiness, a date must be given.
+   */
+  async suggestDeadline(currentUser: CurrentUser, orderId: number, details: Array<{ detailId: number; productionStatusId: number }>): Promise<OrderReworkDeadlineSuggestionDto> {
+    requirePermission(currentUser, 'orders.rework');
+    return this.ports.database.transaction(async (tx) => {
+      const order = await readOrderForRework(tx, orderId);
+      this.assertCanUpdate(currentUser, order);
+      const openRound = await loadOpenRound(tx, orderId);
+      const mode = openRound ? openRound.mode : resolveReworkMode(order.orderStatusCode);
+      const today = almatyToday();
+      const { suggestion, roundDate, scheduleConfigured } = await this.computeRoundSuggestion(
+        tx, orderId, openRound, details.map((detail) => detail.productionStatusId), today,
+      );
+      const planned = (await tx.query<{ planned: string | null }>(
+        'SELECT planned_completion_date::text AS planned FROM orders WHERE order_id = $1', [orderId],
+      )).rows[0]?.planned ?? null;
+      return {
+        suggestedDate: suggestion.suggestedDate,
+        plannedOrderDays: suggestion.plannedOrderDays,
+        stageIds: suggestion.stageIds,
+        scheduleConfigured,
+        required: !openRound && mode === 'after_ready',
+        today,
+        orderPlannedCompletionDate: planned,
+        roundPlannedCompletionDate: roundDate,
+      };
+    }, { isolation: 'repeatable read' });
+  }
+
+  /**
+   * «Переделка» 1.1 §6.3: manual repair — reconcile the order's final deadline now. Literal `deadlines.manage` and
+   * the order's UPDATE scope; a refusal changes nothing and is audited.
+   */
+  async reconcileDeadlineManually(currentUser: CurrentUser, orderId: number, requestId: string): Promise<{ orderId: number; reconciled: true }> {
+    const order = await this.ports.database.transaction((tx) => readOrderForRework(tx, orderId));
+    const subject = { orderId: order.orderId, createdByUserId: order.createdBy, managerUserId: order.managerId };
+    const allowed = currentUser.permissions.includes('deadlines.manage') && this.orderAccessPolicy.canUpdate(currentUser, subject);
+    if (!allowed) {
+      await auditService.recordDenied(this.ports.database, {
+        event: 'order.final_deadline_reconcile_denied',
+        entityType: 'order',
+        entityId: orderId,
+        actorUserId: currentUser.id,
+        actorUsername: currentUser.username,
+        actorRole: currentUser.role,
+        requestId,
+        source: SOURCE,
+        relatedOrderId: orderId,
+        relatedClientId: order.clientId,
+        reason: currentUser.permissions.includes('deadlines.manage') ? 'order_update_scope' : 'missing_permission',
+        requiredPermissions: ['deadlines.manage', 'orders.update'],
+        relatedEntities: [{ entityType: 'order', entityId: orderId }],
+      });
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для сверки дедлайна заказа', {
+        requiredPermissions: ['deadlines.manage', 'orders.update'],
+      });
+    }
+    if (!this.ports.reconcileOrderDeadline) {
+      throw new ApiError(503, 'ORDER_DEADLINE_SYNC_DISABLED', 'Синхронизация дедлайнов заказов выключена');
+    }
+    // §6.3: the repair writes deadlines as the system; the user is the initiator.
+    await this.ports.reconcileOrderDeadline({
+      orderId, actorUserId: ORDER_FINAL_DEADLINE_SYSTEM_ACTOR, requestId,
+      context: { correlationId: requestId, initiatorUserId: currentUser.id },
+    });
+    await this.ports.database.transaction((tx) => auditService.record(tx, {
+      event: 'order.final_deadline_reconciled',
+      entityType: 'order',
+      entityId: orderId,
+      ...actorAudit(currentUser),
+      requestId,
+      source: SOURCE,
+      relatedOrderId: orderId,
+      relatedClientId: order.clientId,
+      metadata: { trigger: 'manual_repair' },
+    }));
+    return { orderId, reconciled: true };
   }
 
   // ------------------------------------------------------------ transactions
@@ -384,6 +524,8 @@ export class OrderReworkService {
       version: command.version,
       reasonId: command.dto.reasonId ?? null,
       comment: command.dto.comment ?? null,
+      // 1.1 §6.1: the requested date is part of the request (same key + another date → IDEMPOTENCY_KEY_REUSED).
+      plannedCompletionDate: command.dto.plannedCompletionDate ?? null,
       details: [...command.dto.details].sort((a, b) => a.detailId - b.detailId),
     });
     if (replay) return replay;
@@ -443,19 +585,31 @@ export class OrderReworkService {
       return noop;
     }
 
+    const deadline = await this.resolveRoundDeadline(tx, {
+      order,
+      openRound,
+      mode: mode!,
+      targetStageIds: planned.map((p) => Number(p.target.production_status_id)),
+      requested: command.dto.plannedCompletionDate,
+    });
+
     let roundId: number;
     if (openRound) {
       roundId = Number(openRound.order_production_round_id);
     } else {
       roundId = Number((await tx.query<{ order_production_round_id: string }>(
+        // 1.1 §6.4: the order dates before the round are kept at its creation, whether or not it sets a deadline
+        // now (a deadline given later, when details are added, is still undone by «Это не переделка»).
         `INSERT INTO order_production_rounds (
            order_id, round_no, mode, reason_id, reason_comment, from_order_status_id,
-           from_order_production_round, source, started_by, request_id, idempotency_key
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'manual', $8, $9, $10)
+           from_order_production_round, source, started_by, request_id, idempotency_key,
+           from_planned_completion_date, from_completion_date
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'manual', $8, $9, $10, $11::date, $12::date)
          RETURNING order_production_round_id`,
         [
           order.orderId, roundNo, mode, Number(reason!.order_rework_reason_id), comment, order.orderStatusId,
           order.productionRound, actorId(command.currentUser), requestId, command.idempotencyKey,
+          deadline.before.planned, deadline.before.completion,
         ],
       )).rows[0].order_production_round_id);
     }
@@ -499,6 +653,29 @@ export class OrderReworkService {
       );
     }
 
+    if (deadline.apply) {
+      // 1.1 §6.2: the order takes the round deadline; returned after readiness — the manual completion date is
+      // cleared. The previous values were kept at the round's creation. Final deadline: after commit (§6.3).
+      await tx.query(
+        `UPDATE orders
+            SET planned_completion_date = $2::date,
+                completion_date = CASE WHEN $3::boolean THEN NULL ELSE completion_date END
+          WHERE order_id = $1`,
+        [order.orderId, deadline.date, deadline.clearCompletion],
+      );
+      await tx.query(
+        `UPDATE order_production_rounds
+            SET planned_completion_date = $2::date,
+                planned_completion_source = $3,
+                suggested_planned_completion_date = $4::date,
+                deadline_sync_requested_at = now(),
+                deadline_sync_request_id = $5,
+                deadline_sync_requested_by = $6
+          WHERE order_production_round_id = $1`,
+        [roundId, deadline.date, deadline.source, deadline.suggested, requestId, actorId(command.currentUser)],
+      );
+    }
+
     const seq = await bumpEventSeq(tx, roundId);
 
     const detailIds = planned.map((p) => p.detailId);
@@ -519,6 +696,8 @@ export class OrderReworkService {
       before: {
         orderStatusId: order.orderStatusId,
         productionRound: order.productionRound,
+        plannedCompletionDate: deadline.before.planned,
+        ...(deadline.clearCompletion ? { completionDate: deadline.before.completion } : {}),
         details: planned.map((p) => ({
           detailId: p.detailId,
           productionStatusId: toNullableNumber(p.from.production_status_id),
@@ -528,6 +707,8 @@ export class OrderReworkService {
       after: {
         orderStatusId: reworkStatusId ?? order.orderStatusId,
         productionRound: roundNo,
+        plannedCompletionDate: deadline.apply ? deadline.date : deadline.before.planned,
+        ...(deadline.clearCompletion ? { completionDate: null } : {}),
         details: planned.map((p) => ({
           detailId: p.detailId,
           productionStatusId: Number(p.target.production_status_id),
@@ -537,23 +718,48 @@ export class OrderReworkService {
       diff: {
         productionRound: { before: order.productionRound, after: roundNo },
         ...(reworkStatusId ? { orderStatusId: { before: order.orderStatusId, after: reworkStatusId } } : {}),
+        ...(deadline.apply ? { plannedCompletionDate: { before: deadline.before.planned, after: deadline.date } } : {}),
+        ...(deadline.clearCompletion && deadline.before.completion !== null
+          ? { completionDate: { before: deadline.before.completion, after: null } } : {}),
       },
       relatedEntities: detailIds.map((detailId) => ({ entityType: 'order_detail', entityId: detailId })),
       metadata: {
         roundNo, mode, ...reasonMeta, reasonComment: comment, source: 'manual', detailIds, eventSeq: seq,
         idempotencyKey: command.idempotencyKey, outboxIdempotencyKey: outboxKey,
+        plannedCompletionDate: deadline.apply ? deadline.date : null,
+        plannedCompletionSource: deadline.apply ? deadline.source : null,
+        suggestedPlannedCompletionDate: deadline.suggested,
+        scheduleStageIds: deadline.stageIds,
       },
     });
     await enqueueOutbox(tx, event, order, outboxKey, {
       roundNo, mode, ...reasonMeta, source: 'manual', detailIds, detailCount: detailIds.length,
       actorUserId: command.currentUser.id, requestId, idempotencyKey: command.idempotencyKey,
+      plannedCompletionDate: deadline.apply ? deadline.date : deadline.before.planned,
     });
+    if (deadline.apply && (deadline.date !== deadline.before.planned || (deadline.clearCompletion && deadline.before.completion !== null))) {
+      await recordOrderDatesAudit(tx, command.currentUser, order, requestId, {
+        roundNo, outboxKey,
+        planned: { before: deadline.before.planned, after: deadline.date },
+        completion: deadline.clearCompletion ? { before: deadline.before.completion, after: null } : null,
+      });
+    }
+    if (deadline.apply && deadline.date !== deadline.before.planned) {
+      // The same domain event as a date change in the calendar/form (notifications); no in-transaction automation
+      // in round commands (§5.7 of stage 1).
+      await enqueueOutbox(tx, 'order.planned_completion_date_changed', order, `${outboxKey}:planned-completion`, {
+        action: 'planned_completion_date_change', scope: { source: 'order_rework' }, roundNo,
+        plannedCompletionDateBefore: deadline.before.planned, plannedCompletionDateAfter: deadline.date,
+        actorUserId: command.currentUser.id, requestId, idempotencyKey: command.idempotencyKey,
+      });
+    }
     if (reworkStatusId) {
       await recordStatusTransition(tx, command.currentUser, order, reworkStatusId, requestId, `${outboxKey}:status`);
     }
 
     const result: OrderReworkCommandResultDto = {
       orderId: order.orderId, roundNo, mode: mode!, action: openRound ? 'extended' : 'started', version, detailIds, requestId,
+      plannedCompletionChanged: deadline.apply,
     };
     await completeIdempotency(tx, command.idempotencyKey, result);
     return result;
@@ -687,11 +893,43 @@ export class OrderReworkService {
     }));
     const restoreStatus = round.mode === 'after_ready' ? Number(round.from_order_status_id) : null;
     const fromRound = Number(round.from_order_production_round);
+    // «Переделка» 1.1 §6.4: the order dates the round wrote are restored independently — each only if it still
+    // holds the value the round command wrote (a later manual change is kept).
+    const roundDates = (await tx.query<{ planned: string | null; from_planned: string | null; from_completion: string | null }>(
+      `SELECT planned_completion_date::text AS planned, from_planned_completion_date::text AS from_planned,
+              from_completion_date::text AS from_completion
+         FROM order_production_rounds WHERE order_production_round_id = $1`,
+      [roundId],
+    )).rows[0];
+    const orderDates = (await tx.query<{ planned: string | null; completion: string | null }>(
+      'SELECT planned_completion_date::text AS planned, completion_date::text AS completion FROM orders WHERE order_id = $1',
+      [order.orderId],
+    )).rows[0];
+    const roundSetDeadline = roundDates?.planned != null;
+    const restorePlanned = roundSetDeadline && orderDates?.planned === roundDates.planned;
+    const restoreCompletion = roundSetDeadline && round.mode === 'after_ready' && orderDates?.completion == null;
+    const plannedAfter = restorePlanned ? roundDates.from_planned : orderDates?.planned ?? null;
+    const completionAfter = restoreCompletion ? roundDates.from_completion : orderDates?.completion ?? null;
+    if (restorePlanned || restoreCompletion) {
+      await tx.query(
+        `UPDATE orders SET planned_completion_date = $2::date, completion_date = $3::date WHERE order_id = $1`,
+        [order.orderId, plannedAfter, completionAfter],
+      );
+    }
+    const deadlineRestore = roundSetDeadline
+      ? {
+        plannedCompletionDate: restorePlanned ? 'restored' : 'kept',
+        completionDate: round.mode !== 'after_ready' ? 'not_applicable' : restoreCompletion ? 'restored' : 'kept',
+      }
+      : null;
     await tx.query(
       `UPDATE order_production_rounds
-       SET closed_at = now(), closed_by = $2, close_reason = 'false_positive'
+       SET closed_at = now(), closed_by = $2, close_reason = 'false_positive',
+           deadline_sync_requested_at = CASE WHEN $3::boolean THEN now() ELSE deadline_sync_requested_at END,
+           deadline_sync_request_id = CASE WHEN $3::boolean THEN $4 ELSE deadline_sync_request_id END,
+           deadline_sync_requested_by = CASE WHEN $3::boolean THEN $2 ELSE deadline_sync_requested_by END
        WHERE order_production_round_id = $1`,
-      [roundId, actorId(command.currentUser)],
+      [roundId, actorId(command.currentUser), roundSetDeadline, requestId],
     );
     const version = Number((await tx.query<{ version: string }>(
       `UPDATE orders
@@ -717,6 +955,7 @@ export class OrderReworkService {
       before: {
         orderStatusId: order.orderStatusId,
         productionRound: order.productionRound,
+        ...(roundSetDeadline ? { plannedCompletionDate: orderDates?.planned ?? null, completionDate: orderDates?.completion ?? null } : {}),
         details: restored.map((r) => ({
           detailId: Number(r.detail_id), productionStatusId: toNullableNumber(r.production_status_id), productionRound: Number(r.production_round),
         })),
@@ -724,6 +963,7 @@ export class OrderReworkService {
       after: {
         orderStatusId: restoreStatus ?? order.orderStatusId,
         productionRound: fromRound,
+        ...(roundSetDeadline ? { plannedCompletionDate: plannedAfter, completionDate: completionAfter } : {}),
         details: restored.filter((r) => !r.deleted).map((r) => ({
           detailId: Number(r.detail_id), productionStatusId: toNullableNumber(r.from_production_status_id), productionRound: Number(r.from_production_round),
         })),
@@ -732,13 +972,31 @@ export class OrderReworkService {
         productionRound: { before: order.productionRound, after: fromRound },
         ...(restoreStatus !== null && restoreStatus !== order.orderStatusId
           ? { orderStatusId: { before: order.orderStatusId, after: restoreStatus } } : {}),
+        ...(restorePlanned && plannedAfter !== orderDates?.planned
+          ? { plannedCompletionDate: { before: orderDates?.planned ?? null, after: plannedAfter } } : {}),
+        ...(restoreCompletion && completionAfter !== null
+          ? { completionDate: { before: null, after: completionAfter } } : {}),
       },
       relatedEntities: detailIds.map((detailId) => ({ entityType: 'order_detail', entityId: detailId })),
       metadata: {
         roundNo: command.roundNo, mode: round.mode, closeReason: 'false_positive', comment, detailIds, removedStageMarks, eventSeq: seq,
-        idempotencyKey: command.idempotencyKey, outboxIdempotencyKey: outboxKey,
+        idempotencyKey: command.idempotencyKey, outboxIdempotencyKey: outboxKey, deadlineRestore,
       },
     });
+    if ((restorePlanned && plannedAfter !== orderDates?.planned) || (restoreCompletion && completionAfter !== orderDates?.completion)) {
+      await recordOrderDatesAudit(tx, command.currentUser, order, requestId, {
+        roundNo: command.roundNo, outboxKey,
+        planned: restorePlanned ? { before: orderDates?.planned ?? null, after: plannedAfter } : null,
+        completion: restoreCompletion ? { before: orderDates?.completion ?? null, after: completionAfter } : null,
+      });
+    }
+    if (restorePlanned && plannedAfter !== orderDates?.planned) {
+      await enqueueOutbox(tx, 'order.planned_completion_date_changed', order, `${outboxKey}:planned-completion`, {
+        action: 'planned_completion_date_change', scope: { source: 'order_rework' }, roundNo: command.roundNo,
+        plannedCompletionDateBefore: orderDates?.planned ?? null, plannedCompletionDateAfter: plannedAfter,
+        actorUserId: command.currentUser.id, requestId, idempotencyKey: command.idempotencyKey,
+      });
+    }
     await enqueueOutbox(tx, 'order.rework_closed', order, outboxKey, {
       roundNo: command.roundNo, mode: round.mode, closeReason: 'false_positive', detailIds, removedStageMarks,
       actorUserId: command.currentUser.id, requestId, idempotencyKey: command.idempotencyKey,
@@ -784,12 +1042,117 @@ export class OrderReworkService {
     }
     const result: OrderReworkCommandResultDto = {
       orderId: order.orderId, roundNo: command.roundNo, mode: round.mode, action: 'false_positive', version, detailIds, requestId,
+      plannedCompletionChanged: roundSetDeadline,
     };
     await completeIdempotency(tx, command.idempotencyKey, result);
     return result;
   }
 
   // ----------------------------------------------------------------- helpers
+
+  /**
+   * «Переделка» 1.1 §4/§6.1: the round deadline. Suggestion from «Схема этапов и сроки» over the remaining stages of
+   * the round (stored + new details); the requested date is validated; required when the order returns after
+   * readiness; when details join an open round the date only moves later.
+   */
+  private async resolveRoundDeadline(
+    tx: TransactionClient,
+    input: {
+      order: LockedOrder;
+      openRound: RoundRow | null;
+      mode: OrderReworkMode;
+      targetStageIds: number[];
+      requested: string | null | undefined;
+    },
+  ): Promise<RoundDeadlineDecision> {
+    const today = almatyToday();
+    const requested = parseReworkPlannedCompletionDate(input.requested, today);
+    const dates = (await tx.query<{ planned: string | null; completion: string | null }>(
+      'SELECT planned_completion_date::text AS planned, completion_date::text AS completion FROM orders WHERE order_id = $1',
+      [input.order.orderId],
+    )).rows[0];
+    const startingAfterReady = !input.openRound && input.mode === 'after_ready';
+    if (startingAfterReady && !requested) {
+      throw new ApiError(422, 'ORDER_REWORK_PLANNED_COMPLETION_REQUIRED', 'Укажите срок готовности заказа после переделки');
+    }
+
+    const { suggestion, roundDate } = await this.computeRoundSuggestion(tx, input.order.orderId, input.openRound, input.targetStageIds, today);
+
+    const before = { planned: dates?.planned ?? null, completion: dates?.completion ?? null };
+    const keep: RoundDeadlineDecision = {
+      apply: false, date: null, source: null, suggested: suggestion.suggestedDate, clearCompletion: false,
+      before, stageIds: suggestion.stageIds,
+    };
+    if (!requested) return keep;
+    if (input.openRound) {
+      const current = roundDate ?? before.planned;
+      if (current !== null && requested <= current) return keep; // adding details never moves the deadline earlier
+    }
+    return {
+      apply: true,
+      date: requested,
+      source: requested === suggestion.suggestedDate ? 'schedule' : 'manual',
+      suggested: suggestion.suggestedDate,
+      clearCompletion: startingAfterReady,
+      before,
+      stageIds: suggestion.stageIds,
+    };
+  }
+
+  /** Suggestion from «Схема этапов и сроки» over the remaining stages (stored round details + the requested ones). */
+  private async computeRoundSuggestion(
+    tx: TransactionClient,
+    orderId: number,
+    openRound: RoundRow | null,
+    targetStageIds: number[],
+    today: string,
+  ): Promise<{ suggestion: { suggestedDate: string | null; plannedOrderDays: number | null; stageIds: number[] }; roundDate: string | null; scheduleConfigured: boolean }> {
+    let returnStageIds = targetStageIds;
+    let roundDate: string | null = null;
+    if (openRound) {
+      const roundId = Number(openRound.order_production_round_id);
+      const stored = await tx.query<{ to_production_status_id: string }>(
+        'SELECT to_production_status_id FROM order_production_round_details WHERE order_production_round_id = $1',
+        [roundId],
+      );
+      returnStageIds = [...stored.rows.map((row) => Number(row.to_production_status_id)), ...targetStageIds];
+      roundDate = (await tx.query<{ planned: string | null }>(
+        'SELECT planned_completion_date::text AS planned FROM order_production_rounds WHERE order_production_round_id = $1',
+        [roundId],
+      )).rows[0]?.planned ?? null;
+    }
+    const workshops = await tx.query<{ production_status_id: string }>(
+      `SELECT DISTINCT production_status_id FROM order_workshops
+        WHERE order_id = $1 AND COALESCE(delete_flag, false) = false AND production_status_id IS NOT NULL`,
+      [orderId],
+    );
+    const schedule = this.ports.loadDeadlineSchedule ? await this.ports.loadDeadlineSchedule(tx) : null;
+    const suggestion = schedule
+      ? suggestReworkPlannedCompletion({
+        schedule,
+        returnStageIds,
+        orderWorkshopStageIds: workshops.rows.map((row) => Number(row.production_status_id)),
+        startDate: today,
+      })
+      : { suggestedDate: null, plannedOrderDays: null, stageIds: [] };
+    return { suggestion, roundDate, scheduleConfigured: Boolean(schedule?.configured) };
+  }
+
+  /** «Переделка» 1.1 §6.3: after commit; a failure leaves the mark for the background pass (never fails the command). */
+  private async reconcileDeadlineAfterCommit(result: OrderReworkCommandResultDto, currentUser: CurrentUser): Promise<void> {
+    if (!this.ports.reconcileOrderDeadline) return;
+    try {
+      await this.ports.reconcileOrderDeadline({
+        orderId: result.orderId, actorUserId: currentUser.id, requestId: result.requestId,
+        context: { correlationId: result.requestId },
+      });
+    } catch (error) {
+      reworkLogger.warn(
+        `Final deadline reconciliation failed after rework ${result.action} (order ${result.orderId}, round ${result.roundNo}); `
+        + `the background pass will retry: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 
   private assertEnabled(): void {
     if (!this.ports.isEnabled()) {
@@ -874,13 +1237,22 @@ export async function assertMdfSupportsRounds(tx: TransactionClient): Promise<vo
 }
 
 async function lockOrder(tx: TransactionClient, orderId: number): Promise<LockedOrder> {
+  return selectOrder(tx, orderId, true);
+}
+
+/** The same order fields without a row lock (read-only paths: deadline suggestion, manual reconciliation). */
+async function readOrderForRework(tx: TransactionClient, orderId: number): Promise<LockedOrder> {
+  return selectOrder(tx, orderId, false);
+}
+
+async function selectOrder(tx: TransactionClient, orderId: number, lock: boolean): Promise<LockedOrder> {
   const row = (await tx.query<LockedOrderRow>(
     `SELECT o.order_id, o.client_id, o.order_kind, o.order_status_id, s.order_status_code, s.order_status_name,
             o.production_round, o.last_round_no, o.version, o.created_by, o.manager_id
      FROM orders o
      JOIN order_statuses s ON s.order_status_id = o.order_status_id
      WHERE o.order_id = $1 AND o.delete_flag = false
-     FOR NO KEY UPDATE OF o`,
+     ${lock ? 'FOR NO KEY UPDATE OF o' : ''}`,
     [orderId],
   )).rows[0];
   if (!row || row.order_kind !== 'production_order') {
@@ -1186,6 +1558,43 @@ function mapReason(row: ReasonRow): OrderReworkReasonDto {
 function actorId(currentUser: CurrentUser): number | null {
   const id = Number(currentUser.id);
   return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+/**
+ * 1.1 §6.5: a change of the order dates by a round command is also the ordinary order-change fact (`orders.update`,
+ * visible in the order history like a save of the form) — only the date fields, linked to the round's event.
+ */
+async function recordOrderDatesAudit(
+  tx: TransactionClient,
+  currentUser: CurrentUser,
+  order: LockedOrder,
+  requestId: string,
+  change: {
+    roundNo: number;
+    outboxKey: string;
+    planned: { before: string | null; after: string | null } | null;
+    completion: { before: string | null; after: string | null } | null;
+  },
+): Promise<void> {
+  const fields = {
+    ...(change.planned && change.planned.before !== change.planned.after ? { plannedCompletionDate: change.planned } : {}),
+    ...(change.completion && change.completion.before !== change.completion.after ? { completionDate: change.completion } : {}),
+  };
+  if (Object.keys(fields).length === 0) return;
+  await auditService.record(tx, {
+    event: 'orders.update',
+    entityType: 'order',
+    entityId: order.orderId,
+    ...actorAudit(currentUser),
+    requestId,
+    source: SOURCE,
+    relatedOrderId: order.orderId,
+    relatedClientId: order.clientId,
+    before: Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, value.before])),
+    after: Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, value.after])),
+    diff: fields,
+    metadata: { origin: 'order_rework', roundNo: change.roundNo, causationOutboxIdempotencyKey: change.outboxKey },
+  });
 }
 
 function actorAudit(currentUser: CurrentUser) {

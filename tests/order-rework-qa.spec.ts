@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import {
-  PREFIX, cleanup, createOrder, createUser, detailStates, frontendUrl, login, openOrder, orderState, psql, qaEnabled,
-  residue, rounds, runId, type Fixture,
+  PREFIX, cleanup, createOrder, createUser, detailStates, fillSchedule, finalDeadlines, frontendUrl, login, openOrder,
+  orderDates, orderState, psql, qaEnabled, residue, restoreSchedule, roundDeadline, rounds, runId, saveSchedule, type Fixture,
 } from './helpers/reworkQa';
 
 /**
@@ -11,6 +11,14 @@ import {
  */
 const shots = process.env.ORDER_REWORK_QA_SHOTS ?? 'test-results/order-rework-qa';
 const tag = runId();
+// «Переделка» 1.1: dates relative to the Almaty business day.
+const almatyToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Almaty', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const day = (offset: number) => {
+  const value = new Date(`${almatyToday}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + offset);
+  return value.toISOString().slice(0, 10);
+};
+const ru = (date: string) => date.split('-').reverse().join('.');
 
 test.describe.configure({ mode: 'serial' });
 
@@ -24,20 +32,25 @@ test.describe('«Переделка» — browser QA (isolated stack)', () => {
   let ready: Fixture;
   let inProduction: Fixture;
   let sawn: Fixture;
+  let savedSchedule: ReturnType<typeof saveSchedule> | null = null;
 
   test.beforeAll(() => {
     cleanup();
+    // «Схема этапов и сроки»: every active stage 1 day, reserve 2 (restored in afterAll).
+    savedSchedule = saveSchedule();
+    fillSchedule(1, 2);
     const mk = (role: number, name: string) => ({ ...createUser(`e2e_rework_qa_${name}_${tag}`, role), username: `e2e_rework_qa_${name}_${tag}` });
     admin = mk(1, 'admin');
     manager = mk(10, 'manager');
     worker = mk(20, 'worker');
-    ready = createOrder({ name: `${PREFIX} готов ${tag}`, createdBy: admin.userId, orderStatus: 'legacy_6', detailStage: 'packed' });
+    ready = createOrder({ name: `${PREFIX} готов ${tag}`, createdBy: admin.userId, orderStatus: 'legacy_6', detailStage: 'packed', plannedDate: day(-10), completionDate: day(-5) });
     inProduction = createOrder({ name: `${PREFIX} в производстве ${tag}`, createdBy: admin.userId, orderStatus: 'legacy_4', detailStage: 'cut' });
     sawn = createOrder({ name: `${PREFIX} распилен ${tag}`, createdBy: admin.userId, orderStatus: 'legacy_5', detailStage: 'cut' });
   });
 
   test.afterAll(() => {
     psql("UPDATE mdf_engine_state SET mode = 'legacy' WHERE singleton;");
+    if (savedSchedule) restoreSchedule(savedSchedule);
     if (process.env.ORDER_REWORK_QA_KEEP === 'true') return;
     cleanup();
     expect(residue()).toBe('0/0/0');
@@ -100,7 +113,9 @@ test.describe('«Переделка» — browser QA (isolated stack)', () => {
     const modal = dialog(page);
     await expect(modal.getByText('Вернуть выбранные детали на этап:')).toBeVisible();
     // Nothing selected yet: the command cannot be sent.
-    await expect(modal.getByText('Выберите детали')).toBeVisible();
+    await expect(modal.getByText('Выберите детали', { exact: true })).toBeVisible();
+    // 1.1: the deadline is required here; it is computed once details and stages are chosen.
+    await expect(modal.getByText('Выберите детали и этапы — срок рассчитается по «Схеме этапов и сроки»')).toBeVisible();
     await expect(modal.getByRole('button', { name: 'Начать переделку' })).toBeDisabled();
 
     await (await detailRow(page, 1)).locator('.ant-checkbox-input').check();
@@ -114,6 +129,12 @@ test.describe('«Переделка» — browser QA (isolated stack)', () => {
     await expect(modal.getByRole('button', { name: 'Начать переделку' })).toBeDisabled();
     await pick(page, modal.locator('.ant-select').filter({ hasText: 'Другое' }), 'Брак цеха');
     await modal.locator('textarea').fill('скол на фасаде');
+    // 1.1: the deadline is pre-filled from «Схема этапов и сроки» for the remaining stages.
+    const hint = modal.getByText(/По «Схеме этапов и сроки»: \d+ дн\. — \d{2}\.\d{2}\.\d{4}/);
+    await expect(hint).toBeVisible({ timeout: 15_000 });
+    const suggested = (/(\d{2}\.\d{2}\.\d{4})/.exec(await hint.innerText()) ?? [])[1];
+    await expect(modal.locator('.ant-picker input')).toHaveValue(suggested);
+    test.info().annotations.push({ type: 'deadline suggestion', description: await hint.innerText() });
     await shot(page, '02-ready-modal-filled');
     await modal.getByRole('button', { name: 'Начать переделку' }).click();
     await expect(page.getByText('Переделка ·2 начата')).toBeVisible({ timeout: 20_000 });
@@ -121,6 +142,11 @@ test.describe('«Переделка» — browser QA (isolated stack)', () => {
     await expect(panel(page).getByText('Переделка ·2:')).toBeVisible({ timeout: 20_000 });
     await expect(panel(page).getByText('Брак цеха — скол на фасаде')).toBeVisible();
     await expect(panel(page).getByText(/после готовности, деталей: 2/)).toBeVisible();
+    await expect(panel(page).getByText(new RegExp(`срок: ${suggested.replace(/\./g, '\\.')}`))).toBeVisible();
+    const isoSuggested = suggested.split('.').reverse().join('-');
+    expect(orderDates(ready.orderId)).toEqual({ planned: isoSuggested, completion: null });
+    expect(roundDeadline(ready.orderId, 2)).toMatchObject({ planned: isoSuggested, source: 'schedule', fromPlanned: day(-10), mark: false });
+    expect(finalDeadlines(ready.orderId).filter((d) => d.status === 'active')).toEqual([{ status: 'active', at: isoSuggested, round: 2 }]);
     // Round suffix in the card's detail table: right after the command, then after a page reload.
     const suffixNow = await page.getByText('Отрисован ·2').first().isVisible({ timeout: 15_000 }).catch(() => false)
       || await page.getByText('Отрисован ·2').first().waitFor({ timeout: 15_000 }).then(() => true).catch(() => false);
@@ -158,11 +184,16 @@ test.describe('«Переделка» — browser QA (isolated stack)', () => {
     await expect(modal.getByText('Выберите причину')).toHaveCount(0);
     await (await detailRow(page, 3)).locator('.ant-checkbox-input').check();
     await pick(page, modal.locator('.ant-select').filter({ hasText: 'Этап для всех выбранных' }), 'Присажен');
+    // 1.1: the current round deadline is shown; adding details only moves it later.
+    await expect(modal.getByText(/Текущий срок круга: \d{2}\.\d{2}\.\d{4}/)).toBeVisible({ timeout: 15_000 });
+    const plannedBefore = orderDates(ready.orderId).planned;
     await shot(page, '05-extend-modal');
     await modal.getByRole('button', { name: 'Добавить' }).click();
     await expect(page.getByText('Детали добавлены в переделку')).toBeVisible({ timeout: 20_000 });
     await expect(panel(page).getByText(/деталей: 3/)).toBeVisible({ timeout: 20_000 });
     expect(detailStates(ready.orderId)[2]).toEqual({ n: 3, stage: 'drilled', round: 2 });
+    expect(orderDates(ready.orderId).planned! >= plannedBefore!).toBe(true);
+    expect(finalDeadlines(ready.orderId).filter((d) => d.status === 'active')).toHaveLength(1);
     const now = await page.getByText('Присажен ·2').first().waitFor({ timeout: 10_000 }).then(() => true).catch(() => false);
     await shot(page, '06-extend-done');
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -385,5 +416,51 @@ test.describe('«Переделка» — browser QA (isolated stack)', () => {
       if (device === 'desktop') expect(suffix).toBe(true);
       await context.close();
     }
+  });
+
+  test('13. Срок вручную (схема не заполнена) → история «Было:» → «Это не переделка» возвращает даты', async ({ page }) => {
+    psql('DELETE FROM deadline_default_stage_durations;');
+    const order = createOrder({ name: `${PREFIX} срок вручную ${tag}`, createdBy: admin.userId, orderStatus: 'legacy_6', detailStage: 'packed', details: 2, plannedDate: day(-8), completionDate: day(-3) });
+    await login(page, admin.username, admin.password);
+    await openOrder(page, order.orderId);
+    await panel(page).getByRole('button', { name: 'Вернуть в переделку' }).click({ timeout: 45_000 });
+    const modal = dialog(page);
+    await (await detailRow(page, 1)).locator('.ant-checkbox-input').check();
+    await pick(page, modal.locator('.ant-select').filter({ hasText: 'Этап для всех выбранных' }), 'Отрисован');
+    await pick(page, modal.locator('.ant-select').filter({ hasText: 'Выберите причину' }), 'Брак цеха');
+    await expect(modal.getByText('Схема этапов и сроки не заполнена — укажите срок вручную')).toBeVisible({ timeout: 15_000 });
+    await expect(modal.getByText('Укажите срок готовности')).toBeVisible();
+    await expect(modal.getByRole('button', { name: 'Начать переделку' })).toBeDisabled();
+    await shot(page, '13-manual-required');
+    const input = modal.locator('.ant-picker input');
+    await input.click();
+    await input.fill(ru(day(12)));
+    await input.press('Enter');
+    await expect(modal.getByRole('button', { name: 'Начать переделку' })).toBeEnabled();
+    await shot(page, '13-manual-filled');
+    await modal.getByRole('button', { name: 'Начать переделку' }).click();
+    await expect(page.getByText('Переделка ·2 начата')).toBeVisible({ timeout: 20_000 });
+    await expect(panel(page).getByText(new RegExp(`срок: ${ru(day(12)).replace(/\./g, '\\.')}`))).toBeVisible({ timeout: 20_000 });
+    expect(orderDates(order.orderId)).toEqual({ planned: day(12), completion: null });
+    expect(roundDeadline(order.orderId, 2)).toMatchObject({ planned: day(12), source: 'manual', fromPlanned: day(-8), mark: false });
+    expect(finalDeadlines(order.orderId).filter((d) => d.status === 'active')).toEqual([{ status: 'active', at: day(12), round: 2 }]);
+
+    await panel(page).getByText(/История переделок \(1\)/).click();
+    const cell = panel(page).locator('.ant-table-tbody').getByText(ru(day(12)));
+    await expect(cell).toBeVisible();
+    await cell.hover();
+    await expect(page.getByText(`Было: ${ru(day(-8))}`)).toBeVisible({ timeout: 10_000 });
+    await shot(page, '13-history-deadline');
+
+    await panel(page).getByRole('button', { name: 'Это не переделка' }).click();
+    await page.getByRole('button', { name: 'Отменить круг' }).click();
+    await expect(page.getByText('Круг отменён')).toBeVisible({ timeout: 20_000 });
+    await expect(panel(page).getByText('Переделка ·2:')).toHaveCount(0, { timeout: 20_000 });
+    expect(orderDates(order.orderId)).toEqual({ planned: day(-8), completion: day(-3) });
+    await expect.poll(() => finalDeadlines(order.orderId).filter((d) => d.status === 'active'), { timeout: 20_000 }).toEqual([]);
+    expect(finalDeadlines(order.orderId).filter((d) => d.round === 2).every((d) => d.status === 'cancelled')).toBe(true);
+    test.info().annotations.push({ type: 'final deadlines after «Это не переделка»', description: JSON.stringify(finalDeadlines(order.orderId)) });
+    await shot(page, '13-false-positive-restored');
+    fillSchedule(1, 2);
   });
 });

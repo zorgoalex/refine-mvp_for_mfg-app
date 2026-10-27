@@ -73,6 +73,33 @@ describe('«Переделка» UI model', () => {
       .toEqual({ ok: true, body: { details: [{ detailId: 11, productionStatusId: 1 }] } });
   });
 
+  it('«Переделка» 1.1: the round deadline is required for «Вернуть в переделку» and sent with the command', () => {
+    const selected = new Set([11]);
+    const base11 = { ...base, selected, commonStage: 1, reasonId: 1, needsReason: true };
+    expect(buildReworkRequest({ ...base11, deadlineRequired: true, plannedCompletionDate: null }))
+      .toEqual({ ok: false, message: 'Укажите срок готовности' });
+    expect(buildReworkRequest({ ...base11, deadlineRequired: true, plannedCompletionDate: '2026-11-03' })).toEqual({
+      ok: true,
+      body: { reasonId: 1, comment: null, plannedCompletionDate: '2026-11-03', details: [{ detailId: 11, productionStatusId: 1 }] },
+    });
+    // In production / adding details: optional; without a date the body has none (the deadline is not changed).
+    expect(buildReworkRequest({ ...base11, needsReason: false, deadlineRequired: false, plannedCompletionDate: null }))
+      .toEqual({ ok: true, body: { details: [{ detailId: 11, productionStatusId: 1 }] } });
+  });
+
+  it('the start form pre-fills the deadline from the schedule suggestion and shows it on the banner and in the history', () => {
+    const panel = readFileSync(join(__dirname, 'OrderReworkPanel.tsx'), 'utf8');
+    expect(panel).toContain('orderReworkApi.suggestDeadline(orderId, targets)');
+    expect(panel).toContain('label="Срок готовности"');
+    expect(panel).toContain("const deadlineRequired = action === 'return';");
+    // Pre-fill only until edited by hand; adding details only moves the deadline later.
+    expect(panel).toContain('if (!plannedDateTouched) {');
+    expect(panel).toContain('next.suggestedDate > current');
+    expect(panel).toContain('Схема этапов и сроки не заполнена — укажите срок вручную');
+    expect(panel).toContain(", срок: ${formatReworkDate(openRound.plannedCompletionDate)}");
+    expect(panel).toContain("title: 'Срок'");
+  });
+
   it('a form may act only with the version the rounds were read with, while the card shows the same version', () => {
     // Rounds read at N, card already re-read at N+1, rounds reload still in flight → blocked.
     expect(reworkFormVersion(5, 6)).toBeNull();

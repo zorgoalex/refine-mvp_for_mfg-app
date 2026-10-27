@@ -4,6 +4,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser, RequestWithCurrentUser } from '../../../permissions/current-user';
 import {
   clarifyReworkReasonRequestSchema,
+  deadlineSuggestionRequestSchema,
   falsePositiveReworkRequestSchema,
   parseReworkRequest,
   startOrExtendReworkRequestSchema,
@@ -11,6 +12,7 @@ import {
 import {
   OrderReworkService,
   type OrderReworkAvailability,
+  type OrderReworkDeadlineSuggestionDto,
   type OrderReworkOrderStateDto,
   type OrderReworkReasonDto,
   type OrderReworkResponseDto,
@@ -35,6 +37,12 @@ const startOrExtendSchema = {
   properties: {
     reasonId: { type: 'integer', minimum: 1, description: 'Required to start a round; must be absent when details join the open round' },
     comment: commentProperty,
+    plannedCompletionDate: {
+      type: 'string',
+      nullable: true,
+      format: 'date',
+      description: 'Round deadline (YYYY-MM-DD, not before today in Asia/Almaty). Required for «Вернуть в переделку»; when details join the open round it only moves the deadline later.',
+    },
     details: {
       type: 'array',
       minItems: 1,
@@ -243,6 +251,33 @@ export class OrderReworkController {
       dto: parseReworkRequest(startOrExtendReworkRequestSchema, body),
       requestId: request.requestId,
     });
+  }
+
+  @Post('deadline-suggestion')
+  @HttpCode(200)
+  @ApiBody({ schema: { type: 'object', required: ['details'], additionalProperties: false, properties: { details: startOrExtendSchema.properties.details } } })
+  @ApiResponse({ status: 200, description: 'Deadline the rework form pre-fills by «Схема этапов и сроки» (null — enter manually)', schema: { type: 'object', additionalProperties: true } })
+  @ApiOperation({ operationId: 'suggestOrderReworkDeadline', summary: 'Round deadline suggested by the stage schedule for the selected details' })
+  async suggestDeadline(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdParam: string,
+    @Body() body: unknown,
+  ): Promise<OrderReworkDeadlineSuggestionDto> {
+    const dto = parseReworkRequest(deadlineSuggestionRequestSchema, body);
+    return this.rework.suggestDeadline(requireUser(request, this.runtime, false), parseOrderId(orderIdParam), dto.details);
+  }
+
+  @Post('deadline-reconcile')
+  @HttpCode(200)
+  @ApiResponse({ status: 200, description: 'Final deadline of the order reconciled', schema: { type: 'object', additionalProperties: true } })
+  @ApiOperation({ operationId: 'reconcileOrderFinalDeadline', summary: 'Repair: reconcile the final deadline of the order (deadlines.manage + order update scope)' })
+  async reconcileDeadline(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdParam: string,
+  ): Promise<{ orderId: number; reconciled: true }> {
+    return this.rework.reconcileDeadlineManually(
+      requireUser(request, this.runtime, true), parseOrderId(orderIdParam), request.requestId ?? 'order-final-deadline-reconcile',
+    );
   }
 
   @Patch('rounds/:roundNo/reason')

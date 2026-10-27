@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Checkbox, Collapse, Form, Input, Modal, Select, Space, Tag, Typography, message } from 'antd';
+import { Alert, Button, Checkbox, Collapse, DatePicker, Form, Input, Modal, Select, Space, Tag, Typography, message } from 'antd';
+import dayjs from 'dayjs';
 import { Table, Tooltip } from '../../../../ui/tooltipDelay';
 import {
   orderReworkApi,
   REWORK_CLOSE_REASON_LABELS,
   type OrderReworkAvailability,
+  type OrderReworkDeadlineSuggestion,
   type OrderReworkReason,
   type OrderReworkRound,
   type OrderReworkState,
@@ -22,6 +24,12 @@ import {
 } from './orderReworkModel';
 
 const { Text } = Typography;
+
+/** «Переделка» 1.1: YYYY-MM-DD → ДД.ММ.ГГГГ. */
+function formatReworkDate(value: string): string {
+  const [year, month, day] = value.slice(0, 10).split('-');
+  return year && month && day ? `${day}.${month}.${year}` : value;
+}
 
 export interface OrderReworkPanelProps {
   orderId: number;
@@ -166,6 +174,7 @@ export const OrderReworkPanel: React.FC<OrderReworkPanelProps> = ({ orderId, ver
               <Text>{openRound.reasonName}{openRound.reasonComment ? ` — ${openRound.reasonComment}` : ''}</Text>
               <Text type="secondary">
                 {openRound.mode === 'after_ready' ? 'после готовности' : 'в производстве'}, деталей: {openRound.details.length}
+                {openRound.plannedCompletionDate ? `, срок: ${formatReworkDate(openRound.plannedCompletionDate)}` : ''}
               </Text>
             </Space>
           )}
@@ -203,6 +212,8 @@ export const OrderReworkPanel: React.FC<OrderReworkPanelProps> = ({ orderId, ver
                 size="small"
                 rowKey="roundNo"
                 pagination={false}
+                // Narrow columns (NewLine card, phone): the history scrolls inside its block instead of overflowing.
+                scroll={{ x: 'max-content' }}
                 dataSource={state.data}
                 columns={[
                   { title: 'Круг', dataIndex: 'roundNo', width: 60, render: (n: number) => `·${n}` },
@@ -210,6 +221,14 @@ export const OrderReworkPanel: React.FC<OrderReworkPanelProps> = ({ orderId, ver
                   { title: 'Источник', dataIndex: 'source', width: 120, render: (s: string) => (s === 'manual' ? 'вручную' : s === 'import' ? 'импорт' : 'авто по раскрою') },
                   { title: 'Начат', width: 170, render: (_: unknown, r) => `${new Date(r.startedAt).toLocaleString('ru-RU')}${r.startedByUsername ? `, ${r.startedByUsername}` : ''}` },
                   { title: 'Деталей', width: 80, render: (_: unknown, r) => r.details.length },
+                  {
+                    title: 'Срок', width: 110,
+                    render: (_: unknown, r: OrderReworkRound) => (r.plannedCompletionDate ? (
+                      <Tooltip title={r.fromPlannedCompletionDate ? `Было: ${formatReworkDate(r.fromPlannedCompletionDate)}` : undefined}>
+                        <span>{formatReworkDate(r.plannedCompletionDate)}</span>
+                      </Tooltip>
+                    ) : '—'),
+                  },
                   {
                     title: 'Закрыт', width: 170,
                     render: (_: unknown, r) => (r.closedAt
@@ -343,9 +362,54 @@ const ReworkStartModal: React.FC<{
   const [perRow, setPerRow] = useState<Record<number, number | undefined>>({});
   const [reasonId, setReasonId] = useState<number | undefined>();
   const [comment, setComment] = useState('');
+  // «Переделка» 1.1: the round deadline — pre-filled from «Схема этапов и сроки» until edited by hand.
+  const [plannedDate, setPlannedDate] = useState<string | null>(null);
+  const [plannedDateTouched, setPlannedDateTouched] = useState(false);
+  const [suggestion, setSuggestion] = useState<OrderReworkDeadlineSuggestion | null>(null);
+  const suggestionGate = useRef(createLatestGate());
   const stageById = useMemo(() => new Map(stages.map((s) => [s.id, s])), [stages]);
   const needsReason = action !== 'extend';
-  const request = buildReworkRequest({ selected, commonStage, perRow, details, stageById, reasonId, comment, needsReason, reasons });
+  const deadlineRequired = action === 'return';
+  const request = buildReworkRequest({
+    selected, commonStage, perRow, details, stageById, reasonId, comment, needsReason, reasons,
+    plannedCompletionDate: plannedDate, deadlineRequired,
+  });
+  const targetsKey = JSON.stringify(details
+    .filter((d) => selected.has(d.id))
+    .map((d) => [d.id, perRow[d.id] ?? commonStage ?? null]));
+  useEffect(() => {
+    const targets = (JSON.parse(targetsKey) as Array<[number, number | null]>)
+      .filter((pair): pair is [number, number] => pair[1] !== null)
+      .map(([detailId, productionStatusId]) => ({ detailId, productionStatusId }));
+    if (targets.length === 0) { setSuggestion(null); return undefined; }
+    const ticket = suggestionGate.current.begin();
+    const timer = window.setTimeout(() => {
+      void orderReworkApi.suggestDeadline(orderId, targets).then((next) => {
+        if (!suggestionGate.current.isLatest(ticket)) return;
+        setSuggestion(next);
+        if (!plannedDateTouched) {
+          const current = next.roundPlannedCompletionDate;
+          // Adding details moves the round deadline only later; starting a round takes the suggestion.
+          const prefill = action === 'extend'
+            ? (next.suggestedDate && (!current || next.suggestedDate > current) ? next.suggestedDate : null)
+            : next.suggestedDate;
+          setPlannedDate(prefill);
+        }
+      }).catch(() => {
+        if (suggestionGate.current.isLatest(ticket)) setSuggestion(null);
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [targetsKey, orderId, action, plannedDateTouched]);
+  const deadlineHint = !suggestion ? (deadlineRequired ? 'Выберите детали и этапы — срок рассчитается по «Схеме этапов и сроки»' : null)
+    : suggestion.suggestedDate
+      ? `По «Схеме этапов и сроки»: ${suggestion.plannedOrderDays} дн. — ${formatReworkDate(suggestion.suggestedDate)}`
+      : suggestion.scheduleConfigured
+        ? 'Этапы вне схемы сроков — укажите срок вручную'
+        : 'Схема этапов и сроки не заполнена — укажите срок вручную';
+  const roundDeadlineNote = action === 'extend' && suggestion?.roundPlannedCompletionDate
+    ? `Текущий срок круга: ${formatReworkDate(suggestion.roundPlannedCompletionDate)} — при добавлении деталей срок только сдвигается позже.`
+    : null;
   const hint = 'message' in request ? request.message : null;
 
   const submit = async () => {
@@ -439,6 +503,22 @@ const ReworkStartModal: React.FC<{
             },
           ]}
         />
+        <Form layout="vertical">
+          <Form.Item
+            label="Срок готовности"
+            required={deadlineRequired}
+            extra={[deadlineHint, roundDeadlineNote].filter(Boolean).join(' ') || undefined}
+            style={{ marginBottom: 4 }}
+          >
+            <DatePicker
+              format="DD.MM.YYYY"
+              allowClear={!deadlineRequired}
+              value={plannedDate ? dayjs(plannedDate) : null}
+              disabledDate={(day) => Boolean(suggestion?.today) && day.format('YYYY-MM-DD') < (suggestion?.today ?? '')}
+              onChange={(day) => { setPlannedDateTouched(true); setPlannedDate(day ? day.format('YYYY-MM-DD') : null); }}
+            />
+          </Form.Item>
+        </Form>
         {needsReason ? (
           <ReasonFields reasons={reasons} reasonId={reasonId} setReasonId={setReasonId} comment={comment} setComment={setComment} />
         ) : null}
