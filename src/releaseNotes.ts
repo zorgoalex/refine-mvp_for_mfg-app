@@ -29,6 +29,15 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-27", title: "МДФ-доска: поиск по номеру заказа",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "Выпадающий список поиска закрывается после Enter и после выбора номера — больше не закрывает карточки ниже.",
+      "В списке поиска только номера заказов, детали которых есть на карточках доски, — без названий файлов и прочего текста.",
+      "У кремовых карточек Базис-раскроя не из МДФ больше нет лишнего светлого пунктирного контура — сплошной коричневый, как у файлов станка.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-27", title: "CAD: новый экран «Мастерская»",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
