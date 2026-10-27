@@ -9,7 +9,9 @@ describe('evolution CSS isolation', () => {
     ':root[data-ui-variant="evolution"]',
     ':root[data-ui-variant="line"]',
     ':root[data-ui-variant="air"]',
-    ':root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"])',
+    ':root[data-ui-variant="neutral"]',
+    ':root[data-ui-variant="workbench"]',
+    ':root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"], [data-ui-variant="neutral"], [data-ui-variant="workbench"])',
     ':root:where([data-ui-variant="line"], [data-ui-variant="air"])',
   ];
 
@@ -34,6 +36,41 @@ describe('evolution CSS isolation', () => {
     expect(source).toContain(':root[data-ui-variant="evolution"]');
     expect(source).toContain(':root[data-ui-variant="line"]');
     expect(source).toContain(':root[data-ui-variant="air"]');
-    expect(source).toContain(':root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"])');
+    expect(source).toContain(':root[data-ui-variant="neutral"]');
+    expect(source).toContain(':root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"], [data-ui-variant="neutral"], [data-ui-variant="workbench"])');
+  });
+
+  it.each([
+    'src/ui-evolution/styles/workbench.css',
+    'src/ui-evolution/styles/workbench-orders.css',
+    'src/ui-evolution/styles/workbench-calendar.css',
+    'src/ui-evolution/styles/workbench-cut.css',
+    'src/ui-evolution/styles/workbench-board.css',
+    'src/ui-evolution/styles/workbench-procurement.css',
+    'src/ui-evolution/styles/workbench-payments.css',
+    'src/ui-evolution/styles/workbench-lists.css',
+    'src/ui-evolution/styles/workbench-stock.css',
+    'src/ui-evolution/styles/workbench-refs.css',
+    'src/ui-evolution/styles/workbench-config.css',
+    'src/ui-evolution/styles/workbench-bazis.css',
+    'src/ui-evolution/styles/workbench-scan.css',
+    'src/ui-evolution/styles/workbench-audit.css',
+    'src/ui-evolution/styles/workbench-profile.css',
+    'src/ui-evolution/styles/workbench-login.css',
+    'src/ui-evolution/styles/workbench-mobile.css',
+  ])('keeps the workbench stylesheet %s scoped to its own variant marker', (file) => {
+    const workbench = postcss.parse(readFileSync(file, 'utf8'));
+    const unscoped: string[] = [];
+    workbench.walkRules((rule) => {
+      rule.selectors.forEach((selector) => {
+        if (!selector.trim().startsWith(':root[data-ui-variant="workbench"]')) unscoped.push(selector);
+      });
+    });
+    expect(unscoped).toEqual([]);
+  });
+
+  it('declares the workbench palette for both themes', () => {
+    expect(source).toContain(':root[data-ui-variant="workbench"] {');
+    expect(source).toContain(':root[data-ui-variant="workbench"][data-theme="dark"] {');
   });
 });

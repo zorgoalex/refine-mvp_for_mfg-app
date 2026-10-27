@@ -1,0 +1,68 @@
+import { ApiError } from '../../../common/errors/api-error';
+import { auditService } from '../../../common/audit/audit.service';
+import type { DatabaseClient } from '../../../database/database.types';
+import type { CurrentUser } from '../../../permissions/current-user';
+import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { clientOrderReadScope } from '../../party-contacts/client-order-read-scope';
+import type {
+  PaymentsAnalyticsSummaryDto,
+  PaymentsAnalyticsSummaryQuery,
+  PaymentsDashboardDto,
+  PaymentsDashboardQuery,
+} from './payments-analytics.types';
+
+/**
+ * All four are required: the analytics right itself, the right to see payments, the right to see orders and the
+ * right to see order money — the dashboard reads order amounts (receivables, the order-amount filter) straight
+ * from `orders`, over all orders.
+ */
+export const PAYMENTS_ANALYTICS_PERMISSIONS = ['finance.analytics.view', 'payments.view', 'orders.view', 'orders.view_financials'] as const;
+
+export interface PaymentsAnalyticsReadPort {
+  summary(query: PaymentsAnalyticsSummaryQuery): Promise<PaymentsAnalyticsSummaryDto>;
+  dashboard(query: PaymentsDashboardQuery): Promise<PaymentsDashboardDto>;
+}
+
+/**
+ * Payments analytics («+Платежи»): totals over ALL payments of a period, so it is open only to a user
+ * who has `finance.analytics.view` and whose payment and order visibility are not limited to their own orders
+ * (receivables count orders without payments, so the order visibility is checked on its own).
+ * The rights are checked here rather than by a decorator: a refusal must reach the audit log.
+ */
+export class PaymentsAnalyticsService {
+  constructor(private readonly ports: { read: PaymentsAnalyticsReadPort; auditClient: DatabaseClient }) {}
+
+  async summary(user: CurrentUser, query: PaymentsAnalyticsSummaryQuery, requestId: string): Promise<PaymentsAnalyticsSummaryDto> {
+    await this.authorize(user, 'summary', query, requestId);
+    return this.ports.read.summary(query);
+  }
+
+  /** Dashboard: totals of all payments and receivables of all issued orders — the same rights as the summary. */
+  async dashboard(user: CurrentUser, query: PaymentsDashboardQuery, requestId: string): Promise<PaymentsDashboardDto> {
+    await this.authorize(user, 'dashboard', query, requestId);
+    return this.ports.read.dashboard(query);
+  }
+
+  private async authorize(user: CurrentUser, action: 'summary' | 'dashboard', query: { dateFrom: string; dateTo: string }, requestId: string): Promise<void> {
+    const missing = PAYMENTS_ANALYTICS_PERMISSIONS.filter((permission) => !user.permissions.includes(permission));
+    const scopeIsAll = rolePolicyForUser(user).payments.view === 'all' && clientOrderReadScope(user).kind === 'all';
+    if (missing.length > 0 || !scopeIsAll) {
+      await auditService.recordDenied(this.ports.auditClient, {
+        event: 'payments.analytics_denied',
+        entityType: 'payments_analytics',
+        entityId: 0,
+        actorUserId: user.id,
+        actorUsername: user.username,
+        actorRole: user.role,
+        requestId,
+        source: 'backend-payments-analytics',
+        reason: missing.length > 0 ? 'missing_permission' : 'scope_not_all',
+        requiredPermissions: [...PAYMENTS_ANALYTICS_PERMISSIONS],
+        metadata: { action, dateFrom: query.dateFrom, dateTo: query.dateTo },
+      });
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра аналитики платежей', {
+        requiredPermissions: [...PAYMENTS_ANALYTICS_PERMISSIONS],
+      });
+    }
+  }
+}

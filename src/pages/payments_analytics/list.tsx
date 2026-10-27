@@ -4,7 +4,7 @@ import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, ShowButton, useSelect } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import {
-  Space, Input, Button, message, Typography, Form, Select, DatePicker, InputNumber, Card } from "antd";
+  Space, Input, Button, message, Typography, Form, Select, DatePicker, InputNumber, Card, Tabs } from "antd";
 import {
   SearchOutlined,
   FilterOutlined,
@@ -15,6 +15,10 @@ import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
 import { countPaymentsAfter, findPaymentByOrderName } from "../../api/reports/paymentsAnalyticsReportApi";
 import { HasuraReportError } from "../../api/hasuraReportClient";
+import { PaymentsAnalyticsSummaryPanel } from "./PaymentsAnalyticsSummaryPanel";
+import { dayLabel, type SummaryDay } from "./paymentsAnalyticsSummary";
+import { PaymentsDashboard } from "./PaymentsDashboard";
+import { PAYMENT_DATE_PRESETS, applyPaymentPreset, detectPaymentPreset, paymentPresetRange, type PaymentDatePreset } from "../payments/paymentDatePreset";
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -43,6 +47,45 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
   });
 
   const { show } = useNavigation();
+
+  // Вкладки экрана: список платежей и дашборд
+  const [screenTab, setScreenTab] = useState<"list" | "dashboard">("list");
+
+  // Быстрые периоды и способы оплаты над списком: меняют только своё условие, остальные фильтры остаются
+  const todayIso = dayjs().format("YYYY-MM-DD");
+  const activePreset = detectPaymentPreset(filters, todayIso);
+  const choosePreset = (preset: PaymentDatePreset) => {
+    setFilters(applyPaymentPreset(filters, preset, todayIso) as any, "replace");
+    setCurrent(1);
+    const range = paymentPresetRange(preset, todayIso);
+    form.setFieldsValue?.({ payment_date_range: range ? [dayjs(range[0]), dayjs(range[1])] : undefined });
+  };
+  const [periodTypes, setPeriodTypes] = useState<readonly string[]>([]);
+  const handleSummaryTypes = useCallback((types: readonly string[]) => setPeriodTypes(types), []);
+  const activeType = ((filters ?? []) as any[]).find((filter) => filter?.field === "type_paid_name" && filter?.operator === "eq")?.value as string | undefined;
+  const typeChips = activeType && !periodTypes.includes(activeType) ? [activeType, ...periodTypes] : periodTypes;
+  const chooseType = (name: string) => {
+    const rest = ((filters ?? []) as any[]).filter((filter) => filter?.field !== "type_paid_name");
+    const next = activeType === name ? undefined : name;
+    setFilters((next ? [...rest, { field: "type_paid_name", operator: "eq", value: next }] : rest) as any, "replace");
+    setCurrent(1);
+    form.setFieldsValue?.({ type_paid_name: next });
+  };
+
+  // Итоги дня (из сводки за период) — для подписи первой строки каждого дня в таблице
+  const [summaryDays, setSummaryDays] = useState<Record<string, SummaryDay>>({});
+  const handleSummaryDays = useCallback((days: Record<string, SummaryDay>) => setSummaryDays(days), []);
+  const pageRows = (tableProps?.dataSource ?? []) as ReadonlyArray<{ payment_id: number; payment_date: string }>;
+  // группировка по дням имеет смысл, только пока список отсортирован по дате платежа
+  const groupedByDay = sorters[0]?.field === "payment_date";
+  const dayStartIds = React.useMemo(() => {
+    const ids = new Set<number>();
+    if (!groupedByDay) return ids;
+    pageRows.forEach((row, index) => {
+      if (index === 0 || pageRows[index - 1].payment_date !== row.payment_date) ids.add(row.payment_id);
+    });
+    return ids;
+  }, [groupedByDay, pageRows]);
 
   // useSelect для статусов
   const { selectProps: orderStatusSelectProps } = useSelect({
@@ -330,7 +373,8 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
   return (
     <List
       title="+Платежи (аналитика)"
-      headerButtons={() => (
+      wrapperProps={{ className: 'payments-analytics' }}
+      headerButtons={() => (screenTab !== "list" ? null : (
         <>
           <Space.Compact style={{ marginRight: 8 }}>
             <Input
@@ -357,8 +401,18 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
             {filtersVisible ? "Скрыть фильтры" : "Фильтры"}
           </Button>
         </>
-      )}
+      ))}
     >
+      <Tabs
+        className="pa-tabs"
+        activeKey={screenTab}
+        onChange={(key) => setScreenTab(key === "dashboard" ? "dashboard" : "list")}
+        items={[
+          {
+            key: "list",
+            label: "Платежи",
+            children: (
+              <>
       {filtersVisible && (
         <Card style={{ marginBottom: 16, padding: '8px 12px' }}>
           <style>{`
@@ -544,13 +598,49 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
         </Card>
       )}
 
+      <div className="pa-presets" role="group" aria-label="Период и способ оплаты">
+        {PAYMENT_DATE_PRESETS.map((preset) => (
+          <button
+            key={preset.key}
+            type="button"
+            className="pa-presets__item"
+            aria-pressed={activePreset === preset.key}
+            data-testid={`pa-preset-${preset.key}`}
+            onClick={() => choosePreset(preset.key)}
+          >
+            {preset.label}
+          </button>
+        ))}
+        {typeChips.length > 0 ? (
+          <>
+            <span className="pa-presets__sep" aria-hidden />
+            <span className="pa-presets__label">Способ:</span>
+            {typeChips.map((name) => (
+              <button
+                key={name}
+                type="button"
+                className="pa-presets__item"
+                aria-pressed={activeType === name}
+                onClick={() => chooseType(name)}
+              >
+                {name}
+              </button>
+            ))}
+          </>
+        ) : null}
+      </div>
+      <PaymentsAnalyticsSummaryPanel filters={filters} onDays={handleSummaryDays} onTypes={handleSummaryTypes} />
       <Table
         {...tableProps}
+        className="pa-table"
         rowKey="payment_id"
         sticky
         scroll={{ x: "max-content", y: 600 }}
         rowClassName={(record) =>
-          record.payment_id === highlightedPaymentId ? "highlighted-row" : ""
+          [
+            record.payment_id === highlightedPaymentId ? "highlighted-row" : "",
+            dayStartIds.has(record.payment_id) ? "pa-day-start" : "",
+          ].filter(Boolean).join(" ")
         }
         onRow={(record) => ({
           onDoubleClick: () => {
@@ -562,8 +652,18 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
           dataIndex="payment_date"
           title="Дата платежа"
           sorter
-          width={110}
-          render={(value) => formatDate(value)}
+          width={groupedByDay ? 150 : 110}
+          render={(value, record: any) => {
+            if (!groupedByDay) return formatDate(value);
+            if (!dayStartIds.has(record.payment_id)) return <span className="pa-day-rest">{formatDate(value)}</span>;
+            const day = summaryDays[value as string];
+            return (
+              <span className="pa-day" title={formatDate(value)}>
+                {dayLabel(value as string)}
+                {day ? <span className="pa-day__total">{day.count} пл. · {formatNumber(day.amount, 0)} ₸</span> : null}
+              </span>
+            );
+          }}
         />
         <Table.Column
           dataIndex="amount"
@@ -706,6 +806,12 @@ export const PaymentsAnalyticsList: React.FC<IResourceComponentsProps> = () => {
           )}
         />
       </Table>
+              </>
+            ),
+          },
+          { key: "dashboard", label: "Дашборд", children: screenTab === "dashboard" ? <PaymentsDashboard /> : null },
+        ]}
+      />
     </List>
   );
 };

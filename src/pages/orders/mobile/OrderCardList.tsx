@@ -4,6 +4,9 @@ import { StarFilled } from '@ant-design/icons';
 import { ProductionStagesDisplay } from '../../../components/ProductionStagesDisplay';
 import { resolveOrderStageCodes } from '../currentProductionStatus';
 import type { TablePaginationConfig } from 'antd';
+import { useOptionalUiVariant } from '../../../ui-variant/UiVariantProvider';
+import { orderStatusTone } from '../orderListWorkbench';
+import { workbenchDeadlineLine, workbenchPaymentLine, workbenchTotalLine } from './workbenchOrderCardModel';
 import {
   buildOrderCardModel,
   getOrderCardStatusTextColor,
@@ -65,14 +68,66 @@ export const buildOrderCardPagination = (
 export const OrderCardList: React.FC<OrderCardListProps> = ({
   rows, loading, pagination, onPaginationChange, onOpen, showFinancials = true, statusColors,
   passedCodesByOrderId, productionWorkflowDisplay,
-}) => (
+}) => {
+  const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
+  return (
   <List
+    className={isWorkbench ? 'wb-mcards' : undefined}
     dataSource={rows as Record<string, unknown>[]}
     loading={loading}
     pagination={buildOrderCardPagination(pagination, onPaginationChange)}
     rowKey={(r) => String(r.order_id)}
     renderItem={(row) => {
       const m = buildOrderCardModel(row, { showFinancials, statusColors });
+      const stages = (
+        <ProductionStagesDisplay
+          passedCodes={resolveOrderStageCodes(row.passed_production_status_codes, passedCodesByOrderId?.[Number(row.order_id)])}
+          displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
+          codeToLetter={productionWorkflowDisplay?.codeToLetter}
+          codeToName={productionWorkflowDisplay?.codeToName}
+          fontSize={11}
+        />
+      );
+      if (isWorkbench) {
+        const deadline = workbenchDeadlineLine(row);
+        const payment = workbenchPaymentLine(row, showFinancials);
+        const total = workbenchTotalLine(row, showFinancials);
+        return (
+          <div
+            className="wb-mcard"
+            role="link"
+            tabIndex={0}
+            onClick={() => onOpen(m.id)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onOpen(m.id);
+              }
+            }}
+          >
+            <div className="wb-mcard__r1">
+              <span className="wb-mcard__no">
+                {m.priority && <StarFilled className="wb-mcard__star" aria-label="Срочный" />}
+                {m.title}
+              </span>
+              <span className="wb-mcard__client">{m.client}</span>
+              {m.statusTag ? (
+                <span className="wb-pill" data-tone={orderStatusTone(m.statusTag)} data-order-card-status="order">{m.statusTag}</span>
+              ) : null}
+            </div>
+            <div className="wb-mcard__r2">
+              <span data-tone={deadline?.tone}>{deadline?.text ?? m.dates}</span>
+              {total ? (
+                <span className="wb-mcard__money">
+                  <b>{total}</b>
+                  {payment ? <small data-tone={payment.tone}>{payment.text}</small> : null}
+                </span>
+              ) : null}
+            </div>
+            <div className="wb-mcard__stages">{stages}</div>
+          </div>
+        );
+      }
       return (
         <Card
           size="small"
@@ -94,13 +149,7 @@ export const OrderCardList: React.FC<OrderCardListProps> = ({
           <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {m.statusTag && statusTag('order', m.statusTag, m.statusTagColor)}
             {m.paymentTag && statusTag('payment', m.paymentTag, m.paymentTagColor)}
-            <ProductionStagesDisplay
-              passedCodes={resolveOrderStageCodes(row.passed_production_status_codes, passedCodesByOrderId?.[Number(row.order_id)])}
-              displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
-              codeToLetter={productionWorkflowDisplay?.codeToLetter}
-              codeToName={productionWorkflowDisplay?.codeToName}
-              fontSize={11}
-            />
+            {stages}
           </div>
           {m.amountLine && (
             <Typography.Text strong style={{ display: 'block', marginTop: 6 }}>{m.amountLine}</Typography.Text>
@@ -109,4 +158,5 @@ export const OrderCardList: React.FC<OrderCardListProps> = ({
       );
     }}
   />
-);
+  );
+};

@@ -20,16 +20,18 @@ export function computeStepOffset(stepDays: CalendarStepDays, direction: 1 | -1)
  * @param options.stepDays 1, 7, 14 или 30 дней. По умолчанию — неделя.
  */
 export const useCalendarDays = (
-  options: { stepDays?: CalendarStepDays; daysAfter?: number } = {},
+  options: { stepDays?: CalendarStepDays; daysAfter?: number; daysBefore?: number } = {},
 ): CalendarDaysResult => {
   const stepDays: CalendarStepDays = options.stepDays ?? 7;
   const daysAfter = options.daysAfter ?? 10;
+  // «NewLine» starts its weeks on Monday, up to 6 days before the current day
+  const daysBefore = options.daysBefore ?? 5;
   const [centerDate, setCenterDate] = useState<Date>(new Date());
 
   // Генерируем массив дней: 5 дней назад + текущий день + 10 дней вперед
   const days = useMemo(() => {
-    return generateCalendarDays(centerDate, 5, daysAfter);
-  }, [centerDate, daysAfter]);
+    return generateCalendarDays(centerDate, daysBefore, daysAfter);
+  }, [centerDate, daysAfter, daysBefore]);
 
   // Начальная и конечная даты для фильтрации данных
   const startDate = days[0];

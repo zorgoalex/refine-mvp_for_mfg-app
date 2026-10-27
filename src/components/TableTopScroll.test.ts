@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   findTableHorizontalScroller,
   isPrimarilyVerticalWheel,
+  syncHorizontalBackButton,
   syncHorizontalEdgeButton,
 } from './TableTopScroll';
 
@@ -62,6 +63,25 @@ describe('syncHorizontalEdgeButton', () => {
     syncHorizontalEdgeButton(button, scroller);
     expect(button.dataset.scrollsBack).toBe('false');
     expect(attributes.get('aria-label')).toBe('Прокрутить список деталей вправо');
+  });
+});
+
+describe('syncHorizontalBackButton', () => {
+  it('shows the left button only while the table is scrolled away from its start', () => {
+    const button = { dataset: {} } as unknown as HTMLButtonElement;
+    const scroller = { clientWidth: 400, scrollLeft: 0, scrollWidth: 1000 } as HTMLElement;
+
+    syncHorizontalBackButton(button, scroller);
+    expect(button.dataset.visible).toBe('false');
+
+    scroller.scrollLeft = 120;
+    syncHorizontalBackButton(button, scroller);
+    expect(button.dataset.visible).toBe('true');
+  });
+
+  it('is opt-in so tables without the prop keep a single edge button', () => {
+    expect(source).toContain('horizontalBackScrollButton = false,');
+    expect(source).toContain('horizontalEdgeScrollButton && horizontalBackScrollButton && scrollState.visible');
   });
 });
 

@@ -6,10 +6,13 @@ import { UnavailablePaymentRepository } from './adapters/unavailable-payment-rep
 import { PaymentService } from './application/payment.service';
 import { PaymentsRuntimeConfigService } from './http/payments-runtime-config.service';
 import { PaymentsController } from './http/payments.controller';
+import { PgPaymentsAnalyticsRepository } from './adapters/pg-payments-analytics-repository';
+import { PaymentsAnalyticsService } from './application/payments-analytics.service';
+import { PaymentsAnalyticsController } from './http/payments-analytics.controller';
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [PaymentsController],
+  controllers: [PaymentsController, PaymentsAnalyticsController],
   providers: [
     PaymentsRuntimeConfigService,
     {
@@ -20,6 +23,12 @@ import { PaymentsController } from './http/payments.controller';
             ? new PgPaymentRepository(database)
             : new UnavailablePaymentRepository(),
         }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: PaymentsAnalyticsService,
+      useFactory: (database: DatabaseService) =>
+        new PaymentsAnalyticsService({ read: new PgPaymentsAnalyticsRepository(database), auditClient: database }),
       inject: [DatabaseService],
     },
   ],

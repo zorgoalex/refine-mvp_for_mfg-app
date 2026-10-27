@@ -13,6 +13,9 @@ import { CLIENT_PERSON_TYPE_LABELS, ClientPersonType } from "../../types/clients
 import { can } from "../../utils/permissions";
 import { ClientCounterpartyBulkModal } from "./ClientCounterpartyBulkModal";
 import { canChooseCounterparty } from "./clientCounterpartyModel";
+import { clientsReadApi, type ClientListFacts } from "../../api/clientsReadApi";
+import { featureFlags } from "../../config/featureFlags";
+import { formatDate } from "../../utils/dateFormat";
 
 export const ClientList: React.FC<IResourceComponentsProps> = () => {
   const [searchValue, setSearchValue] = useState<string>("");
@@ -33,6 +36,24 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
 
   const { highlightProps: existingHighlightProps } = useHighlightRow("client_id", tableProps.dataSource);
   const { show } = useNavigation();
+
+  // Телефон, число заказов и последний заказ клиентов страницы — отдельным запросом к серверу
+  // (число и последний заказ — по тем заказам, которые видит пользователь). В режиме без серверного
+  // входа запрос не делается: колонки остаются пустыми.
+  const pageClientIds = ((tableProps?.dataSource ?? []) as ReadonlyArray<{ client_id?: unknown }>)
+    .map((row) => Number(row.client_id)).filter((id) => Number.isInteger(id) && id > 0);
+  const pageClientIdsKey = pageClientIds.join(",");
+  const [clientFacts, setClientFacts] = useState<{ key: string; byId: Map<number, ClientListFacts> } | null>(null);
+  useEffect(() => {
+    if (!featureFlags.useBackendAuth || pageClientIds.length === 0) return undefined;
+    let current = true;
+    clientsReadApi.listFacts(pageClientIds)
+      .then((rows) => { if (current) setClientFacts({ key: pageClientIdsKey, byId: new Map(rows.map((row) => [row.clientId, row])) }); })
+      .catch(() => { if (current) setClientFacts({ key: pageClientIdsKey, byId: new Map() }); });
+    return () => { current = false; };
+  }, [pageClientIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const factsOf = (clientId: unknown): ClientListFacts | undefined =>
+    (clientFacts?.key === pageClientIdsKey ? clientFacts.byId.get(Number(clientId)) : undefined);
 
   // Автоскролл к найденной строке после загрузки данных
   useEffect(() => {
@@ -136,6 +157,7 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
   return (
     <List
       title="Клиенты"
+      wrapperProps={{ className: 'wb-list' }}
       headerButtons={() => (
         <>
           <Space.Compact style={{ marginRight: 8 }}>
@@ -173,9 +195,46 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
           },
         })}
       >
-        <Table.Column dataIndex="client_id" title="id" sorter />
+        <Table.Column dataIndex="client_id" title="id" sorter className="wb-list__muted" />
         <ReferenceSortOrderColumn />
-        <Table.Column dataIndex="client_name" title="Имя клиента" sorter />
+        <Table.Column dataIndex="client_name" title="Имя клиента" sorter className="wb-list__title" />
+        <Table.Column
+          key="facts_phone"
+          title="Телефон"
+          render={(_, record: any) => {
+            const facts = factsOf(record.client_id);
+            if (!facts?.primaryPhone) return <span className="wb-list__muted">—</span>;
+            return (
+              <span style={{ whiteSpace: "nowrap" }}>
+                {facts.primaryPhone}
+                {facts.phonesCount > 1 ? <span className="wb-list__muted"> +{facts.phonesCount - 1}</span> : null}
+              </span>
+            );
+          }}
+        />
+        <Table.Column
+          key="facts_orders"
+          title="Заказов"
+          align="right"
+          render={(_, record: any) => {
+            const orders = factsOf(record.client_id)?.orders;
+            return orders ? orders.count : <span className="wb-list__muted">—</span>;
+          }}
+        />
+        <Table.Column
+          key="facts_last_order"
+          title="Последний заказ"
+          render={(_, record: any) => {
+            const last = factsOf(record.client_id)?.orders?.last;
+            if (!last) return <span className="wb-list__muted">—</span>;
+            return (
+              <span style={{ whiteSpace: "nowrap" }}>
+                <a onClick={(event) => { event.stopPropagation(); show("orders_view", last.orderId); }}>№ {last.orderName}</a>
+                {last.orderDate ? <span className="wb-list__muted"> · {formatDate(last.orderDate)}</span> : null}
+              </span>
+            );
+          }}
+        />
         <Table.Column
           dataIndex="person_type"
           title="Тип лица"

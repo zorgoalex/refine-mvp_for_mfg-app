@@ -190,6 +190,7 @@ export function shouldEnableOrderDeadlineSync(input: {
         return new OrderQueryService({
           reader,
           nameSuggestions: reader,
+          history: reader,
         });
       },
       inject: [DatabaseService, ConfigService],

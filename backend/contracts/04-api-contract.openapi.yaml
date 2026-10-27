@@ -5836,6 +5836,53 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/orders/{orderId}/history:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Orders
+      operationId: getOrderHistory
+      summary: История заказа
+      description: >-
+        История заказа для всех, кто может открыть заказ. Возвращает фиксированную проекцию
+        событий из белого списка: без audit JSON (before/after/diff/metadata), request id,
+        адресов и связанных сущностей. События оплат и статус оплаты входят только при
+        orders.view_financials и payments.view. Полный журнал остаётся в GET /api/v1/audit.
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.view
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: События истории заказа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderHistoryListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/orders/{orderId}/audit:
     parameters:
       - $ref: '#/components/parameters/OrderId'
@@ -17354,6 +17401,122 @@ paths:
         '403': {description: "Permission denied (audited as payments.onec_denied)"}
         '404': {description: "ONEC_RECEIPT_NOT_FOUND — no such line or it is outside the user's payment scope"}
         '503': {description: "ONEC_PAYMENT_MATCHING_DISABLED — the feature or the 1C integration is off"}
+  /api/v1/payments-analytics/summary:
+    get:
+      tags:
+        - Payments
+      operationId: getPaymentsAnalyticsSummary
+      summary: "Payments of a period under the analytics list filters: total, by payment type, by day (read-only)"
+      security:
+        - {bearerAuth: []}
+      x-permission: finance.analytics.view
+      description: >-
+        Requires finance.analytics.view, payments.view and orders.view_financials, and a payment visibility scope «all» (a user limited to
+        their own orders is refused). The period is required and covers at most 366 days.
+      parameters:
+        - {name: dateFrom, in: query, required: true, schema: {type: string, format: date}}
+        - {name: dateTo, in: query, required: true, schema: {type: string, format: date}}
+        - {name: orderName, in: query, required: false, schema: {type: string, maxLength: 200}, description: Substring}
+        - {name: clientName, in: query, required: false, schema: {type: string, maxLength: 200}, description: Substring}
+        - {name: notes, in: query, required: false, schema: {type: string, maxLength: 200}, description: Substring}
+        - {name: typePaidName, in: query, required: false, schema: {type: string, maxLength: 200}}
+        - {name: orderStatusName, in: query, required: false, schema: {type: string, maxLength: 200}}
+        - {name: paymentStatusName, in: query, required: false, schema: {type: string, maxLength: 200}}
+        - {name: productionStatusName, in: query, required: false, schema: {type: string, maxLength: 200}}
+        - {name: orderDateFrom, in: query, required: false, schema: {type: string, format: date}}
+        - {name: orderDateTo, in: query, required: false, schema: {type: string, format: date}}
+        - {name: amountMin, in: query, required: false, schema: {type: number}}
+        - {name: amountMax, in: query, required: false, schema: {type: number}}
+        - {name: orderAmountMin, in: query, required: false, schema: {type: number}}
+        - {name: orderAmountMax, in: query, required: false, schema: {type: number}}
+        - {name: totalPaymentsMin, in: query, required: false, schema: {type: number}}
+        - {name: totalPaymentsMax, in: query, required: false, schema: {type: number}}
+        - {name: orderBalanceMin, in: query, required: false, schema: {type: number}}
+        - {name: orderBalanceMax, in: query, required: false, schema: {type: number}}
+      responses:
+        '200': {description: "{dateFrom, dateTo, count, amount, byType[{typePaidName,count,amount}], byDay[{paymentDate,count,amount}]}; amounts are decimal strings"}
+        '400': {description: "VALIDATION_FAILED — a bad filter, a missing period or a period longer than 366 days"}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as payments.analytics_denied)"}
+  /api/v1/payments-analytics/dashboard:
+    get:
+      tags:
+        - Payments
+      operationId: getPaymentsAnalyticsDashboard
+      summary: "Payments dashboard of a period: by day, by payment type, refunds, receivables by age and the largest debtors (read-only)"
+      security:
+        - {bearerAuth: []}
+      x-permission: finance.analytics.view
+      description: >-
+        The same rights as the summary (finance.analytics.view, payments.view, orders.view_financials, payment scope «all»). The period covers
+        at most 92 days. Deleted payments and orders are left out. A receivable is an order in the status «Выдан» or
+        «Завершен», dated within the last year, that is not fully paid; its age is counted from the order date.
+      parameters:
+        - {name: dateFrom, in: query, required: true, schema: {type: string, format: date}}
+        - {name: dateTo, in: query, required: true, schema: {type: string, format: date}}
+      responses:
+        '200': {description: "{dateFrom, dateTo, received{count,amount}, refunds{count,amount}, byDay[], byType[], receivables{orders, amount, byAge[{bucket,orders,amount}], topDebtors[{clientId,clientName,orders,amount,oldestOrderDate}]}}"}
+        '400': {description: "VALIDATION_FAILED — a missing period or a period longer than 92 days"}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as payments.analytics_denied)"}
+  /api/v1/clients/list-facts:
+    get:
+      tags:
+        - Client Phones
+      operationId: getClientListFacts
+      summary: "Phone, number of visible orders and the last order of the given clients (one page of the clients list; read-only)"
+      security:
+        - {bearerAuth: []}
+      x-permission: clients.view
+      description: >-
+        Requires clients.view. The order facts follow the order visibility of the user: all orders for the scope «all»,
+        only the user's own (creator or manager) for «own», and null without orders.view or for any other scope.
+      parameters:
+        - {name: ids, in: query, required: true, schema: {type: string, pattern: "^\\d{1,15}(,\\d{1,15})*$"}, description: "Comma-separated client ids, at most 100"}
+      responses:
+        '200': {description: "{data[{clientId, primaryPhone, phonesCount, orders{count, last{orderId, orderName, orderDate}|null}|null}]}"}
+        '400': {description: "VALIDATION_FAILED — a malformed or too long list"}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as clients.list_facts_denied)"}
+  /api/v1/clients-analytics/dashboard:
+    get:
+      tags:
+        - Client Phones
+      operationId: getClientsAnalyticsDashboard
+      summary: "Clients dashboard of a period: new and buying clients, orders by day, segments, the largest and the sleeping clients (read-only)"
+      security:
+        - {bearerAuth: []}
+      x-permission: clients.analytics.view
+      description: >-
+        Requires clients.analytics.view, clients.view, orders.view, orders.view_financials and payments.view, and the
+        visibility scope «all» of both orders and payments (a user limited to their own orders or payments is refused). The period covers at most 366 days. Only real
+        orders are counted (not deleted, not CRM requests or drafts).
+      parameters:
+        - {name: dateFrom, in: query, required: true, schema: {type: string, format: date}}
+        - {name: dateTo, in: query, required: true, schema: {type: string, format: date}}
+        - {name: personType, in: query, required: false, schema: {type: string, enum: [individual, legal]}}
+      responses:
+        '200': {description: "{dateFrom, dateTo, personType, totals{clients,newClients,buyers,repeatBuyers,orders,amount,paid}, byDay[], byRecency[], byFrequency[], byPersonType[], topClients[], toReactivate[]}"}
+        '400': {description: "VALIDATION_FAILED — a missing or too long period, an unknown person type"}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as clients.analytics_denied)"}
+  /api/v1/clients-analytics/clients/{clientId}:
+    get:
+      tags:
+        - Client Phones
+      operationId: getClientAnalyticsCard
+      summary: "Analytics card of one client: profile, totals, the last twelve months, payment types, latest orders and payments (read-only)"
+      security:
+        - {bearerAuth: []}
+      x-permission: clients.analytics.view
+      description: The same rights as the clients dashboard.
+      parameters:
+        - {name: clientId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: "{client{...phones[]}, totals{...}, byMonth[12], paymentTypes[], orders[<=30], payments[<=30]}"}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as clients.analytics_denied)"}
+        '404': {description: "CLIENT_NOT_FOUND"}
   /api/v1/onec/incidents:
     get:
       tags:
@@ -22710,7 +22873,7 @@ components:
           enum: [default, small]
         uiVariant:
           type: string
-          enum: [legacy, evolution, line, air]
+          enum: [legacy, evolution, line, air, neutral, workbench]
         tabletMode:
           type: boolean
           description: Force the tablet layout independently of physical device or viewport size.
@@ -22752,7 +22915,7 @@ components:
           enum: [default, small]
         uiVariant:
           type: string
-          enum: [legacy, evolution, line, air]
+          enum: [legacy, evolution, line, air, neutral, workbench]
         tabletMode:
           type: boolean
         sidebarCollapsed:
@@ -30210,6 +30373,56 @@ components:
           type: string
         entityId:
           type: integer
+
+    OrderHistoryListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - data
+        - pagination
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderHistoryEvent'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    OrderHistoryEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - auditId
+        - event
+        - createdAt
+        - actorName
+        - entityType
+        - statusField
+        - statusName
+        - stageCode
+      properties:
+        auditId:
+          type: string
+        event:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        actorName:
+          type: string
+          nullable: true
+        entityType:
+          type: string
+          nullable: true
+        statusField:
+          type: string
+          nullable: true
+        statusName:
+          type: string
+          nullable: true
+        stageCode:
+          type: string
+          nullable: true
 
     AuditListResponse:
       type: object

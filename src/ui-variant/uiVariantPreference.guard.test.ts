@@ -120,6 +120,8 @@ describe('per-user UI variant selector', () => {
     expect(profileSource).toContain('Новый (Evolutionary)');
     expect(profileSource).toContain('LINE · Деловой минимализм');
     expect(profileSource).toContain('AIR · Светлая динамика');
+    expect(profileSource).toContain('Нейтральная · светлая');
+    expect(profileSource).toContain('NewLine · новый дизайн');
   });
 
   it('reboots every successful login at a safe URL before authenticated paint', () => {

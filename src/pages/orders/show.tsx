@@ -4,7 +4,7 @@ import { useDataProvider, useParsed, IResourceComponentsProps } from "@refinedev
 import type { BaseRecord } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Alert, Button, Card, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, WhatsAppOutlined, SendOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
+import { LeftOutlined, WalletOutlined, FolderOutlined, ApartmentOutlined, ScissorOutlined, BlockOutlined, AimOutlined, RightOutlined, PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, WhatsAppOutlined, SendOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { getTableColumnDataIndex, getTableStickyOffsetHeader } from './utils/tableCompatibility';
 import { forwardRef, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -26,6 +26,19 @@ import { overlayDetailProductionStatuses } from '../../utils/orderProductionSumm
 import { OrderDatesBlock } from "./components/sections/OrderDatesBlock";
 import { OrderFinanceBlock } from "./components/sections/OrderFinanceBlock";
 import { OrderProductionBlock } from "./components/sections/OrderProductionBlock";
+import { OrderProductionFlow, OrderProductionFlowCodes } from "./components/sections/OrderProductionFlow";
+import { OrderMaterialsWorkbenchTable } from "./components/sections/OrderMaterialsWorkbenchTable";
+import { OrderHistorySpoiler } from "./components/sections/OrderHistorySpoiler";
+import { useWorkspaceChromeBottom } from "./useWorkspaceChromeBottom";
+import {
+  OrderClientCard,
+  OrderDatesCard,
+  OrderLinksCard,
+  OrderNotesCard,
+  type OrderLinkItem,
+} from "./components/sections/OrderShowWorkbenchSide";
+import { collectOrderBasisProjects } from "./components/sections/orderBasisProjects";
+import { useOptionalUiVariant } from "../../ui-variant/UiVariantProvider";
 import { OrderFilesBlock } from "./components/sections/OrderFilesBlock";
 import {
   deriveOrderProgressiveLoadingState,
@@ -89,10 +102,13 @@ import { ORDER_SEND_NOT_CONFIGURED_TITLE, buildOrderWhatsAppMenuItems, describeO
 import { runOrderSend } from './whatsappOrderSendModel';
 import { announceWhatsAppSendQueued, currentOwner } from '../../components/whatsapp/myWhatsAppSendsModel';
 import { invalidateOrderSendMenu, useOrderClientContacts, useOrderSendMenu } from './whatsappOrderSendSupport';
-import { mapOrderDtoToFormValues } from '../../api/mappers/orderMapper';
 import { OrderCatalogLinesTable } from './components/OrderCatalogLinesTable';
 import { useIsMobile } from '../../hooks/useDeviceTier';
 import { DetailCardList } from './mobile/DetailCardList';
+import { WorkbenchQuickPaymentSheet } from './mobile/WorkbenchQuickPaymentSheet';
+import { WorkbenchOrderPaymentsSection } from './mobile/WorkbenchOrderPaymentsSection';
+import { quickPaymentRemaining } from './mobile/workbenchQuickPaymentModel';
+import { refetchFresh } from './mobile/freshRefetch';
 import type { DetailCardLookups } from './mobile/detailCardModel';
 import { makeOrderDeleteHandler } from './orderDeleteAction';
 import { canDeleteOrderForUser } from './orderDeleteVisibility';
@@ -116,6 +132,7 @@ import { ORDER_FILM_COLUMN_WIDTH, OrderFilmStockCaption, orderFilmStockColumns, 
 import { useOrderSheetStock } from "../inventory/useOrderSheetStock";
 import { useOrderFilmStock } from "../inventory/useOrderFilmStock";
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from "./orderMaterialsSummary";
+import { resolveOrderShowHdfDetails } from "./orderShowHdfDetails";
 import { useOrderDetailLiveState } from "./useOrderDetailLiveState";
 import {
   isOrderDetailStatusRefreshDue,
@@ -159,7 +176,7 @@ import {
 } from '../../workspace/workspaceOperationPins';
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
-type OrderInfoTab = { key: string; panel: OrderInfoPanelKey | null; label: string; color: string };
+type OrderInfoTab = { key: string; panel: OrderInfoPanelKey | null; label: string; color: string; count?: number };
 type OrderExcelExportMode = 'full' | 'without-prices';
 
 // Display fields shared by legacy and backend-adapted primary reads. Other
@@ -180,6 +197,29 @@ const productionPdfButtonStyle: CSSProperties = {
   background: 'rgba(82, 196, 26, 0.12)',
   borderColor: 'rgba(82, 196, 26, 0.36)',
   color: '#52c41a',
+};
+
+// «NewLine»: height of the compact order bar that replaces the head while it is scrolled away.
+const WORKBENCH_ORDER_BAR_HEIGHT = 52;
+const WORKBENCH_DETAIL_COLUMN_SCALE = 1.4;
+const WORKBENCH_SIDE_COLLAPSED_KEY = 'erp.orderShow.sideCollapsed';
+const WORKBENCH_GROUP_TITLES: Record<string, string> = {
+  detail_number: '№',
+  area: 'Площадь',
+  milling: 'Фрезеровка',
+  hdf_parameter: 'ХДФ параметр',
+  edge: 'Обкат',
+  material: 'Материал',
+  note: 'Примечание',
+  price: 'Цена за м²',
+  detail_cost: 'Сумма',
+  film: 'Плёнка',
+  production_status: 'Статус',
+  doweling: 'Присадка',
+  cut_job: 'Раскрой',
+  bath_cut_job: 'Ванна',
+  basis_project: 'Базис-проект',
+  bazis_cut_sets: 'Базис-раскрой',
 };
 
 const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: string }> = [
@@ -316,6 +356,8 @@ function cncOrderCuttingSequenceStatusLabel(status: CncTelegramOrderCuttingSeque
 }
 
 type OrderShowStickyStyle = CSSProperties & {
+  '--wb-order-sticky-top': string;
+  '--wb-order-bar-height': string;
   '--order-show-sticky-top': string;
   '--order-show-compact-header-height': string;
   '--order-show-tabs-shell-height': string;
@@ -540,7 +582,7 @@ const OrderDetailProductionStatusTag = memo(function OrderDetailProductionStatus
   if (statusId === null || statusId === undefined) {
     const text = 'Не назначен';
     return (
-      <span title={text} style={getOrderDetailStatusBadgeStyle(text, ORDER_DETAIL_STATUS_EMPTY_BADGE_STYLE)}>
+      <span className="order-detail-status-badge" title={text} style={getOrderDetailStatusBadgeStyle(text, ORDER_DETAIL_STATUS_EMPTY_BADGE_STYLE)}>
         {text}
       </span>
     );
@@ -553,7 +595,7 @@ const OrderDetailProductionStatusTag = memo(function OrderDetailProductionStatus
   if (!label && loading) {
     const text = '...';
     return (
-      <span title={text} style={getOrderDetailStatusBadgeStyle(text, ORDER_DETAIL_STATUS_BADGE_STYLE)}>
+      <span className="order-detail-status-badge" title={text} style={getOrderDetailStatusBadgeStyle(text, ORDER_DETAIL_STATUS_BADGE_STYLE)}>
         {text}
       </span>
     );
@@ -564,6 +606,7 @@ const OrderDetailProductionStatusTag = memo(function OrderDetailProductionStatus
 
   return (
     <span
+      className="order-detail-status-badge"
       title={text}
       style={getOrderDetailStatusBadgeStyle(text, ORDER_DETAIL_STATUS_BADGE_STYLE, statusColor)}
     >
@@ -716,7 +759,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const navigate = useNavigate();
   const dataProvider = useDataProvider();
   const isOperational = useOperationalUi();
+  const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
   const isMobile = useIsMobile();
+  const [quickPaymentOpen, setQuickPaymentOpen] = useState(false);
   const { isActive: isWorkspaceTabActive } = useKeepAlive();
   const ordinaryReadActive = useOrderLifecycleReadActive();
   const { activationRevision, documentVisible } = useAppActivitySnapshot();
@@ -1139,7 +1184,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     }));
   }, [legacyBazisCutSetsByDetailId, rawDetails, useBackendOrdersRead]);
   const hdfDetails = useMemo(
-    () => (backendOrder ? mapOrderDtoToFormValues(backendOrder as OrderDto).hdfDetails ?? [] : []),
+    () => resolveOrderShowHdfDetails(backendOrder),
     [backendOrder],
   );
   const hdfDetailBySourceDetailId = useMemo(
@@ -1349,6 +1394,29 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     void refreshLiveDetailProductionStatuses();
   }, [activationRevision, orderRealtimeEnabled, ordinaryReadActive, record?.order_id, refreshLiveDetailProductionStatuses]);
   const workspaceTabsHeight = useWorkspaceTabsHeight();
+  const workbenchChromeBottom = useWorkspaceChromeBottom();
+  // на телефоне NewLine (мокап 22) ход производства открыт сразу
+  const [workbenchFlowOpen, setWorkbenchFlowOpen] = useState(() => isWorkbench && isMobile);
+  // «NewLine»: the right column can be folded to give the details table the full width (per browser).
+  const [workbenchSideCollapsed, setWorkbenchSideCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem(WORKBENCH_SIDE_COLLAPSED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleWorkbenchSide = useCallback(() => {
+    setWorkbenchSideCollapsed((collapsed) => {
+      const next = !collapsed;
+      try {
+        window.localStorage.setItem(WORKBENCH_SIDE_COLLAPSED_KEY, next ? '1' : '0');
+      } catch {
+        // storage can be unavailable (private mode); the toggle still works for this page
+      }
+      return next;
+    });
+  }, []);
+  const [workbenchHeadHidden, setWorkbenchHeadHidden] = useState(false);
   const orderShowStickySentinelRef = useRef<HTMLDivElement>(null);
   const orderShowDetailsBlockRef = useRef<HTMLDivElement>(null);
   const orderShowSummaryTabsRef = useRef<HTMLDivElement>(null);
@@ -1374,30 +1442,66 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     workspaceTabsHeight,
   ]);
   const orderShowStickyStyle = useMemo<OrderShowStickyStyle>(() => ({
+    '--wb-order-sticky-top': `${workbenchChromeBottom}px`,
+    '--wb-order-bar-height': `${WORKBENCH_ORDER_BAR_HEIGHT}px`,
     '--order-show-sticky-top': `${workspaceTabsHeight}px`,
     '--order-show-compact-header-height': `${ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT}px`,
     '--order-show-tabs-shell-height': `${orderShowTabsShellHeight}px`,
     '--order-show-details-toolbar-height': `${orderShowDetailsToolbarHeight}px`,
     '--order-show-table-header-top': `${orderShowTableHeaderTop}px`,
-  }), [orderShowDetailsToolbarHeight, orderShowTableHeaderTop, orderShowTabsShellHeight, workspaceTabsHeight]);
+  }), [orderShowDetailsToolbarHeight, orderShowTableHeaderTop, orderShowTabsShellHeight, workbenchChromeBottom, workspaceTabsHeight]);
   const orderShowPageClassName = useMemo(() => [
     'order-show-page',
     isOperational ? 'order-show-page--operational' : '',
     isOperational && activeInfoPanel === 'cut' ? 'order-show-page--cut-active' : '',
     isOperational && activeInfoPanel === 'additional' ? 'order-show-page--additional-active' : '',
     orderShowStickyEnabled ? 'order-show-page--sticky-enabled' : '',
-  ].filter(Boolean).join(' '), [activeInfoPanel, isOperational, orderShowStickyEnabled]);
-  const orderShowDetailTableSticky = useMemo(() => (
-    orderShowStickyEnabled && orderShowTableHeaderTop > 0
+    isWorkbench ? 'order-show-page--workbench' : '',
+    isWorkbench && activeInfoPanel ? 'order-show-page--workbench-section' : '',
+    isWorkbench && workbenchSideCollapsed ? 'order-show-page--workbench-wide' : '',
+  ].filter(Boolean).join(' '), [activeInfoPanel, isOperational, isWorkbench, orderShowStickyEnabled, workbenchSideCollapsed]);
+  const orderShowDetailTableSticky = useMemo(() => {
+    if (isWorkbench) {
+      return workbenchChromeBottom > 0
+        ? { offsetHeader: workbenchChromeBottom + WORKBENCH_ORDER_BAR_HEIGHT }
+        : undefined;
+    }
+    return orderShowStickyEnabled && orderShowTableHeaderTop > 0
       ? { offsetHeader: orderShowTableHeaderTop }
-      : undefined
-  ), [orderShowStickyEnabled, orderShowTableHeaderTop]);
+      : undefined;
+  }, [isWorkbench, orderShowStickyEnabled, orderShowTableHeaderTop, workbenchChromeBottom]);
+
+  // «NewLine»: the compact bar appears once the page head has scrolled under the app chrome.
+  useEffect(() => {
+    if (!isWorkbench) return;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const head = orderShowStickySentinelRef.current?.parentElement?.querySelector('.wb-order-head__top');
+      const next = head ? head.getBoundingClientRect().bottom < workbenchChromeBottom : false;
+      setWorkbenchHeadHidden((prev) => (prev === next ? prev : next));
+    };
+    const schedule = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener('scroll', schedule, { passive: true, capture: true });
+    window.addEventListener('resize', schedule);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', schedule, { capture: true });
+      window.removeEventListener('resize', schedule);
+    };
+  }, [isWorkbench, record?.order_id, workbenchChromeBottom]);
 
   useEffect(() => {
     const update = () => {
       const block = orderShowDetailsBlockRef.current;
       const availableHeight = window.innerHeight - workspaceTabsHeight;
+      // «NewLine» has its own compact bar; the legacy sticky stack stays off there.
       const next =
+        !isWorkbench &&
         !isMobile &&
         details.length > 0 &&
         !!block &&
@@ -1413,7 +1517,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       window.removeEventListener('resize', update);
       ro?.disconnect();
     };
-  }, [details.length, isMobile, workspaceTabsHeight]);
+  }, [details.length, isMobile, isWorkbench, workspaceTabsHeight]);
 
   useEffect(() => {
     const update = () => {
@@ -1450,7 +1554,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const { data: filmsData } = useList({
     resource: "films",
     pagination: { pageSize: 10000 },
-    filters: [],  // Убираем любые фильтры чтобы загрузить все записи
+    // Активные и неактивные: плёнка заказа могла стать объединённым дублем — её название всё равно нужно показать.
+    filters: [{ field: "is_active", operator: "in", value: [true, false] }],
     queryOptions: { enabled: canViewReferences },
   });
 
@@ -2111,9 +2216,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   // OrderDetail; let TS infer.
   const groupedDataSource = useMemo(
     () => (groupingActive
-      ? buildGroupedRows(sortedDetails, grouping.state.field!, { includeLeadingSeparator: cutSelectMode, groupValueOf, groupLabelOf })
+      ? buildGroupedRows(sortedDetails, grouping.state.field!, { includeLeadingSeparator: cutSelectMode || isWorkbench, groupValueOf, groupLabelOf })
       : sortedDetails),
-    [groupingActive, sortedDetails, grouping.state.field, cutSelectMode, groupValueOf, groupLabelOf],
+    [groupingActive, sortedDetails, grouping.state.field, cutSelectMode, groupValueOf, groupLabelOf, isWorkbench],
   );
   const orderShowLiveRowsRef = useRef<any[]>([]);
   const orderShowDetailsDataSource = useMemo(() => {
@@ -2194,7 +2299,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   );
 
   // Загрузка платежей для расчёта статуса оплаты и экспорта
-  const { data: paymentsData } = useList({
+  const { data: paymentsData, refetch: refetchPaymentsList } = useList({
     resource: 'payments',
     filters: [
       {
@@ -2800,12 +2905,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     },
   ];
 
+  // «NewLine»: the ХДФ column appears only when the order really has ХДФ (a part or a parameter).
+  const orderHasHdf = hdfDetails.length > 0
+    || details.some((detail: any) => detail?.hdf_parameter_override_mm != null);
   const visibleDetailColumns = useMemo(
     () => applyOrderDetailColumnSettings(
       filterOrderFinancialItems(detailColumns, canViewFinancials),
       showColumnSettings,
-    ),
-    [canViewFinancials, detailColumns, showColumnSettings],
+    ).filter((column) => !isWorkbench || orderHasHdf || column.key !== 'hdf_parameter_override_mm'),
+    [canViewFinancials, detailColumns, isWorkbench, orderHasHdf, showColumnSettings],
   );
 
   const renderGroupedSummaryValue = useCallback((row: any, key: string): React.ReactNode => {
@@ -2848,6 +2956,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               : null;
         return {
           ...column,
+          // «NewLine» uses the normal table font instead of 70–80%, so the fixed widths grow with it.
+          width: isWorkbench && typeof column.width === 'number'
+            ? Math.round(column.width * WORKBENCH_DETAIL_COLUMN_SCALE)
+            : column.width,
           sortOrder: column.key === orderShowActiveSorter?.key ? orderShowActiveSorter.order : null,
           shouldCellUpdate: (row: any, previousRow: any) => {
             if (liveVersionKey) return row?.[liveVersionKey] !== previousRow?.[liveVersionKey];
@@ -2866,9 +2978,19 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               return renderGroupedSummaryValue(row, String(column.key ?? ''));
             }
             if (row?.kind === 'separator') {
-              return index === 0
-                ? <span style={{ fontWeight: 600, color: 'var(--app-text-muted)' }}>{row.label}</span>
-                : null;
+              if (index !== 0) return null;
+              if (isWorkbench) {
+                // «NewLine»: every group, including the first, is headed by what it was grouped by.
+                const groupTitle = grouping.state.field ? WORKBENCH_GROUP_TITLES[grouping.state.field] : null;
+                return (
+                  <span className="wb-group-head">
+                    {groupTitle ? <span className="wb-group-head__field">{groupTitle}</span> : null}
+                    <b className="wb-group-head__value">{row.label || '—'}</b>
+                    <span className="wb-group-head__count">{row.selectionKeys.length} поз.</span>
+                  </span>
+                );
+              }
+              return <span style={{ fontWeight: 600, color: 'var(--app-text-muted)' }}>{row.label}</span>;
             }
             const detail = unwrapOrderShowDetailRow(row);
             if (!detail) return null;
@@ -2877,7 +2999,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           },
         };
       }),
-    [orderShowActiveSorter, renderGroupedSummaryValue, visibleDetailColumns],
+    [grouping.state.field, isWorkbench, orderShowActiveSorter, renderGroupedSummaryValue, visibleDetailColumns],
   );
   const stableRenderedDetailColumns = useStableOrderShowColumns(
     renderedDetailColumns,
@@ -2914,7 +3036,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     : null;
   const orderShowDetailsToolbar = (
     <div ref={orderShowDetailsToolbarRef} className="order-show-details-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-      <div style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
+      <div className="order-show-details-toolbar__title" style={{ fontSize: 14, fontWeight: 600, color: '#1890ff' }}>
         Детали заказа
       </div>
       <Space size="small" wrap>
@@ -2980,6 +3102,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     { key: 'activity', panel: 'deadlines', label: 'Активность', color: 'var(--operational-brand)' },
   ] satisfies OrderInfoTab[] : orderInfoTabs.map((tab) => ({ ...tab, panel: tab.key })))
     .filter((tab) => canViewFinancials || tab.panel !== 'finance');
+  // «NewLine»: the details table is the first tab of the same row; sections replace it instead of stacking above.
+  const renderedOrderInfoTabs: OrderInfoTab[] = isWorkbench
+    ? [{ key: 'details', panel: null, label: 'Детали', color: 'inherit', count: details.length }, ...visibleOrderInfoTabs]
+    : visibleOrderInfoTabs;
   const activeOrderInfoLabel = isOperational
     ? visibleOrderInfoTabs.find((tab) => tab.key === activeOperationalTab)?.label
     : visibleOrderInfoTabs.find((tab) => tab.panel === activeInfoPanel)?.label;
@@ -3049,11 +3175,139 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     </>
   ) : null;
 
+  // «NewLine» draws its own page head (crumbs, title, actions); a deleted order keeps the standard one.
+  const ownPageHead = isOperational || (isWorkbench && !deletedOrder);
+  const openAddPaymentForm = record?.order_id && canCreatePayment
+    ? () => navigate(buildOrderEditAddPaymentPath(Number(record.order_id)))
+    : undefined;
+  // NewLine на телефоне — быстрый платёж нижним листом (POST /payments); без backend-платежей — прежняя форма.
+  // Лист смонтирован и вне телефона (переход ширины не сбрасывает защиту от повтора), показывается только на телефоне.
+  const quickPaymentMounted = isWorkbench && featureFlags.useBackendPayments && !deletedOrder;
+  const quickPaymentAvailable = quickPaymentMounted && isMobile;
+  const paymentsListActive = !!record?.order_id && !useBackendOrdersRead && canViewFinancials;
+  /**
+   * Перечитать заказ и, при старом чтении заказа, отдельный список оплат; true — оба реально перечитаны
+   * (отменённый при закрытии вкладки refetch возвращает старые данные и не считается).
+   */
+  const reconcileQuickPayment = async (): Promise<boolean> => {
+    const [orderOk, paymentsOk] = await Promise.all([
+      refetchFresh((options) => queryResult.refetch(options)),
+      paymentsListActive ? refetchFresh((options) => refetchPaymentsList(options)) : Promise.resolve(true),
+    ]);
+    return orderOk && paymentsOk;
+  };
+  const openAddPayment = openAddPaymentForm && quickPaymentAvailable
+    ? () => setQuickPaymentOpen(true)
+    : openAddPaymentForm;
+  const workbenchPrintItems = canExportOrders ? [
+    ...(canViewFinancials ? [
+      { key: 'print', icon: <PrinterOutlined />, label: 'Печать', disabled: !record || details.length === 0 },
+      {
+        key: 'excel',
+        icon: <FileExcelOutlined />,
+        label: 'Экспорт в Excel',
+        disabled: !record || details.length === 0 || isClientResolving || isAnyExcelExporting,
+      },
+    ] : []),
+    { key: 'pdf-production', icon: <FilePdfOutlined />, label: 'PDF для производства', disabled: productionPdfDisabled },
+    { key: 'excel-without-prices', icon: <FileExcelOutlined />, label: 'Excel для производства', disabled: productionExcelDisabled },
+    ...(canViewFinancials ? [
+      { key: 'json', icon: <FileTextOutlined />, label: 'JSON snapshot', disabled: !record || isSnapshotExporting },
+    ] : []),
+  ] : [];
+  const workbenchMoreItems = [
+    ...(canUpdateOrders ? [{ key: 'refresh', icon: <ReloadOutlined />, label: 'Обновить', disabled: isRefreshingOrder }] : []),
+    ...(canMoveOrderProject ? [{ key: 'move-project', icon: <SwapOutlined />, label: 'Перенести в другой проект' }] : []),
+    ...(canDeleteOrder ? [{ key: 'delete-order', icon: <DeleteOutlined />, label: 'Удалить заказ', danger: true }] : []),
+  ];
+  const handleWorkbenchAction = ({ key }: { key: string }) => {
+    if (key === 'refresh') void handleRefreshOrder();
+    if (key === 'print') handlePrint();
+    if (key === 'excel') void handleExportExcel();
+    if (key === 'pdf-production') handleProductionPdf();
+    if (key === 'excel-without-prices') void handleExportExcel('without-prices');
+    if (key === 'json') void handleExportSnapshot();
+    if (key === 'move-project') setMoveModalOpen(true);
+    if (key === 'delete-order') handleDeleteOrder();
+  };
+  const workbenchEditButton = canEditOrderContent && record?.order_id ? (
+    <Button type="primary" icon={<EditOutlined />} onClick={() => navigate(`/orders/edit/${record.order_id}`)}>
+      Изменить
+    </Button>
+  ) : null;
+  const workbenchPaymentButton = openAddPayment ? (
+    <Button className="wb-head-pay" icon={<WalletOutlined />} onClick={openAddPayment}>Добавить платёж</Button>
+  ) : null;
+  // NewLine: the same «Отправить заказ» also stays at hand in the sticky order bar
+  const workbenchBarSendAction = isWorkbench ? orderSendAction : null;
+  const workbenchHeadActions = isWorkbench ? (
+    <>
+      {workbenchPaymentButton}
+      {workbenchPrintItems.length > 0 ? (
+        <Dropdown trigger={['click']} menu={{ items: workbenchPrintItems, onClick: handleWorkbenchAction }}>
+          <Button icon={<PrinterOutlined />} loading={isAnyExcelExporting || isSnapshotExporting}>
+            Печать <DownOutlined style={{ fontSize: 10 }} />
+          </Button>
+        </Dropdown>
+      ) : null}
+      {workbenchEditButton}
+      {orderSendAction}
+      {workbenchMoreItems.length > 0 ? (
+        <Dropdown trigger={['click']} menu={{ items: workbenchMoreItems, onClick: handleWorkbenchAction }}>
+          <Tooltip title="Ещё действия">
+            <Button aria-label="Ещё действия" icon={<EllipsisOutlined />} loading={isRefreshingOrder} disabled={!record} />
+          </Tooltip>
+        </Dropdown>
+      ) : null}
+    </>
+  ) : null;
+  const workbenchLinkItems: OrderLinkItem[] = isWorkbench && record ? [
+    ...(featureFlags.projects && projectId ? [{
+      key: 'project',
+      icon: <FolderOutlined />,
+      label: `Проект ${projectLabel}`,
+      to: `/projects/show/${projectId}`,
+    }] : []),
+    ...((record.groups ?? backendOrder?.groups ?? []) as any[]).map((group: any, index: number) => ({
+      key: `group-${group.groupId ?? group.id ?? index}`,
+      icon: <ApartmentOutlined />,
+      label: [group.code, group.name].filter(Boolean).join(' · ') || 'Группа',
+      hint: group.isPrimary ? 'основная' : 'группа',
+    })),
+    ...collectOrderBasisProjects(details || []).map((name: string) => ({
+      key: `basis-${name}`,
+      icon: <BlockOutlined />,
+      label: `Базис-проект ${name}`,
+    })),
+    ...dowelingLinks.map((link: any, index: number) => {
+      const dowelingOrderId = link.doweling_order?.doweling_order_id ?? link.doweling_order_id;
+      const name = link.doweling_order?.doweling_order_name || link.doweling_order_name
+        || (dowelingOrderId ? String(dowelingOrderId) : '—');
+      return {
+        key: `doweling-${link.order_doweling_link_id ?? index}`,
+        icon: <AimOutlined />,
+        label: `Присадка ${name}`,
+        to: getDowelingOrderShowPath(dowelingOrderId),
+      };
+    }),
+    ...(cutColumnEnabled ? cutOrderJobs.map((job) => {
+      const versionRef = latestReadyCutRefByJobId.get(job.cutJobId);
+      return {
+        key: `cut-${job.cutJobId}`,
+        icon: <ScissorOutlined />,
+        label: job.name,
+        title: job.name,
+        to: versionRef ? cutJobDeepLink(versionRef) : cutJobDeepLink(job.cutJobId),
+        hint: cutJobProfileLabel(job),
+      };
+    }) : []),
+  ] : [];
+
   return (
     <Show
       isLoading={false}
-      title={isOperational ? ' ' : showTitle}
-      breadcrumb={isOperational ? false : (
+      title={ownPageHead ? ' ' : showTitle}
+      breadcrumb={ownPageHead ? false : (
         <Breadcrumb>
           <Breadcrumb.Item>
             <Link to="/">
@@ -3066,7 +3320,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           <Breadcrumb.Item>Просмотр</Breadcrumb.Item>
         </Breadcrumb>
       )}
-      headerButtons={() => isOperational ? null : (
+      headerButtons={() => ownPageHead ? null : (
         deletedOrder ? null : (
           isMobile ? (
             <>
@@ -3322,6 +3576,26 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       ) : record && (
         <div className={orderShowPageClassName} style={orderShowStickyStyle}>
           <div ref={orderShowStickySentinelRef} className="order-show-sticky-sentinel" aria-hidden />
+          {isWorkbench ? (
+            <>
+              <nav className="wb-order-crumbs" aria-label="Хлебные крошки">
+                <Link to="/orders">Заказы</Link>
+                <RightOutlined aria-hidden />
+                <span>{record.order_name}</span>
+              </nav>
+              <div className="wb-order-bar-slot" data-on={workbenchHeadHidden} aria-hidden={!workbenchHeadHidden}>
+                <OrderShowHeader
+                  record={record}
+                  details={detailsWithLiveProductionStatuses}
+                  dowelingLinks={dowelingLinks}
+                  compactSticky
+                  showFinancials={canViewFinancials}
+                  hdfDetails={hdfDetails}
+                  compactActions={<>{workbenchPaymentButton}{workbenchEditButton}{workbenchBarSendAction}</>}
+                />
+              </div>
+            </>
+          ) : null}
           {isOperational ? (
             <OperationalPageHeader
               breadcrumbs={(
@@ -3432,12 +3706,29 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               headerMaterialName={headerMaterialName}
               showFinancials={canViewFinancials}
               hdfDetails={hdfDetails}
+              actions={workbenchHeadActions}
+              projectLabel={featureFlags.projects && projectId ? projectLabel : null}
+              onAddPayment={openAddPayment}
             />
+            {quickPaymentMounted && openAddPaymentForm && record?.order_id ? (
+              <WorkbenchQuickPaymentSheet
+                key={Number(record.order_id)}
+                open={quickPaymentOpen && quickPaymentAvailable}
+                orderId={Number(record.order_id)}
+                orderName={String(record.order_name ?? record.order_id)}
+                clientName={record.client_name}
+                remaining={quickPaymentRemaining(record as Record<string, unknown>)}
+                onClose={() => setQuickPaymentOpen(false)}
+                onReconcile={reconcileQuickPayment}
+                onOpenFullForm={() => { setQuickPaymentOpen(false); openAddPaymentForm(); }}
+              />
+            ) : null}
 
             <div ref={orderShowTabsShellRef} className="order-show-tabs-shell">
             <div
               role="tablist"
               aria-label="Секции заказа"
+              className="order-show-info-tabs"
               style={{
                 display: 'flex',
                 flexWrap: 'nowrap',
@@ -3446,7 +3737,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 overflow: 'hidden',
               }}
             >
-              {visibleOrderInfoTabs.map((tab) => {
+              {renderedOrderInfoTabs.map((tab) => {
                 const isActive = isOperational
                   ? activeOperationalTab === tab.key
                   : activeInfoPanel === tab.panel;
@@ -3458,6 +3749,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     role="tab"
                     aria-selected={isActive}
                     title={tab.label}
+                    className="order-show-info-tab"
                     onClick={() => {
                       if (isOperational) {
                         setActiveOperationalTab(tab.key);
@@ -3498,6 +3790,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     >
                       {tab.label}
                     </span>
+                    {tab.count != null ? <span className="order-show-info-tab__count">{tab.count}</span> : null}
                     {isActive ? <UpOutlined style={{ fontSize: 10 }} /> : <DownOutlined style={{ fontSize: 10 }} />}
                   </button>
                 );
@@ -3506,6 +3799,66 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             </div>
             {orderShowDetailsToolbar}
           </div>
+
+          {isWorkbench ? (
+            <>
+              <section className={`wb-panel wb-order-flow${workbenchFlowOpen ? ' wb-order-flow--open' : ''}`}>
+                <button
+                  type="button"
+                  className="wb-order-flow__summary"
+                  aria-expanded={workbenchFlowOpen}
+                  onClick={() => setWorkbenchFlowOpen((open) => !open)}
+                >
+                  <RightOutlined className="wb-order-flow__chevron" aria-hidden />
+                  <h2>Ход производства</h2>
+                  <span className="wb-order-flow__sub">
+                    {productionSummaryDetailsLoaded ? (
+                      <OrderProductionFlowCodes
+                        details={detailsWithLiveProductionStatuses}
+                        statuses={productionStatusesData?.data as any[] ?? []}
+                      />
+                    ) : null}
+                  </span>
+                </button>
+                {workbenchFlowOpen ? (
+                  <div className="wb-order-flow__body">
+                    <OrderProductionFlow
+                      details={detailsWithLiveProductionStatuses}
+                      statuses={productionStatusesData?.data as any[] ?? []}
+                      loading={productionStatusesLoading || !productionSummaryDetailsLoaded}
+                    />
+                  </div>
+                ) : null}
+              </section>
+              {isMobile && canViewFinancials ? (
+                <WorkbenchOrderPaymentsSection payments={payments as Record<string, unknown>[]} />
+              ) : null}
+              <Tooltip title={workbenchSideCollapsed ? 'Показать боковую панель' : 'Свернуть боковую панель'} placement="left">
+                <button
+                  type="button"
+                  className="wb-order-side-rail"
+                  aria-label={workbenchSideCollapsed ? 'Показать боковую панель' : 'Свернуть боковую панель'}
+                  aria-expanded={!workbenchSideCollapsed}
+                  aria-controls="order-show-side"
+                  onClick={toggleWorkbenchSide}
+                >
+                  <span className="wb-order-side-rail__grip" aria-hidden>
+                    {workbenchSideCollapsed ? <LeftOutlined /> : <RightOutlined />}
+                  </span>
+                </button>
+              </Tooltip>
+              <aside id="order-show-side" className="wb-order-side" aria-label="Сводка заказа" hidden={workbenchSideCollapsed}>
+                <OrderClientCard
+                  clientId={record.client_id}
+                  clientName={record.client_name}
+                  canViewClients={!featureFlags.useBackendPermissions || can('clients.view')}
+                />
+                <OrderDatesCard record={record} />
+                <OrderLinksCard items={workbenchLinkItems} />
+                <OrderNotesCard notes={record.notes} />
+              </aside>
+            </>
+          ) : null}
 
             {activeInfoPanel && (
               <div
@@ -3585,9 +3938,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       )}
                     </div>
                   ) : (
-                    <>
+                    <div className="order-additional">
                     {/* Три колонки: Даты | Производство | Присадки + Раскрой */}
                     <div
+                      className="order-additional__summary"
                       style={{
                         display: 'grid',
                         gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
@@ -3764,10 +4118,21 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       </div>
                     </div>
 
-                    <div style={{ marginTop: 12, borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 6 }}>
+                    <div className="order-additional__materials" style={{ marginTop: 12, borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
+                      <div className="order-additional__title" style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 6 }}>
                         Материалы заказа
                       </div>
+                      {isWorkbench ? (
+                        <OrderMaterialsWorkbenchTable
+                          filmRows={orderFilmMaterialRows}
+                          sheetRows={orderSheetMaterialRows}
+                          bathRefs={bathCutJobByDetailId.values()}
+                          cutJobNameById={cutJobNameById}
+                          filmStock={filmStock}
+                          sheetStock={sheetStock}
+                          filmEmptyText={cutColumnEnabled ? 'Нет данных по пленке' : 'Нет доступа к данным раскроя'}
+                        />
+                      ) : (
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 12 }}>
                         <div>
                           <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Пленка</div>
@@ -3914,12 +4279,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                           />
                         </div>
                       </div>
+                      )}
                     </div>
 
                     {/* Ниже — на всю ширину: Файлы, Бирки, Служебная информация */}
-                    <div style={{ marginTop: 12, borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
+                    <div className="order-additional__extras" style={{ marginTop: 12, borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
                       {/* Файлы */}
-                      <div style={{ marginBottom: 8 }}>
+                      <div className="order-additional__files" style={{ marginBottom: 8 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#722ed1', marginBottom: 3 }}>
                           Файлы
                         </div>
@@ -3927,11 +4293,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       </div>
 
                       {labelsEnabled && record?.order_id && (
-                        <OrderLatestLabelsPreview orderId={record.order_id} />
+                        <div className="order-additional__labels">
+                          <OrderLatestLabelsPreview orderId={record.order_id} />
+                        </div>
                       )}
 
                       {/* Служебная информация — спойлер, по умолчанию свёрнут */}
-                      <details style={{ borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
+                      <details className="order-additional__meta" style={{ borderTop: '1px solid var(--app-border)', paddingTop: 8 }}>
                         <summary
                           style={{
                             fontSize: 12,
@@ -3947,8 +4315,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                           <OrderMetaBlock record={record} compact />
                         </div>
                       </details>
+                      {isWorkbench && record?.order_id ? (
+                        <div className="order-additional__history">
+                          <OrderHistorySpoiler orderId={Number(record.order_id)} />
+                        </div>
+                      ) : null}
                     </div>
-                    </>
+                    </div>
                   )
                 )}
               </div>
@@ -3966,7 +4339,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 bazisCutLinkEnabled={bazisCutLinkEnabled}
                 bazisProjectLinkEnabled={bazisProjectLinkEnabled} />
             ) : (
-            <TableTopScroll className="order-show-details-table-wrap" horizontalEdgeScrollButton>
+            <TableTopScroll className="order-show-details-table-wrap" horizontalEdgeScrollButton horizontalBackScrollButton={isWorkbench}>
             <MemoizedOrderShowTable
               renderVersion={orderShowDetailTableRenderVersion}
               className={`${groupingActive ? 'details-grouped ' : ''}order-show-details-table`}
