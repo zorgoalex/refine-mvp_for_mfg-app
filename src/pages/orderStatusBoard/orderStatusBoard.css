@@ -1300,6 +1300,9 @@
 .status-board-card.cnc-packet-card--other-material:hover,
 .status-board-card.cnc-packet-card--other-material {
   border-color: #8b5a2b;
+  /* Solid even on Bazis-cut cards: their dashed border showed as a light dashed
+     line between the inset and outer brown outline. */
+  border-style: solid;
   background: color-mix(in srgb, #f3dfb8 42%, var(--app-surface));
   box-shadow:
     inset 0 0 0 1px #8b5a2b,

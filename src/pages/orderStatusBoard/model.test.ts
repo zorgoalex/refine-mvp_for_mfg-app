@@ -997,6 +997,25 @@ describe('order status board model', () => {
     });
   });
 
+  it('suggests only order numbers linked to an ERP order, never file names or OCR text', () => {
+    const columns = [
+      {
+        key: 'parsed', title: 'Файлы на станке', total: 2,
+        packets: [
+          cncPacket('linked', ['2706', 'Ванна 2706 - Белый Софт.svg', 'ДСП'], [2706, null, null]),
+          cncPacket('matched', ['2707'], [null], [2707]),
+        ],
+        baths: [],
+        bazisCutSets: [cncBazisCutSet(9101, [
+          { orderName: '3057', orderId: 3057, detailId: 1 },
+          { orderName: 'Без заказа', orderId: null, detailId: null },
+        ])],
+      },
+    ] as unknown as CncTelegramTodayColumn[];
+
+    expect(buildCncOrderFilterOptions(columns)).toEqual(['2706', '2707', '3057']);
+  });
+
   it('filters CNC packet and bath cards by exact order number', () => {
     const columns = [
       {
@@ -1004,8 +1023,8 @@ describe('order status board model', () => {
         title: 'Файлы на станке',
         total: 2,
         packets: [
-          cncPacket('p-2706', ['2706', '2707']),
-          cncPacket('p-2712', ['2712']),
+          cncPacket('p-2706', ['2706', '2707'], [2706], [null, 2707]),
+          cncPacket('p-2712', ['2712'], [2712]),
         ],
         baths: [],
       },

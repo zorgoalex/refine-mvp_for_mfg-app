@@ -771,6 +771,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const [cncMobileColumnScale, setCncMobileColumnScale] =
     useState<CncMobileColumnScale>(() => readCncMobileColumnScalePreference(currentUser?.id));
   const [mobileToolbarExpanded, setMobileToolbarExpanded] = useState(false);
+  // The order-search dropdown closes after Enter or a pick so it does not cover the cards below.
+  const [cncOrderSearchOpen, setCncOrderSearchOpen] = useState(false);
   const [cncRelationsEnabled, setCncRelationsEnabled] = useState(true);
   const [activeCncRelation, setActiveCncRelation] =
     useState<CncRelationTarget | null>(null);
@@ -3020,6 +3022,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               suffixIcon={<SearchOutlined />}
               value={cncOrderFilters}
               onChange={(values) => updateViewState({ cncOrderFilters: values })}
+              open={cncOrderSearchOpen}
+              onDropdownVisibleChange={setCncOrderSearchOpen}
+              onSelect={() => setCncOrderSearchOpen(false)}
+              onSearch={(text) => { if (text) setCncOrderSearchOpen(true); }}
+              onInputKeyDown={(event) => { if (event.key === 'Enter') setCncOrderSearchOpen(false); }}
               aria-label="Фильтр МДФ-работ по номеру заказа"
             />
             <div

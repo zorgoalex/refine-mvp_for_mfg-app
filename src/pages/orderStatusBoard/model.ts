@@ -303,6 +303,8 @@ function parseOrderStatusBoardSortOrder(value: string): OrderStatusBoardSortOrde
   return value === 'asc' || value === 'desc' ? value : undefined;
 }
 
+// Search suggestions: only order numbers whose details are linked to a card
+// (an ERP order id), never file names or unrecognised text from machine files.
 export function buildCncOrderFilterOptions(
   columns: CncTelegramTodayColumn[],
 ): string[] {
@@ -310,21 +312,29 @@ export function buildCncOrderFilterOptions(
   for (const column of columns) {
     for (const packet of column.packets ?? []) {
       for (const item of packet.items) {
-        addCncOrderFilterOption(orderNamesByKey, item.orderName);
+        if (isLinkedCncOrderId(item.orderId ?? item.matchOrderId) && !item.orderDeleted) {
+          addCncOrderFilterOption(orderNamesByKey, item.orderName);
+        }
       }
     }
     for (const bath of column.baths ?? []) {
       for (const item of bath.items) {
-        addCncOrderFilterOption(orderNamesByKey, item.orderName);
+        if (isLinkedCncOrderId(item.orderId)) addCncOrderFilterOption(orderNamesByKey, item.orderName);
       }
     }
     for (const bazisCutSet of column.bazisCutSets ?? []) {
       for (const item of bazisCutSet.items) {
-        addCncOrderFilterOption(orderNamesByKey, item.orderName);
+        if (isLinkedCncOrderId(item.orderId) && !item.orderDeleted) {
+          addCncOrderFilterOption(orderNamesByKey, item.orderName);
+        }
       }
     }
   }
   return Array.from(orderNamesByKey.values()).sort(compareCncOrderNames);
+}
+
+function isLinkedCncOrderId(value: number | null | undefined): boolean {
+  return Number.isInteger(value) && Number(value) > 0;
 }
 
 export function filterCncTodayColumnsByOrders(
