@@ -244,6 +244,20 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     expect((await boundedLoad()).response.historicalReadinessSources?.some(source => source.kind === 'bazisCutSet')).toBe(false);
   });
 
+  it('returns the displayed file layout status without its placed items', async () => {
+    await client.query(`UPDATE pg_temp.cnc_telegram_packets SET cut_layout_json=$2::jsonb WHERE packet_id=$1`,
+      [sourcePacket.id, JSON.stringify({ status: 'valid', reasons: [], sheet: { widthMm: 2070, heightMm: 2800 },
+        rawCommentCount: 1, partContourCount: 1, acceptedItemCount: 1,
+        renderOnlyContours: [{ body: 'E2E-not-for-board' }],
+        items: [{ orderName: '1', detailNumber: 1, widthMm: 10, heightMm: 20, xMm: 0, yMm: 0, placedWidthMm: 10,
+          placedHeightMm: 20, sourceSvg: { body: 'E2E-not-for-board' } }] })]);
+    const { response } = await boundedLoad();
+    const packet = response.columns.flatMap(column => column.packets).find(p => p.packetId === sourcePacket.id)!;
+    expect(packet.cutLayout).toMatchObject({ status: 'valid', sheet: { widthMm: 2070, heightMm: 2800 },
+      acceptedItemCount: 1, items: [], renderOnlyContours: [] });
+    expect(JSON.stringify(response)).not.toContain('E2E-not-for-board');
+  });
+
   it('evaluates whole mixed source before trimming quantities to displayed orders', async () => {
     const packetId = await oldPacket(10, '2026-08-01');
     await client.query(`INSERT INTO pg_temp.cnc_telegram_packet_items(packet_id,match_order_id,match_detail_id,quantity)
