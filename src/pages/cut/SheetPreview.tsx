@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Space } from 'antd';
 import { CheckCircleFilled } from '@ant-design/icons';
 import { OrderDeletedTag } from '../../components/OrderDeletedTag';
-import { displayedSheetExtents, formatSheetSide, type CutPieceOverlay } from './cutPreviewHelpers';
+import { displayedSheetExtents, formatSheetSide, sheetImageHeadingShare, type CutPieceOverlay } from './cutPreviewHelpers';
 import { fitLabelScale, LINE1_SCALE, splitDimsLine } from './pieceLabel';
 
 const sideLabelStyle: React.CSSProperties = {
@@ -32,6 +32,12 @@ export interface SheetPreviewProps {
   labelsInImage?: boolean;
   onOpen?: () => void;
   onCollapse?: () => void;
+  /** Piece highlighted on the sheet (overlay key), e.g. the one pointed at in a parts list. */
+  activeOverlayKey?: string | null;
+  /** Pointer entered a piece on the sheet (`null` — left it). */
+  onOverlayHover?: (key: string | null) => void;
+  /** A piece on the sheet was clicked. */
+  onOverlayPick?: (key: string) => void;
 }
 
 function renderOverlayTooltip(overlay: CutPieceOverlay): React.ReactNode {
@@ -55,6 +61,14 @@ function renderOverlayTooltip(overlay: CutPieceOverlay): React.ReactNode {
 
 const BASE_FONT_PX = 11;
 
+/** A piece pointed at in the parts list (or on the sheet itself): contour + tint. */
+const ACTIVE_PIECE_STYLE: React.CSSProperties = {
+  outline: '2px solid #1f5fe0',
+  outlineOffset: -2,
+  background: 'rgba(31, 95, 224, 0.18)',
+  zIndex: 1,
+};
+
 function OverlayLayer({
   overlays,
   labelsInImage = false,
@@ -62,6 +76,9 @@ function OverlayLayer({
   imgHeightPx,
   onClick,
   onDoubleClick,
+  activeKey,
+  onHoverKey,
+  onPickKey,
 }: {
   overlays?: CutPieceOverlay[];
   labelsInImage?: boolean;
@@ -71,6 +88,9 @@ function OverlayLayer({
   imgHeightPx: number;
   onClick?: () => void;
   onDoubleClick?: () => void;
+  activeKey?: string | null;
+  onHoverKey?: (key: string | null) => void;
+  onPickKey?: (key: string) => void;
 }) {
   if (!overlays || overlays.length === 0) return null;
   return (
@@ -95,15 +115,20 @@ function OverlayLayer({
           <Tooltip key={overlay.key} title={renderOverlayTooltip(overlay)}>
             <span
               aria-label={`Заказ ${overlay.orderId ?? '—'}, позиция ${overlay.detailNumber ?? '—'}`}
-              onClick={onClick}
+              onClick={onPickKey ? () => { onPickKey(overlay.key); onClick?.(); } : onClick}
               onDoubleClick={onDoubleClick}
+              onMouseEnter={onHoverKey ? () => onHoverKey(overlay.key) : undefined}
+              onMouseLeave={onHoverKey ? () => onHoverKey(null) : undefined}
+              data-piece-active={activeKey === overlay.key ? 'true' : undefined}
               style={{
+                ...(activeKey === overlay.key ? ACTIVE_PIECE_STYLE : null),
+                pointerEvents: 'auto',
                 position: 'absolute',
                 left: `${overlay.leftPct}%`,
                 top: `${overlay.topPct}%`,
                 width: `${overlay.widthPct}%`,
                 height: `${overlay.heightPct}%`,
-                cursor: 'help',
+                cursor: onPickKey ? 'pointer' : 'help',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
@@ -214,17 +239,22 @@ export function SheetPreview({
   labelsInImage = false,
   onOpen,
   onCollapse,
+  activeOverlayKey,
+  onOverlayHover,
+  onOverlayPick,
 }: SheetPreviewProps) {
   // Track the full-view image's rendered pixel size (set via onLoad) so
   // OverlayLayer can compute pixel-accurate font sizes for label auto-shrink.
   const [fullImgSize, setFullImgSize] = useState({ w: 0, h: 0 });
+  // Share of the image height taken by the job heading band the backend draws above the sheet.
+  const [headingShare, setHeadingShare] = useState(0);
 
   // For the thumbnail the height is fixed (thumbHeight); width follows aspect ratio.
   const { horizontalMm, verticalMm } = displayedSheetExtents(widthMm, heightMm, landscape);
 
   if (!full) {
     return (
-      <div style={{ marginTop: 4 }}>
+      <div className="cut-sheet-thumb" style={{ marginTop: 4 }}>
         <span style={{ position: 'relative', display: 'inline-block', maxWidth: '100%' }}>
           <Tooltip title="Открыть лист в полном размере">
             <img
@@ -243,7 +273,7 @@ export function SheetPreview({
   }
 
   return (
-    <div style={{ marginTop: 4, maxWidth: '100%', overflow: 'auto' }}>
+    <div className="cut-sheet-full" style={{ marginTop: 4, maxWidth: '100%', overflow: 'auto' }}>
       <Tooltip title="Двойной клик — свернуть до превью">
         {/* padding leaves room for the side-dimension labels */}
         <div style={{ position: 'relative', display: 'inline-block', padding: '22px 56px', cursor: 'zoom-out' }}>
@@ -259,16 +289,32 @@ export function SheetPreview({
               onLoad={(e) => {
                 const img = e.currentTarget;
                 setFullImgSize({ w: img.clientWidth, h: img.clientHeight });
+                setHeadingShare(sheetImageHeadingShare(img.naturalWidth, img.naturalHeight, horizontalMm, verticalMm));
               }}
               style={{ width: '100%', display: 'block' }}
             />
-            <OverlayLayer
-              overlays={overlays}
-              labelsInImage={labelsInImage}
-              imgWidthPx={fullImgSize.w}
-              imgHeightPx={fullImgSize.h}
-              onDoubleClick={onCollapse}
-            />
+            {/* overlays cover the sheet itself: the heading band above it is not part of the sheet */}
+            <span
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: `${headingShare * 100}%`,
+                width: '100%',
+                height: `${(1 - headingShare) * 100}%`,
+                pointerEvents: 'none',
+              }}
+            >
+              <OverlayLayer
+                overlays={overlays}
+                labelsInImage={labelsInImage}
+                imgWidthPx={fullImgSize.w}
+                imgHeightPx={fullImgSize.h * (1 - headingShare)}
+                onDoubleClick={onCollapse}
+                activeKey={activeOverlayKey}
+                onHoverKey={onOverlayHover}
+                onPickKey={onOverlayPick}
+              />
+            </span>
           </span>
           <span style={{ ...sideLabelStyle, top: 2, left: '50%', transform: 'translateX(-50%)' }}>
             {formatSheetSide(horizontalMm)}

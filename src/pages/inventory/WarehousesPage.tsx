@@ -181,6 +181,7 @@ export const WarehousesPage: React.FC = () => {
 
   return (
     <Card
+      className="warehouses-page wb-list"
       title="Справочник складов"
       extra={<Space>
         <Checkbox checked={includeInactive} onChange={(event) => setIncludeInactive(event.target.checked)}>Показывать неактивные</Checkbox>

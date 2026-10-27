@@ -154,10 +154,11 @@ export const ProductionStagesDisplay: React.FC<ProductionStagesDisplayProps> = (
   };
 
   const content = (
-    <span style={containerStyle}>
+    <span className="production-stages" style={containerStyle}>
       {stagesToShow.map((stage, index) => (
         <React.Fragment key={stage.code}>
           <span
+            className={stage.isPassed ? 'production-stages__stage--passed' : 'production-stages__stage--pending'}
             style={{
               color: stage.isPassed ? passedColor : notPassedColor,
               fontWeight: stage.isPassed ? 600 : 400,

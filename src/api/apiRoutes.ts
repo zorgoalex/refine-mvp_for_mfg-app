@@ -74,6 +74,7 @@ export const apiRoutes = {
     byId: (orderId: number) => backendApiPath(`/orders/${orderId}`),
     recalculateHdf: (orderId: number) => backendApiPath(`/orders/${orderId}/recalculate-hdf`),
     refresh: (orderId: number) => backendApiPath(`/orders/${orderId}/refresh`),
+    history: (orderId: number) => backendApiPath(`/orders/${orderId}/history`),
     detailLiveState: (orderId: number) =>
       backendApiPath(`/orders/${orderId}/detail-live-state`),
     liveEvents: (orderId: number) => backendApiPath(`/orders/${orderId}/live-events`),
@@ -111,6 +112,15 @@ export const apiRoutes = {
     groups: orderGroupsRoute,
     whatsappSends: (orderId: number) => backendApiPath(`/orders/${orderId}/whatsapp-sends`),
     whatsappSendClientContacts: (orderId: number) => backendApiPath(`/orders/${orderId}/whatsapp-sends/client-contacts`),
+  },
+  clientsRead: {
+    listFacts: backendApiPath('/clients/list-facts'),
+    analyticsDashboard: backendApiPath('/clients-analytics/dashboard'),
+    analyticsCard: (clientId: number) => backendApiPath(`/clients-analytics/clients/${clientId}`),
+  },
+  paymentsAnalytics: {
+    summary: backendApiPath('/payments-analytics/summary'),
+    dashboard: backendApiPath('/payments-analytics/dashboard'),
   },
   paymentsOnec: {
     receipts: backendApiPath('/payments/onec-receipts'),

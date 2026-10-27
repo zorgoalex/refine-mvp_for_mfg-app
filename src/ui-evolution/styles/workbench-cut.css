@@ -1,0 +1,888 @@
+/* «NewLine»: экран «Раскрой» по мокапу — список заданий слева, задание справа
+   (шапка задания, шаги, вкладки, параметры-чипы, показатели). Только оформление и раскладка. */
+
+/* ---------- левая панель: шапка, виды, поиск, статусы ---------- */
+:root[data-ui-variant="workbench"] .wb-cut-rail {
+  display: grid;
+  gap: 10px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--evo-text);
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--embedded .wb-cut-rail__title {
+  font-size: 15px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__kind {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__kind small,
+:root[data-ui-variant="workbench"] .wb-cut-rail__chip small,
+:root[data-ui-variant="workbench"] .wb-cut-tabs__item small {
+  color: var(--evo-text-secondary);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__chip {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--evo-border);
+  border-radius: 999px;
+  background: var(--evo-surface);
+  color: var(--evo-text);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__chip:hover {
+  border-color: var(--evo-border-strong);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__chip[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--evo-primary) 45%, var(--evo-border));
+  background: color-mix(in srgb, var(--evo-primary) 9%, var(--evo-surface));
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__chip[aria-pressed="true"] small {
+  color: inherit;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__chip--icon {
+  width: 28px;
+  justify-content: center;
+  padding: 0;
+  color: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-rail__chip:focus-visible,
+:root[data-ui-variant="workbench"] .wb-cut-tabs__item:focus-visible,
+:root[data-ui-variant="workbench"] .wb-cut-params__toggle:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: 1px;
+}
+
+/* ---------- элементы списка: строки с отметкой выбранного, без рамок-карточек ---------- */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .wb-cut-jobs--compact .wb-cut-job {
+  position: relative;
+  padding: 9px 10px 9px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .wb-cut-jobs--compact .wb-cut-job:hover {
+  background: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .wb-cut-jobs--compact .wb-cut-job[data-active="true"] {
+  background: color-mix(in srgb, var(--evo-primary) 8%, var(--evo-surface));
+  box-shadow: inset 3px 0 0 var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .wb-cut-jobs--compact .wb-cut-jobs__grid {
+  gap: 2px;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .wb-cut-job__mdf .cut-job-mdf-board-cell__reason {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: 11.5px;
+}
+
+/* ---------- боковые панели «+ Задание» и «Фильтры» ---------- */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:empty {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-drawer .ant-drawer-body {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-filters__extra {
+  display: grid;
+  gap: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-filters__field,
+:root[data-ui-variant="workbench"] .wb-cut-drawer--filters .cut-operational-filter {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-drawer--filters .cut-operational-filters {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-drawer--filters .cut-operational-filter .ant-select,
+:root[data-ui-variant="workbench"] .wb-cut-drawer--filters .cut-operational-filter .ant-picker,
+:root[data-ui-variant="workbench"] .wb-cut-drawer--filters .cut-operational-filter .ant-input-affix-wrapper {
+  width: 100% !important;
+}
+
+/* ---------- шапка задания ---------- */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-page-modern__job > .ant-card-head {
+  padding: 14px 16px 0;
+  border-bottom: 0;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-page-modern__job > .ant-card-head .ant-card-head-title {
+  padding: 0;
+  overflow: visible;
+  white-space: normal;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-head {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-head__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-head__title {
+  margin: 0;
+  color: var(--evo-text);
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-head__top .ant-tag {
+  margin: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-head__source {
+  padding: 1px 8px;
+  border: 1px solid var(--evo-border);
+  border-radius: 6px;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-head__grow {
+  flex: 1 1 auto;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-head__name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--evo-text-secondary);
+  font-size: 13.5px;
+  font-weight: 400;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-head__name .cut-job-card-name {
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+/* шаги задания */
+:root[data-ui-variant="workbench"] .wb-cut-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 0;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-step {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding-right: 8px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-step:not(:last-child)::after {
+  content: '';
+  width: 14px;
+  height: 2px;
+  margin-left: 2px;
+  border-radius: 2px;
+  background: var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-step[data-state="done"]:not(:last-child)::after {
+  background: var(--evo-success, #1f9d55);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-step__mark {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--evo-surface-muted);
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-step[data-state="done"] .wb-cut-step__mark {
+  background: color-mix(in srgb, var(--evo-success, #1f9d55) 16%, var(--evo-surface));
+  color: var(--evo-success, #1f9d55);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-step[data-state="current"] .wb-cut-step__mark {
+  background: var(--evo-primary);
+  color: #fff;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-step[data-state="error"] .wb-cut-step__mark {
+  background: var(--evo-danger, #c33b32);
+  color: #fff;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-step__text {
+  display: grid;
+  line-height: 1.25;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-step__text b {
+  color: var(--evo-text);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-step__text small {
+  color: var(--evo-text-secondary);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-step[data-state="done"] .wb-cut-step__text small {
+  color: var(--evo-success, #1f9d55);
+}
+
+/* вкладки задания */
+:root[data-ui-variant="workbench"] .wb-cut-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 2px -16px 0;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-tabs__item {
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: -1px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--evo-text-secondary);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-tabs__item:hover {
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-tabs__item[aria-selected="true"] {
+  border-bottom-color: var(--evo-text);
+  color: var(--evo-text);
+}
+
+/* что показывает каждая вкладка */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split:not([data-wb-tab="versions"]) .cut-job-overview__history,
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split[data-wb-tab="versions"] .cut-job-overview__main,
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split[data-wb-tab="versions"] .cut-job-operational-actions,
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split[data-wb-tab="versions"] > .ant-space-item:has(> .cut-sheet-view-controls),
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split[data-wb-tab="versions"] > .ant-space-item:has(> .cut-page-modern__group),
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split[data-wb-tab="details"] > .ant-space-item:has(> .cut-sheet-view-controls),
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split[data-wb-tab="details"] > .ant-space-item:has(> .cut-page-modern__group),
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split[data-wb-tab="details"] .cut-job-overview__main,
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split:not([data-wb-tab="details"]) > .ant-space-item:has(> .cut-page-modern__details),
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split:not([data-wb-tab="details"]) > .ant-space-item:has(> .cut-page-modern__eligible) {
+  display: none;
+}
+
+/* на вкладке «Детали» список раскрыт всегда: заголовок-спойлер не нужен */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-page-modern__details > .ant-collapse-item > .ant-collapse-header {
+  display: none;
+}
+
+/* ---------- параметры чипами и показатели ---------- */
+:root[data-ui-variant="workbench"] .wb-cut-params {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-params__title {
+  color: var(--evo-text);
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-params__chips {
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-chip {
+  padding: 2px 10px;
+  border: 1px solid var(--evo-border);
+  border-radius: 999px;
+  background: var(--evo-surface);
+  color: var(--evo-text);
+  font-size: 12.5px;
+  line-height: 20px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-params__toggle {
+  flex: none;
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: var(--evo-primary);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split[data-wb-params="closed"] .cut-job-operational-fields,
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split[data-wb-params="closed"] .cut-job-operational-options,
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-job-operational-stats {
+  display: none !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-kpi {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+  margin: 0 0 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-kpi > div {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-kpi dt {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-kpi dd {
+  margin: 0;
+  color: var(--evo-text);
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-kpi dd small {
+  margin-left: 1px;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-kpi__orders dd {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 24px;
+}
+
+/* заголовок страницы — в левой панели, отдельный над ней не нужен */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split > .ant-space-item:has(> h3) {
+  display: none;
+}
+
+/* список заданий занимает высоту экрана и прокручивается сам */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split.cut-page-modern--standalone .wb-cut-jobs__grid {
+  max-height: calc(100vh - var(--wb-order-sticky-top, 84px) - 330px);
+}
+
+/* ---------- шапка задания: действия; прежняя строка «Создать карточку…» не нужна ---------- */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-job-mdf-create-row {
+  display: none;
+}
+
+/* ---------- листы плитками: миниатюра слева, сведения справа ---------- */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item:not(.cut-sheet-preview-item--open) {
+  flex: 1 1 260px !important;
+  max-width: 360px !important;
+  min-height: 0 !important;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 12px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--evo-border);
+  border-radius: 10px;
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item:not(.cut-sheet-preview-item--open):hover {
+  border-color: var(--evo-border-strong);
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item:not(.cut-sheet-preview-item--open) > .cut-sheet-thumb {
+  grid-column: 1;
+  grid-row: 1 / span 3;
+  margin-top: 0 !important;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item:not(.cut-sheet-preview-item--open) > .cut-sheet-thumb img {
+  height: 96px !important;
+  border-radius: 4px;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item:not(.cut-sheet-preview-item--open) > :not(.cut-sheet-thumb) {
+  grid-column: 2;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-header {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-title {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-title strong {
+  color: var(--evo-text);
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-usage {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-usage b {
+  color: var(--evo-text);
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-actions .ant-btn {
+  height: 26px;
+  padding-inline: 8px;
+  font-size: 12px;
+}
+
+/* раскрытый лист: крупный вид слева, «Детали листа» справа */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item--open {
+  min-height: 0 !important;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 248px;
+  column-gap: 14px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--evo-primary) 40%, var(--evo-border));
+  border-radius: 10px;
+  background: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item--open > * {
+  grid-column: 1;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item--open > .wb-cut-sheet-parts {
+  grid-column: 2;
+  grid-row: 1 / span 6;
+  max-height: 70vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 13.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__head span {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__list li {
+  display: grid;
+  grid-template-columns: 26px auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--evo-border);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__list li:last-child {
+  border-bottom: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__no {
+  color: var(--evo-text-secondary);
+  font-weight: 600;
+  text-align: center;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__ref {
+  overflow: hidden;
+  color: var(--evo-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1280px) {
+  :root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item--open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item--open > .wb-cut-sheet-parts {
+    grid-column: 1;
+    grid-row: auto;
+    max-height: 240px;
+  }
+}
+
+/* --- список деталей открытого листа: связан с листом (наведение и клик) --- */
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__list li {
+  margin-inline: -8px;
+  padding-inline: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__list li:hover,
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__list li[data-active="true"] {
+  border-bottom-color: transparent;
+  background: color-mix(in srgb, var(--evo-primary) 12%, var(--evo-surface));
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__list li[data-picked="true"] {
+  border-bottom-color: transparent;
+  background: color-mix(in srgb, var(--evo-primary) 18%, var(--evo-surface));
+  box-shadow: inset 3px 0 0 var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__list li[data-active="true"] .wb-cut-sheet-parts__no,
+:root[data-ui-variant="workbench"] .wb-cut-sheet-parts__list li[data-picked="true"] .wb-cut-sheet-parts__no {
+  color: var(--evo-primary);
+}
+
+/* --- вид листа (ориентация, точка отсчёта) — в строке заголовка группы --- */
+:root[data-ui-variant="workbench"] .wb-cut-view-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-view-controls .wb-cut-view-label {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-view-controls .cut-sheet-icon-radio {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--evo-border);
+  border-radius: 8px;
+  background: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-view-controls .cut-sheet-icon-radio .ant-radio-button-wrapper {
+  width: 30px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--evo-text-secondary);
+  line-height: 24px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-view-controls .cut-sheet-icon-radio .ant-radio-button-wrapper::before {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-view-controls .cut-sheet-icon-radio .ant-radio-button-wrapper:hover {
+  color: var(--evo-text);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-view-controls .cut-sheet-icon-radio .ant-radio-button-wrapper-checked {
+  background: var(--evo-surface);
+  box-shadow: 0 0 0 1px var(--evo-border), 0 1px 2px rgba(16, 24, 40, 0.08);
+  color: var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-view-controls .cut-sheet-control-icon,
+:root[data-ui-variant="workbench"] .wb-cut-view-controls .cut-sheet-origin-icon {
+  transform: scale(0.72);
+}
+
+/* --- «Детали листа» липкие: лист прокручивается, список остаётся под верхней панелью --- */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item--open > .wb-cut-sheet-parts {
+  position: sticky;
+  /* под верхней панелью и под липкой строкой заголовка группы */
+  top: calc(var(--wb-cut-sticky-top, 84px) + var(--wb-cut-group-head, 104px) + 10px);
+  align-self: start;
+  max-height: calc(100vh - var(--wb-cut-sticky-top, 84px) - var(--wb-cut-group-head, 104px) - 70px);
+  border: 1px solid var(--evo-border);
+}
+
+/* --- лента листов под итогами: плитка на каждый лист, клик открывает лист --- */
+:root[data-ui-variant="workbench"] .wb-cut-sheet-strip {
+  display: flex;
+  gap: 10px;
+  margin: 2px 0 14px;
+  padding: 2px 2px 6px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-strip:empty {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile {
+  display: grid;
+  flex: 0 0 260px;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 0;
+  border-radius: var(--evo-radius-lg);
+  background: var(--evo-surface-muted);
+  color: var(--evo-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile:hover {
+  background: color-mix(in srgb, var(--evo-primary) 6%, var(--evo-surface-muted));
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile[aria-current="true"] {
+  background: color-mix(in srgb, var(--evo-primary) 10%, var(--evo-surface));
+  box-shadow: 0 0 0 1.5px var(--evo-primary);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile:focus-visible {
+  outline: 2px solid var(--evo-primary);
+  outline-offset: 2px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__thumb {
+  display: flex;
+  width: 88px;
+  height: 60px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 5px;
+  background: var(--evo-surface);
+  box-shadow: inset 0 0 0 1px var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__thumb img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__body {
+  display: block;
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__body b {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__mat {
+  display: block;
+  overflow: hidden;
+  color: var(--evo-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__bar {
+  display: block;
+  height: 4px;
+  margin-top: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--evo-border);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--evo-text-secondary);
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__bar[data-level="high"] i {
+  background: #2f9e62;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__bar[data-level="low"] i {
+  background: #d9952b;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 5px;
+  color: var(--evo-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* лист, открытый из ленты, встаёт под липкие строки, а не под них */
+:root[data-ui-variant="workbench"] .cut-page-modern--wb-split .cut-sheet-preview-item {
+  scroll-margin-top: calc(var(--wb-cut-group-head, 104px) + 64px);
+}
+
+/* --- схема листа в плитке: лист на длинной стороне, детали — заливкой --- */
+:root[data-ui-variant="workbench"] .wb-cut-sheet-mini {
+  display: block;
+  width: 88px;
+  height: auto;
+  border-radius: 5px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-mini__bg {
+  fill: color-mix(in srgb, var(--evo-text) 7%, var(--evo-surface));
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-mini__hatch {
+  fill: color-mix(in srgb, var(--evo-text) 11%, var(--evo-surface));
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__mat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__mat > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .wb-cut-sheet-tile__swatch {
+  flex: 0 0 11px;
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(27, 34, 48, 0.25);
+}

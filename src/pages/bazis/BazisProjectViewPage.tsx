@@ -28,6 +28,7 @@ import { RevisionOrdersTab } from './RevisionOrdersTab';
 import { buildSubtreeSummaries, useRevisionData } from './useRevisionData';
 import { ViewerTree, type ViewerTreeHandle } from './ViewerTree';
 import { saveBazisCutFile, type BazisCutSaveHandle } from '../bazis-cut/bazisCutSaveFile';
+import { useOptionalUiVariant } from '../../ui-variant/UiVariantProvider';
 import {
   OperationalPageHeader,
   useOperationalUi,
@@ -38,6 +39,7 @@ const { Title, Text } = Typography;
 export const BazisProjectViewPage: React.FC = () => {
   const invalidate = useInvalidate();
   const isOperational = useOperationalUi();
+  const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
   const { bazisProjectId: bazisProjectIdParam } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [projectCard, setProjectCard] = useState<BazisProjectCard | null>(null);
@@ -361,6 +363,67 @@ export const BazisProjectViewPage: React.FC = () => {
     label: buildRevisionLabel(revision),
   }));
 
+  const projectNameControl = renaming ? (
+    <Space.Compact>
+      <Input
+        autoFocus
+        aria-label="Название Базис-проекта"
+        value={renameDraft}
+        style={{ width: 'min(420px, 48vw)', height: 40 }}
+        onChange={(event) => setRenameDraft(event.target.value)}
+        onPressEnter={() => void saveProjectName()}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') cancelRename();
+        }}
+      />
+      <Tooltip title="Сохранить">
+        <Button
+          aria-label="Сохранить название"
+          icon={<CheckOutlined />}
+          type="primary"
+          loading={renameSaving}
+          disabled={!renameDraft.trim()}
+          style={{ minWidth: 40, height: 40 }}
+          onClick={() => void saveProjectName()}
+        />
+      </Tooltip>
+      <Tooltip title="Отмена">
+        <Button
+          aria-label="Отменить редактирование"
+          icon={<CloseOutlined />}
+          disabled={renameSaving}
+          style={{ minWidth: 40, height: 40 }}
+          onClick={cancelRename}
+        />
+      </Tooltip>
+    </Space.Compact>
+  ) : (
+    <Space align="center" size={4}>
+      {isWorkbench ? <h1 className="wb-bz-proj__name">{projectCard.name}</h1> : (
+        <Title level={3} style={{ margin: 0 }}>
+          {projectCard.name}
+        </Title>
+      )}
+      {canManage ? (
+        <Tooltip title="Изменить название">
+          <Button
+            aria-label="Изменить название Базис-проекта"
+            type="text"
+            icon={<EditOutlined />}
+            style={{ width: 40, height: 40 }}
+            onClick={startRename}
+          />
+        </Tooltip>
+      ) : null}
+    </Space>
+  );
+  const erpProjectLink = (
+    <Link to={`/projects/show/${projectCard.projectId}`}>
+      {projectCard.projectName?.trim()
+        ? `ERP-проект: ${projectCard.projectName.trim()} · #${projectCard.projectId}`
+        : `ERP-проект #${projectCard.projectId}`}
+    </Link>
+  );
   const projectTitle = (
     <Space direction="vertical" size={4}>
       <Space align="center" size={12}>
@@ -369,73 +432,95 @@ export const BazisProjectViewPage: React.FC = () => {
             <Button size="small" icon={<ArrowLeftOutlined />}>К списку</Button>
           </Link>
         ) : null}
-        {renaming ? (
-          <Space.Compact>
-            <Input
-              autoFocus
-              aria-label="Название Базис-проекта"
-              value={renameDraft}
-              style={{ width: 'min(420px, 48vw)', height: 40 }}
-              onChange={(event) => setRenameDraft(event.target.value)}
-              onPressEnter={() => void saveProjectName()}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') cancelRename();
-              }}
-            />
-            <Tooltip title="Сохранить">
-              <Button
-                aria-label="Сохранить название"
-                icon={<CheckOutlined />}
-                type="primary"
-                loading={renameSaving}
-                disabled={!renameDraft.trim()}
-                style={{ minWidth: 40, height: 40 }}
-                onClick={() => void saveProjectName()}
-              />
-            </Tooltip>
-            <Tooltip title="Отмена">
-              <Button
-                aria-label="Отменить редактирование"
-                icon={<CloseOutlined />}
-                disabled={renameSaving}
-                style={{ minWidth: 40, height: 40 }}
-                onClick={cancelRename}
-              />
-            </Tooltip>
-          </Space.Compact>
-        ) : (
-          <Space align="center" size={4}>
-            <Title level={3} style={{ margin: 0 }}>
-              {projectCard.name}
-            </Title>
-            {canManage ? (
-              <Tooltip title="Изменить название">
-                <Button
-                  aria-label="Изменить название Базис-проекта"
-                  type="text"
-                  icon={<EditOutlined />}
-                  style={{ width: 40, height: 40 }}
-                  onClick={startRename}
-                />
-              </Tooltip>
-            ) : null}
-          </Space>
-        )}
+        {projectNameControl}
       </Space>
       {renameErrorText ? <Text type="danger">{renameErrorText}</Text> : null}
       <Space size={12} wrap>
-        <Link to={`/projects/show/${projectCard.projectId}`}>
-          {projectCard.projectName?.trim()
-            ? `ERP-проект: ${projectCard.projectName.trim()} · #${projectCard.projectId}`
-            : `ERP-проект #${projectCard.projectId}`}
-        </Link>
+        {erpProjectLink}
         {projectCard.bazisOrderNo?.trim() ? (
           <Text type="secondary">{`Заказ Базис: ${projectCard.bazisOrderNo.trim()}`}</Text>
         ) : null}
       </Space>
     </Space>
   );
-  const tabLabel = (label: string, count?: number | null) => isOperational ? (
+  const designEngineerControl = canManage ? (
+    <Space direction="vertical" size={2} style={{ width: 'min(420px, 100%)' }}>
+      <Select<number>
+        {...employeeSelectProps}
+        aria-label="Конструктор Базис-проекта"
+        allowClear
+        showSearch
+        optionFilterProp="label"
+        placeholder="Выберите сотрудника"
+        value={projectCard.designEngineerId ?? undefined}
+        loading={Boolean(employeeSelectProps.loading) || designEngineerSaving}
+        disabled={designEngineerSaving}
+        style={{ width: '100%', minHeight: isWorkbench ? undefined : 40 }}
+        onChange={(value) => void saveDesignEngineer(value)}
+      />
+      <DesignEngineerHint project={projectCard} />
+    </Space>
+  ) : (
+    <Space direction="vertical" size={2}>
+      <Text>{projectCard.designEngineerName?.trim() || projectCard.designEngineerXmlName?.trim() || 'Не указан'}</Text>
+      <DesignEngineerHint project={projectCard} />
+    </Space>
+  );
+  const revisionSelect = selectedRevision ? (
+    <Select<number>
+      aria-label="Ревизия Базис-проекта"
+      style={{ width: '100%', minWidth: 0 }}
+      value={selectedRevision.bazisRevisionId}
+      options={revisionOptions}
+      onChange={handleRevisionChange}
+    />
+  ) : null;
+  const workbenchHeader = isWorkbench ? (
+    <header className="wb-bz-proj__head">
+      <nav className="wb-bz-proj__crumbs" aria-label="Навигация">
+        <Link to="/bazis">Базис-проекты</Link>
+        <span aria-hidden="true">›</span>
+        <span aria-current="page">{projectCard.name}</span>
+      </nav>
+      <div className="wb-bz-proj__row">
+        <div className="wb-bz-proj__titles">
+          <div className="wb-bz-proj__title">
+            {projectNameControl}
+            {projectCard.linkedOrders.map((order) => (
+              <Link key={order.orderId} className="wb-pill wb-bz-proj__order" data-tone="ready" to={`/orders/show/${order.orderId}`}>
+                {`Связан с заказом ${order.orderName?.trim() || `#${order.orderId}`}`}
+                {order.orderDeleted ? ' (в корзине)' : ''}
+              </Link>
+            ))}
+          </div>
+          {renameErrorText ? <Text type="danger">{renameErrorText}</Text> : null}
+          <p className="wb-bz-proj__sub">
+            {erpProjectLink}
+            {projectCard.bazisOrderNo?.trim() ? <span>{`Заказ Базис: ${projectCard.bazisOrderNo.trim()}`}</span> : null}
+            {projectSummaryProductName ? <span>{projectSummaryProductName}</span> : null}
+            {selectedRevision?.summary.panels != null ? <span>{`панелей: ${selectedRevision.summary.panels}`}</span> : null}
+            {selectedRevision ? <span>{`импорт ${formatRevisionDate(selectedRevision.importedAt)}`}</span> : null}
+          </p>
+        </div>
+        <div className="wb-bz-proj__actions">
+          <div className="wb-bz-proj__field wb-bz-proj__field--revision">
+            <span className="wb-bz-proj__label">Ревизия</span>
+            {revisionSelect}
+          </div>
+          <div className="wb-bz-proj__field">
+            <span className="wb-bz-proj__label">Конструктор</span>
+            {designEngineerControl}
+          </div>
+        </div>
+      </div>
+    </header>
+  ) : null;
+  const tabLabel = (label: string, count?: number | null) => isWorkbench ? (
+    <span className="wb-bz-proj__tab">
+      {label}
+      {count != null ? <span className="wb-bz-proj__tab-count">{count}</span> : null}
+    </span>
+  ) : isOperational ? (
     <span className="bazis-project-tab-label">
       <span>{label}</span>
       {count != null ? <small>{count}</small> : null}
@@ -443,7 +528,8 @@ export const BazisProjectViewPage: React.FC = () => {
   ) : `${label}${count != null ? ` · ${count}` : ''}`;
 
   return (
-    <div className="bazis-project-workspace">
+    <div className={isWorkbench ? 'bazis-project-workspace wb-bz-proj' : 'bazis-project-workspace'}>
+      {workbenchHeader}
       {isOperational ? (
         <OperationalPageHeader
           breadcrumbs={(
@@ -515,20 +601,15 @@ export const BazisProjectViewPage: React.FC = () => {
                 : 'Ревизия не выбрана'}
             </Text>
           </div>
-        ) : projectTitle}
-        extra={selectedRevision ? (
+        ) : isWorkbench ? undefined : projectTitle}
+        extra={selectedRevision && !isWorkbench ? (
           <Space align="center" className="bazis-project-workspace__revision-select">
             <Text strong>Ревизия</Text>
-            <Select<number>
-              style={{ width: '100%', minWidth: 0 }}
-              value={selectedRevision.bazisRevisionId}
-              options={revisionOptions}
-              onChange={handleRevisionChange}
-            />
+            {revisionSelect}
           </Space>
         ) : null}
       >
-        <Descriptions
+        {isWorkbench ? null : <Descriptions
           size="small"
           column={{ xs: 1, sm: 1, md: 2, lg: 3, xl: 3, xxl: 3 }}
           style={{ marginBottom: 16 }}
@@ -537,31 +618,9 @@ export const BazisProjectViewPage: React.FC = () => {
             <Descriptions.Item label="Изделие">{projectSummaryProductName}</Descriptions.Item>
           ) : null}
           <Descriptions.Item label="Конструктор">
-            {canManage ? (
-              <Space direction="vertical" size={2} style={{ width: 'min(420px, 100%)' }}>
-                <Select<number>
-                  {...employeeSelectProps}
-                  aria-label="Конструктор Базис-проекта"
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                  placeholder="Выберите сотрудника"
-                  value={projectCard.designEngineerId ?? undefined}
-                  loading={Boolean(employeeSelectProps.loading) || designEngineerSaving}
-                  disabled={designEngineerSaving}
-                  style={{ width: '100%', minHeight: 40 }}
-                  onChange={(value) => void saveDesignEngineer(value)}
-                />
-                <DesignEngineerHint project={projectCard} />
-              </Space>
-            ) : (
-              <Space direction="vertical" size={2}>
-                <Text>{projectCard.designEngineerName?.trim() || projectCard.designEngineerXmlName?.trim() || 'Не указан'}</Text>
-                <DesignEngineerHint project={projectCard} />
-              </Space>
-            )}
+            {designEngineerControl}
           </Descriptions.Item>
-        </Descriptions>
+        </Descriptions>}
         {projectCard.revisions.length === 0 || !selectedRevision ? (
           <Empty description="У проекта пока нет ревизий" />
         ) : (
