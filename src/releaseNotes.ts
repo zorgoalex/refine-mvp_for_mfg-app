@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-27", title: "NewLine: «Сохранить и создать ещё»",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "В NewLine в форме создания заказа — кнопка «Сохранить и создать ещё»: заказ сохраняется, в сообщении ссылка «Открыть», а форма очищается для следующего заказа.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-27", title: "Несколько поставщиков и производитель у материалов",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

@@ -146,6 +146,8 @@ interface OrderFormProps {
   mode: OrderFormMode;
   orderId?: number;
   onSaveSuccess?: (orderId: number) => void;
+  /** «NewLine», create form: «Сохранить и создать ещё» — after the save the caller opens a clean form. */
+  onSaveAndCreateAnother?: (orderId: number) => void;
   onCancel?: () => void;
 }
 
@@ -242,6 +244,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   mode,
   orderId,
   onSaveSuccess,
+  onSaveAndCreateAnother,
   onCancel,
 }) => {
   const ordinaryReadActive = useOrderLifecycleReadActive();
@@ -1551,6 +1554,17 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const { show } = useNavigation();
 
   // Handle save
+  // «Сохранить и создать ещё»: the same save, then the caller's «another» callback instead of onSaveSuccess
+  const createAnotherRef = useRef(false);
+  const handleSaveAndCreateAnother = async () => {
+    createAnotherRef.current = true;
+    try {
+      await handleSave();
+    } finally {
+      createAnotherRef.current = false;
+    }
+  };
+
   const handleSave = async (): Promise<boolean> => {
     console.log('[OrderForm] ========== handleSave STARTED ==========');
     console.log('[OrderForm] handleSave - mode:', mode);
@@ -1688,7 +1702,9 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         }
 
         console.log('[OrderForm] handleSave - onSaveSuccess callback exists?', !!onSaveSuccess);
-        if (onSaveSuccess) {
+        if (createAnotherRef.current && onSaveAndCreateAnother) {
+          onSaveAndCreateAnother(savedOrderId);
+        } else if (onSaveSuccess) {
           console.log('[OrderForm] handleSave - calling onSaveSuccess with orderId:', savedOrderId);
           onSaveSuccess(savedOrderId);
           console.log('[OrderForm] handleSave - onSaveSuccess called successfully');
@@ -2608,6 +2624,9 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
               dirty={formHasUnsavedChanges}
               saving={isSaving}
               onSave={() => { void handleSave(); }}
+              onSaveAndCreateAnother={mode === 'create' && onSaveAndCreateAnother && !bazisDraft
+                ? () => { void handleSaveAndCreateAnother(); }
+                : undefined}
               onCancel={handleCancel}
             />
           </>

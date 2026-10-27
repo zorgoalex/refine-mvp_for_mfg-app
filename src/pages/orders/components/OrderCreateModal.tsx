@@ -2,7 +2,7 @@
 // Modal window for creating a new order with transition to edit mode after save
 
 import React, { useEffect, useState } from 'react';
-import { Button, Modal, Space, Typography } from 'antd';
+import { Button, Modal, Space, Typography, message } from 'antd';
 import { ExpandOutlined, MinusOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { OrderForm } from './OrderForm';
@@ -59,6 +59,24 @@ export const OrderCreateModal: React.FC<OrderCreateModalProps> = ({ open, onClos
     }, 100);
 
     console.log('[OrderCreateModal] ========== handleSaveSuccess ENDED ==========');
+  };
+
+  // «NewLine»: «Сохранить и создать ещё» — the saved order stays reachable from the message, the form starts over
+  const [formGeneration, setFormGeneration] = useState(0);
+  const handleSaveAndCreateAnother = (orderId: number) => {
+    message.success({
+      content: (
+        <span>
+          Заказ сохранён.{' '}
+          <Typography.Link onClick={() => navigate(`/orders/edit/${orderId}`)}>Открыть</Typography.Link>
+        </span>
+      ),
+      duration: 8,
+    });
+    setTimeout(() => {
+      getOrderDraftStore(NEW_ORDER_KEY).getState().reset();
+      setFormGeneration((value) => value + 1);
+    }, 0);
   };
 
   const closeAndDiscard = () => {
@@ -119,8 +137,10 @@ export const OrderCreateModal: React.FC<OrderCreateModalProps> = ({ open, onClos
       >
         {isReady && (
           <OrderForm
+            key={formGeneration}
             mode="create"
             onSaveSuccess={handleSaveSuccess}
+            onSaveAndCreateAnother={handleSaveAndCreateAnother}
             onCancel={closeAndDiscard}
           />
         )}

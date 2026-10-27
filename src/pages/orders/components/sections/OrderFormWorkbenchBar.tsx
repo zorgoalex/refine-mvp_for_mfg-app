@@ -1,7 +1,7 @@
 // «NewLine»: нижняя панель формы заказа — состояние, итог и те же «Закрыть / Сохранить», что в шапке.
 import React, { useMemo } from 'react';
 import { Button } from 'antd';
-import { CloseOutlined, SaveOutlined } from '@ant-design/icons';
+import { CloseOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
@@ -16,10 +16,12 @@ interface Props {
   dirty: boolean;
   saving: boolean;
   onSave: () => void;
+  /** Create form only: save, then a clean form for the next order. */
+  onSaveAndCreateAnother?: () => void;
   onCancel: () => void;
 }
 
-export const OrderFormWorkbenchBar: React.FC<Props> = ({ dirty, saving, onSave, onCancel }) => {
+export const OrderFormWorkbenchBar: React.FC<Props> = ({ dirty, saving, onSave, onSaveAndCreateAnother, onCancel }) => {
   const { header, details, payments, catalogLines } = useOrderFormStore();
   const totals = useMemo(
     () => orderFormTotals({ header, details, payments, catalogLines }),
@@ -39,6 +41,11 @@ export const OrderFormWorkbenchBar: React.FC<Props> = ({ dirty, saving, onSave, 
       ) : null}
       <span className="wb-form-savebar__spacer" />
       <Button icon={<CloseOutlined />} onClick={onCancel} disabled={saving}>Закрыть</Button>
+      {onSaveAndCreateAnother ? (
+        <Button icon={<PlusOutlined />} onClick={onSaveAndCreateAnother} loading={saving} disabled={!dirty}>
+          Сохранить и создать ещё
+        </Button>
+      ) : null}
       <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={saving} disabled={!dirty}>
         Сохранить
         <kbd className="wb-form-savebar__kbd">Ctrl S</kbd>
