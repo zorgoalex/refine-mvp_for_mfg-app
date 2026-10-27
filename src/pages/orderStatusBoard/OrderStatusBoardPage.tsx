@@ -1,6 +1,13 @@
 import { Popover, Tooltip } from '../../ui/tooltipDelay';
 import { MdfProductionReturnDialog, isMdfBackwardMove, type MdfReturnIntent } from './MdfProductionReturnDialog';
 import { keepsShownMdfBoard, mdfShownDataKey, resetMdfBoardForNewSession } from './mdfBoardSessionData';
+import {
+  orderStatusOptionColumns,
+  reuseIfSameData,
+  reuseUnchangedCncColumns,
+  reuseUnchangedOrderBoardColumns,
+  reuseUnchangedOrderEntries,
+} from './stableBoardData';
 import { useSessionGenerationReset } from './useSessionGenerationReset';
 import React, {
   lazy,
@@ -959,8 +966,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               cncOrderSearchTodayRef.current = null;
               setCncToday(null);
               setCncOrderSearchToday(null);
-              cncManualMovesRef.current = manualMoves;
-              setCncManualMoves(manualMoves);
+              // unchanged moves keep their object (every card depends on them)
+              cncManualMovesRef.current = reuseIfSameData(cncManualMovesRef.current, manualMoves);
+              setCncManualMoves(cncManualMovesRef.current);
               if (!options.preserveLoading) setCncOrderBoard(null);
               boardRef.current = null;
               setBoard(null);
@@ -1034,8 +1042,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             setCncToday(response);
             setCncOrderSearchToday(response);
             setCncOriginalBoard(null);
-            cncManualMovesRef.current = manualMoves;
-            setCncManualMoves(manualMoves);
+            // unchanged moves keep their object (every card depends on them)
+            cncManualMovesRef.current = reuseIfSameData(cncManualMovesRef.current, manualMoves);
+            setCncManualMoves(cncManualMovesRef.current);
             if (!options.preserveLoading) setCncOrderBoard(null);
             boardRef.current = null;
             setBoard(null);
@@ -1570,12 +1579,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncOrderFilterKey = cncOrderFilters.join('\u0000');
   const cncDisplayPeriod = viewState.cncOrderSearchPeriod ?? defaultCncOrderSearchPeriod;
   const cncPlannedTodayDate = dayjs().format('YYYY-MM-DD');
-  const cncPeriodColumns = useMemo(
-    () => cncOriginalView
+  // A refresh keeps the objects of unchanged cards (and the inputs every card shares), so only changed cards
+  // re-render instead of the whole board.
+  const stableCncPeriodColumnsRef = useRef<CncTelegramTodayColumn[] | null>(null);
+  const cncPeriodColumns = useMemo(() => {
+    const columns = cncOriginalView
       ? buildCncOriginalSourceColumns(cncOriginalBoard)
-      : cncToday?.columns ?? [],
-    [cncOriginalBoard, cncOriginalView, cncToday?.columns],
-  );
+      : cncToday?.columns ?? [];
+    const stable = reuseUnchangedCncColumns(stableCncPeriodColumnsRef.current, columns);
+    stableCncPeriodColumnsRef.current = stable;
+    return stable;
+  }, [cncOriginalBoard, cncOriginalView, cncToday?.columns]);
   const cncOrderFilterOptions = useMemo(
     () =>
       buildCncOrderFilterOptions(cncPeriodColumns).map((orderName) => ({
@@ -1594,10 +1608,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     () => cncOriginalView ? [] : cncToday?.historicalBathReadiness ?? [],
     [cncOriginalView, cncToday?.historicalBathReadiness],
   );
-  const cncOrderBoardColumns = useMemo(
-    () => filterBoardColumns('production', cncOrderBoard?.columns ?? [], true),
-    [cncOrderBoard?.columns],
-  );
+  const stableCncOrderBoardColumnsRef = useRef<OrderStatusBoardColumn[] | null>(null);
+  const cncOrderBoardColumns = useMemo(() => {
+    const stable = reuseUnchangedOrderBoardColumns(stableCncOrderBoardColumnsRef.current,
+      filterBoardColumns('production', cncOrderBoard?.columns ?? [], true));
+    stableCncOrderBoardColumnsRef.current = stable;
+    return stable;
+  }, [cncOrderBoard?.columns]);
   const cncOrderStatusCards = useMemo(
     () => buildCncOrderStatusCards(cncOrderBoardColumns, cncOrderIds),
     [cncOrderBoardColumns, cncOrderIds],
@@ -1875,14 +1892,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       mdfBoardHiddenStatusesSetting,
     ],
   );
-  const cncOriginalCurrentLocations = useMemo(
-    () => buildCncOriginalCurrentLocations(
+  // passed to every card: an equal map keeps its object (a new `{}` would re-render the whole board)
+  const stableCncCurrentLocationsRef = useRef<CncOriginalCurrentLocationMap | null>(null);
+  const cncOriginalCurrentLocations = useMemo(() => {
+    const locations = reuseIfSameData(stableCncCurrentLocationsRef.current, buildCncOriginalCurrentLocations(
       cncOriginalBoard,
       cncOriginalCurrentRuleColumns,
       cncManualMoves,
-    ),
-    [cncManualMoves, cncOriginalBoard, cncOriginalCurrentRuleColumns],
-  );
+    ));
+    stableCncCurrentLocationsRef.current = locations;
+    return locations;
+  }, [cncManualMoves, cncOriginalBoard, cncOriginalCurrentRuleColumns]);
   const cncOriginalOrderCreatedAt = useMemo(
     () => buildCncOriginalOrderCreatedAt(cncOriginalBoard),
     [cncOriginalBoard],
@@ -1987,8 +2007,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
           !cancelled
           && cncAuxiliaryRefreshRevisionRef.current === requestRevision
         ) {
-          cncManualMovesRef.current = moves;
-          setCncManualMoves(moves);
+          // unchanged moves keep their object (every card depends on them)
+          cncManualMovesRef.current = reuseIfSameData(cncManualMovesRef.current, moves);
+          setCncManualMoves(cncManualMovesRef.current);
         }
       } catch (error) {
         if (!cancelled && !warned) {
@@ -2096,6 +2117,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     setActiveCncDetailedDetail(target);
   }, []);
 
+  // Cards keep their rendered content while their data is unchanged; the move they call must still act on the
+  // current board (mode, command tokens, snapshot) — a stable entry point to the latest handler.
+  const moveCncCardRef = useRef<typeof moveCncCard | null>(null);
+  const stableMoveCncCard = useCallback(
+    (...args: Parameters<typeof moveCncCard>) => moveCncCardRef.current?.(...args),
+    [],
+  ) as typeof moveCncCard;
   const moveCncCard = useCallback((
     kind: CncManualCardKind,
     cardId: string,
@@ -2254,8 +2282,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 cncStrongRefreshInFlightRef.current
                 || cncAuxiliaryRefreshRevisionRef.current !== moveRefreshRevision
               ) return;
-              cncManualMovesRef.current = moves;
-              setCncManualMoves(moves);
+              // unchanged moves keep their object (every card depends on them)
+              cncManualMovesRef.current = reuseIfSameData(cncManualMovesRef.current, moves);
+              setCncManualMoves(cncManualMovesRef.current);
             })
             .catch(() => undefined);
         }
@@ -2268,6 +2297,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     fetchInitial,
     replacePending,
   ]);
+  moveCncCardRef.current = moveCncCard;
 
   const syncCncBoardScrollTopButton = useCallback((viewportOverride?: HTMLElement | null) => {
     const viewport = viewportOverride ?? boardViewportRef.current;
@@ -3183,7 +3213,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                   : undefined}
                 onOpenOrder={(orderId) => navigate(`/orders/show/${orderId}`)}
                 onOpenBazisCut={(setId) => navigate(`/bazis-cut/${setId}`)}
-                onMove={moveCncCard}
+                onMove={stableMoveCncCard}
                 showFinancials={canViewFinancials}
               />
             )
@@ -3848,16 +3878,26 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     () => buildCncOrderMissingDetails(orderCards, readinessColumns, historicalReadinessSources),
     [orderCards, readinessColumns, historicalReadinessSources],
   );
-  const currentOrderDisplayCards = useMemo(
-    () => splitCncOrderCardsByManualColumn(
+  // An unchanged order keeps its entry (card, readiness, missing details): only changed order cards re-render.
+  const stableCurrentOrderDisplayCardsRef = useRef<ReturnType<typeof splitCncOrderCardsByManualColumn> | null>(null);
+  const currentOrderDisplayCards = useMemo(() => {
+    const split = reuseUnchangedOrderEntries(stableCurrentOrderDisplayCardsRef.current, splitCncOrderCardsByManualColumn(
       orderCards,
       orderReadinessByOrderId,
       manualMoves,
       orderSort,
       orderMissingDetailsByOrderId,
-    ),
-    [manualMoves, orderCards, orderMissingDetailsByOrderId, orderReadinessByOrderId, orderSort],
-  );
+    ));
+    stableCurrentOrderDisplayCardsRef.current = split;
+    return split;
+  }, [manualMoves, orderCards, orderMissingDetailsByOrderId, orderReadinessByOrderId, orderSort]);
+  // order cards need the columns only as status options (not their cards)
+  const stableOrderStatusOptionsRef = useRef<OrderStatusBoardColumn[] | null>(null);
+  const orderStatusOptions = useMemo(() => {
+    const options = orderStatusOptionColumns(stableOrderStatusOptionsRef.current, orderStatusColumns);
+    stableOrderStatusOptionsRef.current = options;
+    return options;
+  }, [orderStatusColumns]);
   const orderDisplayCards = useMemo(
     () => originalMode
       ? splitCncOrderCardsByManualColumn(
@@ -3879,6 +3919,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       originalOrderCreatedAt,
     ],
   );
+  const stableCurrentOrderLocationsRef = useRef<CncOriginalCurrentLocationMap | null>(null);
   const currentOrderLocations = useMemo(() => {
     const locations: CncOriginalCurrentLocationMap = {};
     for (const columnKey of CNC_ORDER_DISPLAY_COLUMN_KEYS) {
@@ -3887,7 +3928,9 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
           cncColumnTitleByKey(columnKey);
       }
     }
-    return locations;
+    const stable = reuseIfSameData(stableCurrentOrderLocationsRef.current, locations);
+    stableCurrentOrderLocationsRef.current = stable;
+    return stable;
   }, [currentOrderDisplayCards]);
   const manualDisplayColumns = useMemo(
     () => applyCncManualMovesToColumns(columns, originalMode ? {} : manualMoves, {
@@ -4215,18 +4258,23 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         )}
                         fallbackLabel={card.orderName || String(card.orderId)}
                         contentIdentity={card}
-                        renderDependencies={[
+                        renderDependencies={cncOrderCardRenderDependencies({
+                          orderMovesEnabled,
+                          pending: pendingOrderIds.has(card.orderId),
                           readiness,
                           missingDetails,
                           summaryOnly,
-                          mutedOrderIds.has(card.orderId),
-                          orderStatusColumns,
+                          muted: mutedOrderIds.has(card.orderId),
+                          orderStatusOptions,
                           relationContext,
                           relationsEnabled,
-                          Boolean(onSelectOrderHistory),
+                          historySelectable: Boolean(onSelectOrderHistory),
                           originalMode,
                           currentOrderLocations,
-                        ]}
+                          cardDisplayMode,
+                          detailedBathActive,
+                          showFinancials,
+                        })}
                       >
                       <CncManualCardFrame
                         kind="order"
@@ -4249,7 +4297,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         board="production"
                         card={card}
                         sourceColumn={column.key}
-                        allColumns={orderStatusColumns}
+                        allColumns={orderStatusOptions}
                         finePointer={false}
                         mutationsEnabled={false}
                         pending={false}
@@ -4698,16 +4746,46 @@ const CncDeferredCardComponent: React.FC<CncDeferredCardProps> = ({
   );
 };
 
-const CncDeferredCard = memo(
-  CncDeferredCardComponent,
-  (previous, next) =>
-    previous.defer === next.defer
+/** Everything an order card renders from besides its own data: each input is a dependency, so the card is
+ * re-rendered when any of them changes (and kept as is otherwise). */
+export function cncOrderCardRenderDependencies(input: {
+  orderMovesEnabled: boolean;
+  pending: boolean;
+  readiness: unknown;
+  missingDetails: unknown;
+  summaryOnly: boolean;
+  muted: boolean;
+  orderStatusOptions: unknown;
+  relationContext: unknown;
+  relationsEnabled: boolean;
+  historySelectable: boolean;
+  originalMode: boolean;
+  currentOrderLocations: unknown;
+  cardDisplayMode: CncCardDisplayMode;
+  detailedBathActive: boolean;
+  showFinancials: boolean;
+}): unknown[] {
+  return [input.orderMovesEnabled, input.pending, input.readiness, input.missingDetails, input.summaryOnly, input.muted,
+    input.orderStatusOptions, input.relationContext, input.relationsEnabled, input.historySelectable,
+    input.originalMode, input.currentOrderLocations, input.cardDisplayMode, input.detailedBathActive,
+    input.showFinancials];
+}
+
+/** A card re-renders only when its own data object or one of its own dependencies changed. */
+export function cncDeferredCardPropsEqual(
+  previous: { defer: boolean; fallbackLabel: string; contentIdentity: unknown; renderDependencies: readonly unknown[] },
+  next: { defer: boolean; fallbackLabel: string; contentIdentity: unknown; renderDependencies: readonly unknown[] },
+): boolean {
+  return previous.defer === next.defer
     && previous.fallbackLabel === next.fallbackLabel
     && previous.contentIdentity === next.contentIdentity
     && previous.renderDependencies.length === next.renderDependencies.length
-    && previous.renderDependencies.every(
-      (dependency, index) => dependency === next.renderDependencies[index],
-    ),
+    && previous.renderDependencies.every((dependency, index) => dependency === next.renderDependencies[index]);
+}
+
+const CncDeferredCard = memo(
+  CncDeferredCardComponent,
+  cncDeferredCardPropsEqual,
 );
 
 const CncColumnCardPlaceholders: React.FC<{ displayMode: CncCardDisplayMode }> = ({
