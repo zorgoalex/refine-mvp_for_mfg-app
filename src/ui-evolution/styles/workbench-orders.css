@@ -2765,3 +2765,60 @@
   color: var(--evo-text-secondary);
   cursor: default;
 }
+
+/* список заказов: быстрый просмотр справа (мокап 03) */
+:root[data-ui-variant="workbench"] .orders-table .wb-order-row--previewed > td {
+  background: var(--evo-primary-soft) !important;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-quick .ant-drawer-content-wrapper {
+  box-shadow: -8px 0 24px rgba(16, 24, 40, 0.08);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-quick__title {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-quick__facts {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 10px 12px;
+  margin: 0;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-quick__facts dt {
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-quick__facts dd {
+  margin: 0;
+  color: var(--evo-text);
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-quick__facts dd[data-tone="danger"] {
+  color: var(--evo-danger);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-quick__facts dd[data-tone="warning"] {
+  color: var(--evo-warning);
+}
+
+:root[data-ui-variant="workbench"] .wb-order-quick__key {
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  font-size: 11px;
+  opacity: 0.8;
+}

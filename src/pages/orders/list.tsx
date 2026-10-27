@@ -126,6 +126,7 @@ import { useOrderLifecycleCohort } from "../../performance/orderLifecycleCohortS
 import { useOptionalUiVariant } from "../../ui-variant/UiVariantProvider";
 import { groupOrderRows, ORDER_LIST_GROUPINGS, ORDER_LIST_PERIODS, orderListPeriodOf, orderListPeriodRange, type OrderListPeriod, orderDeadlineHint, orderListWorkbenchDefaultOrder, orderStatusTone, paymentStatusTone, type OrderListGrouping } from "./orderListWorkbench";
 import { flattenOrderGroups, isOrderGroupRow, withGroupHeaderColumns } from "./orderListGroupedTable";
+import { WorkbenchOrderQuickView } from "./WorkbenchOrderQuickView";
 import "./list.css";
 
 const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
@@ -353,7 +354,9 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   });
 
   const invalidate = useInvalidate();
-  const { show } = useNavigation();
+  const { show, edit } = useNavigation();
+  // «NewLine»: быстрый просмотр заказа справа по клику на строку (мокап 03)
+  const [quickViewRow, setQuickViewRow] = useState<Record<string, unknown> | null>(null);
   const deviceTier = useDeviceTier();
   const isMobile = deviceTier === 'phone';
   const isTablet = isTabletTier(deviceTier);
@@ -1605,6 +1608,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     ? flattenOrderGroups(groupOrderRows((tableProps.dataSource ?? []) as any[], listGrouping))
     : null;
   const groupedListColumns = listGroupingActive ? withGroupHeaderColumns(visibleOrderListColumns as any) : null;
+  const quickViewEnabled = isWorkbench && !isMobile && !isTablet;
 
   return (
     <>
@@ -1996,9 +2000,20 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             scroll={{ x: "max-content", y: 600 }}
             showSorterTooltip={{ mouseEnterDelay: 1 }}
             rowClassName={(record: any) =>
-              isOrderGroupRow(record) ? "wb-order-group" : record.order_id === highlightedOrderId ? "highlighted-row" : ""
+              isOrderGroupRow(record)
+                ? "wb-order-group"
+                : [
+                    record.order_id === highlightedOrderId ? "highlighted-row" : "",
+                    quickViewRow && record.order_id === quickViewRow.order_id ? "wb-order-row--previewed" : "",
+                  ].filter(Boolean).join(" ")
             }
             onRow={(record: any) => ({
+              onClick: (event: React.MouseEvent<HTMLElement>) => {
+                if (!quickViewEnabled || isOrderGroupRow(record)) return;
+                const target = event.target as HTMLElement | null;
+                if (target?.closest('button, a, input, label, .ant-checkbox-wrapper, .ant-select, .ant-dropdown-trigger')) return;
+                setQuickViewRow(record);
+              },
               onDoubleClick: () => {
                 if (isOrderGroupRow(record)) return;
                 show("orders_view", record.order_id, "push");
@@ -2009,6 +2024,17 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           )}
         </OrderListProgressiveSurface>
       </List>
+
+      {quickViewEnabled ? (
+        <WorkbenchOrderQuickView
+          row={quickViewRow}
+          showFinancials={canViewFinancials}
+          canEdit={Boolean(canUpdateOrders)}
+          onClose={() => setQuickViewRow(null)}
+          onOpen={(orderId) => { setQuickViewRow(null); show("orders_view", orderId, "push"); }}
+          onEdit={(orderId) => { setQuickViewRow(null); edit("orders_view", orderId, "push"); }}
+        />
+      ) : null}
 
       <OrderLifecycleReadSurface active={createModalOpen}>
         <OrderCreateModal

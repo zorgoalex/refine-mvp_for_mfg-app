@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-27", title: "NewLine: быстрый просмотр заказа в списке",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "В NewLine клик по строке списка заказов открывает справа быстрый просмотр: статус и оплата, клиент, срок, суммы (при праве на финансы), состав, материал, плёнка, примечание. «Открыть» (Ctrl+Enter) — карточка, «Изменить» (E) — форма; двойной клик по-прежнему открывает карточку.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-27", title: "NewLine: список заказов — группировка и периоды",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
