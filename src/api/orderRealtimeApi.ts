@@ -11,6 +11,8 @@ export interface OrderDetailLiveStateItem {
 
 export interface OrderDetailLiveStateSnapshot {
   orderId: number;
+  /** orders.version at the snapshot; null from a backend that does not send it yet. */
+  orderVersion: number | null;
   streamEnabled: boolean;
   streamCursor: string;
   cutRefsAccess: 'allowed' | 'denied';
@@ -101,6 +103,9 @@ function parseOrderDetailLiveStateSnapshot(
 
   return {
     orderId: expectedOrderId,
+    orderVersion: Number.isSafeInteger(value.orderVersion) && (value.orderVersion as number) >= 0
+      ? value.orderVersion as number
+      : null,
     streamEnabled: value.streamEnabled,
     streamCursor: value.streamCursor,
     cutRefsAccess: value.cutRefsAccess,

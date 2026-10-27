@@ -27,6 +27,7 @@ interface OrderScopeRow extends QueryResultRow {
 }
 
 interface SnapshotRow extends QueryResultRow {
+  order_version: string | number;
   commit_sequence: string | number;
   detail_status_revision: string | number;
   cut_refs_revision: string | number;
@@ -109,6 +110,7 @@ export class PgOrderRealtimeReader {
   }
 
   async loadSnapshot(orderId: number, cutRefsAllowed: boolean): Promise<{
+    orderVersion: number;
     commitSequence: number;
     detailStatusRevision: number;
     cutRefsRevision: number;
@@ -122,6 +124,7 @@ export class PgOrderRealtimeReader {
     if (!row) throw new ApiError(404, 'ORDER_NOT_FOUND', 'Заказ не найден', { orderId });
 
     return {
+      orderVersion: toSafeNumber(row.order_version),
       commitSequence: toSafeNumber(row.commit_sequence),
       detailStatusRevision: toSafeNumber(row.detail_status_revision),
       cutRefsRevision: toSafeNumber(row.cut_refs_revision),
@@ -181,6 +184,7 @@ export class PgOrderRealtimeReader {
 const SNAPSHOT_STATUS_SQL = `
 WITH stream_state AS (
   SELECT o.order_id,
+         o.version AS order_version,
          COALESCE(s.commit_sequence, 0) AS commit_sequence,
          COALESCE(s.detail_status_revision, 0) AS detail_status_revision,
          COALESCE(s.cut_refs_revision, 0) AS cut_refs_revision
@@ -193,7 +197,7 @@ detail_state AS (
   FROM order_details d
   WHERE d.order_id = $1 AND d.delete_flag = false
 )
-SELECT s.commit_sequence, s.detail_status_revision, s.cut_refs_revision,
+SELECT s.commit_sequence, s.detail_status_revision, s.cut_refs_revision, s.order_version,
        COALESCE(
          jsonb_agg(
            jsonb_build_object(
@@ -205,12 +209,13 @@ SELECT s.commit_sequence, s.detail_status_revision, s.cut_refs_revision,
        ) AS details
 FROM stream_state s
 LEFT JOIN detail_state d ON true
-GROUP BY s.commit_sequence, s.detail_status_revision, s.cut_refs_revision
+GROUP BY s.commit_sequence, s.detail_status_revision, s.cut_refs_revision, s.order_version
 `;
 
 const SNAPSHOT_WITH_CUT_SQL = `
 WITH stream_state AS (
   SELECT o.order_id,
+         o.version AS order_version,
          COALESCE(s.commit_sequence, 0) AS commit_sequence,
          COALESCE(s.detail_status_revision, 0) AS detail_status_revision,
          COALESCE(s.cut_refs_revision, 0) AS cut_refs_revision
@@ -278,7 +283,7 @@ detail_state AS (
     ON bath.order_detail_id = d.detail_id AND bath.is_vacuum = true AND bath.rn = 1
   WHERE d.order_id = $1 AND d.delete_flag = false
 )
-SELECT s.commit_sequence, s.detail_status_revision, s.cut_refs_revision,
+SELECT s.commit_sequence, s.detail_status_revision, s.cut_refs_revision, s.order_version,
        COALESCE(
          jsonb_agg(
            jsonb_build_object(
@@ -312,7 +317,7 @@ SELECT s.commit_sequence, s.detail_status_revision, s.cut_refs_revision,
        ) AS details
 FROM stream_state s
 LEFT JOIN detail_state d ON true
-GROUP BY s.commit_sequence, s.detail_status_revision, s.cut_refs_revision
+GROUP BY s.commit_sequence, s.detail_status_revision, s.cut_refs_revision, s.order_version
 `;
 
 const REPLAY_STATUS_SQL = `

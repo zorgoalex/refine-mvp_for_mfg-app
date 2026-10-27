@@ -36,6 +36,9 @@ export interface Order {
   production_status_name?: string | null;
   production_status_from_details_enabled?: boolean;
   passed_production_status_codes?: string[];
+  /** «Переделка»: current production round (1 = original run) and the highest used. */
+  production_round?: number;
+  last_round_no?: number;
 
   // Financial fields
   total_amount?: number | null;
@@ -177,6 +180,8 @@ export interface OrderDetail {
   priority: number;
   production_status_id?: number | null;
   production_status_name?: string | null;
+  /** «Переделка»: current production round of the detail (read-only, backend read). */
+  production_round?: number;
   joint_order_id?: number | null;
 
   // File links

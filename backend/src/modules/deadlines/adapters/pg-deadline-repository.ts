@@ -1953,6 +1953,10 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
           trigger,
           workerId,
           schedulerRunId,
+          // «Переделка» 1.1 §6.3: a system reconciliation names its actor, initiator and correlation.
+          ...(typeof payload.actor === 'string' ? { actor: payload.actor } : {}),
+          ...(typeof payload.initiatorUserId === 'string' ? { initiatorUserId: payload.initiatorUserId } : {}),
+          ...(typeof payload.correlationId === 'string' ? { correlationId: payload.correlationId } : {}),
         }),
       ],
     );
@@ -2008,6 +2012,10 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
           workerId,
           schedulerRunId,
           source,
+          // «Переделка» 1.1 §6.3: a system reconciliation names its actor, initiator and correlation.
+          ...(typeof payload.actor === 'string' ? { actor: payload.actor } : {}),
+          ...(typeof payload.initiatorUserId === 'string' ? { initiatorUserId: payload.initiatorUserId } : {}),
+          ...(typeof payload.correlationId === 'string' ? { correlationId: payload.correlationId } : {}),
         }),
         `deadline-event:${event.deadlineEventId}:outbox`,
       ],

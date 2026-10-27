@@ -35,6 +35,22 @@ describe('orderRealtimeApi', () => {
     expect(new Headers(options?.headers).get('If-None-Match')).toBe('"state-0"');
   });
 
+  it('reads the order version of the snapshot; an older backend without it gives null', async () => {
+    const body = (extra: Record<string, unknown>) => new Response(JSON.stringify({
+      orderId: 42, streamEnabled: true, streamCursor: 'c', cutRefsAccess: 'denied', details: [], ...extra,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    vi.spyOn(httpClient, 'raw')
+      .mockResolvedValueOnce(body({ orderVersion: 7 }))
+      .mockResolvedValueOnce(body({}))
+      .mockResolvedValueOnce(body({ orderVersion: -1 }));
+    const versions = [];
+    for (let i = 0; i < 3; i += 1) {
+      const result = await orderRealtimeApi.getDetailLiveState(42, {});
+      versions.push(result.status === 200 ? result.snapshot?.orderVersion : 'none');
+    }
+    expect(versions).toEqual([7, null, null]);
+  });
+
   it('accepts 304 without reading a body', async () => {
     vi.spyOn(httpClient, 'raw').mockResolvedValue(new Response(null, {
       status: 304,

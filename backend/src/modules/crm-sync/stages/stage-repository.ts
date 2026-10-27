@@ -86,8 +86,13 @@ export class StageRepository {
   ): Promise<StageOrder | null> {
     const { rows } = await client.query<StageOrder>(
       `SELECT o.order_id::text,o.order_name,o.order_status_id,o.order_kind,o.delete_flag,o.client_id::text,o.version,
+      s.order_status_code,
+      CASE WHEN s.order_status_code='rework'
+        THEN (SELECT st.order_status_id FROM order_statuses st WHERE st.order_status_code='legacy_4')
+        ELSE o.order_status_id END AS stage_status_id,
       m.bitrix_id,m.status AS mapping_status,m.source_system,r.bitrix_deal_id AS request_deal,r.linked_order_id::text,r.state AS request_state
-      FROM orders o LEFT JOIN crm_sync_mapping m ON m.entity_type='order' AND m.erp_id=o.order_id::text AND m.bitrix_object='deal'
+      FROM orders o LEFT JOIN order_statuses s ON s.order_status_id=o.order_status_id
+      LEFT JOIN crm_sync_mapping m ON m.entity_type='order' AND m.erp_id=o.order_id::text AND m.bitrix_object='deal'
       LEFT JOIN LATERAL (SELECT bitrix_deal_id,linked_order_id,state FROM bitrix24_incoming_request WHERE linked_order_id=o.order_id AND bitrix_deal_id=m.bitrix_id LIMIT 1) r ON true
       WHERE o.order_id=$1`,
       [id]

@@ -44,6 +44,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('real BASIS creation
       'cut_result_board_projection','cut_result_placement','cut_result_sheet_map']) {
       await db.query(`CREATE TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
     }
+    // CREATE TABLE AS drops defaults; order_details.production_round is NOT NULL DEFAULT 1 («Переделка»).
+    await db.query('ALTER TABLE order_details ALTER COLUMN production_round SET DEFAULT 1');
     await db.query(`CREATE SEQUENCE e2e_set_seq OWNED BY bazis_cut_sets.bazis_cut_set_id;
       ALTER TABLE bazis_cut_sets ALTER COLUMN bazis_cut_set_id SET DEFAULT nextval('e2e_set_seq');
       ALTER TABLE bazis_cut_sets ALTER COLUMN version SET DEFAULT 0;

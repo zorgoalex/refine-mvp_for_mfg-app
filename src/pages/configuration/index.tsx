@@ -41,6 +41,7 @@ import { featureFlags } from '../../config/featureFlags';
 import { bitrix24MenuConfig } from '../../config/bitrix24';
 import { VlmConfigTab } from './VlmConfigTab';
 import { ProductionWorkflowTab } from './components/ProductionWorkflowTab';
+import { ReworkReasonsConfigTab } from './components/ReworkReasonsConfigTab';
 import { DeadlineTransitionRulesConfig } from './components/DeadlineTransitionRulesConfig';
 import { StatusAutomationConfig } from './components/StatusAutomationConfig';
 import { MessageProcessingConfig } from './components/MessageProcessingConfig';
@@ -131,6 +132,8 @@ export const filterConfigurationTabItems = <T extends { key: string }>(
       return whatsappSettingsVisible;
     }
     if (item.key === 'procurement-settings') return procurementSettingsVisible;
+    // Added only for holders of references.manage (backend permissions).
+    if (item.key === 'rework-reasons') return true;
     if (generalSettingsVisible) return true;
     if (deadlineSettingsVisible && item.key === 'production') return true;
     return false;
@@ -905,6 +908,9 @@ export const ConfigurationPage: React.FC = () => {
             children: <LabelsConfigTab />,
           },
         ]
+      : []),
+    ...(featureFlags.useBackendPermissions && can('references.manage')
+      ? [{ key: 'rework-reasons', label: 'Причины переделки', children: <ReworkReasonsConfigTab /> }]
       : []),
   ];
   const tabItems = filterConfigurationTabItems(

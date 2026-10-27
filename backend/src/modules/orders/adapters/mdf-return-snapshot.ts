@@ -42,6 +42,8 @@ export interface ReturnDetail {
   status: string | null;
   rank: number | null;
   deleted: boolean;
+  /** «Переделка»: production round of the detail (> 1 → excluded from MDF automation). */
+  productionRound: number;
 }
 export interface ReturnSnapshot {
   cards: ReturnCard[];
@@ -187,7 +189,8 @@ export async function loadReturnSnapshot(
   const details = await db.query<ReturnDetail>(
     `SELECT d.detail_id::integer AS id,d.order_id::integer AS "orderId",
     d.detail_number AS number,d.quantity,d.production_status_id::integer AS "statusId",
-    s.production_status_name AS status,s.sort_order AS rank,COALESCE(d.delete_flag,false) AS deleted
+    s.production_status_name AS status,s.sort_order AS rank,COALESCE(d.delete_flag,false) AS deleted,
+    d.production_round::integer AS "productionRound"
     FROM order_details d LEFT JOIN production_statuses s ON s.production_status_id=d.production_status_id
     WHERE d.order_id=ANY($1::bigint[]) ORDER BY d.detail_id`,
     [allOwnerIds]

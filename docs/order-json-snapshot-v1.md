@@ -10,8 +10,12 @@ to hash, validate, and keep backward compatible.
 Every file has two explicit version fields:
 
 - `schema`: format family, currently `erp.order.snapshot.v1`;
-- `formatVersion`: file contract version, currently `1.0.0`;
+- `formatVersion`: file contract version — `1.0.0`, or `1.1.0` for an order
+  with production rounds (see «Production rounds» below);
 - `exporterService.version`: export service version, currently `1.0.0`.
+
+Import accepts `1.0.0` and `1.1.0`. An order without production rounds is still
+exported as `1.0.0`, unchanged, so its `payloadHash` stays stable.
 
 The exporter service version is part of every exported file name:
 
@@ -200,6 +204,39 @@ The snapshot includes:
 
 Audit rows, outbox rows, notifications, and global reference catalogs are not
 imported as order-owned data.
+
+## Production rounds (format 1.1.0)
+
+An order that has been returned to production («Переделка») is exported as
+`1.1.0` with two additive parts:
+
+- `data.productionStatusEvents[].roundNo` — the production round of each stage
+  event (absent in `1.0.0`, meaning round 1);
+- `data.productionRounds` — `productionRound` and `lastRoundNo` of the order,
+  `detailRounds[]` (exported details whose current round is above 1) and
+  `rounds[]`: round number, mode, reason (`reasonCode` from the rework reason
+  catalogue), comment, the order status and round it started from, source,
+  start/clarification/closure timestamps and users, close reason, `eventSeq`,
+  per-detail before-state (`details[]`) and admitted sources (`sources[]`).
+  Soft-deleted details and their round rows are not exported.
+
+Import restores rounds **only when it creates a new order**. A snapshot of an
+order that already exists locally returns `noop`/`skipped` as before; its local
+rounds are not changed. On creation the import:
+
+- validates the round state before writing: unique rounds, at most one open
+  round and it is the order's current round, every detail/event round is 1 or
+  an exported round; an open round is not allowed with «Готов к выдаче»,
+  «Выдан» or «Завершен», and «Переделка» requires an open round — otherwise
+  `422 SNAPSHOT_ROUNDS_INVALID`;
+- resolves each reason by `reasonCode`; a code missing from the local
+  catalogue returns `422 SNAPSHOT_REWORK_REASON_UNKNOWN`;
+- maps statuses through `references` and users only if they exist locally;
+- fails fast with `409 ORDER_REWORK_MDF_CUTOVER_IN_PROGRESS` during an MDF
+  engine cutover and `409 ORDER_REWORK_MDF_ENGINE_UNSUPPORTED` while the engine
+  cannot hold production rounds;
+- sets `lastRoundNo` to the highest of the exported value and all round numbers,
+  so the next rework of the imported order continues the numbering.
 
 ## Client Handling
 

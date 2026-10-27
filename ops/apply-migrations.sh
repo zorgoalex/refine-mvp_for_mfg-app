@@ -230,6 +230,19 @@ ensure_ledger() {
              checksum text NOT NULL,
              applied_at timestamptz NOT NULL DEFAULT now());" >/dev/null
 }
+# «Переделка» §5.9 (accepted residual risk): the deferred realtime drain must not run
+# while DDL/maintenance holds table locks. An active drain keeps its own connection
+# with application_name 'erp-order-realtime-drain' (OrderRealtimeDeferredDrainService).
+warn_active_realtime_drain() {
+  local active
+  active="$(pg_query "SELECT count(*) FROM pg_stat_activity
+    WHERE datname = current_database() AND application_name = 'erp-order-realtime-drain';" 2>/dev/null || echo 0)"
+  if [ "${active:-0}" != "0" ]; then
+    err "WARNING: the deferred realtime drain is active ($active connection(s) 'erp-order-realtime-drain')."
+    err "Before migrations/maintenance set BACKEND_ORDER_REALTIME_DEFERRED_DRAIN=false and restart every"
+    err "backend instance (it logs 'drain stopped'), or stop the backend; re-enable afterwards (ops/README.md)."
+  fi
+}
 ledger_exists() {
   [ "$(pg_query "SELECT to_regclass('public.schema_migrations') IS NOT NULL;")" = "t" ]
 }
@@ -962,7 +975,7 @@ probe_file() {
                      "$(q_fun_hash 'order_realtime_bridge_enabled_for_fanout(integer)' 31c9de672533a32b0493235924ea8261)" \
                      "$(q_fun_hash 'order_realtime_bridge_max_detail_ids()' d0485616d61b3904e36418387a09f506)" \
                      "$(q_fun_hash 'order_realtime_cut_job_snapshot_visible(bigint,text,text,bigint)' d0bb80f56f3010c62312a66b6a3575d2)" \
-                     "$(q_fun_hash 'order_realtime_emit_one(bigint,text[],bigint[],text)' bbf8a2f2fad9cd1483a144244fe9d522)" \
+                     "$(q_fun_hash_either 'order_realtime_emit_one(bigint,text[],bigint[],text)' bbf8a2f2fad9cd1483a144244fe9d522 04eabdca6d8369194f6937ca6d1b1fc6)" \
                      "$(q_fun_hash 'order_realtime_lock_cut_roots(bigint[])' 496b5bf6aebf43754456e0ec0dbb47d2)" \
                      "$(q_fun_hash 'order_realtime_order_snapshot_visible(bigint)' a8e335d989b19d0246523aa34fbfc324)" \
                      "$(q_fun_hash 'trg_order_realtime_detail_status_insert()' d3a33ea887a1ef1110ff46eb164773ea)" \
@@ -2925,6 +2938,52 @@ probe_file() {
       "$(q_idx idx_whatsapp_broadcasts_calendar_active)" \
       "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='idx_whatsapp_broadcasts_name_active' AND indexdef LIKE '%purpose%');" \
       "SELECT EXISTS (SELECT 1 FROM whatsapp_broadcasts WHERE purpose = 'calendar');" ;;
+    # «Переделка», миграция A: статус, причины, круги, round_no, очередь realtime, guard'ы.
+    274_order_rework_rounds*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM public.order_statuses WHERE order_status_code='rework' AND sort_order=45)" \
+      "SELECT EXISTS (SELECT 1 FROM public.order_rework_reasons WHERE code='unclarified' AND is_system)" \
+      "$(q_tbl order_production_rounds)" \
+      "$(q_idx uq_order_production_rounds_open)" \
+      "$(q_tbl order_production_round_details)" \
+      "$(q_tbl order_production_round_sources)" \
+      "$(q_col orders production_round)" \
+      "$(q_col orders last_round_no)" \
+      "$(q_con_on orders chk_orders_production_round)" \
+      "$(q_col order_details production_round)" \
+      "$(q_col production_status_events round_no)" \
+      "$(q_idx uq_pse_detail_status_round)" \
+      "$(q_idx uq_pse_order_status_round)" \
+      "$(q_col cut_job_item production_round)" \
+      "$(q_con_on cut_job_item chk_cut_job_item_repeat_kind)" \
+      "$(q_tbl order_realtime_deferred)" \
+      "$(q_trg trg_order_realtime_stream_on_order_insert)" \
+      "$(q_fun_hash 'order_realtime_emit_one(bigint,text[],bigint[],text)' 04eabdca6d8369194f6937ca6d1b1fc6)" \
+      "$(q_trg trg_orders_rework_status_guard)" \
+      "$(q_trg ctrg_orders_rework_round_consistency)" \
+      "$(q_trg ctrg_order_production_rounds_consistency)" ;;
+    # «Переделка», миграция B: старые индексы «этап один раз» удалены, DB command boundary событий этапов.
+    275_order_rework_rounds_stage_boundary*) probe_all \
+      "SELECT to_regclass('public.uq_pse_detail_status_once') IS NULL AND to_regclass('public.uq_pse_order_status_once') IS NULL" \
+      "$(q_idx uq_pse_detail_status_round)" \
+      "$(q_idx uq_pse_order_status_round)" \
+      "$(q_trg trg_production_status_events_command_boundary)" \
+      "$(q_fun_hash 'public.trg_production_status_events_command_boundary()' 3e164baf56866d058a62346908295f10)" ;;
+    # «Переделка»: закрытие открытого круга при «Готов к выдаче»/«Выдан»/«Завершен» любым писателем.
+    276_order_rework_round_closure*) probe_all \
+      "$(q_trg trg_orders_close_rework_round)" \
+      "$(q_fun_hash 'public.trg_orders_close_rework_round()' b5591f65ae646e55dd5232ad77f8cac7)" ;;
+    # «Переделка» 1.1: срок готовности круга и отметка сверки итогового дедлайна (аддитивно).
+    281_order_rework_round_deadline*) probe_all \
+      "$(q_col order_production_rounds planned_completion_date)" \
+      "$(q_col order_production_rounds planned_completion_source)" \
+      "$(q_col order_production_rounds suggested_planned_completion_date)" \
+      "$(q_col order_production_rounds from_planned_completion_date)" \
+      "$(q_col order_production_rounds from_completion_date)" \
+      "$(q_col order_production_rounds deadline_sync_requested_at)" \
+      "$(q_col order_production_rounds deadline_sync_request_id)" \
+      "$(q_col order_production_rounds deadline_sync_requested_by)" \
+      "$(q_con_on order_production_rounds chk_order_production_rounds_planned_source)" \
+      "$(q_idx idx_order_production_rounds_deadline_sync)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -3014,6 +3073,18 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     207_onec_allocation_origin_suggested*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    274_order_rework_rounds*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    275_order_rework_rounds_stage_boundary*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    276_order_rework_round_closure*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    281_order_rework_round_deadline*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     204_procurement_workspace*)
@@ -3437,6 +3508,7 @@ case "$MODE" in
 
   apply)
     hard_stop_gate
+    warn_active_realtime_drain
     ensure_ledger
     # Recompute applied set now the ledger surely exists.
     APPLIED_SUM=()
@@ -3476,6 +3548,7 @@ case "$MODE" in
     # migration head. See the plan:
     # spec_erp/plans/2026-07-04-auto-migrations-restored-dump-plan.md
     # ------------------------------------------------------------------
+    warn_active_realtime_drain
     if [ "$CLEAR_HARD_STOP" -eq 1 ] && ledger_exists; then
       err "Clearing ${HARD_STOP_PREFIX}* sentinel(s) on operator request."
       pg_query "DELETE FROM schema_migrations WHERE filename LIKE '${HARD_STOP_PREFIX}%';" >/dev/null

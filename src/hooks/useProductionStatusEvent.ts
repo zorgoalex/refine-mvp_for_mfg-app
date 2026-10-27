@@ -16,6 +16,20 @@ import { ProductionStatusEvent } from '../types/orders';
 import { useKeepAlive } from '../components/workspace/KeepAliveContext';
 import { runPageOwnedWorkspaceOperation } from '../workspace/workspaceOperationPins';
 
+/**
+ * Direct Hasura writes to production_status_events are revoked (production
+ * rounds, migration 275): stage marks go through the backend only. A client
+ * still running the legacy path must see a failure, not a false success.
+ */
+export const LEGACY_STAGE_WRITE_UNSUPPORTED_MESSAGE =
+  'Отметка этапов выполняется через сервер. Обновите страницу (Ctrl+F5) и повторите.';
+
+export function legacyStageWriteUnsupportedError(cause: unknown): Error {
+  const error = new Error(LEGACY_STAGE_WRITE_UNSUPPORTED_MESSAGE);
+  (error as Error & { cause?: unknown }).cause = cause;
+  return error;
+}
+
 export interface ProductionStatusCommandOptions {
   version?: number;
   onResponse?: (response: ProductionActionResponse) => void;
@@ -284,10 +298,9 @@ export const useProductionStatusEvent = (
           );
           return true;
         }
-        // If table not found in Hasura - skip silently (table not tracked yet)
+        // Hasura no longer grants stage-event writes (production rounds): never report success.
         if (errorMsg.includes('not found in type')) {
-          console.warn('[useProductionStatusEvent] Table not tracked in Hasura, skipping event recording');
-          return true;
+          throw legacyStageWriteUnsupportedError(error);
         }
         console.error('[useProductionStatusEvent] Error recording event:', error);
         throw error;
@@ -348,10 +361,9 @@ export const useProductionStatusEvent = (
           );
           return;
         }
-        // If table not found in Hasura - skip silently
+        // Hasura no longer grants stage-event writes (production rounds): never report success.
         if (errorMsg.includes('not found in type')) {
-          console.warn('[useProductionStatusEvent] Table not tracked in Hasura, skipping event recording');
-          return;
+          throw legacyStageWriteUnsupportedError(error);
         }
         console.error('[useProductionStatusEvent] Error recording event:', error);
         throw error;
@@ -428,8 +440,7 @@ export const useProductionStatusEvent = (
       } catch (error: any) {
         const errorMsg = error?.message || '';
         if (errorMsg.includes('not found in type')) {
-          console.warn('[useProductionStatusEvent] Table not tracked in Hasura');
-          return true;
+          throw legacyStageWriteUnsupportedError(error);
         }
         console.error('[useProductionStatusEvent] Error removing event:', error);
         throw error;
