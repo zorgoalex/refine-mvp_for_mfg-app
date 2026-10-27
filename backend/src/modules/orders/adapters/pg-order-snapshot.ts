@@ -3208,6 +3208,20 @@ async function upsertDeadlines(
     });
   }
 
+  // «Переделка» 1.1: a round's deadline instance names the instance it replaced (`previousDeadlineId`, the target of
+  // «Это не переделка»). Imported instances get local ids, so the reference follows the mapping (null outside the snapshot).
+  for (const raw of snapshot.data.deadlineInstances) {
+    const metadata = raw.metadata_json as Record<string, unknown> | null | undefined;
+    const previous = metadata?.previousDeadlineId;
+    if (typeof previous !== 'string') continue;
+    await tx.query(
+      `UPDATE deadline_instances
+          SET metadata_json = jsonb_set(metadata_json, '{previousDeadlineId}', to_jsonb($2::text))
+        WHERE deadline_id = $1::uuid`,
+      [requiredString(deadlineIds.get(requiredString(raw.deadline_id, 'deadline_id')), 'deadline mapping'), deadlineIds.get(previous) ?? null],
+    );
+  }
+
   await deleteMissingImportedDeadlineRows(
     tx,
     source,

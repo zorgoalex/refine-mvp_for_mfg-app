@@ -122,6 +122,7 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
   const version = async (orderId: number) => Number((await pool.query('SELECT version FROM orders WHERE order_id = $1', [orderId])).rows[0].version);
   const key = () => `e2e-rework-${randomUUID()}`;
   let engineMode: string | null = null;
+  let hasMdfEngine = false;
   // Order stage-mark automation (266) audits its own changes; command assertions exclude it.
   const commandAudit = "event NOT LIKE 'production_stage_mark.%'";
   const orderMarks = async (orderId: number) => (await pool.query(
@@ -134,7 +135,9 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
     pool = new Pool({ connectionString: databaseUrl, max: 6 });
     // Rounds are refused while the MDF engine is active (§5.5): the suite runs on «legacy»
     // and restores the database's own mode afterwards (stage copies may be «active»).
-    engineMode = (await pool.query('SELECT mode FROM mdf_engine_state WHERE singleton')).rows[0]?.mode ?? null;
+    // main has no MDF engine (no mdf_engine_state): nothing to pin then.
+    hasMdfEngine = Boolean((await pool.query("SELECT to_regclass('public.mdf_engine_state') IS NOT NULL AS present")).rows[0]?.present);
+    engineMode = hasMdfEngine ? (await pool.query('SELECT mode FROM mdf_engine_state WHERE singleton')).rows[0]?.mode ?? null : null;
     if (engineMode) await pool.query("UPDATE mdf_engine_state SET mode = 'legacy' WHERE singleton");
     service = new OrderReworkService({
       database: database(),
@@ -414,7 +417,8 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
     await pool.query('UPDATE order_details SET order_id = $2, detail_number = 1 WHERE detail_id = $1', [source.detailIds[0], source.orderId]);
   });
 
-  it('fails fast with 409 on every round command while the MDF cutover holds the exclusive fence', async () => {
+  it('fails fast with 409 on every round command while the MDF cutover holds the exclusive fence', async (ctx) => {
+    if (!hasMdfEngine) return ctx.skip(); // MDF engine (stage) only
     const { orderId, detailIds } = await createOrder('legacy_6', 'packed', 1);
     await service.startOrExtend({
       currentUser: admin, orderId, version: await version(orderId), idempotencyKey: key(),
@@ -848,7 +852,8 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
     }
   });
 
-  it('fails fast with 409 when the MDF cutover holds the fence; a direct «Переделка» insert without marker is refused', async () => {
+  it('fails fast with 409 when the MDF cutover holds the fence; a direct «Переделка» insert without marker is refused', async (ctx) => {
+    if (!hasMdfEngine) return ctx.skip(); // MDF engine (stage) only
     const source = await orderWithRounds();
     const snapshot = retarget(await exportSnapshot(source.orderId), 'fence');
     const cutover = await pool.connect();
@@ -1268,7 +1273,8 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
     expect((await service.listRounds(admin, completed.orderId)).order.action).toBeNull();
   });
 
-  it('refuses round commands while the MDF engine is active or read-only; the UI is told why', async () => {
+  it('refuses round commands while the MDF engine is active or read-only; the UI is told why', async (ctx) => {
+    if (!hasMdfEngine) return ctx.skip(); // MDF engine (stage) only
     const ready = await createOrder('legacy_6', 'packed', 1);
     try {
       for (const mode of ['active', 'read_only']) {

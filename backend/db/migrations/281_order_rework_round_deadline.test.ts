@@ -34,6 +34,9 @@ describe('281 order rework round deadline migration', () => {
     }
     expect(rollback).toContain('ROLLBACK_281_REFUSED');
     expect(rollback.indexOf('ROLLBACK_281_REFUSED')).toBeLessThan(rollback.indexOf('DROP COLUMN'));
+    // Locked before the emptiness check, held until COMMIT: a concurrent writer cannot fill a column in between.
+    expect(rollback).toContain('LOCK TABLE public.order_production_rounds IN ACCESS EXCLUSIVE MODE NOWAIT;');
+    expect(rollback.indexOf('LOCK TABLE')).toBeLessThan(rollback.indexOf('ROLLBACK_281_REFUSED'));
   });
 
   it('is probed before the ledger records it', () => {

@@ -10,6 +10,8 @@ import { PgOrderDeadlineSync } from '../../deadlines/adapters/pg-order-deadline-
 import { PgDeadlineDefaultScheduleRepository } from '../../deadlines/adapters/pg-deadline-default-schedule-repository';
 import { almatyToday, suggestReworkPlannedCompletion } from '../domain/order-rework-deadline';
 import { OrderReworkService } from './order-rework.service';
+import { PgOrderSnapshot } from '../adapters/pg-order-snapshot';
+import type { OrderSnapshotDto } from '../dto/order-snapshot.dto';
 import { OrderReworkDeadlineSweeper } from './order-rework-deadline-sweeper.service';
 import { ORDER_FINAL_DEADLINE_SYSTEM_ACTOR } from '../../deadlines/domain/order-final-deadline';
 
@@ -30,9 +32,12 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
   let clientId: number;
   let projectId: number;
   let engineMode: string | null = null;
+  let hasMdfEngine = false;
   let savedSchedule: { durations: unknown[]; reserve: number } | null = null;
   const tag = randomUUID().slice(0, 8);
   const orderIds: number[] = [];
+  const importProjectIds: number[] = [];
+  const importSource = `e2e-rework-deadline-${tag}`;
   const status: Record<string, number> = {};
   const stage: Record<string, number> = {};
   const reasons: Record<string, number> = {};
@@ -167,7 +172,9 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: databaseUrl, max: 6 });
-    engineMode = (await pool.query('SELECT mode FROM mdf_engine_state WHERE singleton')).rows[0]?.mode ?? null;
+    // main has no MDF engine (no mdf_engine_state): nothing to pin then.
+    hasMdfEngine = Boolean((await pool.query("SELECT to_regclass('public.mdf_engine_state') IS NOT NULL AS present")).rows[0]?.present);
+    engineMode = hasMdfEngine ? (await pool.query('SELECT mode FROM mdf_engine_state WHERE singleton')).rows[0]?.mode ?? null : null;
     if (engineMode) await pool.query("UPDATE mdf_engine_state SET mode = 'legacy' WHERE singleton");
     for (const row of (await pool.query('SELECT order_status_code, order_status_id FROM order_statuses')).rows) status[row.order_status_code] = Number(row.order_status_id);
     for (const row of (await pool.query('SELECT production_status_code, production_status_id FROM production_statuses')).rows) stage[row.production_status_code] = Number(row.production_status_id);
@@ -262,6 +269,16 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
           } finally {
             client.release();
           }
+        });
+      }
+      await step(() => pool.query('DELETE FROM order_import_entity_map WHERE source_instance_id LIKE $1', [`${importSource}%`]));
+      await step(() => pool.query('DELETE FROM order_import_runs WHERE source_instance_id LIKE $1', [`${importSource}%`]));
+      for (const importProject of importProjectIds) {
+        await step(async () => {
+          await pool.query("DELETE FROM audit_log_related_entity WHERE audit_id IN (SELECT audit_id FROM audit_log WHERE entity_type = 'project' AND entity_id = $1)", [String(importProject)]);
+          await pool.query("DELETE FROM audit_log WHERE entity_type = 'project' AND entity_id = $1", [String(importProject)]);
+          await pool.query("DELETE FROM outbox_events WHERE aggregate_type = 'project' AND aggregate_id = $1", [String(importProject)]);
+          await pool.query('DELETE FROM projects WHERE project_id = $1', [importProject]);
         });
       }
       if (projectId) await step(() => pool.query('DELETE FROM projects WHERE project_id = $1', [projectId]));
@@ -650,5 +667,29 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
     await sync().reconcileOrderFinalDeadline({ orderId: order.orderId, currentUser: { id: ORDER_FINAL_DEADLINE_SYSTEM_ACTOR }, requestId: `e2e-${tag}` });
     expect((await roundRow(order.orderId, 2)).mark).toBeNull();
     await pool.query('UPDATE orders SET delete_flag = false WHERE order_id = $1', [order.orderId]);
+  });
+
+  it('R1.2 (port review): export/import keeps the round deadline chain — «Это не переделка» after import restores round 2', async () => {
+    const order = await orderWithDeadline('legacy_6', true);
+    await start(order.orderId, order.detailIds[0], addDays(today, 7));
+    await setStatus(order.orderId, 'legacy_6'); // round 2 closed by readiness, its deadline stays current
+    await start(order.orderId, order.detailIds[1], addDays(today, 14)); // round 3 supersedes it
+    const snapshots = new PgOrderSnapshot(database());
+    const exported = JSON.parse((await snapshots.exportOrderSnapshot({ orderId: order.orderId, currentUser: admin, requestId: key() })).content) as OrderSnapshotDto;
+    exported.source.sourceInstanceId = `${importSource}-${randomUUID()}`;
+    exported.source.payloadHash = '';
+    exported.data.order.orderName = `E2E-Тест срок переделки ${tag} импорт`;
+    const imported = await snapshots.importOrderSnapshot({ snapshot: exported, currentUser: admin, requestId: key() });
+    orderIds.push(imported.orderId);
+    const project = (await pool.query('SELECT project_id FROM orders WHERE order_id = $1', [imported.orderId])).rows[0];
+    if (project && Number(project.project_id) !== projectId) importProjectIds.push(Number(project.project_id));
+    const rows = await finals(imported.orderId);
+    const ids = new Set(rows.map((row) => row.deadline_id));
+    for (const row of rows) {
+      const previous = row.metadata_json?.previousDeadlineId;
+      if (previous != null) expect(ids.has(String(previous))).toBe(true); // local ids only
+    }
+    await falsePositive(imported.orderId, 3);
+    expect(await active(imported.orderId)).toEqual([expect.objectContaining({ at: addDays(today, 7), metadata_json: expect.objectContaining({ reworkRoundNo: 2 }) })]);
   });
 });

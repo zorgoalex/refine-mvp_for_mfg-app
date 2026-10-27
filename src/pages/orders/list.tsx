@@ -1,4 +1,5 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
+import { currentRoundStageEvents } from '../../utils/currentRoundStageEvents';
 import type { TablePaginationConfig } from 'antd/es/table';
 import React, { useMemo, useState, useCallback, useEffect } from "react";
 import type { Dayjs } from "dayjs";
@@ -1170,7 +1171,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   // Группируем события производственных статусов по order_id и получаем коды
   const passedCodesByOrderId = useMemo(() => {
     const map: Record<number, string[]> = {};
-    (productionEventsData?.data || []).forEach((event: any) => {
+    // «Переделка»: only the marks of each order's current round (earlier rounds are history).
+    currentRoundStageEvents((productionEventsData?.data || []) as any[]).forEach((event: any) => {
       if (event.order_id) {
         if (!map[event.order_id]) {
           map[event.order_id] = [];

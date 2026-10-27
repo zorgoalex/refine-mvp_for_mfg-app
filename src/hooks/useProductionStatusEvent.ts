@@ -13,6 +13,7 @@ import type { ProductionActionResponse } from '../api/types/productionActionsApi
 import { featureFlags } from '../config/featureFlags';
 import { useList } from '../query/orderLifecycleQueries';
 import { ProductionStatusEvent } from '../types/orders';
+import { currentRoundStageEvents } from '../utils/currentRoundStageEvents';
 import { useKeepAlive } from '../components/workspace/KeepAliveContext';
 import { runPageOwnedWorkspaceOperation } from '../workspace/workspaceOperationPins';
 
@@ -82,6 +83,8 @@ interface UseProductionStatusEventProps {
   orderId?: number;
   /** Enable loading events */
   enabled?: boolean;
+  /** «Переделка»: the order's current production round (else the newest round among its marks). */
+  productionRound?: number | null;
 }
 
 /**
@@ -93,7 +96,7 @@ export const useProductionStatusEvent = (
   const { tabKey } = useKeepAlive();
   const dataProvider = useDataProvider();
   const invalidate = useInvalidate();
-  const { orderId, enabled = true } = props || {};
+  const { orderId, enabled = true, productionRound } = props || {};
   const [backendStageOverrides, setBackendStageOverrides] = useState<BackendStageOverrides>({});
   const sourceEventsRef = useRef<ProductionStatusEvent[]>([]);
   const backendStageOverridesRef = useRef<BackendStageOverrides>({});
@@ -111,7 +114,14 @@ export const useProductionStatusEvent = (
     },
   });
 
-  const sourceEvents = eventsData?.data || [];
+  // «Переделка»: marks of earlier production rounds are history, not the order's current stages.
+  const sourceEvents = useMemo(
+    () => currentRoundStageEvents(
+      eventsData?.data || [],
+      orderId && productionRound ? new Map([[Number(orderId), Number(productionRound)]]) : undefined,
+    ),
+    [eventsData, orderId, productionRound],
+  );
   sourceEventsRef.current = sourceEvents;
   const events = useMemo(
     () => applyBackendStageOverrides(sourceEvents, backendStageOverrides, orderId),

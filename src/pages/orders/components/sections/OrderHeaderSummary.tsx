@@ -61,6 +61,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({
   const { getSetting } = useOrderAppSettings();
   const productionStatusEvents = useProductionStatusEvent({
     orderId: header.order_id,
+    productionRound: (header as { production_round?: number | null }).production_round ?? null,
   });
   // Detail and HDF stages set and clear the order marks in the database: a saved
   // order (new version) or changed stages re-read them.

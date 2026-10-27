@@ -618,6 +618,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "event_by",
     "note",
     "payload",
+    "round_no",
   ],
   resource_requirements_statuses: [
     "requirement_status_id",
@@ -1762,6 +1763,7 @@ const PACKER_RESOURCE_FIELDS: Record<string, string[]> = {
     'order_id',
     'production_status_id',
     'event_at',
+    'round_no',
   ],
 };
 
