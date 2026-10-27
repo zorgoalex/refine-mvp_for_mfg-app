@@ -1,11 +1,14 @@
-/** Employees keep phones, emails and Telegram accounts; suppliers also keep addresses. */
-export type EmployeeContactKind = 'phone' | 'email' | 'telegram' | 'address';
+/**
+ * Employees keep phones, emails and Telegram accounts; suppliers also keep addresses; clients keep emails and
+ * messengers (WhatsApp and Viber numbers, Instagram accounts, «Другое» with a label in the note).
+ */
+export type EmployeeContactKind = 'phone' | 'email' | 'telegram' | 'address' | 'whatsapp' | 'viber' | 'instagram' | 'other';
 
 export interface EmployeeContact {
   contactId: number;
   kind: EmployeeContactKind;
   value: string;
-  /** phone 7XXXXXXXXXX, email lower case, Telegram username without «@». */
+  /** phone / WhatsApp / Viber 7XXXXXXXXXX, email lower case, Telegram / Instagram account without «@». */
   valueNormalized: string;
   isPrimary: boolean;
   note: string | null;

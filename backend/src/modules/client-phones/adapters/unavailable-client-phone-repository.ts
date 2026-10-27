@@ -3,6 +3,7 @@ import type {
   ClientPhoneRepositoryPort,
   CreateClientPhoneCommand,
   DeleteClientPhoneCommand,
+  ReplaceClientPhoneSetCommand,
   UpdateClientPhoneCommand,
 } from '../application/client-phone.types';
 
@@ -16,6 +17,10 @@ export class UnavailableClientPhoneRepository implements ClientPhoneRepositoryPo
   }
 
   deleteClientPhone(_command: DeleteClientPhoneCommand) {
+    return Promise.reject(databaseUnavailable());
+  }
+
+  replaceClientPhoneSet(_command: ReplaceClientPhoneSetCommand) {
     return Promise.reject(databaseUnavailable());
   }
 }

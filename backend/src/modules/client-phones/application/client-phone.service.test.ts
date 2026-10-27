@@ -61,7 +61,33 @@ describe('ClientPhoneService', () => {
       code: 'PERMISSION_DENIED',
     } satisfies Partial<ApiError>);
   });
+
+  it.each(['superadmin', 'admin', 'top_manager'] as const)('lets %s replace the phone set from the contacts screen', async (role) => {
+    const calls: string[] = [];
+    const service = new ClientPhoneService({
+      clientPhones: createRepository({
+        async replaceClientPhoneSet(command) {
+          calls.push(`${role}:set:${command.clientId}:${command.source}`);
+          return { clientId: command.clientId, phones: [], created: 0, updated: 0, deleted: 0, requestId: 'request-1' };
+        },
+      }),
+    });
+    await service.replaceSet(setCommand(currentUser(role)));
+    expect(calls).toEqual([`${role}:set:1:client_contacts_screen`]);
+  });
+
+  it.each(['manager', 'operator', 'viewer'] as const)('denies %s the contacts screen set command (clients.update is not enough)', async (role) => {
+    const service = new ClientPhoneService({ clientPhones: createRepository() });
+    await expect(service.replaceSet(setCommand(currentUser(role)))).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+    } satisfies Partial<ApiError>);
+  });
 });
+
+function setCommand(user: CurrentUser) {
+  return { currentUser: user, clientId: 1, source: 'client_contacts_screen', dto: { idempotencyKey: 'client-phone-set-test', expected: [], phones: [] } };
+}
 
 function createRepository(
   overrides: Partial<ClientPhoneRepositoryPort> = {},
@@ -75,6 +101,9 @@ function createRepository(
     },
     async deleteClientPhone() {
       throw new Error('deleteClientPhone should not be called');
+    },
+    async replaceClientPhoneSet() {
+      throw new Error('replaceClientPhoneSet should not be called');
     },
     ...overrides,
   };

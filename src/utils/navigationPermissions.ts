@@ -31,6 +31,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   order_resource_requirements: ['orders.view'],
   crm: ['orders.view'],
   clients: ['references.view'],
+  client_contacts: ['clients.contacts.view'],
   bitrix24_incoming_requests: ['bitrix24.requests.view'],
   materials: ['references.view'],
   milling_types: ['references.view'],

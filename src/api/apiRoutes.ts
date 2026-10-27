@@ -384,6 +384,12 @@ export const apiRoutes = {
     contacts: (employeeId: number) => backendApiPath(`/employees/${employeeId}/contacts`),
     contactsList: backendApiPath('/employee-contacts'),
   },
+  clientContacts: {
+    list: backendApiPath('/client-contacts'),
+    row: (clientId: number) => backendApiPath(`/client-contacts/${clientId}`),
+    contacts: (clientId: number) => backendApiPath(`/client-contacts/${clientId}/contacts`),
+    phones: (clientId: number) => backendApiPath(`/client-contacts/${clientId}/phones`),
+  },
   partyContacts: {
     contacts: (party: 'supplier' | 'vendor' | 'client', id: number) => backendApiPath(`/${party}s/${id}/contacts`),
     contactsList: (party: 'supplier' | 'vendor') => backendApiPath(`/${party}-contacts`),

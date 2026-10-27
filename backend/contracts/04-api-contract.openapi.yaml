@@ -1154,6 +1154,80 @@ paths:
         '200': {description: Counterparties, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/SupplierCounterparty'}}}}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/client-contacts:
+    get:
+      tags: [Client contacts]
+      operationId: listClientContacts
+      summary: 'Clients with their phones, emails and messengers («Контакты клиентов»)'
+      description: 'Search `q` over names, values and labels (phones also by digits), per-column filters `f.<column>` = has | none | ~text, sorting by a column (its primary value), pages.'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.contacts.view]
+      parameters:
+        - {name: q, in: query, schema: {type: string, maxLength: 100}}
+        - {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: pageSize, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: sort, in: query, schema: {type: string, enum: [client, updated, phone, email, telegram, whatsapp, viber, instagram, other], default: client}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: asc}}
+        - {name: active, in: query, schema: {type: string, enum: [active, archived, all], default: active}}
+      responses:
+        '200': {description: 'A page of clients', content: {application/json: {schema: {type: object, required: [items, total, page, pageSize, kinds, canManage, phonesEditable], properties: {items: {type: array, items: {$ref: '#/components/schemas/ClientContactsRow'}}, total: {type: integer}, page: {type: integer}, pageSize: {type: integer}, kinds: {type: array, items: {type: string}}, canManage: {type: boolean}, phonesEditable: {type: boolean}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {description: 'VALIDATION_ERROR'}
+  /api/v1/client-contacts/{clientId}:
+    get:
+      tags: [Client contacts]
+      operationId: getClientContactsRow
+      summary: 'One client of the «Контакты клиентов» list'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.contacts.view]
+      parameters:
+        - {name: clientId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Row, content: {application/json: {schema: {$ref: '#/components/schemas/ClientContactsRow'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'CLIENT_NOT_FOUND'}
+  /api/v1/client-contacts/{clientId}/contacts:
+    put:
+      tags: [Client contacts]
+      operationId: replaceClientContactsFromList
+      summary: 'Replace the emails and messengers of a client from the list (version compare-and-swap)'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.contacts.manage]
+      parameters:
+        - {name: clientId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [version, contacts], properties: {version: {type: integer, minimum: 0}, contacts: {type: array, maxItems: 20, items: {type: object, required: [contactId, kind, value, isPrimary], properties: {contactId: {type: integer, nullable: true}, kind: {type: string, enum: [email, telegram, whatsapp, viber, instagram, other]}, value: {type: string, maxLength: 200}, isPrimary: {type: boolean}, note: {type: string, maxLength: 200, nullable: true}}}}}}}}
+      responses:
+        '200': {description: 'The row after the save', content: {application/json: {schema: {$ref: '#/components/schemas/ClientContactsRow'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'CLIENT_NOT_FOUND'}
+        '409': {description: 'PARTY_CONTACTS_VERSION_CONFLICT'}
+        '422': {description: 'VALIDATION_ERROR | PARTY_CONTACT_INVALID | PARTY_CONTACT_DUPLICATE'}
+  /api/v1/client-contacts/{clientId}/phones:
+    put:
+      tags: [Client contacts]
+      operationId: replaceClientPhonesFromList
+      summary: 'Replace the phones of a client from the list'
+      description: 'The stored set (ids, numbers, types, primary) must equal `expected`, else 409 CLIENT_PHONES_STALE with the current set. Idempotent by `idempotencyKey` (a completed command with the same body answers again; another body — 409 IDEMPOTENCY_KEY_REUSED).'
+      security: [{bearerAuth: []}]
+      x-permissions: [clients.contacts.manage]
+      parameters:
+        - {name: clientId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [idempotencyKey, expected, phones], properties: {idempotencyKey: {type: string, minLength: 8, maxLength: 200}, expected: {type: array, items: {type: object, required: [phoneId, phoneNumber, phoneType, isPrimary], properties: {phoneId: {type: integer}, phoneNumber: {type: string}, phoneType: {type: string, enum: [mobile, work, home, fax]}, isPrimary: {type: boolean}}}}, phones: {type: array, items: {type: object, required: [phoneId, phoneNumber, phoneType, isPrimary], properties: {phoneId: {type: integer, nullable: true}, phoneNumber: {type: string, minLength: 7, maxLength: 20}, phoneType: {type: string, enum: [mobile, work, home, fax]}, isPrimary: {type: boolean}}}}}}}}
+      responses:
+        '200': {description: 'The stored command answer (the same on a repeat) and the client row now', content: {application/json: {schema: {type: object, required: [result, row], properties: {result: {type: object, required: [clientId, phones, created, updated, deleted, requestId], properties: {clientId: {type: integer}, phones: {type: array, items: {type: object}}, created: {type: integer}, updated: {type: integer}, deleted: {type: integer}, requestId: {type: string}}}, row: {$ref: '#/components/schemas/ClientContactsRow'}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'CLIENT_NOT_FOUND'}
+        '409': {description: 'CLIENT_PHONES_STALE | CLIENT_PHONE_DUPLICATE | IDEMPOTENCY_KEY_REUSED | IDEMPOTENCY_IN_PROGRESS'}
+        '422': {description: 'VALIDATION_ERROR | CLIENT_PHONE_SET_INVALID'}
+        '503': {description: 'CLIENT_PHONES_DISABLED'}
   /api/v1/suppliers/{id}/contacts/onec-sync:
     post:
       tags: [Party contacts]
@@ -21235,6 +21309,15 @@ components:
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   schemas:
+    ClientContactsRow:
+      type: object
+      required: [client, phones, contacts, contactsVersion, updatedAt]
+      properties:
+        client: {type: object, required: [id, name, isActive, personType], properties: {id: {type: integer}, name: {type: string}, isActive: {type: boolean}, personType: {type: string, nullable: true}}}
+        phones: {type: array, items: {type: object, required: [phoneId, phoneNumber, phoneType, isPrimary], properties: {phoneId: {type: integer}, phoneNumber: {type: string}, phoneType: {type: string}, isPrimary: {type: boolean}}}}
+        contacts: {type: array, items: {type: object, required: [contactId, kind, value, valueNormalized, isPrimary, note], properties: {contactId: {type: integer}, kind: {type: string}, value: {type: string}, valueNormalized: {type: string}, isPrimary: {type: boolean}, note: {type: string, nullable: true}}}}
+        contactsVersion: {type: integer}
+        updatedAt: {type: string, format: date-time, nullable: true}
     CatalogImportCreate:
       oneOf:
         - type: object

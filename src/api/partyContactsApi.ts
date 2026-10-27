@@ -1,15 +1,17 @@
 import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
-import type { EmployeeContact, EmployeeContactInput } from './employeeContactsApiTypes';
+import type { EmployeeContact, EmployeeContactInput, EmployeeContactKind } from './employeeContactsApiTypes';
 
 export type PartyKind = 'supplier' | 'vendor' | 'client';
 
 export interface PartyContacts {
   party: PartyKind;
   partyId: number;
-  /** Version of the whole set (0 = never saved); for a client — of emails and Telegram accounts only. */
+  /** Version of the whole set (0 = never saved); for a client — of its emails and messengers (not phones). */
   version: number;
   contacts: EmployeeContact[];
+  /** Kinds a new or changed contact may have now (absent on an older backend). */
+  kinds?: EmployeeContactKind[];
 }
 
 /** A 1C counterparty a supplier can be linked to. */

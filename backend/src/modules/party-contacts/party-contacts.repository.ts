@@ -1,7 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { QueryResultRow } from 'pg';
 import { auditService } from '../../common/audit/audit.service';
 import { ApiError } from '../../common/errors/api-error';
+import type { BackendEnv } from '../../config/env.validation';
 import { DatabaseService } from '../../database/database.service';
 import type { DatabaseClient } from '../../database/database.types';
 import type { CurrentUser } from '../../permissions/current-user';
@@ -33,7 +35,21 @@ const ROW_COLUMNS = (owner: string) => `c.*, c.${owner} AS owner_id, party_onec_
  */
 @Injectable()
 export class PartyContactsRepository {
-  constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
+  constructor(
+    @Inject(DatabaseService) private readonly database: DatabaseService,
+    @Optional() @Inject(ConfigService) private readonly config?: ConfigService<BackendEnv, true>,
+  ) {}
+
+  /** The client messengers of migration 269 (BACKEND_CLIENT_CONTACT_EXTRA_KINDS); off when no config is given. */
+  extraKindsEnabled(): boolean {
+    return this.config?.get('BACKEND_CLIENT_CONTACT_EXTRA_KINDS', { infer: true }) === true;
+  }
+
+  /** Kinds a new or changed contact of the owner may have now. */
+  kindsNow(party: PartyKind): PartyContactKind[] {
+    const config = PARTY_CONFIG[party];
+    return config.kinds.filter((kind) => this.extraKindsEnabled() || !config.extraKinds.includes(kind));
+  }
 
   async get(party: PartyKind, partyId: number, client: DatabaseClient = this.database): Promise<PartyContacts> {
     const config = PARTY_CONFIG[party];
@@ -42,6 +58,7 @@ export class PartyContactsRepository {
     return {
       party, partyId, version: await this.version(client, config, partyId),
       contacts: (await this.rows(client, config, partyId)).filter((row) => row.available).map(toContact),
+      kinds: this.kindsNow(party),
     };
   }
 
@@ -67,7 +84,7 @@ export class PartyContactsRepository {
    * masks only.
    */
   async replace(party: PartyKind, partyId: number, version: number, input: readonly PartyContactInput[], actor: CurrentUser,
-    requestId: string): Promise<PartyContacts> {
+    requestId: string, source: string = SOURCE): Promise<PartyContacts> {
     const config = PARTY_CONFIG[party];
     return this.database.transaction(async (tx) => {
       // NO KEY UPDATE: serializes the contact commands (and the 1C sync) of the owner without blocking FK key-share locks on it.
@@ -76,7 +93,8 @@ export class PartyContactsRepository {
       const current = await this.version(tx, config, partyId);
       if (current !== version) throw new ApiError(409, PARTY_CONTACTS_VERSION_CONFLICT, 'Контакты уже изменены; обновите страницу');
       const before = await this.rows(tx, config, partyId);
-      const plan = planContactSet(input, before.map(toStored), config.kinds, config.ownerGenitive);
+      const frozen = this.extraKindsEnabled() ? [] : config.extraKinds;
+      const plan = planContactSet(input, before.map(toStored), config.kinds, config.ownerGenitive, frozen);
       const byId = new Map(before.map((row) => [Number(row.contact_id), row]));
       const actorId = Number(actor.id);
       const keptOwn = new Set(plan.own.filter((line) => line.contactId !== null).map((line) => line.contactId as number));
@@ -111,7 +129,7 @@ export class PartyContactsRepository {
       const after = await this.get(party, partyId, tx);
       await auditService.record(tx, {
         event: config.auditEvent, entityType: party, entityId: partyId,
-        actorUserId: actorId, actorUsername: actor.username, actorRole: actor.role, requestId, source: SOURCE,
+        actorUserId: actorId, actorUsername: actor.username, actorRole: actor.role, requestId, source,
         ...(party === 'client' ? { relatedClientId: partyId } : {}),
         relatedEntities: [{ entityType: party, entityId: partyId }],
         before: { version, contacts: before.filter((row) => row.available).map((row) => auditView(toContact(row))) },
@@ -150,7 +168,7 @@ function toContact(row: ContactRow): PartyContact {
 function toStored(row: ContactRow): StoredContact {
   return {
     contactId: Number(row.contact_id), kind: row.kind, value: row.value, valueNormalized: row.value_normalized, isPrimary: row.is_primary,
-    position: row.position, origin: row.origin, available: row.available,
+    position: row.position, origin: row.origin, available: row.available, note: row.note,
   };
 }
 
