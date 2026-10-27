@@ -138,9 +138,15 @@ export class PgNotificationRepository implements NotificationRepositoryPort {
     return result.rows[0] ? mapRow(result.rows[0]) : null;
   }
 
-  async markAllReadForUser(viewer: NotificationViewer): Promise<number> {
+  /**
+   * «Прочитать всё». С `notificationIds` — только эти строки (то, что пользователь видит в списке колокольчика):
+   * уведомление, пришедшее после загрузки списка, остаётся непрочитанным и ещё всплывёт балуном.
+   */
+  async markAllReadForUser(viewer: NotificationViewer, notificationIds?: readonly string[]): Promise<number> {
+    if (notificationIds && notificationIds.length === 0) return 0;
     const params: unknown[] = [viewer.id];
     const visible = notificationVisibilitySql(viewer, params);
+    const idsIndex = params.push(notificationIds ? [...notificationIds] : null);
     // Тот же предикат прямо в массовом UPDATE (R6-2): скрытые строки не помечаются и не считаются.
     const result = await this.database.query<{ updated_count: string | number }>(
       `
@@ -150,6 +156,7 @@ export class PgNotificationRepository implements NotificationRepositoryPort {
           read_at = COALESCE(read_at, now())
         WHERE user_id = $1
           AND is_read = false
+          AND ($${idsIndex}::uuid[] IS NULL OR notification_id = ANY($${idsIndex}::uuid[]))
           AND ${visible}
         RETURNING notification_id
       )

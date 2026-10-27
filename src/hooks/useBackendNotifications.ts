@@ -25,7 +25,8 @@ export interface BackendNotificationsState {
   error: unknown;
   refresh: () => Promise<void>;
   markAsRead: (ids: string | string[]) => Promise<void>;
-  markAllAsRead: () => Promise<void>;
+  /** «Все прочитаны» — только уведомления, показанные в списке (их id передаёт панель). */
+  markAllAsRead: (shownIds: string[]) => Promise<void>;
   deleteNotification: (ids: string | string[]) => Promise<void>;
 }
 
@@ -44,6 +45,8 @@ export function useBackendNotifications(enabled: boolean): BackendNotificationsS
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const enabledRef = useRef(enabled);
+  const snapshotRef = useRef<BackendNotificationsSnapshot>(EMPTY_SNAPSHOT);
+  snapshotRef.current = snapshot;
   const mountedRef = useRef(true);
   const refreshRequestIdRef = useRef(0);
 
@@ -126,18 +129,31 @@ export function useBackendNotifications(enabled: boolean): BackendNotificationsS
     }
   }, [invalidatePendingRefresh]);
 
-  const markAllAsRead = useCallback(async () => {
+  // «Все прочитаны» — только то, что показано в списке: уведомление, пришедшее после последней загрузки, остаётся
+  // непрочитанным (и ещё всплывёт балуном), а не гасится вслепую.
+  const markAllAsRead = useCallback(async (shownIds: string[]) => {
+    const shown = new Set(shownIds);
+    const shownUnread = snapshotRef.current.notifications
+      .filter((notification) => shown.has(notification.id) && !notification.read)
+      .map((notification) => notification.id);
+    if (shownUnread.length === 0) return;
     invalidatePendingRefresh();
-    await notificationsApi.markAllRead();
+    await notificationsApi.markAllRead(shownUnread);
     invalidatePendingRefresh();
-    setSnapshot((current) => ({
-      notifications: current.notifications.map((notification) => ({
-        ...notification,
-        read: true,
-      })),
-      unreadCount: 0,
-    }));
-  }, [invalidatePendingRefresh]);
+    const marked = new Set(shownUnread);
+    setSnapshot((current) => {
+      // Вычитаем только то, что в текущем снимке ещё непрочитано: если обновление списка успело прийти раньше ответа,
+      // оно уже учло эти строки — второго вычитания нет.
+      const stillUnread = current.notifications.filter((notification) => marked.has(notification.id) && !notification.read).length;
+      return {
+        notifications: current.notifications.map((notification) =>
+          marked.has(notification.id) ? { ...notification, read: true } : notification),
+        unreadCount: Math.max(0, current.unreadCount - stillUnread),
+      };
+    });
+    // Точный счётчик — с сервера: отмеченная строка могла уйти за первую страницу, пока шёл запрос.
+    void refresh();
+  }, [invalidatePendingRefresh, refresh]);
 
   const deleteNotification = useCallback(async (ids: string | string[]) => {
     invalidatePendingRefresh();

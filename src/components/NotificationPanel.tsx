@@ -64,7 +64,7 @@ export const NotificationPanel: React.FC<{
       await markAsRead(selectedIds);
       setSelectedIds([]);
     } else {
-      await markAllAsRead();
+      await markAllAsRead(allIds);
     }
   };
 
