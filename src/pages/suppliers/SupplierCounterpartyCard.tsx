@@ -3,20 +3,26 @@ import { Alert, Button, Card, Popconfirm, Select, Space, Typography, message } f
 import { isApiError } from '../../api/apiError';
 import { partyContactsApi, type SupplierCounterparty, type SupplierLink } from '../../api/partyContactsApi';
 import {
-  SUPPLIER_COUNTERPARTY_CONFLICT, counterpartyOptions, isCounterpartyApiMissing, supplierLinkErrorMessage,
+  SUPPLIER_COUNTERPARTY_CONFLICT, counterpartyOptions, isCounterpartyApiMissing, onecProfileView, onecSyncMessage, supplierLinkErrorMessage,
 } from './supplierCounterpartyModel';
 
 interface Props {
   supplierId: number | null | undefined;
   /** suppliers.manage: may link and unlink; otherwise read-only. */
   editable: boolean;
+  /** The contacts of the supplier changed here (a link change or a sync with 1C): the contacts block reloads. */
+  onContactsChanged?: () => void;
+  /** The contacts block has unsaved edits: a sync or a link change would reload it over them, so both wait. */
+  contactsDirty?: boolean;
+  /** A sync or a link change is in flight (until its answer is in): the contacts block does not take edits meanwhile. */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 /**
  * «Контрагент 1С» of a supplier. The link is changed only by the backend command (it drives the 1C documents
  * loader): the form of the supplier no longer carries the key.
  */
-export const SupplierCounterpartyCard: React.FC<Props> = ({ supplierId, editable }) => {
+export const SupplierCounterpartyCard: React.FC<Props> = ({ supplierId, editable, onContactsChanged, contactsDirty = false, onBusyChange }) => {
   const [link, setLink] = useState<SupplierLink | null>(null);
   const [items, setItems] = useState<SupplierCounterparty[]>([]);
   const [choice, setChoice] = useState<string | null>(null);
@@ -24,6 +30,8 @@ export const SupplierCounterpartyCard: React.FC<Props> = ({ supplierId, editable
   const [unsupported, setUnsupported] = useState(false);
   const [saving, setSaving] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  useEffect(() => { onBusyChange?.(saving || syncing); }, [saving, syncing, onBusyChange]);
   const searchRef = useRef(0);
 
   const load = useCallback(async () => {
@@ -55,11 +63,12 @@ export const SupplierCounterpartyCard: React.FC<Props> = ({ supplierId, editable
   useEffect(() => { if (editable && supplierId) void search(''); }, [editable, supplierId, search]);
 
   const change = async (refKey1c: string | null) => {
-    if (!supplierId || !link || saving) return;
+    if (!supplierId || !link || saving || contactsDirty) return;
     setSaving(true);
     try {
       setLink(await partyContactsApi.setSupplierCounterparty(supplierId, { refKey1c, expectedRefKey1c: link.refKey1c }));
       setChoice(null);
+      onContactsChanged?.();
       message.success(refKey1c ? 'Поставщик привязан к контрагенту 1С' : 'Привязка к контрагенту 1С снята');
       void search('');
     } catch (error) {
@@ -74,6 +83,22 @@ export const SupplierCounterpartyCard: React.FC<Props> = ({ supplierId, editable
     }
   };
 
+  const syncNow = async () => {
+    if (!supplierId || syncing || contactsDirty) return;
+    setSyncing(true);
+    try {
+      const result = await partyContactsApi.syncSupplierOnec(supplierId);
+      setLink(result.link);
+      onContactsChanged?.();
+      const shown = onecSyncMessage(result.outcome);
+      message[shown.type](shown.text);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Не удалось сверить контакты с 1С');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   if (!supplierId || unsupported) return null;
   const title = 'Контрагент 1С';
   if (loadError) return <Card title={title} size="small"><Alert type="error" showIcon message={loadError} /></Card>;
@@ -82,10 +107,27 @@ export const SupplierCounterpartyCard: React.FC<Props> = ({ supplierId, editable
     ? <Typography.Text strong>{link.counterpartyName ?? link.refKey1c}</Typography.Text>
     : <Typography.Text type="secondary">Не связан</Typography.Text>;
 
+  const profile = onecProfileView(link?.onec);
+
   return (
-    <Card title={title} size="small" loading={!link}>
+    <Card
+      title={title}
+      size="small"
+      loading={!link}
+      extra={editable && link?.refKey1c && link.onecSyncEnabled
+        ? <Button size="small" loading={syncing} disabled={saving || contactsDirty} onClick={() => { void syncNow(); }}>Сверить с 1С</Button>
+        : null}
+    >
       <Space direction="vertical" style={{ width: '100%' }} size={8}>
         <div>{current}</div>
+        {editable && contactsDirty ? (
+          <Typography.Text type="warning">Сначала сохраните контакты: сверка и смена привязки перечитывают их.</Typography.Text>
+        ) : null}
+        {link?.refKey1c && profile.identificationNumber ? (
+          <Typography.Text>ИИН/БИН: <Typography.Text copyable>{profile.identificationNumber}</Typography.Text></Typography.Text>
+        ) : null}
+        {link?.refKey1c && profile.syncedText ? <Typography.Text type="secondary">{profile.syncedText}</Typography.Text> : null}
+        {link?.refKey1c ? profile.warnings.map((warning) => <Alert key={warning} type="warning" showIcon message={warning} />) : null}
         {editable ? (
           <Space wrap>
             <Select
@@ -105,26 +147,27 @@ export const SupplierCounterpartyCard: React.FC<Props> = ({ supplierId, editable
               title={<>Привязать поставщика к этому контрагенту 1С?<br />При ближайшей загрузке из 1С все документы этого контрагента получат ссылку на поставщика.</>}
               okText="Привязать"
               cancelText="Отмена"
-              disabled={!choice || saving}
+              disabled={!choice || saving || contactsDirty}
               onConfirm={() => { void change(choice); }}
             >
-              <Button type="primary" disabled={!choice || saving} loading={saving}>{link?.refKey1c ? 'Сменить' : 'Привязать'}</Button>
+              <Button type="primary" disabled={!choice || saving || contactsDirty} loading={saving}>{link?.refKey1c ? 'Сменить' : 'Привязать'}</Button>
             </Popconfirm>
             {link?.refKey1c ? (
               <Popconfirm
                 title={<>Снять привязку к контрагенту 1С?<br />При ближайшей загрузке из 1С документы контрагента потеряют ссылку на поставщика.</>}
                 okText="Снять"
                 cancelText="Отмена"
-                disabled={saving}
+                disabled={saving || contactsDirty}
                 onConfirm={() => { void change(null); }}
               >
-                <Button danger disabled={saving}>Снять привязку</Button>
+                <Button danger disabled={saving || contactsDirty}>Снять привязку</Button>
               </Popconfirm>
             ) : null}
           </Space>
         ) : null}
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          По этой связи экран снабжения находит телефон поставщика для отправки заявки в WhatsApp.
+          По этой связи экран снабжения находит телефон поставщика для отправки заявки в WhatsApp, а телефоны, email и адреса
+          контрагента из 1С попадают в контакты поставщика.
         </Typography.Text>
       </Space>
     </Card>
