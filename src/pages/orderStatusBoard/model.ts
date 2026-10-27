@@ -15,7 +15,12 @@ import type {
   OrderStatusBoardSortOrder,
   OrderStatusBoardType,
 } from '../../api/types/orderStatusBoardApi.types';
-import { cncMaterialNameIsMdf, cncPacketCountsForMdfReadiness } from './cncDetailedMachine';
+import {
+  cncMaterialNameIsMdf,
+  cncMaterialNameIsOther,
+  cncPacketCountsForMdfReadiness,
+  cncPacketHasOtherMaterialMarker,
+} from './cncDetailedMachine';
 
 const COMPLETED_ORDER_STATUS_NAMES = new Set<string>(['завершен', 'завершён']);
 export interface MdfBoardHiddenStatusesSetting {
@@ -298,6 +303,8 @@ function parseOrderStatusBoardSortOrder(value: string): OrderStatusBoardSortOrde
   return value === 'asc' || value === 'desc' ? value : undefined;
 }
 
+// Search suggestions: only order numbers whose details are linked to a card
+// (an ERP order id), never file names or unrecognised text from machine files.
 export function buildCncOrderFilterOptions(
   columns: CncTelegramTodayColumn[],
 ): string[] {
@@ -305,21 +312,29 @@ export function buildCncOrderFilterOptions(
   for (const column of columns) {
     for (const packet of column.packets ?? []) {
       for (const item of packet.items) {
-        addCncOrderFilterOption(orderNamesByKey, item.orderName);
+        if (isLinkedCncOrderId(item.orderId ?? item.matchOrderId) && !item.orderDeleted) {
+          addCncOrderFilterOption(orderNamesByKey, item.orderName);
+        }
       }
     }
     for (const bath of column.baths ?? []) {
       for (const item of bath.items) {
-        addCncOrderFilterOption(orderNamesByKey, item.orderName);
+        if (isLinkedCncOrderId(item.orderId)) addCncOrderFilterOption(orderNamesByKey, item.orderName);
       }
     }
     for (const bazisCutSet of column.bazisCutSets ?? []) {
       for (const item of bazisCutSet.items) {
-        addCncOrderFilterOption(orderNamesByKey, item.orderName);
+        if (isLinkedCncOrderId(item.orderId) && !item.orderDeleted) {
+          addCncOrderFilterOption(orderNamesByKey, item.orderName);
+        }
       }
     }
   }
   return Array.from(orderNamesByKey.values()).sort(compareCncOrderNames);
+}
+
+function isLinkedCncOrderId(value: number | null | undefined): boolean {
+  return Number.isInteger(value) && Number(value) > 0;
 }
 
 export function filterCncTodayColumnsByOrders(
@@ -348,6 +363,102 @@ export function filterCncTodayColumnsByOrders(
       : packets.length + bazisCutSets.length;
     return { ...column, baths, packets, bazisCutSets, total };
   });
+}
+
+export interface CncSearchedOrderItem {
+  widthMm: number | null;
+  heightMm: number | null;
+  quantity: number;
+}
+
+// Items of the searched orders only, across every card of the column; other
+// orders sharing the same bath or machine file are left out.
+export function selectCncSearchedOrderItems(
+  column: { key: string } & Pick<CncTelegramTodayColumn, 'packets' | 'baths' | 'bazisCutSets'>,
+  orderFilters: readonly string[],
+): CncSearchedOrderItem[] {
+  return splitCncSearchedOrderItems(column, orderFilters).mdf;
+}
+
+// Searched-order items split by material: non-MDF files (cream cards) and non-MDF
+// Bazis-cut positions are shown on the board but are not MDF work.
+export function splitCncSearchedOrderItems(
+  column: { key: string } & Pick<CncTelegramTodayColumn, 'packets' | 'baths' | 'bazisCutSets'>,
+  orderFilters: readonly string[],
+): { mdf: CncSearchedOrderItem[]; other: CncSearchedOrderItem[] } {
+  const orderKeys = new Set(
+    normalizeCncOrderFilterValues(orderFilters).map((value) =>
+      normalizeCncOrderKey(value),
+    ),
+  );
+  const mdf: CncSearchedOrderItem[] = [];
+  const other: CncSearchedOrderItem[] = [];
+  if (orderKeys.size === 0) return { mdf, other };
+  const matches = (item: { orderName: string }) =>
+    orderKeys.has(normalizeCncOrderKey(item.orderName));
+  if (isCncBathColumnKey(column.key)) {
+    for (const bath of column.baths ?? []) mdf.push(...bath.items.filter(matches));
+    return { mdf, other };
+  }
+  for (const packet of column.packets ?? []) {
+    (cncPacketHasOtherMaterialMarker(packet) ? other : mdf).push(...packet.items.filter(matches));
+  }
+  for (const set of column.bazisCutSets ?? []) {
+    for (const item of set.items.filter(matches)) {
+      (cncMaterialNameIsOther(item.materialName) ? other : mdf).push(item);
+    }
+  }
+  return { mdf, other };
+}
+
+// A bath or machine file mixes details of many orders, so the order columns
+// keep only the searched orders themselves, not every order sharing their cards.
+export function filterCncOrderCardsByOrders(
+  cards: readonly OrderStatusBoardCard[],
+  orderFilters: readonly string[],
+  searchedOrderIds: ReadonlySet<number> = new Set(),
+): OrderStatusBoardCard[] {
+  const orderKeys = new Set(
+    normalizeCncOrderFilterValues(orderFilters).map((value) =>
+      normalizeCncOrderKey(value),
+    ),
+  );
+  if (orderKeys.size === 0) return [...cards];
+  return cards.filter((card) =>
+    searchedOrderIds.has(card.orderId)
+    || orderKeys.has(normalizeCncOrderKey(card.orderName))
+    || orderKeys.has(normalizeCncOrderKey(card.fullNumber)));
+}
+
+// Order ids of the items whose stored order name matches the search: a card keeps the
+// order name it was made with, so a renamed order is still found by its id. Only the
+// matching items count, never the other orders sharing a bath or machine file.
+export function collectCncSearchedOrderIds(
+  columns: readonly Pick<CncTelegramTodayColumn, 'packets' | 'baths' | 'bazisCutSets'>[],
+  orderFilters: readonly string[],
+): Set<number> {
+  const orderKeys = new Set(
+    normalizeCncOrderFilterValues(orderFilters).map((value) =>
+      normalizeCncOrderKey(value),
+    ),
+  );
+  const orderIds = new Set<number>();
+  if (orderKeys.size === 0) return orderIds;
+  const add = (orderName: string, orderId: number | null | undefined) => {
+    if (orderKeys.has(normalizeCncOrderKey(orderName))) addCncOrderId(orderIds, orderId);
+  };
+  for (const column of columns) {
+    for (const packet of column.packets ?? []) {
+      for (const item of packet.items) add(item.orderName, item.orderId ?? item.matchOrderId);
+    }
+    for (const bath of column.baths ?? []) {
+      for (const item of bath.items) add(item.orderName, item.orderId);
+    }
+    for (const set of column.bazisCutSets ?? []) {
+      for (const item of set.items) add(item.orderName, item.orderId);
+    }
+  }
+  return orderIds;
 }
 
 export function filterCncOrderCardsByPlannedOrderDate(
@@ -887,7 +998,7 @@ function collectBathOrderIds(bath: CncTelegramBathCard): number[] {
   return orderIds.every(isPositiveInteger) ? normalizePositiveIntegerArray(orderIds) : [];
 }
 
-function isCncBathColumnKey(key: CncTelegramTodayColumn['key']): boolean {
+function isCncBathColumnKey(key: string): boolean {
   return key === 'baths'
     || key === 'baths_ready'
     || key === 'baths_laminated'
@@ -914,6 +1025,18 @@ export function collectCncOrderIds(columns: CncTelegramTodayColumn[]): number[] 
     }
   }
   return Array.from(orderIds).sort((left, right) => left - right);
+}
+
+/** Orders with MDF work on the board: a non-MDF file (cream card) alone gives its orders no order card. */
+export function collectCncMdfOrderIds(columns: CncTelegramTodayColumn[]): number[] {
+  return collectCncOrderIds(columns.map((column) => ({
+    ...column,
+    packets: (column.packets ?? []).filter((packet) => !cncPacketHasOtherMaterialMarker(packet)),
+    bazisCutSets: (column.bazisCutSets ?? []).map((set) => ({
+      ...set,
+      items: set.items.filter((item) => !cncMaterialNameIsOther(item.materialName)),
+    })),
+  })));
 }
 
 export function buildCncOrderSearchDateRange(

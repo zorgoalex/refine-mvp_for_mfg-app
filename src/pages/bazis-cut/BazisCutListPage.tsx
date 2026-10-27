@@ -65,6 +65,8 @@ export const BazisCutListPage: React.FC = () => {
       render: (value: number, row) => <Space direction="vertical" size={0} align="end"><Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</Text><Text type="secondary">Позиций: {row.positionCount}</Text></Space> },
     { title: 'Площадь, м²', dataIndex: 'totalAreaM2', key: 'totalAreaM2', align: 'right', width: 130,
       render: (value: number) => <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{formatBazisCutAreaM2(value)}</Text> },
+    { title: 'Материал', key: 'materialNames', width: 220,
+      render: (_, row) => <MaterialNames names={row.materialNames ?? []} /> },
     ...(canManage ? [{ title: 'Действия', key: 'actions', align: 'right' as const, width: 130,
       render: (_: unknown, row: BazisCutSetListItemDto) => {
         const empty = row.positionCount === 0;
@@ -111,6 +113,13 @@ export const BazisCutListPage: React.FC = () => {
         navigate(`/bazis-cut/${createdSetId}`);
       }} />
   </Space></div>;
+};
+
+const MaterialNames: React.FC<{ names: readonly string[] }> = ({ names }) => {
+  if (names.length === 0) return <Text type="secondary">—</Text>;
+  return <Space direction="vertical" size={0}>
+    {names.map((name) => <Text key={name}>{name}</Text>)}
+  </Space>;
 };
 
 const Sources: React.FC<{ row: BazisCutSetListItemDto }> = ({ row }) => <Space direction="vertical" size={2}>

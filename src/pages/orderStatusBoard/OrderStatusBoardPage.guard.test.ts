@@ -70,7 +70,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(memo('cncOrderIds')).toContain('collectCncOrderIds(cncPeriodColumns)');
     expect(memo('cncActiveColumns')).not.toContain('cncFilteredColumns');
     expect(memo('cncOrderFilteredColumns')).toContain('filterCncTodayColumnsByOrders(cncActiveColumns, cncOrderFilters)');
-    expect(memo('cncVisibleOrderIds')).toContain('collectCncOrderIds(cncFilteredColumns)');
+    expect(memo('cncVisibleOrderIds')).toContain('collectCncMdfOrderIds(cncFilteredColumns)');
     expect(memo('cncVisibleOrderStatusCards')).toContain('cncVisibleOrderIds');
     expect(memo('cncDisplayOrderStatusCards')).toContain('cncVisibleOrderStatusCards');
     expect(memo('cncHistoricalBathReadiness')).toContain('cncToday?.historicalBathReadiness');
@@ -1547,9 +1547,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(settings).toContain('Скрыть пустые');
     expect(settings).not.toContain('checked={viewState.cncPlannedTodayOnly}');
     expect(settings).not.toContain('Плановая дата сегодня');
-    expect(cncToolbar).toContain('active={viewState.cncPlannedTodayOnly}');
-    expect(cncToolbar).toContain('label="Плановая дата сегодня"');
+    expect(cncToolbar).toContain("type={viewState.cncPlannedTodayOnly ? 'primary' : 'default'}");
+    expect(cncToolbar).toContain('aria-pressed={viewState.cncPlannedTodayOnly}');
     expect(cncToolbar).toContain('icon={<ScheduleOutlined />}');
+    expect(cncToolbar).toContain('onClick={toggleCncPlannedTodayFilter}');
+    expect(cncToolbar).not.toContain('label="Плановая дата сегодня"');
+    expect(cncToolbar).toContain('aria-label="Перейти на сегодняшнюю дату"');
+    expect(cncToolbar).toContain('onClick={() => updateCncWorkday(dayjs())}');
     expect(page).toContain('const toggleCncPlannedTodayFilter = useCallback(() => {');
     expect(page).toContain('cncWorkday: todayCncWorkday');
     expect(page).toContain('cncOrderSearchPeriod: defaultCncOrderSearchPeriod');
@@ -1557,7 +1561,6 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('hideEmpty: false');
     expect(page).toContain('setCncBathsRequireMachineFiles(false)');
     expect(page).toContain('setCncTerminalColumnsVisible(false)');
-    expect(cncToolbar).toContain('onToggle={toggleCncPlannedTodayFilter}');
     expect(cncToolbar).not.toContain('Вчера');
     expect(cncToolbar).not.toContain('checked={viewState.hideEmpty}');
     expect(cncToolbar).not.toContain('<Typography.Text type="secondary">Период</Typography.Text>');
@@ -1907,5 +1910,21 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('setCncHistoryCollapsed(false)');
     expect(page).toContain('aria-label={onSelectCard');
     expect(page).toContain('Показать историю заказа');
+  });
+});
+
+describe('MDF board order search', () => {
+  it('shows only the searched-order totals in column headers while searching', () => {
+    expect(page).toContain('const searchTotals = buildCncSearchedOrderTotals(column, searchOrderFilters);');
+    expect(page).toContain('{!searchTotals ? (');
+    expect(page).not.toContain('{!searchTotals || !orderColumn ? (');
+    expect(page).toContain('не МДФ: {searchTotals.otherDetails} дет.');
+    expect(page).toContain(': { details: 0, areaM2: 0 };');
+  });
+
+  it('closes the order-search dropdown after Enter or a pick', () => {
+    expect(page).toContain('open={cncOrderSearchOpen}');
+    expect(page).toContain('onSelect={() => setCncOrderSearchOpen(false)}');
+    expect(page).toContain("onInputKeyDown={(event) => { if (event.key === 'Enter') setCncOrderSearchOpen(false); }}");
   });
 });

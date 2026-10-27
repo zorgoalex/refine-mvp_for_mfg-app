@@ -51,9 +51,14 @@ import {
   filterCncBathColumnsByMachineOrderMatches,
   filterCncHistoricalBathReadiness,
   filterCncBathColumnsByOrderStatuses,
+  collectCncSearchedOrderIds,
+  filterCncOrderCardsByOrders,
   filterCncOrderCardsByPlannedOrderDate,
   filterCncTodayColumnsByOrders,
   filterCncTodayColumnsByPlannedOrderDate,
+  selectCncSearchedOrderItems,
+  splitCncSearchedOrderItems,
+  collectCncMdfOrderIds,
   isCncCardSummaryOnly,
   isCncOrderHiddenFromMdfBoard,
   mergeOrderStatusBoardColumnPage,
@@ -993,6 +998,25 @@ describe('order status board model', () => {
     });
   });
 
+  it('suggests only order numbers linked to an ERP order, never file names or OCR text', () => {
+    const columns = [
+      {
+        key: 'parsed', title: 'Файлы на станке', total: 2,
+        packets: [
+          cncPacket('linked', ['2706', 'Ванна 2706 - Белый Софт.svg', 'ДСП'], [2706, null, null]),
+          cncPacket('matched', ['2707'], [null], [2707]),
+        ],
+        baths: [],
+        bazisCutSets: [cncBazisCutSet(9101, [
+          { orderName: '3057', orderId: 3057, detailId: 1 },
+          { orderName: 'Без заказа', orderId: null, detailId: null },
+        ])],
+      },
+    ] as unknown as CncTelegramTodayColumn[];
+
+    expect(buildCncOrderFilterOptions(columns)).toEqual(['2706', '2707', '3057']);
+  });
+
   it('filters CNC packet and bath cards by exact order number', () => {
     const columns = [
       {
@@ -1000,8 +1024,8 @@ describe('order status board model', () => {
         title: 'Файлы на станке',
         total: 2,
         packets: [
-          cncPacket('p-2706', ['2706', '2707']),
-          cncPacket('p-2712', ['2712']),
+          cncPacket('p-2706', ['2706', '2707'], [2706], [null, 2707]),
+          cncPacket('p-2712', ['2712'], [2712]),
         ],
         baths: [],
       },
@@ -1100,6 +1124,114 @@ describe('order status board model', () => {
       filterCncOrderCardsByPlannedOrderDate(orderCards, '2026-08-11')
         .map((order) => order.orderId),
     ).toEqual([2706, 2800]);
+  });
+
+  it('keeps the card of a renamed order found by the stored order name on its items', () => {
+    const columns = [
+      { key: 'parsed', title: 'Files', total: 1, baths: [],
+        packets: [cncPacket('p', ['2706', '2707'], [3001, 3002])],
+        bazisCutSets: [cncBazisCutSet(9201, [
+          { orderName: '2706', orderId: 3001, detailId: 1 },
+          { orderName: '2708', orderId: 3003, detailId: 2 },
+        ])] },
+    ] as unknown as CncTelegramTodayColumn[];
+    const searchedIds = collectCncSearchedOrderIds(columns, ['2706']);
+    expect([...searchedIds]).toEqual([3001]);
+
+    const renamed = card(3001, { orderName: '2806', fullNumber: 'A-2806' });
+    const neighbour = card(3002, { orderName: '2707', fullNumber: 'A-2707' });
+    expect(filterCncOrderCardsByOrders([renamed, neighbour], ['2706'], searchedIds)
+      .map((order) => order.orderId)).toEqual([3001]);
+    expect(filterCncOrderCardsByOrders([renamed, neighbour], ['2706'])).toEqual([]);
+  });
+
+  it('keeps only searched orders in the order columns when a bath mixes several orders', () => {
+    const columns: CncTelegramTodayColumn[] = [
+      { key: 'baths', title: 'Baths', total: 1, packets: [],
+        baths: [cncBath('mixed', ['2706', '2707', '2708'], [2706, 2707, 2708])] },
+    ];
+    const orderCards = [card(2706), card(2707), card(2708), card(2999)];
+    const visibleIds = new Set(collectCncOrderIds(filterCncTodayColumnsByOrders(columns, ['2706'])));
+    const visibleCards = orderCards.filter((order) => visibleIds.has(order.orderId));
+
+    expect(visibleCards.map((order) => order.orderId)).toEqual([2706, 2707, 2708]);
+    expect(filterCncOrderCardsByOrders(visibleCards, ['2706']).map((order) => order.orderId))
+      .toEqual([2706]);
+    expect(filterCncOrderCardsByOrders(visibleCards, [' 2706 , 2708']).map((order) => order.orderId))
+      .toEqual([2706, 2708]);
+    expect(filterCncOrderCardsByOrders(visibleCards, ['a-2707']).map((order) => order.orderId))
+      .toEqual([2707]);
+    expect(filterCncOrderCardsByOrders(visibleCards, [])).toEqual(visibleCards);
+  });
+
+  it('selects only searched-order items across every card of a column for the header totals', () => {
+    const bathColumn = {
+      key: 'baths' as const, title: 'Baths', total: 2, packets: [],
+      baths: [
+        cncBath('a', ['2706', '2707', '2706'], [2706, 2707, 2706]),
+        cncBath('b', ['2708'], [2708]),
+        cncBath('c', ['2706'], [2706]),
+      ],
+    } as unknown as CncTelegramTodayColumn;
+    expect(selectCncSearchedOrderItems(bathColumn, ['2706'])).toHaveLength(3);
+    expect(selectCncSearchedOrderItems(bathColumn, ['2999'])).toEqual([]);
+    expect(selectCncSearchedOrderItems(bathColumn, [])).toEqual([]);
+
+    const machineColumn = {
+      key: 'parsed' as const, title: 'Files', total: 2,
+      packets: [cncPacket('p', ['2706', '2707'])],
+      baths: [cncBath('ignored', ['2706'])],
+      bazisCutSets: [cncBazisCutSet(9001, [
+        { orderName: '2706', orderId: 2706, detailId: 1 },
+        { orderName: '2707', orderId: 2707, detailId: 2 },
+      ])],
+    } as unknown as CncTelegramTodayColumn;
+    expect(selectCncSearchedOrderItems(machineColumn, ['2706'])).toHaveLength(2);
+    expect(selectCncSearchedOrderItems(machineColumn, ['2706, 2707'])).toHaveLength(4);
+  });
+
+  it('splits the searched-order items into MDF and non-MDF for the separate header line', () => {
+    const ldsp = { ...cncPacket('ldsp', ['2706', '2708'], [2706, 2708]), materialName: 'ЛДСП 16мм' };
+    const column = {
+      key: 'parsed' as const, title: 'Files', total: 3,
+      packets: [cncPacket('mdf', ['2706'], [2706]), ldsp],
+      baths: [],
+      bazisCutSets: [cncBazisCutSet(9003, [
+        { orderName: '2706', orderId: 2706, detailId: 1, materialName: 'МДФ 16мм' },
+        { orderName: '2706', orderId: 2706, detailId: 2, materialName: 'ХДФ 3мм' },
+        { orderName: '2707', orderId: 2707, detailId: 3, materialName: 'ХДФ 3мм' },
+      ])],
+    } as unknown as CncTelegramTodayColumn;
+    const split = splitCncSearchedOrderItems(column, ['2706']);
+    expect(split.mdf).toHaveLength(2);
+    expect(split.other).toHaveLength(2);
+    expect(selectCncSearchedOrderItems(column, ['2706'])).toEqual(split.mdf);
+    expect(splitCncSearchedOrderItems(column, [])).toEqual({ mdf: [], other: [] });
+    const baths = { key: 'baths' as const, title: 'Baths', total: 1, packets: [],
+      baths: [cncBath('b', ['2706'], [2706])] } as unknown as CncTelegramTodayColumn;
+    expect(splitCncSearchedOrderItems(baths, ['2706']).other).toEqual([]);
+  });
+
+  it('non-MDF files (cream cards) add no MDF details to search totals and no order card of their own', () => {
+    const ldsp = { ...cncPacket('ldsp', ['2706', '2708'], [2706, 2708]), materialName: 'ЛДСП 16мм' };
+    const unknown = { ...cncPacket('unknown', ['2709'], [2709]), materialName: '' };
+    const column = {
+      key: 'parsed' as const, title: 'Files', total: 4,
+      packets: [cncPacket('mdf', ['2706'], [2706]), ldsp, unknown],
+      baths: [],
+      bazisCutSets: [cncBazisCutSet(9002, [
+        { orderName: '2706', orderId: 2706, detailId: 1, materialName: 'МДФ 16мм' },
+        { orderName: '2706', orderId: 2706, detailId: 2, materialName: 'ХДФ 3мм' },
+        { orderName: '2710', orderId: 2710, detailId: 3, materialName: 'ЛДСП 16мм' },
+      ])],
+    } as unknown as CncTelegramTodayColumn;
+    // 2706: the MDF file and the MDF detail of the mixed set; the ЛДСП file and the ХДФ detail stay out.
+    expect(selectCncSearchedOrderItems(column, ['2706'])).toHaveLength(2);
+    expect(selectCncSearchedOrderItems(column, ['2708'])).toEqual([]);
+    // An unrecognised material is not proven non-MDF: the card is not cream and still counts.
+    expect(selectCncSearchedOrderItems(column, ['2709'])).toHaveLength(1);
+    // 2708 and 2710 reach the board only through non-MDF work: no order card.
+    expect(collectCncMdfOrderIds([column])).toEqual([2706, 2709]);
   });
 
   it.each([

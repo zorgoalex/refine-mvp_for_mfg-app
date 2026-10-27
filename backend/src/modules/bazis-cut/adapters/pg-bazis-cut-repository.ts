@@ -71,6 +71,7 @@ interface ListRow extends SetRow {
   quantity: string | number;
   position_count: string | number;
   total_area_m2: string | number;
+  material_names: string[] | null;
   orders: unknown;
   projects: unknown;
   bazis_projects: unknown;
@@ -158,6 +159,8 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
               COALESCE(SUM(d.quantity), 0)::bigint AS quantity,
               COUNT(d.bazis_cut_set_detail_id)::bigint AS position_count,
               COALESCE(SUM(d.finished_length_mm * d.finished_width_mm * d.quantity / 1000000.0), 0)::numeric AS total_area_m2,
+              COALESCE(array_agg(DISTINCT btrim(d.material_name)::text)
+                FILTER (WHERE NULLIF(btrim(d.material_name), '') IS NOT NULL), '{}'::text[]) AS material_names,
               COALESCE(jsonb_agg(DISTINCT jsonb_build_object(
                 'id', d.source_order_id,
                 'label', d.source_order_name,
@@ -975,6 +978,7 @@ async function loadSet(client: DatabaseClient, setId: number): Promise<BazisCutS
     createdAt: iso(header.created_at), updatedAt: iso(header.updated_at), details,
     quantity: details.reduce((sum, detail) => sum + detail.quantity, 0), positionCount: details.length,
     totalAreaM2: totalAreaM2(details),
+    materialNames: distinctMaterialNames(details.map((detail) => detail.materialName)),
     orders: refs(details, 'sourceOrderId', 'sourceOrderName', 'sourceOrderDeleted'),
     projects: refs(details, 'sourceProjectId', 'sourceProjectCode'),
     bazisProjects: labelRefs(details, 'sourceBazisProjectId', 'sourceBazisProjectName'),
@@ -1003,6 +1007,7 @@ function mapSummaryRow(row: ListRow): BazisCutSetSummaryDto {
     bazisCutSetId: toNumber(row.bazis_cut_set_id), name: row.name, version: Number(row.version),
     createdAt: iso(row.created_at), updatedAt: iso(row.updated_at), quantity: toNumber(row.quantity),
     positionCount: toNumber(row.position_count), totalAreaM2: toNumber(row.total_area_m2),
+    materialNames: distinctMaterialNames(row.material_names ?? []),
     orders: parseRefs(row.orders), projects: parseRefs(row.projects),
     bazisProjects: parseRefs(row.bazis_projects), bazisOrders: parseRefs(row.bazis_orders),
   };
@@ -1322,9 +1327,15 @@ function setSummary(set: BazisCutSetDto): BazisCutSetSummaryDto {
     bazisCutSetId: set.bazisCutSetId, name: set.name, version: set.version,
     createdAt: set.createdAt, updatedAt: set.updatedAt, quantity: set.quantity,
     positionCount: set.positionCount, totalAreaM2: set.totalAreaM2,
+    materialNames: set.materialNames,
     orders: set.orders, projects: set.projects, bazisProjects: set.bazisProjects,
     bazisOrders: set.bazisOrders,
   };
+}
+
+function distinctMaterialNames(names: readonly (string | null | undefined)[]): string[] {
+  const unique = new Set(names.map((name) => name?.trim() ?? '').filter(Boolean));
+  return [...unique].sort((left, right) => left.localeCompare(right, 'ru'));
 }
 
 function totalAreaM2(details: readonly Pick<BazisCutSetDetailDto, 'finishedLengthMm' | 'finishedWidthMm' | 'quantity'>[]): number {

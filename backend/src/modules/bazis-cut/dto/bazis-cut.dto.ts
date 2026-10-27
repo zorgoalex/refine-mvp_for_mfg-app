@@ -173,6 +173,8 @@ export interface BazisCutSetSummaryDto {
   quantity: number;
   positionCount: number;
   totalAreaM2: number;
+  /** Distinct trimmed detail material names, sorted. */
+  materialNames: string[];
   orders: BazisCutSourceRefDto[];
   projects: BazisCutSourceRefDto[];
   bazisProjects: BazisCutSourceRefDto[];
