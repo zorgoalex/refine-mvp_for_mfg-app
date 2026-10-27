@@ -2635,6 +2635,18 @@ probe_file() {
     # 233: queue instead of refusals (no «one active» index), manual cancel, image forms + their pages.
     # 230's probe checks its end state: 233 drops the one-active index, so 230 does not require it.
     # 235: employee work contacts + an employee as an order card send recipient.
+    # 243: K4a — supplier contacts from 1C: origin columns on the three contact tables, 1C profile and sync state,
+    # availability/lock functions, the narrowed phone sync, the profile cleanup trigger, version save marker.
+    243_supplier_contacts_onec*) probe_all \
+      "$(q_col supplier_contacts onec_snapshot_version)" \
+      "$(q_col vendor_contacts onec_snapshot_version)" \
+      "$(q_col client_contacts onec_snapshot_version)" \
+      "$(q_tbl party_onec_profiles)" \
+      "$(q_tbl party_onec_sync_state)" \
+      "SELECT to_regprocedure('public.party_onec_contacts_available(bigint,timestamp with time zone)') IS NOT NULL AND to_regprocedure('public.party_onec_contacts_lock(bigint,timestamp with time zone)') IS NOT NULL;" \
+      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'supplier_phone_contact_sync' AND prosrc LIKE '%origin = ''erp''%');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'party_contact_versions_saved' AND prosrc LIKE '%erp.party_contacts_onec_sync%');" \
+      "$(q_trg trg_supplier_drop_onec_profile)" ;;
     # 244: permissions of the 1C counterparty data in the client card (manager and above).
     244_client_onec_permissions*) probe_all \
       "SELECT (SELECT count(*) FROM permissions_catalog WHERE permission_name IN ('clients.onec_data.view','clients.onec_documents.view') AND is_active) = 2;" \

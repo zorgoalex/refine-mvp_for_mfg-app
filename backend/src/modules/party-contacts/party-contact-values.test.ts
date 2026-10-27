@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../common/errors/api-error';
 import type { OnecCounterpartyContact } from '../onec-agent/onec-catalog-reader';
 import { onecContactValues } from './onec-contact-values';
+import { parseOwnerId } from './party-contacts.controller';
 import { maskPartyContact, normalizePartyContact, planContactSet, type StoredContact } from './party-contact-values';
 import { PARTY_ONEC_CONTACTS_MAX, type PartyContactInput } from './party-contacts';
 
@@ -90,5 +91,15 @@ describe('1C contact values', () => {
     const many = Array.from({ length: PARTY_ONEC_CONTACTS_MAX + 2 }, (_, index) => contact(index + 1, 'email', { email: `u${index}@test.kz` }));
     expect(onecContactValues(many)).toMatchObject({ skipped: 2 });
     expect(onecContactValues(many).values).toHaveLength(PARTY_ONEC_CONTACTS_MAX);
+  });
+});
+
+describe('owner ids', () => {
+  it('a supplier or vendor id beyond smallint is «not found», not a database error; clients are bigint', () => {
+    expect(codeOf(() => parseOwnerId('supplier', '999999'))).toBe('SUPPLIER_NOT_FOUND');
+    expect(codeOf(() => parseOwnerId('vendor', '32768'))).toBe('VENDOR_NOT_FOUND');
+    expect(parseOwnerId('supplier', '32767')).toBe(32767);
+    expect(parseOwnerId('client', '999999')).toBe(999999);
+    expect(codeOf(() => parseOwnerId('client', '0'))).toBe('VALIDATION_ERROR');
   });
 });

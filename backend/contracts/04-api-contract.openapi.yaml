@@ -1154,6 +1154,21 @@ paths:
         '200': {description: Counterparties, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/SupplierCounterparty'}}}}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/suppliers/{id}/contacts/onec-sync:
+    post:
+      tags: [Party contacts]
+      operationId: syncSupplierContactsFromOnec
+      summary: 'Sync the contacts of a supplier with its 1C counterparty now'
+      description: 'Uses the loaded 1C data. Returns the sync outcome and the refreshed counterparty link.'
+      security: [{bearerAuth: []}]
+      x-permissions: [suppliers.manage]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: 'Outcome and link', content: {application/json: {schema: {type: object, required: [outcome, link], properties: {outcome: {type: object}, link: {$ref: '#/components/schemas/SupplierLink'}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'SUPPLIER_NOT_FOUND'}
   /api/v1/suppliers/{id}/counterparty:
     get:
       tags: [Party contacts]
