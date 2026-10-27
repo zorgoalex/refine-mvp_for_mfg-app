@@ -416,6 +416,7 @@ export function splitCncSearchedOrderItems(
 export function filterCncOrderCardsByOrders(
   cards: readonly OrderStatusBoardCard[],
   orderFilters: readonly string[],
+  searchedOrderIds: ReadonlySet<number> = new Set(),
 ): OrderStatusBoardCard[] {
   const orderKeys = new Set(
     normalizeCncOrderFilterValues(orderFilters).map((value) =>
@@ -424,8 +425,40 @@ export function filterCncOrderCardsByOrders(
   );
   if (orderKeys.size === 0) return [...cards];
   return cards.filter((card) =>
-    orderKeys.has(normalizeCncOrderKey(card.orderName))
+    searchedOrderIds.has(card.orderId)
+    || orderKeys.has(normalizeCncOrderKey(card.orderName))
     || orderKeys.has(normalizeCncOrderKey(card.fullNumber)));
+}
+
+// Order ids of the items whose stored order name matches the search: a card keeps the
+// order name it was made with, so a renamed order is still found by its id. Only the
+// matching items count, never the other orders sharing a bath or machine file.
+export function collectCncSearchedOrderIds(
+  columns: readonly Pick<CncTelegramTodayColumn, 'packets' | 'baths' | 'bazisCutSets'>[],
+  orderFilters: readonly string[],
+): Set<number> {
+  const orderKeys = new Set(
+    normalizeCncOrderFilterValues(orderFilters).map((value) =>
+      normalizeCncOrderKey(value),
+    ),
+  );
+  const orderIds = new Set<number>();
+  if (orderKeys.size === 0) return orderIds;
+  const add = (orderName: string, orderId: number | null | undefined) => {
+    if (orderKeys.has(normalizeCncOrderKey(orderName))) addCncOrderId(orderIds, orderId);
+  };
+  for (const column of columns) {
+    for (const packet of column.packets ?? []) {
+      for (const item of packet.items) add(item.orderName, item.orderId ?? item.matchOrderId);
+    }
+    for (const bath of column.baths ?? []) {
+      for (const item of bath.items) add(item.orderName, item.orderId);
+    }
+    for (const set of column.bazisCutSets ?? []) {
+      for (const item of set.items) add(item.orderName, item.orderId);
+    }
+  }
+  return orderIds;
 }
 
 export function filterCncOrderCardsByPlannedOrderDate(

@@ -158,6 +158,7 @@ import {
   applyMdfHiddenRulesToReadinessSources,
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
+  collectCncSearchedOrderIds,
   filterCncOrderCardsByOrders,
   splitCncSearchedOrderItems,
   filterCncOrderCardsByPlannedOrderDate,
@@ -1880,12 +1881,18 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     ),
     [cncDisplayOrderStatusCards, cncHiddenOrderStatusIds, cncHiddenProductionStatusIds],
   );
+  const cncSearchedOrderIds = useMemo(
+    () => collectCncSearchedOrderIds(cncActiveColumns, cncOrderFilters),
+    [cncActiveColumns, cncOrderFilterKey],
+  );
   const cncOrderCards = useMemo(
     () => {
       const cards = cncOriginalView || cncTerminalColumnsVisible
         ? cncDisplayOrderStatusCards
         : cncDisplayOrderStatusCards.filter((card) => !cncMutedOrderIds.has(card.orderId));
-      return cncSearchActive ? filterCncOrderCardsByOrders(cards, cncOrderFilters) : cards;
+      return cncSearchActive
+        ? filterCncOrderCardsByOrders(cards, cncOrderFilters, cncSearchedOrderIds)
+        : cards;
     },
     [
       cncDisplayOrderStatusCards,
@@ -1893,6 +1900,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       cncOrderFilterKey,
       cncOriginalView,
       cncSearchActive,
+      cncSearchedOrderIds,
       cncTerminalColumnsVisible,
     ],
   );

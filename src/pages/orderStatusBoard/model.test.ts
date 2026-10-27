@@ -51,6 +51,7 @@ import {
   filterCncBathColumnsByMachineOrderMatches,
   filterCncHistoricalBathReadiness,
   filterCncBathColumnsByOrderStatuses,
+  collectCncSearchedOrderIds,
   filterCncOrderCardsByOrders,
   filterCncOrderCardsByPlannedOrderDate,
   filterCncTodayColumnsByOrders,
@@ -1123,6 +1124,25 @@ describe('order status board model', () => {
       filterCncOrderCardsByPlannedOrderDate(orderCards, '2026-08-11')
         .map((order) => order.orderId),
     ).toEqual([2706, 2800]);
+  });
+
+  it('keeps the card of a renamed order found by the stored order name on its items', () => {
+    const columns = [
+      { key: 'parsed', title: 'Files', total: 1, baths: [],
+        packets: [cncPacket('p', ['2706', '2707'], [3001, 3002])],
+        bazisCutSets: [cncBazisCutSet(9201, [
+          { orderName: '2706', orderId: 3001, detailId: 1 },
+          { orderName: '2708', orderId: 3003, detailId: 2 },
+        ])] },
+    ] as unknown as CncTelegramTodayColumn[];
+    const searchedIds = collectCncSearchedOrderIds(columns, ['2706']);
+    expect([...searchedIds]).toEqual([3001]);
+
+    const renamed = card(3001, { orderName: '2806', fullNumber: 'A-2806' });
+    const neighbour = card(3002, { orderName: '2707', fullNumber: 'A-2707' });
+    expect(filterCncOrderCardsByOrders([renamed, neighbour], ['2706'], searchedIds)
+      .map((order) => order.orderId)).toEqual([3001]);
+    expect(filterCncOrderCardsByOrders([renamed, neighbour], ['2706'])).toEqual([]);
   });
 
   it('keeps only searched orders in the order columns when a bath mixes several orders', () => {
