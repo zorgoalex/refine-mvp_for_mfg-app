@@ -18,6 +18,8 @@ import {
   buildDefaultProductionWorkflowConfig,
   normalizeProductionWorkflowConfig,
 } from '../../../types/productionWorkflow';
+import { buildProductionStagesDisplayConfig } from '../../../utils/productionWorkflow';
+import { findLetterConflicts } from './productionStatusLetters';
 import {
   buildDefaultSchedulePayload,
   buildDurationDraft,
@@ -303,10 +305,32 @@ export const ProductionWorkflowTab: React.FC = () => {
     [draft?.layout_rows, draft?.status_codes_order],
   );
 
+  // Letters orders and the calendar actually show: configured, else the fallback from the name.
+  const effectiveLetters = useMemo(() => {
+    if (!draft || statuses.length === 0) return {} as Record<string, string>;
+    return buildProductionStagesDisplayConfig({ workflow: draft, statuses, workflowKey: WORKFLOW_KEY })
+      .display.codeToLetter;
+  }, [draft, statuses]);
+  const letterConflicts = useMemo(
+    () => findLetterConflicts(statuses, effectiveLetters),
+    [statuses, effectiveLetters],
+  );
+  const conflictByCode = useMemo(() => {
+    const map = new Map<string, string[]>();
+    letterConflicts.forEach((c) => c.codes.forEach((code) => map.set(code, c.names)));
+    return map;
+  }, [letterConflicts]);
+
   const validationItems = useMemo(() => {
     if (!draft) return [];
-    return validateWorkflow(draft, knownCodesSet);
-  }, [draft, knownCodesSet]);
+    return [
+      ...validateWorkflow(draft, knownCodesSet),
+      ...letterConflicts.map((c): ValidationItem => ({
+        level: 'error',
+        message: `Буква «${c.letter}» у нескольких этапов: ${c.names.join(', ')} — задайте разные буквы`,
+      })),
+    ];
+  }, [draft, knownCodesSet, letterConflicts]);
 
   const validationErrors = useMemo(() => validationItems.filter((i) => i.level === 'error'), [validationItems]);
   const validationWarnings = useMemo(() => validationItems.filter((i) => i.level === 'warning'), [validationItems]);
@@ -1276,6 +1300,16 @@ export const ProductionWorkflowTab: React.FC = () => {
               render: (code: string) => (
                 <Input
                   value={draft.letters_by_code?.[code] || ''}
+                  // Empty field: the letter orders show anyway (first letter of the name).
+                  placeholder={effectiveLetters[code]}
+                  status={conflictByCode.has(code) ? 'error' : undefined}
+                  title={
+                    conflictByCode.has(code)
+                      ? `Совпадает: ${conflictByCode.get(code)!.join(', ')}`
+                      : draft.letters_by_code?.[code]
+                        ? undefined
+                        : 'Не задана — в заказах показывается первая буква названия'
+                  }
                   disabled={!canManageWorkflow}
                   maxLength={1}
                   style={{ width: 54, textAlign: 'center' }}
@@ -1292,13 +1326,14 @@ export const ProductionWorkflowTab: React.FC = () => {
             {
               title: 'Название',
               dataIndex: 'production_status_name',
-              render: (name: string, row: ProductionStatusRef) => (
-                <Space size={8}>
-                  <span>{name}</span>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    ({row.production_status_code})
-                  </Text>
-                </Space>
+            },
+            {
+              title: 'Код',
+              dataIndex: 'production_status_code',
+              render: (code: string) => (
+                <Text type="secondary" copyable={{ text: code }} style={{ fontSize: 12 }}>
+                  {code}
+                </Text>
               ),
             },
             {
