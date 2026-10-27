@@ -1240,6 +1240,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).not.toContain('MdfHybridMoveContext');
     expect(page).toContain("hybridEntry={hybridMoveMeta?.get(cncManualMoveStorageKey('packet', packet.packetId))}");
     expect(page).toContain('renderDependencies={cncOrderCardRenderDependencies({');
+    // the app-wide capture scroll listener reads column rects once per frame and never while the board is hidden
+    expect(page).toContain("if (viewport?.closest('[hidden]')) return;");
+    expect(page).toContain('if (frame) window.cancelAnimationFrame(frame);');
     expect(page).toContain('onMove={stableMoveCncCard}');
     expect(page).toContain('moveCncCardRef.current = moveCncCard;');
     expect(page).toContain('allColumns={orderStatusOptions}');
