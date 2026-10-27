@@ -2103,7 +2103,9 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         }
       }
       setWorkbenchSpySection((prev) => (prev === current ? prev : current));
-      setWorkbenchOpenSpySection((prev) => (prev === currentOpen ? prev : currentOpen));
+      // at the top of the page no section has reached the line yet: the manager sees the first one
+      const customerSection = currentOpen ?? (Object.values(hybridSectionRefs.current).some(Boolean) ? HYBRID_MAIN_SECTION_ORDER[0] : null);
+      setWorkbenchOpenSpySection((prev) => (prev === customerSection ? prev : customerSection));
     };
     // the extra room is dropped once the user has scrolled away from it (it is below the screen then)
     const dropSpacer = () => {
