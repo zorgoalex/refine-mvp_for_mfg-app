@@ -38,8 +38,11 @@ export const notificationsApi = {
     return httpClient.post<AckBalloonsResponse>(apiRoutes.notifications.balloonsAck, body);
   },
 
-  markAllRead(): Promise<MarkAllNotificationsReadResponse> {
-    return httpClient.patch<MarkAllNotificationsReadResponse>(apiRoutes.notifications.readAll);
+  /** Только перечисленные уведомления — те, что пользователь видит в списке. */
+  markAllRead(notificationIds: string[]): Promise<MarkAllNotificationsReadResponse> {
+    return httpClient.patch<MarkAllNotificationsReadResponse>(apiRoutes.notifications.readAll, {
+      notificationIds: notificationIds.map(validateNotificationId),
+    });
   },
 
   delete(notificationId: string): Promise<DeleteNotificationResponse> {

@@ -66,9 +66,9 @@ export class NotificationService {
     return { notification };
   }
 
-  async markAllRead(input: { currentUser: CurrentUser | undefined }) {
+  async markAllRead(input: { currentUser: CurrentUser | undefined; notificationIds?: readonly string[] }) {
     const currentUser = requireCurrentUser(input.currentUser);
-    const updatedCount = await this.deps.repository.markAllReadForUser(currentUser);
+    const updatedCount = await this.deps.repository.markAllReadForUser(currentUser, input.notificationIds);
     return { updatedCount };
   }
 

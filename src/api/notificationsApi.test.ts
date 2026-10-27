@@ -56,11 +56,12 @@ describe('notificationsApi', () => {
   it('marks all notifications as read', async () => {
     const fetchMock = mockFetch({ updatedCount: 2 });
 
-    await notificationsApi.markAllRead();
+    const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
+    await notificationsApi.markAllRead(ids);
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/notifications/read-all',
-      expect.objectContaining({ method: 'PATCH' }),
+      expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ notificationIds: ids }) }),
     );
   });
 

@@ -141,7 +141,19 @@ describe('PgNotificationRepository', () => {
     const sql = queriedSql(database, 1);
     expect(sql).toContain('SET is_read = true, read_at = COALESCE(read_at, now())');
     expect(sql).toContain('AND is_read = false');
-    expect(database.query).toHaveBeenCalledWith(expect.stringContaining('is_read = false'), ['42', SOURCES, ONEC]);
+    expect(sql).toContain('AND ($4::uuid[] IS NULL OR notification_id = ANY($4::uuid[]))');
+    expect(database.query).toHaveBeenCalledWith(expect.stringContaining('is_read = false'), ['42', SOURCES, ONEC, null]);
+  });
+
+  it('marks only the listed notifications when ids are given, and nothing for an empty list', async () => {
+    const ids = ['11111111-1111-4111-8111-111111111111'];
+    const database = databaseClient([{ rows: [{ updated_count: '1' }] }]);
+    await expect(new PgNotificationRepository(database).markAllReadForUser(viewer, ids)).resolves.toBe(1);
+    expect(database.query).toHaveBeenCalledWith(expect.stringContaining('notification_id = ANY($4::uuid[])'), ['42', SOURCES, ONEC, ids]);
+
+    const untouched = databaseClient([]);
+    await expect(new PgNotificationRepository(untouched).markAllReadForUser(viewer, [])).resolves.toBe(0);
+    expect(untouched.query).not.toHaveBeenCalled();
   });
 
   it('deletes only current-user notification rows', async () => {
@@ -181,13 +193,13 @@ describe('1C alert notifications (plan 2026-10-19 §2.7–2.8)', () => {
     const without = databaseClient([{ rows: [{ updated_count: '0' }] }]);
     await new PgNotificationRepository(without).markAllReadForUser(viewer);
     expect(queriedSql(without, 1)).toContain('AND n.source_type IS DISTINCT FROM $3');
-    expect(vi.mocked(without.query).mock.calls[0]?.[1]).toEqual(['42', SOURCES, ONEC]);
+    expect(vi.mocked(without.query).mock.calls[0]?.[1]).toEqual(['42', SOURCES, ONEC, null]);
 
     const onecViewer: CurrentUser = { ...viewer, permissions: ['orders.view', 'onec.view'] };
     const withView = databaseClient([{ rows: [{ updated_count: '1' }] }]);
     await new PgNotificationRepository(withView).markAllReadForUser(onecViewer);
     expect(queriedSql(withView, 1)).not.toContain('IS DISTINCT FROM $3');
-    expect(vi.mocked(withView.query).mock.calls[0]?.[1]).toEqual(['42', SOURCES]);
+    expect(vi.mocked(withView.query).mock.calls[0]?.[1]).toEqual(['42', SOURCES, null]);
   });
 
   it('refuses to delete a row whose mandatory balloon was not shown yet', async () => {
