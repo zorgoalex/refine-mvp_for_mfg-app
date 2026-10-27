@@ -39,3 +39,24 @@ describe('audit journal (NewLine)', () => {
     expect(auditChangeChips([])).toEqual({ chips: [], more: 0 });
   });
 });
+
+describe('auditSourceLabel', () => {
+  it('names the sources in words', async () => {
+    const { auditSourceLabel } = await import('./auditWorkbench');
+    expect(auditSourceLabel('backend-status-automation')).toBe('Автостатус');
+    expect(auditSourceLabel('backend-orders-command')).toBe('Интерфейс');
+    expect(auditSourceLabel('backend.bazis-cut')).toBe('Интерфейс');
+    expect(auditSourceLabel('onec_loader')).toBe('1С');
+    expect(auditSourceLabel('erp_1c_agent')).toBe('1С');
+    expect(auditSourceLabel('bitrix24')).toBe('Bitrix24');
+    expect(auditSourceLabel('crm-sync')).toBe('Bitrix24');
+    expect(auditSourceLabel('erp_whatsapp_broadcast')).toBe('WhatsApp');
+    expect(auditSourceLabel('waha_webhook')).toBe('WhatsApp');
+    expect(auditSourceLabel('backend-cnc-telegram-command')).toBe('Telegram');
+    expect(auditSourceLabel('backend-mdf-job')).toBe('МДФ-движок');
+    expect(auditSourceLabel('dbeaver-bulk-sql')).toBe('Обслуживание');
+    expect(auditSourceLabel('detail_status_trigger')).toBe('Этапы деталей');
+    expect(auditSourceLabel('something_new')).toBe('something_new');
+    expect(auditSourceLabel('')).toBeNull();
+  });
+});

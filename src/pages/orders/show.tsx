@@ -100,6 +100,7 @@ import {
 } from './detailGrouping';
 import { useDetailGrouping } from './useDetailGrouping';
 import { DetailGroupingControls } from './components/DetailGroupingControls';
+import { WorkbenchGroupingSwitch } from './components/sections/WorkbenchGroupingSwitch';
 import { groupCheckboxState, toggleGroupSelection, filterNumericKeys } from './groupSelection';
 import { authSession } from '../../api/authSession';
 import { orderSendApi } from '../../api/orderSendApi';
@@ -3140,6 +3141,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       </div>
       <Space size="small" wrap>
         {!isMobile && <>
+          {isWorkbench && (
+            <WorkbenchGroupingSwitch field={grouping.state.field} onFieldChange={grouping.setField} />
+          )}
           <DetailGroupingControls
             state={grouping.state}
             onFieldChange={grouping.setField}

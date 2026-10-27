@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { rowFromProjection } from './OrderHistorySpoiler';
+import { historyEventCategory, rowFromProjection } from './OrderHistorySpoiler';
 
 const source = readFileSync(new URL('./OrderHistorySpoiler.tsx', import.meta.url), 'utf8');
 
@@ -44,5 +44,17 @@ describe('order history spoiler', () => {
     expect(source).toContain('ordersApi.history(orderId, { page: nextPage, pageSize: PAGE_SIZE })');
     expect(source).toContain("auditApi.list({ scope: 'business', orderIds: [orderId], page: nextPage, pageSize: PAGE_SIZE })");
     expect(source).not.toContain('Нет доступа к журналу истории');
+  });
+
+  it('sorts events into the mockup filters', () => {
+    expect(historyEventCategory('payments.create')).toBe('payments');
+    expect(historyEventCategory('orders.payment_status_change')).toBe('payments');
+    expect(historyEventCategory('orders.status_change')).toBe('statuses');
+    expect(historyEventCategory('orders.production_status_change')).toBe('statuses');
+    expect(historyEventCategory('orders.detail_production_status_batch_change')).toBe('statuses');
+    expect(historyEventCategory('production.stage_activate')).toBe('statuses');
+    expect(historyEventCategory('status_automation.rule_applied')).toBe('statuses');
+    expect(historyEventCategory('orders.update')).toBe('changes');
+    expect(historyEventCategory('cut_job.created')).toBe('changes');
   });
 });

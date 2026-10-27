@@ -4,6 +4,7 @@
 // `audit.view` keep the richer journal source (GET /audit, scope=business) with «было → стало».
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from 'antd';
+import { Segmented } from '../../../../ui/Segmented';
 import { RightOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { auditApi } from '../../../../api/auditApi';
@@ -21,6 +22,7 @@ interface OrderHistorySpoilerProps {
 
 interface HistoryRow {
   key: string;
+  event: string;
   createdAt: string;
   title: string;
   actor: string;
@@ -33,6 +35,7 @@ function rowFromJournal(event: AuditLogEventDto): HistoryRow {
   const summary = buildAuditReadableSummary(event);
   return {
     key: event.auditId,
+    event: event.event,
     createdAt: event.createdAt,
     title: summary.title,
     actor: summary.actor,
@@ -45,6 +48,7 @@ function rowFromJournal(event: AuditLogEventDto): HistoryRow {
 export function rowFromProjection(event: OrderHistoryEvent): HistoryRow {
   return {
     key: event.auditId,
+    event: event.event,
     createdAt: event.createdAt,
     title: auditEventTitle(event.event),
     actor: event.actorName || 'Система',
@@ -55,6 +59,27 @@ export function rowFromProjection(event: OrderHistoryEvent): HistoryRow {
       : [],
     notes: [],
   };
+}
+
+export type HistoryFilter = 'all' | 'statuses' | 'changes' | 'payments';
+
+const HISTORY_FILTERS: ReadonlyArray<{ value: HistoryFilter; label: string }> = [
+  { value: 'all', label: 'Все' },
+  { value: 'statuses', label: 'Статусы' },
+  { value: 'changes', label: 'Изменения' },
+  { value: 'payments', label: 'Оплаты' },
+];
+
+/** Mockup 04 filters: payments and the payment status; status/stage changes (also automatic); everything else. */
+export function historyEventCategory(event: string): Exclude<HistoryFilter, 'all'> {
+  if (event.startsWith('payments.') || event === 'orders.payment_status_change') return 'payments';
+  if (
+    event.endsWith('status_change')
+    || event.startsWith('orders.detail_production_status')
+    || event.startsWith('production.stage_')
+    || event.startsWith('status_automation.')
+  ) return 'statuses';
+  return 'changes';
 }
 
 // «нет данных → нет данных» says nothing: such a line is not shown
@@ -71,6 +96,7 @@ export const OrderHistorySpoiler: React.FC<OrderHistorySpoilerProps> = ({ orderI
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<HistoryFilter>('all');
   const requestRef = useRef(0);
 
   const loadPage = useCallback(async (nextPage: number) => {
@@ -103,7 +129,10 @@ export const OrderHistorySpoiler: React.FC<OrderHistorySpoilerProps> = ({ orderI
     setPage(0);
     setError(null);
     setLoading(false);
+    setFilter('all');
   }, [orderId]);
+
+  const shownEvents = filter === 'all' ? events : events.filter((row) => historyEventCategory(row.event) === filter);
 
   useEffect(() => {
     if (open && page === 0 && !loading && !error) void loadPage(1);
@@ -133,8 +162,21 @@ export const OrderHistorySpoiler: React.FC<OrderHistorySpoilerProps> = ({ orderI
             <div className="order-history__note">Записей истории по заказу нет</div>
           ) : null}
           {events.length > 0 ? (
+            <Segmented
+              size="small"
+              className="order-history__filters"
+              aria-label="Отбор событий истории"
+              options={HISTORY_FILTERS.map((option) => ({ ...option }))}
+              value={filter}
+              onChange={(value) => setFilter(value as HistoryFilter)}
+            />
+          ) : null}
+          {events.length > 0 && shownEvents.length === 0 ? (
+            <div className="order-history__note">Среди загруженных записей таких нет</div>
+          ) : null}
+          {shownEvents.length > 0 ? (
             <ol className="order-history__list">
-              {events.map((summary) => {
+              {shownEvents.map((summary) => {
                 return (
                   <li key={summary.key} className="order-history__item">
                     <span className="order-history__time">{dayjs(summary.createdAt).format('DD.MM.YYYY HH:mm')}</span>

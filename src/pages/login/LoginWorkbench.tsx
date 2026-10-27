@@ -8,6 +8,7 @@ import {
   SunOutlined,
 } from "@ant-design/icons";
 import { featureFlags } from "../../config/featureFlags";
+import { Tooltip } from "../../ui/tooltipDelay";
 import { useAppTheme } from "../../theme/ThemeProvider";
 import { APP_VERSION } from "../../version";
 import { useWorkosSso } from "./useWorkosSso";
@@ -54,14 +55,16 @@ const LoginWorkbench: React.FC<LoginWorkbenchProps> = ({
       </aside>
 
       <div className="wb-login__side">
-        <button
-          type="button"
-          className="wb-login__theme"
-          aria-label={isDark ? "Светлая тема" : "Тёмная тема"}
-          onClick={() => void toggleMode()}
-        >
-          {isDark ? <SunOutlined /> : <MoonOutlined />}
-        </button>
+        <Tooltip title={isDark ? "Светлая тема" : "Тёмная тема"} placement="left">
+          <button
+            type="button"
+            className="wb-login__theme"
+            aria-label={isDark ? "Светлая тема" : "Тёмная тема"}
+            onClick={() => void toggleMode()}
+          >
+            {isDark ? <SunOutlined /> : <MoonOutlined />}
+          </button>
+        </Tooltip>
         <main className="wb-login__card">
           <div>
             <h1>Вход в систему</h1>

@@ -63,6 +63,25 @@ export const OrderProductionFlow: React.FC<OrderProductionFlowProps> = ({ detail
 };
 
 /**
+ * One short code per stage of the collapsed summary: the first letter; when stages share it, the letter plus the
+ * first letter where their names differ («Закатан» / «Завершено» → «Зк» / «Зв»).
+ */
+export function uniqueStageCodes(stages: ReadonlyArray<{ letter: string; name: string }>): string[] {
+  const first = stages.map((stage) => stage.letter.trim().slice(0, 1).toUpperCase() || '?');
+  const letters = (name: string) => Array.from(name.toLowerCase()).filter((char) => /\p{L}/u.test(char));
+  return first.map((code, index) => {
+    if (code === '—') return code;
+    const group = stages.filter((_, other) => first[other] === code).map((stage) => letters(stage.name));
+    if (group.length < 2) return code;
+    const own = letters(stages[index].name);
+    for (let position = 1; position < own.length; position += 1) {
+      if (group.some((name) => name[position] !== own[position])) return `${code}${own[position]}`;
+    }
+    return code;
+  });
+}
+
+/**
  * Collapsed-spoiler summary: every stage as its letter code with the number of pieces
  * currently in it. Deliberately faint — it must not draw attention.
  */
@@ -89,14 +108,17 @@ export const OrderProductionFlowCodes: React.FC<Omit<OrderProductionFlowProps, '
   const flow = useMemo(() => buildOrderProductionFlow(details, statuses), [details, statuses]);
 
   if (flow.stages.length === 0) return null;
+  const letters = uniqueStageCodes(flow.stages.map((stage) => ({
+    letter: stage.statusId === null
+      ? '—'
+      : (stage.code ? codeToLetter?.[stage.code] || PRODUCTION_STATUS_CODE_LETTERS[stage.code] : '') || stage.name,
+    name: stage.name,
+  })));
 
   return (
     <span className="order-production-flow-codes" aria-label="Детали заказа по этапам производства">
-      {flow.stages.map((stage) => {
-        const rawLetter = stage.statusId === null
-          ? '—'
-          : (stage.code ? codeToLetter?.[stage.code] || PRODUCTION_STATUS_CODE_LETTERS[stage.code] : '') || stage.name;
-        const letter = rawLetter.trim().slice(0, 1).toUpperCase() || '?';
+      {flow.stages.map((stage, index) => {
+        const letter = letters[index];
         return (
           <Tooltip
             key={stage.key}

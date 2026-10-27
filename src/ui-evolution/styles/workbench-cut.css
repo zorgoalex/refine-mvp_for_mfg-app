@@ -886,3 +886,28 @@
   border-radius: 3px;
   box-shadow: inset 0 0 0 1px rgba(27, 34, 48, 0.25);
 }
+
+/* крупный лист: «− 100% +» и полный экран (мокап 09) */
+:root[data-ui-variant="workbench"] .cut-sheet-zoom {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--evo-border);
+  border-radius: var(--evo-radius-md);
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .cut-sheet-zoom__value {
+  min-width: 56px;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .cut-sheet-full--fullscreen {
+  max-width: none !important;
+  padding: 12px;
+  background: var(--evo-surface);
+}

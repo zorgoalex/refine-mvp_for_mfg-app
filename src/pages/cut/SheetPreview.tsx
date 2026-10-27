@@ -1,7 +1,7 @@
 import { Tooltip } from '../../ui/tooltipDelay';
-import React, { useState } from 'react';
-import { Space } from 'antd';
-import { CheckCircleFilled } from '@ant-design/icons';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Button, Space } from 'antd';
+import { CheckCircleFilled, FullscreenExitOutlined, FullscreenOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import { OrderDeletedTag } from '../../components/OrderDeletedTag';
 import { displayedSheetExtents, formatSheetSide, sheetImageHeadingShare, type CutPieceOverlay } from './cutPreviewHelpers';
 import { fitLabelScale, LINE1_SCALE, splitDimsLine } from './pieceLabel';
@@ -38,6 +38,18 @@ export interface SheetPreviewProps {
   onOverlayHover?: (key: string | null) => void;
   /** A piece on the sheet was clicked. */
   onOverlayPick?: (key: string) => void;
+  /** Full view: «− 100% +» and full screen above the sheet («NewLine», mockup 09). */
+  zoomControls?: boolean;
+}
+
+export const SHEET_ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3] as const;
+
+/** Next zoom step up (+1) or down (−1); the ends stay. */
+export function nextSheetZoom(current: number, direction: 1 | -1): number {
+  const index = SHEET_ZOOM_STEPS.findIndex((step) => step >= current - 1e-9);
+  const at = index < 0 ? SHEET_ZOOM_STEPS.length - 1 : index;
+  const next = Math.min(SHEET_ZOOM_STEPS.length - 1, Math.max(0, at + direction));
+  return SHEET_ZOOM_STEPS[next];
 }
 
 function renderOverlayTooltip(overlay: CutPieceOverlay): React.ReactNode {
@@ -242,7 +254,14 @@ export function SheetPreview({
   activeOverlayKey,
   onOverlayHover,
   onOverlayPick,
+  zoomControls = false,
 }: SheetPreviewProps) {
+  const [zoom, setZoom] = useState(1);
+  const [fullscreen, setFullscreen] = useState(false);
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  // width of the sheet at 100%: the frame minus the room for the side labels, as without the zoom
+  const [baseWidth, setBaseWidth] = useState(0);
   // Track the full-view image's rendered pixel size (set via onLoad) so
   // OverlayLayer can compute pixel-accurate font sizes for label auto-shrink.
   const [fullImgSize, setFullImgSize] = useState({ w: 0, h: 0 });
@@ -251,6 +270,34 @@ export function SheetPreview({
 
   // For the thumbnail the height is fixed (thumbHeight); width follows aspect ratio.
   const { horizontalMm, verticalMm } = displayedSheetExtents(widthMm, heightMm, landscape);
+
+  // labels are fitted to the rendered size: re-measure after a zoom or full-screen change
+  useEffect(() => {
+    const img = imgRef.current;
+    if (!img) return undefined;
+    const frame = requestAnimationFrame(() => setFullImgSize({ w: img.clientWidth, h: img.clientHeight }));
+    return () => cancelAnimationFrame(frame);
+  }, [zoom, fullscreen, baseWidth]);
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!zoomControls || !frame || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => setBaseWidth(Math.max(0, Math.min(1800, frame.clientWidth - 112))));
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [zoomControls]);
+
+  useEffect(() => {
+    if (!zoomControls) return undefined;
+    const onChange = () => setFullscreen(document.fullscreenElement === frameRef.current && frameRef.current !== null);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, [zoomControls]);
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) void document.exitFullscreen?.();
+    else void frameRef.current?.requestFullscreen?.();
+  }, []);
 
   if (!full) {
     return (
@@ -273,15 +320,42 @@ export function SheetPreview({
   }
 
   return (
-    <div className="cut-sheet-full" style={{ marginTop: 4, maxWidth: '100%', overflow: 'auto' }}>
+    <div
+      ref={frameRef}
+      className={`cut-sheet-full${fullscreen ? ' cut-sheet-full--fullscreen' : ''}`}
+      style={{ marginTop: 4, maxWidth: '100%', overflow: 'auto' }}
+    >
+      {zoomControls ? (
+        <div className="cut-sheet-zoom" role="group" aria-label="Масштаб листа">
+          <Button size="small" icon={<MinusOutlined />} aria-label="Уменьшить" disabled={zoom <= SHEET_ZOOM_STEPS[0]} onClick={() => setZoom((value) => nextSheetZoom(value, -1))} />
+          <Button size="small" className="cut-sheet-zoom__value" onClick={() => setZoom(1)} aria-label="Масштаб 100%">{`${Math.round(zoom * 100)}%`}</Button>
+          <Button size="small" icon={<PlusOutlined />} aria-label="Увеличить" disabled={zoom >= SHEET_ZOOM_STEPS[SHEET_ZOOM_STEPS.length - 1]} onClick={() => setZoom((value) => nextSheetZoom(value, 1))} />
+          <Button
+            size="small"
+            icon={fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+            aria-label={fullscreen ? 'Выйти из полноэкранного режима' : 'Во весь экран'}
+            onClick={toggleFullscreen}
+          />
+        </div>
+      ) : null}
       <Tooltip title="Двойной клик — свернуть до превью">
         {/* padding leaves room for the side-dimension labels */}
         <div style={{ position: 'relative', display: 'inline-block', padding: '22px 56px', cursor: 'zoom-out' }}>
           {/* Enlarged view ~2× the previous size: cap doubled (900 → 1800); the
               open sheet's wrapper in CutPage spans the full previews row so the
               image can actually grow to this width. */}
-          <span style={{ position: 'relative', display: 'inline-block', maxWidth: 1800, width: '100%' }}>
+          <span
+            style={{
+              position: 'relative',
+              display: 'inline-block',
+              maxWidth: 1800,
+              width: '100%',
+              // «− 100% +»: the sheet gets an explicit width (100% = the width it had without the zoom)
+              ...(zoomControls && baseWidth > 0 ? { maxWidth: 'none', width: Math.round(baseWidth * zoom) } : null),
+            }}
+          >
             <img
+              ref={imgRef}
               className="app-image-outline"
               src={src}
               alt={alt}

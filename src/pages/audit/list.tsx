@@ -31,6 +31,7 @@ import {
   auditActorInitials,
   auditChangeChips,
   auditPeriodRange,
+  auditSourceLabel,
   auditWhen,
   type AuditPeriodKey,
 } from './auditWorkbench';
@@ -660,6 +661,19 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
     setQuery(buildAuditQuery(values, query.pageSize ?? PAGE_SIZE_DEFAULT, businessHistoryMode ? 'business' : 'all'));
   };
 
+  // «NewLine»: строка быстрых фильтров (мокап 19) — те же поля, что в полной форме «Фильтры»
+  // варианты фильтров грузятся при первом открытии списка, как и в полной форме
+  const loadQuickFilterOptions = (open: boolean) => {
+    if (open && !filterOptionsLoaded && !filterOptionsLoading) void fetchFilterOptions();
+  };
+
+  const applyQuickFilter = (patch: Pick<FilterValues, 'userId' | 'entityType' | 'event' | 'source'>) => {
+    const values: FilterValues = { ...appliedFilters, ...patch };
+    if (filtersVisible) form.setFieldsValue(patch);
+    setAppliedFilters(values);
+    setQuery(buildAuditQuery(values, query.pageSize ?? PAGE_SIZE_DEFAULT, businessHistoryMode ? 'business' : 'all'));
+  };
+
   const handleTableChange = (pag: { current?: number; pageSize?: number }) => {
     const nextPageSize = pag.pageSize ?? query.pageSize ?? PAGE_SIZE_DEFAULT;
     const pageSizeChanged = nextPageSize !== query.pageSize;
@@ -803,6 +817,52 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
           </Button>
         </Space>
       </div>
+
+      {isWorkbench && !businessHistoryMode ? (
+        <div className="wb-audit__quick-filters" role="group" aria-label="Быстрые фильтры">
+          <Select
+            {...commonSelectProps}
+            placeholder="Пользователь"
+            aria-label="Пользователь"
+            onDropdownVisibleChange={loadQuickFilterOptions}
+            options={filterSelectOptions.users}
+            value={appliedFilters.userId}
+            onChange={(value) => applyQuickFilter({ userId: value ?? undefined })}
+            style={{ width: 190 }}
+          />
+          <Select
+            {...commonSelectProps}
+            placeholder="Объект"
+            aria-label="Объект"
+            onDropdownVisibleChange={loadQuickFilterOptions}
+            options={filterOptions.entityTypes.map((value) => ({ value, label: AUDIT_ENTITY_LABELS[value] ?? value }))}
+            value={appliedFilters.entityType}
+            onChange={(value) => applyQuickFilter({ entityType: value ?? undefined })}
+            style={{ width: 170 }}
+          />
+          <Select
+            {...commonSelectProps}
+            placeholder="Событие"
+            aria-label="Событие"
+            onDropdownVisibleChange={loadQuickFilterOptions}
+            options={filterSelectOptions.events}
+            dropdownMatchSelectWidth={520}
+            value={appliedFilters.event}
+            onChange={(value) => applyQuickFilter({ event: value ?? undefined })}
+            style={{ width: 230 }}
+          />
+          <Select
+            {...commonSelectProps}
+            placeholder="Источник"
+            aria-label="Источник"
+            onDropdownVisibleChange={loadQuickFilterOptions}
+            options={filterOptions.sources.map((value) => ({ value, label: `${auditSourceLabel(value) ?? value} · ${value}` }))}
+            value={appliedFilters.source}
+            onChange={(value) => applyQuickFilter({ source: value ?? undefined })}
+            style={{ width: 200 }}
+          />
+        </div>
+      ) : null}
 
       {permissionError && <Alert type="error" showIcon message={permissionError} style={{ marginBottom: 12 }} />}
 
@@ -1310,7 +1370,7 @@ const WorkbenchReadableTable: React.FC<WorkbenchReadableTableProps> = ({ data, l
         dataIndex="source"
         title="Источник"
         width={120}
-        render={(value: string | null) => value ? <span className="wb-audit-table__source" title={value}>{value}</span> : <span className="wb-list__muted">—</span>}
+        render={(value: string | null) => value ? <span className="wb-audit-table__source" title={value}>{auditSourceLabel(value)}</span> : <span className="wb-list__muted">—</span>}
       />
     </Table>
   );
@@ -1380,7 +1440,7 @@ const AuditEntryDrawer: React.FC<{ record: AuditLogEventDto | null; onClose: () 
             <dl className="wb-audit-entry__facts">
               <dt>Объект</dt><dd>{summary.object}</dd>
               <dt>Событие</dt><dd><Text code>{record.event}</Text></dd>
-              <dt>Источник</dt><dd>{record.source ?? '—'}</dd>
+              <dt>Источник</dt><dd>{record.source ? <>{auditSourceLabel(record.source)} <Text type="secondary" code>{record.source}</Text></> : '—'}</dd>
               <dt>Роль</dt><dd>{record.role ?? '—'}</dd>
               <dt>ID запроса</dt><dd>{record.requestId ? <Text copyable={{ text: record.requestId }} code>{record.requestId}</Text> : '—'}</dd>
               {record.ip ? <><dt>IP-адрес</dt><dd>{record.ip}</dd></> : null}

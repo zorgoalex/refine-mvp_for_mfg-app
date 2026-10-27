@@ -5990,6 +5990,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                           activeOverlayKey={isWorkbench ? wbActivePieceOf(key) : undefined}
                           onOverlayHover={isWorkbench ? (piece) => setWbHoverPiece(piece ? { sheet: key, piece, from: 'sheet' } : null) : undefined}
                           onOverlayPick={isWorkbench ? (piece) => toggleWbPickedPiece(key, piece) : undefined}
+                          zoomControls={isWorkbench}
                         />
                       )}
                       {isWorkbench && wbSheetStripEl ? createPortal(

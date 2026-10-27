@@ -1787,6 +1787,10 @@
   border-top: 1px solid var(--evo-border);
 }
 
+:root[data-ui-variant="workbench"] .order-history__filters {
+  margin: 10px 0 4px;
+}
+
 :root[data-ui-variant="workbench"] .order-history__list {
   margin: 0;
   padding: 0;

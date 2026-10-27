@@ -371,3 +371,11 @@
     padding: 10px 12px;
   }
 }
+
+/* быстрые фильтры одной строкой под периодом (мокап 19); полная форма — по кнопке «Фильтры» */
+:root[data-ui-variant="workbench"] .wb-audit__quick-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -4px 0 12px;
+}

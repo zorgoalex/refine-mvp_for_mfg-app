@@ -15,6 +15,7 @@ import { OnecSnapshotsTab } from './OnecSnapshotsTab';
 import { snapshotsMode } from './onecSnapshots';
 import { OnecIssuesTab } from './OnecIssuesTab';
 import { documentBasis, formatMoment, supportsOnecConsumption } from './onecConsumption';
+import { stockTabItems } from './StockTabLabel';
 import { FILM_GROUP, isOnecGroup, isStockUnsupported, nextStockSupport, pageTitle, readStoredGroup, resolveGroup, stockExportRows, stockQuantityTone, stockTabs, storeGroup } from './warehouseStock';
 import './inventory.css';
 
@@ -339,7 +340,7 @@ export const FilmInventoryPage: React.FC = () => {
         </Space>
         {stockUnsupported && <Alert style={{ marginBottom: 12 }} type="info" showIcon message="Остатки других материалов из 1С недоступны в этой версии сервера — показана плёнка." />}
         {stockQuery.isError && !stockUnsupported && <Alert style={{ marginBottom: 12 }} type="error" showIcon message="Не удалось загрузить вкладки материалов" />}
-        <Tabs size="small" activeKey={stockGroup} onChange={chooseStockGroup} items={stockTabs(stockQuery.data, stockUnsupported)} />
+        <Tabs size="small" activeKey={stockGroup} onChange={chooseStockGroup} items={stockTabItems(stockTabs(stockQuery.data, stockUnsupported))} />
         {stockGroup === FILM_GROUP ? <>
           <Space wrap style={{ marginBottom: 16 }}>
             <Select allowClear placeholder="Поставщик" style={{ minWidth: 200 }} value={vendorId} options={vendors.map(([value, label]) => ({ value, label }))} onChange={setVendorId} />

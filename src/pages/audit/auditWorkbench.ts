@@ -46,3 +46,30 @@ export function auditChangeChips(changes: readonly AuditReadableChange[], limit 
   const chips = changes.slice(0, limit).map((change) => `${change.label}: ${change.before} → ${change.after}`);
   return { chips, more: Math.max(0, changes.length - limit) };
 }
+
+const AUDIT_SOURCE_EXACT: Readonly<Record<string, string>> = {
+  'backend-status-automation': 'Автостатус',
+  detail_status_trigger: 'Этапы деталей',
+  workos: 'Вход через SSO',
+  integration_duplicates: 'Дубли интеграций',
+};
+
+const AUDIT_SOURCE_PATTERNS: ReadonlyArray<[RegExp, string]> = [
+  [/bitrix24|crm-sync/, 'Bitrix24'],
+  [/onec|1c/, '1С'],
+  [/whatsapp|waha|message_processing/, 'WhatsApp'],
+  [/telegram/, 'Telegram'],
+  [/mdf-(job|baseline|allocation)/, 'МДФ-движок'],
+  [/^(ops|migration|dbeaver)/, 'Обслуживание'],
+  [/^(backend|erp_|client_contacts|inventory)/, 'Интерфейс'],
+];
+
+/** Источник записи журнала словами (мокап 19): «Интерфейс», «1С», «Автостатус»…; неизвестный код — как есть. */
+export function auditSourceLabel(source: string | null | undefined): string | null {
+  const code = (source ?? '').trim();
+  if (!code) return null;
+  const exact = AUDIT_SOURCE_EXACT[code];
+  if (exact) return exact;
+  const lower = code.toLowerCase();
+  return AUDIT_SOURCE_PATTERNS.find(([pattern]) => pattern.test(lower))?.[1] ?? code;
+}

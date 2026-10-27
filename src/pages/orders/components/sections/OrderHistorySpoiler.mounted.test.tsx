@@ -11,6 +11,7 @@ vi.mock('../../../../api/ordersApi', () => ({ ordersApi: { history: vi.fn() } })
 vi.mock('../../../../utils/permissions', () => ({ can: vi.fn() }));
 vi.mock('antd', () => ({
   Button: (props: any) => React.createElement('button', { type: 'button', onClick: props.onClick }, props.children),
+  Segmented: () => null,
 }));
 vi.mock('@ant-design/icons', () => ({ RightOutlined: () => null }));
 

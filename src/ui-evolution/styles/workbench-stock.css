@@ -145,3 +145,28 @@
   color: var(--evo-text-secondary);
   font-size: 12px;
 }
+
+/* счётчик на вкладке — плашкой, а не текстом «· 83» (мокап 13) */
+:root[data-ui-variant="workbench"] .stock-tab-count__sep {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .stock-tab-count {
+  display: inline-block;
+  min-width: 20px;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--evo-surface-muted);
+  color: var(--evo-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .ant-tabs-tab-active .stock-tab-count {
+  background: var(--evo-primary-soft);
+  color: var(--evo-primary);
+}

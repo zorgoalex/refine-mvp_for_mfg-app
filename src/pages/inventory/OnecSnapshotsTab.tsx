@@ -12,6 +12,7 @@ import {
   viewFailureAction, warehousePlaceholder, warehouseScopeNote, type SnapshotRequestIntent,
 } from './onecSnapshots';
 import { stockQuantityTone } from './warehouseStock';
+import { StockTabLabel } from './StockTabLabel';
 
 const { Text } = Typography;
 const formatQuantity = (value: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 }).format(value);
@@ -283,7 +284,7 @@ const SnapshotView: React.FC<{
     {comparing && <Alert style={{ marginBottom: 12 }} type="info" showIcon message="Разница — вторая сторона минус срез: плюс — стало больше, минус — меньше. Позиции, которой нет на одной из сторон, соответствует ноль." />}
     {stockQuery.isError && <Alert style={{ marginBottom: 12 }} type="error" showIcon message={failureText(failure, 'Не удалось загрузить остатки среза')}
       description={failure?.details?.warehouses?.length ? `Склады: ${failure.details.warehouses.map((row) => `${row.name} — ${row.reason}`).join('; ')}` : undefined} />}
-    <Tabs size="small" activeKey={group} onChange={setGroup} items={(data?.tabs ?? [{ key: 'all', label: 'Все материалы', count: 0 }]).map((tab) => ({ key: tab.key, label: `${tab.label} · ${tab.count}` }))} />
+    <Tabs size="small" activeKey={group} onChange={setGroup} items={(data?.tabs ?? [{ key: 'all', label: 'Все материалы', count: 0 }]).map((tab) => ({ key: tab.key, label: <StockTabLabel label={`${tab.label} · ${tab.count}`} /> }))} />
     {group !== 'all' && categoryOptions.length > 0 && <Space style={{ marginBottom: 12 }}>
       <Select allowClear placeholder="Категория 1С" style={{ minWidth: 260 }} value={categoryKey} options={categoryOptions} onChange={(value) => setCategoryKey(value ?? undefined)} />
     </Space>}
