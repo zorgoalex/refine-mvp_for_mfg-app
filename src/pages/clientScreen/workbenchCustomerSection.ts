@@ -86,11 +86,17 @@ export function useWorkbenchCustomerSection(input: WorkbenchCustomerInputs & {
   const previous = useRef<WorkbenchCustomerInputs | null>(
     sectionByOrder.has(orderKey) ? { activeTab, pinned, spy, foldsKey, navigationSeq } : null,
   );
+  const wasActive = useRef(active);
   useEffect(() => {
     const next = { activeTab, pinned, spy, foldsKey, navigationSeq };
     const events = workbenchCustomerEvents(previous.current, next);
     previous.current = next;
-    if (!active || events.length === 0) return;
+    const activated = active && !wasActive.current;
+    wasActive.current = active;
+    if (!active) return;
+    // Back on its page: what the form shows now counts, even if it is what it measured before it was hidden.
+    if (activated) events.push({ kind: 'spy', key: spy });
+    if (events.length === 0) return;
     const context: WorkbenchCustomerContext = { pinned, spy, isOpen };
     setSection((current) => events.reduce((value, event) => nextWorkbenchCustomerSection(value, event, context), current));
   }, [active, activeTab, pinned, spy, foldsKey, navigationSeq, isOpen]);
