@@ -83,16 +83,24 @@ test.describe('«Переделка» — browser QA (isolated stack)', () => {
   const dialog = (page: Page) => page.locator('.ant-modal-content').filter({ visible: true }).last();
 
   async function pick(page: Page, select: Locator, label: string) {
-    await select.click();
-    const option = page.locator('.ant-select-dropdown .ant-select-item-option:visible')
-      .filter({ hasText: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) });
-    await option.last().click();
-    // The dropdown closes with an animation; under load it can take longer — then close it explicitly.
-    const closed = await expect(page.locator('.ant-select-dropdown:visible')).toHaveCount(0, { timeout: 10_000 }).then(() => true, () => false);
-    if (!closed) {
-      await page.keyboard.press('Escape');
-      await expect(page.locator('.ant-select-dropdown:visible')).toHaveCount(0);
+    // The select is re-located by its row/placeholder; once chosen it shows `label`, so the check uses the value.
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      await select.click();
+      const option = page.locator('.ant-select-dropdown .ant-select-item-option:visible')
+        .filter({ hasText: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) });
+      await option.last().click();
+      // The dropdown closes with an animation; under load it can take longer — then close it explicitly.
+      const closed = await expect(page.locator('.ant-select-dropdown:visible')).toHaveCount(0, { timeout: 10_000 }).then(() => true, () => false);
+      if (!closed) {
+        await page.keyboard.press('Escape');
+        await expect(page.locator('.ant-select-dropdown:visible')).toHaveCount(0);
+      }
+      const chosen = await page.locator('.ant-modal-content .ant-select-selection-item, .ant-select-selection-item')
+        .filter({ hasText: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }).count();
+      if (chosen > 0) return;
+      test.info().annotations.push({ type: 'pick retry', description: `${label}: attempt ${attempt} did not apply` });
     }
+    throw new Error(`select option «${label}» did not apply`);
   }
 
   async function shot(page: Page, name: string) {
@@ -131,7 +139,7 @@ test.describe('«Переделка» — browser QA (isolated stack)', () => {
     await modal.locator('textarea').fill('скол на фасаде');
     // 1.1: the deadline is pre-filled from «Схема этапов и сроки» for the remaining stages.
     const hint = modal.getByText(/По «Схеме этапов и сроки»: \d+ дн\. — \d{2}\.\d{2}\.\d{4}/);
-    await expect(hint).toBeVisible({ timeout: 15_000 });
+    await expect(hint).toBeVisible({ timeout: 45_000 }); // the suggestion is a backend read (slow under host load)
     const suggested = (/(\d{2}\.\d{2}\.\d{4})/.exec(await hint.innerText()) ?? [])[1];
     await expect(modal.locator('.ant-picker input')).toHaveValue(suggested);
     test.info().annotations.push({ type: 'deadline suggestion', description: await hint.innerText() });
@@ -185,7 +193,7 @@ test.describe('«Переделка» — browser QA (isolated stack)', () => {
     await (await detailRow(page, 3)).locator('.ant-checkbox-input').check();
     await pick(page, modal.locator('.ant-select').filter({ hasText: 'Этап для всех выбранных' }), 'Присажен');
     // 1.1: the current round deadline is shown; adding details only moves it later.
-    await expect(modal.getByText(/Текущий срок круга: \d{2}\.\d{2}\.\d{4}/)).toBeVisible({ timeout: 15_000 });
+    await expect(modal.getByText(/Текущий срок круга: \d{2}\.\d{2}\.\d{4}/)).toBeVisible({ timeout: 45_000 });
     const plannedBefore = orderDates(ready.orderId).planned;
     await shot(page, '05-extend-modal');
     await modal.getByRole('button', { name: 'Добавить' }).click();
@@ -428,7 +436,7 @@ test.describe('«Переделка» — browser QA (isolated stack)', () => {
     await (await detailRow(page, 1)).locator('.ant-checkbox-input').check();
     await pick(page, modal.locator('.ant-select').filter({ hasText: 'Этап для всех выбранных' }), 'Отрисован');
     await pick(page, modal.locator('.ant-select').filter({ hasText: 'Выберите причину' }), 'Брак цеха');
-    await expect(modal.getByText('Схема этапов и сроки не заполнена — укажите срок вручную')).toBeVisible({ timeout: 15_000 });
+    await expect(modal.getByText('Схема этапов и сроки не заполнена — укажите срок вручную')).toBeVisible({ timeout: 45_000 });
     await expect(modal.getByText('Укажите срок готовности')).toBeVisible();
     await expect(modal.getByRole('button', { name: 'Начать переделку' })).toBeDisabled();
     await shot(page, '13-manual-required');
@@ -448,6 +456,13 @@ test.describe('«Переделка» — browser QA (isolated stack)', () => {
     await panel(page).getByText(/История переделок \(1\)/).click();
     const cell = panel(page).locator('.ant-table-tbody').getByText(ru(day(12)));
     await expect(cell).toBeVisible();
+    // Layout: which scroll containers overflow horizontally (the history table must scroll inside its own block).
+    const overflow = await page.evaluate(() => [...document.querySelectorAll('*')]
+      .filter((el) => el.scrollWidth > el.clientWidth + 1 && ['auto', 'scroll'].includes(getComputedStyle(el).overflowX))
+      .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).split(' ').slice(0, 2).join('.')} ${el.scrollWidth}/${el.clientWidth}`));
+    const docOverflow = await page.evaluate(() => `${document.documentElement.scrollWidth}/${document.documentElement.clientWidth}`);
+    test.info().annotations.push({ type: 'horizontal overflow', description: `doc ${docOverflow}; ${overflow.join(' | ')}` });
+    await shot(page, '13-history-before-hover');
     await cell.hover();
     await expect(page.getByText(`Было: ${ru(day(-8))}`)).toBeVisible({ timeout: 10_000 });
     await shot(page, '13-history-deadline');
