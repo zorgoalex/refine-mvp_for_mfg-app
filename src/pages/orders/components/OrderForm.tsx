@@ -38,6 +38,9 @@ import { featureFlags } from '../../../config/featureFlags';
 import { OrderCatalogLinesTable } from './OrderCatalogLinesTable';
 import { orderCatalogSubtotal } from '../../../utils/orderCatalogLines';
 import { can } from '../../../utils/permissions';
+import { ClientScreenFrameSlot } from '../../clientScreen/ClientScreenFrameSlot';
+import { ClientScreenOrderHeader } from '../../clientScreen/ClientScreenOrderHeader';
+import { useWorkbenchCustomerSection } from '../../clientScreen/workbenchCustomerSection';
 import { authSession } from '../../../api/authSession';
 import { useOrderFinancialVisibility } from '../../../hooks/useOrderFinancialVisibility';
 import { resolveOrderTabLabel } from '../../../utils/tabLabels';
@@ -254,6 +257,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const [workbenchAnchorsStuck, setWorkbenchAnchorsStuck] = useState(false);
   const workbenchAnchorsRef = useRef<HTMLElement>(null);
   const [workbenchSpySection, setWorkbenchSpySection] = useState<string | null>(null);
+  // the same for the customer screen, skipping closed folds (the manager sees only their heading)
+  const [workbenchOpenSpySection, setWorkbenchOpenSpySection] = useState<string | null>(null);
   // the anchor the user clicked stays current until they scroll the form themselves
   // (a short last section cannot reach the top of the screen)
   const [workbenchPinnedSection, setWorkbenchPinnedSection] = useState<string | null>(null);
@@ -497,6 +502,13 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       ? HYBRID_MAIN_SECTION_KEYS.includes(key) || hybridOpenSections.includes(key)
       : activeTab === key
   );
+  const workbenchCustomerSection = useWorkbenchCustomerSection({
+    activeTab,
+    pinned: workbenchPinnedSection,
+    spy: workbenchOpenSpySection,
+    isOpen: isFormSectionActive,
+    foldsKey: hybridOpenSections.join('\u0001'),
+  });
   const hybridSpacerRef = useRef<HTMLDivElement>(null);
   const [hybridSpacerHeight, setHybridSpacerHeight] = useState(0);
   const hybridSpacerHeightRef = useRef(0);
@@ -1885,9 +1897,11 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
               key: 'cut',
               label: 'Раскрой',
               children: header.order_id ? (
-                <OrderLifecycleReadSurface active={isFormSectionActive('cut')}>
-                  <CutPage embeddedOrderId={header.order_id} />
-                </OrderLifecycleReadSurface>
+                <ClientScreenFrameSlot orderKey={orderKey} tab="cut">
+                  <OrderLifecycleReadSurface active={isFormSectionActive('cut')}>
+                    <CutPage embeddedOrderId={header.order_id} />
+                  </OrderLifecycleReadSurface>
+                </ClientScreenFrameSlot>
               ) : null,
               disabled: mode === 'create' && !header.order_id,
             },
@@ -1904,7 +1918,11 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       {
         key: 'workshops',
         label: isOperational ? 'Производство' : 'Цеха',
-        children: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={isOperational ? 'Производственные операции не добавлены' : 'Цеха не назначены'} />,
+        children: (
+          <ClientScreenFrameSlot orderKey={orderKey} tab="workshops">
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={isOperational ? 'Производственные операции не добавлены' : 'Цеха не назначены'} />
+          </ClientScreenFrameSlot>
+        ),
         disabled: mode === 'create' && !header.order_id,
       },
       {
@@ -1921,6 +1939,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         key: 'additional',
         label: isOperational ? 'Бирки' : 'Дополнительно',
         children: (
+          <ClientScreenFrameSlot orderKey={orderKey} tab="additional">
           <OrderLifecycleReadSurface active={isFormSectionActive('additional')}>
             {isOperational ? (
               <Space direction="vertical" style={{ width: '100%' }} size="large">
@@ -1941,6 +1960,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
               </Space>
             )}
           </OrderLifecycleReadSurface>
+          </ClientScreenFrameSlot>
         ),
       },
       ];
@@ -2068,6 +2088,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       const line = workbenchChromeBottom + WORKBENCH_FORM_BAR_HEIGHT + (anchors?.offsetHeight ?? 0) + 24;
       let current: string | null = null;
       let currentTop = -Infinity;
+      let currentOpen: string | null = null;
+      let currentOpenTop = -Infinity;
       for (const [key, node] of Object.entries(hybridSectionRefs.current)) {
         if (!node || key === 'dates') continue;
         const top = node.getBoundingClientRect().top;
@@ -2075,8 +2097,13 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
           current = key;
           currentTop = top;
         }
+        if (top <= line && top > currentOpenTop && (HYBRID_MAIN_SECTION_KEYS.includes(key) || hybridOpenSections.includes(key))) {
+          currentOpen = key;
+          currentOpenTop = top;
+        }
       }
       setWorkbenchSpySection((prev) => (prev === current ? prev : current));
+      setWorkbenchOpenSpySection((prev) => (prev === currentOpen ? prev : currentOpen));
     };
     // the extra room is dropped once the user has scrolled away from it (it is below the screen then)
     const dropSpacer = () => {
@@ -2107,7 +2134,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       window.removeEventListener('wheel', unpin);
       window.removeEventListener('touchmove', unpin);
     };
-  }, [isWorkbench, orderKey, setHybridSpacer, workbenchChromeBottom]);
+  }, [hybridOpenSections, isWorkbench, orderKey, setHybridSpacer, workbenchChromeBottom]);
 
   useEffect(() => {
     const update = () => {
@@ -2219,6 +2246,20 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     );
   }
 
+  // Customer screen (second monitor): present this order, hide, emergency switch-off. Read-only for the form.
+  // «NewLine» shows the sections on one page: the customer follows the section the manager is at
+  // (see workbenchCustomerSection.ts), not only the last anchor clicked.
+  const clientScreenTab = isWorkbench ? workbenchCustomerSection : activeTab;
+  const clientScreenControl = (
+    <ClientScreenOrderHeader
+      orderKey={orderKey}
+      orderNumber={(headerNameData?.data as { order_full_number?: string | null } | undefined)?.order_full_number ?? null}
+      activeTab={clientScreenTab}
+      operational={isOperational}
+      cutTab={cutTabEnabled}
+    />
+  );
+
   if (isOperational) {
     return (
       <OrderDraftStoreProvider orderKey={orderKey}>
@@ -2239,6 +2280,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
             actions={(
               <>
                 <Tag color="orange">Режим редактирования</Tag>
+                {clientScreenControl}
                 {mode === 'edit' && orderId ? (
                   <Button icon={<EyeOutlined />} onClick={() => show('orders_view', orderId)}>
                     Просмотр
@@ -2332,6 +2374,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const hybridCurrentAnchor = workbenchPinnedSection ?? workbenchSpySection ?? (activeTab === 'dates' ? 'basic' : activeTab);
   const formActions = (
         <Space>
+          {clientScreenControl}
           {mode === 'edit' && orderId && (
             <Button
               className="order-form-action order-form-action--view"
