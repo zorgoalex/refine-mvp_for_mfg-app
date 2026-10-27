@@ -399,7 +399,8 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     }
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
-    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('242_supplier_phone_contact_sync*|245_onec_operator_role*');
+    // 245 is in the post-apply list (its neighbours change as migrations are added, e.g. 243 now sits before it).
+    expect(scriptText.slice(verifyStart, verifyEnd)).toContain('|245_onec_operator_role*|');
     // The manual rollback script is never picked up by the runner (side files are excluded from the selection).
     expect(files).toContain('245_onec_operator_role.sql');
     expect(files).not.toContain('245_onec_operator_role_rollback.sql');
