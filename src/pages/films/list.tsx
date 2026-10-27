@@ -19,7 +19,7 @@ import { materialSuppliersApi, type FilmSuppliersDto } from "../../api/materialS
 
 // Узкие колонки фиксированной ширины: список помещается без горизонтальной прокрутки, «Название» берёт остаток.
 // Сумма 960px: при ширине окна 1440 «Названию» остаётся ~200px.
-const WIDTH = { id: 56, sort: 84, nomenclatureType: 84, category: 84, note: 110, filmType: 84, vendor: 100, suppliers: 120, texture: 70, key: 90, active: 92, actions: 76, catalog: 64 } as const;
+const WIDTH = { id: 64, sort: 84, nomenclatureType: 84, category: 84, note: 110, filmType: 84, vendor: 118, suppliers: 104, texture: 70, key: 90, active: 92, actions: 76, catalog: 64 } as const;
 
 export const FilmList: React.FC<IResourceComponentsProps> = () => {
   const [filtersVisible, setFiltersVisible] = useState(false);
@@ -247,7 +247,7 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
           },
         })}
       >
-        <Table.Column dataIndex="film_id" title="id" sorter width={WIDTH.id} />
+        <Table.Column dataIndex="film_id" title="id" sorter width={WIDTH.id} render={(value: number) => <span style={{ whiteSpace: 'nowrap' }}>{value}</span>} />
         <Table.Column dataIndex="sort_order" title="Порядок" sorter width={WIDTH.sort} />
         <Table.Column dataIndex="film_name" title="Название" sorter render={(value: string) => <span className="films-list__name">{value}</span>} />
         <Table.Column dataIndex="nomenclature_type" title="Тип номенклатуры" width={WIDTH.nomenclatureType} ellipsis />
