@@ -354,3 +354,102 @@ describe('currentSessionSnapshot', () => {
     expect(read).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('useMdfPublishedBoard: a hidden board keeps what it shows', () => {
+  let renderer: ReactTestRenderer;
+  function Toggle(props: { enabled: boolean; workday: string; period?: CncOrderSearchPeriod }) {
+    current = useMdfPublishedBoard({ enabled: props.enabled, workday: props.workday, period: props.period ?? '1w',
+      focusKind: null, focusId: null });
+    return null;
+  }
+
+  beforeEach(() => {
+    current = null;
+    api.getEngineMode.mockReset().mockResolvedValue({ mode: 'active', publishedReads: true });
+    api.publishedGet.mockReset().mockImplementation(async (query: { dateTo: string }) => ({
+      sessionGeneration: api.sessionGeneration, snapshot: snapshot({ dateTo: query.dateTo }),
+    }));
+    vi.stubGlobal('window', { setInterval: vi.fn(() => 0), clearInterval: vi.fn() });
+    vi.stubGlobal('document', { addEventListener: vi.fn(), removeEventListener: vi.fn(), visibilityState: 'visible' });
+  });
+  afterEach(() => {
+    act(() => renderer?.unmount());
+    vi.unstubAllGlobals();
+  });
+
+  it('shows the same snapshot at once when shown again, and drops it after the day changed while hidden', async () => {
+    await act(async () => { renderer = create(<Toggle enabled workday="2026-10-27" />); });
+    const first = current!.session;
+    expect(first?.snapshot.dateTo).toBe('2026-10-27');
+    await act(async () => { renderer.update(<Toggle enabled={false} workday="2026-10-27" />); });
+    expect(current!.session).toBe(first);
+    expect(current!.mode).toBe('published');
+    let release!: () => void;
+    api.publishedGet.mockImplementationOnce((query: { dateTo: string }) => new Promise((resolve) => {
+      release = () => resolve({ sessionGeneration: 1, snapshot: snapshot({ dateTo: query.dateTo, revision: 'rev-2' }) });
+    }));
+    await act(async () => { renderer.update(<Toggle enabled workday="2026-10-27" />); });
+    expect(current!.session).toBe(first); // still on screen while the background read runs
+    await act(async () => { release(); });
+    expect(current!.session?.snapshot.revision).toBe('rev-2');
+    await act(async () => { renderer.update(<Toggle enabled={false} workday="2026-10-27" />); });
+    await act(async () => { renderer.update(<Toggle enabled={false} workday="2026-10-28" />); });
+    let releaseNext!: () => void;
+    api.publishedGet.mockImplementationOnce((query: { dateTo: string }) => new Promise((resolve) => {
+      releaseNext = () => resolve({ sessionGeneration: 1, snapshot: snapshot({ dateTo: query.dateTo }) });
+    }));
+    await act(async () => { renderer.update(<Toggle enabled workday="2026-10-28" />); });
+    expect(current!.session).toBeNull(); // yesterday's board is not shown for the new day
+    await act(async () => { releaseNext(); });
+    expect(current!.session?.snapshot.dateTo).toBe('2026-10-28');
+  });
+
+  it('keeps the snapshot when the board comes back through its default period before the page restores it', async () => {
+    await act(async () => { renderer = create(<Toggle enabled workday="2026-10-27" period="1w" />); });
+    const first = current!.session;
+    await act(async () => { renderer.update(<Toggle enabled={false} workday="2026-10-27" period="1w" />); });
+    api.publishedGet.mockImplementation(() => new Promise(() => undefined));
+    // menu link without the board's query: the first shown render has the default period
+    await act(async () => { renderer.update(<Toggle enabled workday="2026-10-27" period="1m" />); });
+    expect(current!.session).toBe(first);
+    await act(async () => { renderer.update(<Toggle enabled workday="2026-10-27" period="1w" />); });
+    expect(current!.session).toBe(first);
+    expect(current!.mode).toBe('published');
+  });
+
+  it('drops the old day even when the restored URL shows it first and the page moves to today afterwards', async () => {
+    await act(async () => { renderer = create(<Toggle enabled workday="2026-10-27" />); });
+    await act(async () => { renderer.update(<Toggle enabled={false} workday="2026-10-27" />); });
+    api.publishedGet.mockImplementation(() => new Promise(() => undefined));
+    await act(async () => { renderer.update(<Toggle enabled workday="2026-10-27" />); }); // tab restores yesterday
+    await act(async () => { renderer.update(<Toggle enabled workday="2026-10-28" />); }); // opening sync: today
+    expect(current!.session).toBeNull();
+  });
+
+  it('never returns a kept snapshot of another auth session', async () => {
+    await act(async () => { renderer = create(<Toggle enabled workday="2026-10-27" />); });
+    expect(current!.session).not.toBeNull();
+    await act(async () => { renderer.update(<Toggle enabled={false} workday="2026-10-27" />); });
+    api.sessionGeneration = 2; // permission/scope refresh while the board was hidden
+    api.publishedGet.mockImplementation(() => new Promise(() => undefined));
+    try {
+      await act(async () => { renderer.update(<Toggle enabled workday="2026-10-27" />); });
+      expect(current!.session).toBeNull();
+    } finally {
+      api.sessionGeneration = 1;
+    }
+  });
+
+  it('keeps the snapshot when the query only changed while hidden and is back on return', async () => {
+    await act(async () => { renderer = create(<Toggle enabled workday="2026-10-27" />); });
+    const first = current!.session;
+    // another screen without the board's URL parameters: the hidden board sees a different query for a while
+    await act(async () => { renderer.update(<Toggle enabled={false} workday="2026-10-27" />); });
+    await act(async () => { renderer.update(<Toggle enabled={false} workday="2026-10-20" />); });
+    await act(async () => { renderer.update(<Toggle enabled={false} workday="2026-10-27" />); });
+    api.publishedGet.mockImplementationOnce(() => new Promise(() => undefined));
+    await act(async () => { renderer.update(<Toggle enabled workday="2026-10-27" />); });
+    expect(current!.session).toBe(first);
+    expect(current!.mode).toBe('published');
+  });
+});

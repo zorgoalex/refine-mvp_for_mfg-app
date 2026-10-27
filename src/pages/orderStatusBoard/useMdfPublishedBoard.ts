@@ -19,7 +19,7 @@ import { buildCncOrderSearchDateRange, type CncOrderSearchPeriod } from './model
 const POLL_INTERVAL_MS = 15000;
 
 export interface UseMdfPublishedBoardParams {
-  /** `active && isCncToday`. When false the hook tears its state down and does no IO. */
+  /** `active && isCncToday`. When false the hook does no IO and keeps what it shows (see the query effect). */
   enabled: boolean;
   workday: string;
   /** The board's period selector (defaults to `1w` inside `buildCncOrderSearchDateRange` when
@@ -67,6 +67,8 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
   const [searchResolving, setSearchResolving] = useState(false);
 
   const generationRef = useRef<MdfBoardGenerationState>(createMdfBoardGenerationState());
+  // the workday the shown snapshot was read for
+  const shownWorkdayRef = useRef<string | null>(null);
   const sessionRef = useRef<MdfSessionSnapshot | null>(null);
   const searchOrderIdsRef = useRef<number[]>([]);
   const orderIdsRef = useRef<number[]>([]);
@@ -127,6 +129,7 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
       && engineModeFetch.engineMode.publishedReads;
     if (!needsPublishedFetch) {
       const resolvedMode = selectMdfBoardMode({ engineModeFetch, publishedReadsFailed: false });
+      shownWorkdayRef.current = workday;
       setMode(resolvedMode);
       setSession(null);
       setLoading(false);
@@ -141,6 +144,7 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     }
     if (!isMdfBoardGenerationCurrent(generationRef.current, requestGeneration) || !enabledRef.current) return;
     const resolvedMode = selectMdfBoardMode({ engineModeFetch, publishedReadsFailed });
+    shownWorkdayRef.current = workday;
     setMode(resolvedMode);
     setSession(resolvedMode === 'published' ? nextSession : null);
     setLoading(false);
@@ -155,13 +159,19 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
   // Query change (workday, period — which drives `displayFrom` — focus, mode-affecting session
   // state, searchOrderIds) or enable/disable: one board-wide generation bump per change, superseded
   // responses dropped (§5.6 req 7 / R2#2).
+  // Hidden board (another screen is open): reads stop, but what it shows stays — coming back shows it at once and
+  // refreshes in the background. A snapshot of another workday is never shown (whenever the day differs, also after
+  // the page restores the URL); one of another auth session is never returned (see `shownSession` below).
   useEffect(() => {
     const requestGeneration = bump();
     if (!enabled) {
-      setMode(null);
-      setSession(null);
       setLoading(false);
       return;
+    }
+    if (shownWorkdayRef.current !== null && shownWorkdayRef.current !== workday) {
+      setMode(null);
+      setSession(null);
+      shownWorkdayRef.current = null;
     }
     void runCycle(requestGeneration);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -236,5 +246,7 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     })();
   }, []);
 
-  return { mode, session, loading, searchOrderIds, searchResolving, refresh, requestSearchOrderNames };
+  // Kept while hidden, but never across a re-login or a permission/scope change: such data is dropped at once.
+  const shownSession = session && session.sessionGeneration === authSession.getSessionGeneration() ? session : null;
+  return { mode, session: shownSession, loading, searchOrderIds, searchResolving, refresh, requestSearchOrderNames };
 }
