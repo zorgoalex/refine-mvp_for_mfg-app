@@ -1233,6 +1233,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('let alreadyLoaded = cncOrderBoardRequestKeyRef.current === requestKey;');
     expect(page).toContain('cncOrderStatusBoardKeyCovers(cncOrderBoardKeyOf(loadedBoard), requestKey)');
     expect(page).toContain('if (!cncStrongRefreshInFlightRef.current) setCncOrderBoardLoading(false);');
+    expect(page).toContain('buildCncOrderStatusBoardRequestKey(orderIds, DEFAULT_MDF_ORDER_CARD_SORT, includeBazisAllocation));');
     expect(page).toContain('if (!alreadyLoaded) void loadOrderBoard();');
     expect(page).toContain('const timer = window.setInterval(() => {');
     expect(page).toContain('}, CNC_ORDER_STATUS_REFRESH_MS);');

@@ -8977,13 +8977,18 @@ export async function prefetchMdfOrderStatusBoard(
     orderStatusBoardApi.listMdfManualMoves(),
   ]);
   if (authSession.getSessionGeneration() !== sessionGeneration) return false;
+  const includeBazisAllocation = response.historicalReadinessSources === undefined;
+  const orderBoard = mergeCncOrderStatusBoardResponses(responses);
+  // the page may narrow these orders right after opening; it reuses this read (see cncOrderStatusBoardKeyCovers)
+  rememberCncOrderBoardKey(orderBoard,
+    buildCncOrderStatusBoardRequestKey(orderIds, DEFAULT_MDF_ORDER_CARD_SORT, includeBazisAllocation));
   mdfInitialSnapshot = {
     createdAt: Date.now(),
     manualMoves: mapMdfBoardManualMovesResponse(manualMovesResponse.moves),
     sessionGeneration,
     dateFrom,
     today: response,
-    orderBoard: mergeCncOrderStatusBoardResponses(responses),
+    orderBoard,
   };
   return true;
 }
