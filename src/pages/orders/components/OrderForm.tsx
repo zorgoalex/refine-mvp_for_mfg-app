@@ -2080,8 +2080,15 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   useEffect(() => {
     if (!isWorkbench || !workspaceTabActive) return;
     let frame = 0;
+    // The page is hidden by the workspace before this effect is cleaned up: a scroll in between must not
+    // measure the hidden form (all its boxes are empty then).
+    const formShown = () => {
+      const node = workbenchAnchorsRef.current ?? orderFormStickySentinelRef.current;
+      return !node || node.getClientRects().length > 0;
+    };
     const update = () => {
       frame = 0;
+      if (!formShown()) return;
       const head = orderFormStickySentinelRef.current?.parentElement?.querySelector('.wb-order-head__top');
       const next = head ? head.getBoundingClientRect().bottom < workbenchChromeBottom : false;
       setWorkbenchHeadHidden((prev) => (prev === next ? prev : next));
@@ -2125,6 +2132,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       frame = window.requestAnimationFrame(update);
     };
     const unpin = () => {
+      if (!formShown()) return;
       hybridScrollTimersRef.current.forEach((timer) => window.clearTimeout(timer));
       hybridScrollTimersRef.current = [];
       setWorkbenchPinnedSection(null);
