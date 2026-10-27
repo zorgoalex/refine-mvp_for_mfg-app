@@ -1242,6 +1242,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).not.toContain('MdfHybridMoveContext');
     expect(page).toContain("hybridEntry={hybridMoveMeta?.get(cncManualMoveStorageKey('packet', packet.packetId))}");
     expect(page).toContain('renderDependencies={cncOrderCardRenderDependencies({');
+    // a packet card navigates without subscribing to the location (no re-render of every card on a route change)
+    expect(page).toContain('const { navigator } = useContext(UNSAFE_NavigationContext);');
+    expect(page).toContain('navigator.push(cutJobPath);');
+    // column headers stick under the toolbar while the board scrolls (columns clip, not scroll)
+    expect(css).toContain('.status-board-page--cnc .status-board-columns--cnc > .status-board-column {\n  overflow: clip;');
+    expect(css).toContain('> .status-board-column > .status-board-column__header {\n  position: sticky;\n  top: 0;');
     // the app-wide capture scroll listener reads column rects once per frame and never while the board is hidden
     expect(page).toContain("if (viewport?.closest('[hidden]')) return;");
     expect(page).toContain('if (frame) window.cancelAnimationFrame(frame);');

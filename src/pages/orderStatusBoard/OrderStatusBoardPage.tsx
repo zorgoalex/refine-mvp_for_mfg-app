@@ -40,6 +40,7 @@ import React, {
   startTransition,
   Suspense,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -79,7 +80,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { createPortal } from 'react-dom';
 import { DndProvider, useDrag, useDragLayer, useDrop } from 'react-dnd';
 import { TouchBackend } from 'react-dnd-touch-backend';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { UNSAFE_NavigationContext, useNavigate, useSearchParams } from 'react-router-dom';
 import { readMdfBoardPeriod, writeMdfBoardPeriod } from '../../utils/mdfBoardDailyPeriod';
 import { isApiError } from '../../api/apiError';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
@@ -6821,7 +6822,8 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   const cutMapFallbackImage = useMemo(() => cutMapFallbackImageFromPacket(packet), [packet]);
   const [activeAuxView, setActiveAuxView] = useState<'items' | 'sheet' | null>(null);
   const minimal = displayMode === 'minimal';
-  const navigate = useNavigate();
+  // navigation without subscribing to the location: a card re-renders on its own data, not on every route change
+  const { navigator } = useContext(UNSAFE_NavigationContext);
   const cutJobPath = cncPacketCutJobPath(packet);
   const compactCutNumber = formatCncPacketCompactNumber(packet);
   const displayCutJobNumber = cncPacketDisplayCutJobNumber(packet);
@@ -6839,8 +6841,8 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
       return;
     }
     event.preventDefault();
-    navigate(cutJobPath);
-  }, [cutJobPath, navigate]);
+    navigator.push(cutJobPath);
+  }, [cutJobPath, navigator]);
 
   useEffect(() => {
     if (activeAuxView === 'sheet' && !hasSheetPreview) {

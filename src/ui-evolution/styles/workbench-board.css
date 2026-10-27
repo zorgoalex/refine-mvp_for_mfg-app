@@ -331,3 +331,8 @@
 :root[data-ui-variant="workbench"] .evolution-shell__content:has(.status-board-page) {
   min-height: 0;
 }
+
+/* липкая шапка колонки МДФ-доски: непрозрачная, чтобы карточки под ней не просвечивали при прокрутке */
+:root[data-ui-variant="workbench"] .status-board-page--cnc .cnc-today-column > .status-board-column__header {
+  background: var(--evo-surface-muted);
+}

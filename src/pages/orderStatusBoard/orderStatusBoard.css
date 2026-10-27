@@ -4337,3 +4337,16 @@
     transition: none;
   }
 }
+
+/* MDF board: column headers stay on screen under the toolbar while the board scrolls. The viewport is the scroll
+   container; columns clip their rounded corners without becoming scroll containers themselves (overflow: clip), so
+   each header sticks to the top of the viewport, exactly above its own column. */
+.status-board-page--cnc .status-board-columns--cnc > .status-board-column {
+  overflow: clip;
+}
+
+.status-board-page--cnc .status-board-columns--cnc > .status-board-column > .status-board-column__header {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+}
