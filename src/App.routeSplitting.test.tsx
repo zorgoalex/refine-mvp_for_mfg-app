@@ -48,7 +48,7 @@ describe('App.tsx route-level code splitting', () => {
     expect(source).toContain('void loadOrderStatusBoardModule()');
     expect(persistentMdfHostSource).toContain("import('../../pages/orderStatusBoard')");
     expect(persistentMdfHostSource).toContain('MdfWorkBoardPage');
-    expect(source).toContain('cncTelegramApi.prefetchToday(mdfDefaultDateRange())');
-    expect(source).toContain('module.prefetchMdfOrderStatusBoard(response)');
+    expect(source).toContain('cncTelegramApi.prefetchToday(range)');
+    expect(source).toContain('module.prefetchMdfOrderStatusBoard(response, range.dateFrom, sessionGeneration)');
   });
 });

@@ -108,6 +108,7 @@ import {
 } from './interaction';
 import {
   buildCncOrderSearchDateRange,
+  mdfOpeningPeriod,
   buildCncOrderFilterOptions,
   buildOrderStatusBoardDatasetKey,
   buildCncOrderMissingDetails,
@@ -362,6 +363,8 @@ interface MdfInitialSnapshot {
   createdAt: number;
   manualMoves: CncBoardManualMoveState;
   sessionGeneration: number;
+  /** `dateFrom` the `today` read used: the page takes the snapshot only for its own opening range. */
+  dateFrom: string;
   today: CncTelegramTodayResponse;
   orderBoard: OrderStatusBoardResponse | null;
 }
@@ -648,8 +651,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     (viewState.cncWorkday !== todayCncWorkday
       || viewState.cncOrderFilters.length > 0
       // the period stays as the user left it; only the date starts from today
-      || (!viewState.cncPlannedTodayOnly
-        && viewState.cncOrderSearchPeriod !== (readMdfBoardPeriod(currentUser?.id) ?? viewState.cncOrderSearchPeriod)));
+      || viewState.cncOrderSearchPeriod !== mdfOpeningPeriod(readMdfBoardPeriod(currentUser?.id),
+        viewState.cncOrderSearchPeriod, viewState.cncPlannedTodayOnly));
   const {
     getSetting: getAppSetting,
     refetch: refetchAppSettings,
@@ -675,13 +678,16 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     viewState.cncWorkday,
     viewState.view,
   ]);
-  const [initialMdfSnapshot] = useState(() =>
-    fixedView === 'cnc_today'
-      && viewState.cncOrderFilters.length === 0
-      && (viewState.cncWorkday ?? todayCncWorkday) === todayCncWorkday
-      ? readMdfInitialSnapshot()
-      : null,
-  );
+  const [initialMdfSnapshot] = useState(() => {
+    if (fixedView !== 'cnc_today' || viewState.cncOrderFilters.length > 0
+      || (viewState.cncWorkday ?? todayCncWorkday) !== todayCncWorkday) return null;
+    const snapshot = readMdfInitialSnapshot();
+    // the range the opening will settle on (the period the user left wins over the URL's, as in the opening sync)
+    const openingPeriod = mdfOpeningPeriod(readMdfBoardPeriod(currentUser?.id), viewState.cncOrderSearchPeriod,
+      viewState.cncPlannedTodayOnly);
+    return snapshot?.dateFrom === buildCncOrderSearchDateRange(todayCncWorkday, openingPeriod).dateFrom
+      ? snapshot : null;
+  });
   const preserveInitialMdfSnapshotRef = useRef(Boolean(initialMdfSnapshot));
   const preserveInitialMdfOrderBoardRef = useRef(Boolean(initialMdfSnapshot?.orderBoard));
   const preserveInitialMdfManualMovesRef = useRef(Boolean(initialMdfSnapshot));
@@ -861,8 +867,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       return;
     }
     // Finish synchronization only after the router reflects the opening date.
-    const openingPeriod = readMdfBoardPeriod(currentUser?.id) ?? viewState.cncOrderSearchPeriod;
-    if (viewState.cncPlannedTodayOnly || viewState.cncOrderSearchPeriod === openingPeriod) {
+    const openingPeriod = mdfOpeningPeriod(readMdfBoardPeriod(currentUser?.id), viewState.cncOrderSearchPeriod,
+      viewState.cncPlannedTodayOnly);
+    if (viewState.cncOrderSearchPeriod === openingPeriod) {
       updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });
     } else {
       updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [], cncOrderSearchPeriod: openingPeriod });
@@ -8500,9 +8507,14 @@ function hasPrefetchedCncOrderStatusBoard(
   );
 }
 
+/** Stores the board's initial snapshot for the session `today` was read under; returns false (nothing stored) when the
+ * session changed meanwhile — another user's or a stale session's data is never handed to the current one. */
 export async function prefetchMdfOrderStatusBoard(
   response: CncTelegramTodayResponse,
-): Promise<void> {
+  dateFrom: string,
+  sessionGeneration = authSession.getSessionGeneration(),
+): Promise<boolean> {
+  if (authSession.getSessionGeneration() !== sessionGeneration) return false;
   // Match the initial view: machine-file matching is opt-in in the gear settings.
   const orderIds = collectCncOrderIds(response.columns);
   const [responses, manualMovesResponse] = await Promise.all([
@@ -8515,13 +8527,16 @@ export async function prefetchMdfOrderStatusBoard(
     ),
     orderStatusBoardApi.listMdfManualMoves(),
   ]);
+  if (authSession.getSessionGeneration() !== sessionGeneration) return false;
   mdfInitialSnapshot = {
     createdAt: Date.now(),
     manualMoves: mapMdfBoardManualMovesResponse(manualMovesResponse.moves),
-    sessionGeneration: authSession.getSessionGeneration(),
+    sessionGeneration,
+    dateFrom,
     today: response,
     orderBoard: mergeCncOrderStatusBoardResponses(responses),
   };
+  return true;
 }
 
 function readMdfInitialSnapshot(): MdfInitialSnapshot | null {
