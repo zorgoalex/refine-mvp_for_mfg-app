@@ -31,6 +31,8 @@ describe('Basis-cut UI integration guards', () => {
       expect(list).toContain(label);
     }
     expect(list).toContain("dataIndex: 'totalAreaM2'");
+    expect(list.indexOf("title: 'Площадь, м²'")).toBeLessThan(list.indexOf("title: 'Материал'"));
+    expect(list).toContain('<MaterialNames names={row.materialNames ?? []} />');
     expect(list).toContain('ERP-заказы');
     expect(list).toContain('Базис-проекты');
     expect(list).toContain('Базис-заказы');

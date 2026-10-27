@@ -123,6 +123,7 @@ import {
   buildCncOrderMissingDetails,
   indexCncOrderComposition,
   cncOrderDetailSourceKeys,
+  collectCncMdfOrderIds,
   collectCncOrderIds,
   DEFAULT_CNC_ORDER_SEARCH_PERIOD,
   DEFAULT_MDF_ORDER_CARD_SORT,
@@ -131,6 +132,9 @@ import {
   applyMdfHiddenRulesToReadinessSources,
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
+  collectCncSearchedOrderIds,
+  filterCncOrderCardsByOrders,
+  splitCncSearchedOrderItems,
   filterCncOrderCardsByPlannedOrderDate,
   filterCncTodayColumnsByOrders,
   filterCncTodayColumnsByPlannedOrderDate,
@@ -176,6 +180,8 @@ import {
   cncMaterialNameIsMdf,
   cncPacketCountsForMdfReadiness,
   cncPacketHasOtherMaterialMarker,
+  cncBazisCutSetHasOtherMaterial,
+  cncMaterialNameIsOther,
   type CncDetailedMachineSource,
 } from './cncDetailedMachine';
 import { touchBoardEdgeScrollDelta } from './touchBoardDrag';
@@ -766,6 +772,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const [cncMobileColumnScale, setCncMobileColumnScale] =
     useState<CncMobileColumnScale>(() => readCncMobileColumnScalePreference(currentUser?.id));
   const [mobileToolbarExpanded, setMobileToolbarExpanded] = useState(false);
+  // The order-search dropdown closes after Enter or a pick so it does not cover the cards below.
+  const [cncOrderSearchOpen, setCncOrderSearchOpen] = useState(false);
   const [cncRelationsEnabled, setCncRelationsEnabled] = useState(true);
   const [activeCncRelation, setActiveCncRelation] =
     useState<CncRelationTarget | null>(null);
@@ -1684,7 +1692,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     [cncBathsRequireMachineFiles, cncOrderFilteredColumns, cncOriginalView, preservedCncBathCardId],
   );
   const cncVisibleOrderIds = useMemo(
-    () => new Set(collectCncOrderIds(cncFilteredColumns)),
+    () => new Set(collectCncMdfOrderIds(cncFilteredColumns)),
     [cncFilteredColumns],
   );
   const cncVisibleOrderStatusCards = useMemo(
@@ -1784,11 +1792,28 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     ),
     [cncDisplayOrderStatusCards, cncHiddenOrderStatusIds, cncHiddenProductionStatusIds],
   );
+  const cncSearchedOrderIds = useMemo(
+    () => collectCncSearchedOrderIds(cncActiveColumns, cncOrderFilters),
+    [cncActiveColumns, cncOrderFilterKey],
+  );
   const cncOrderCards = useMemo(
-    () => cncOriginalView || cncTerminalColumnsVisible
-      ? cncDisplayOrderStatusCards
-      : cncDisplayOrderStatusCards.filter((card) => !cncMutedOrderIds.has(card.orderId)),
-    [cncDisplayOrderStatusCards, cncMutedOrderIds, cncOriginalView, cncTerminalColumnsVisible],
+    () => {
+      const cards = cncOriginalView || cncTerminalColumnsVisible
+        ? cncDisplayOrderStatusCards
+        : cncDisplayOrderStatusCards.filter((card) => !cncMutedOrderIds.has(card.orderId));
+      return cncSearchActive
+        ? filterCncOrderCardsByOrders(cards, cncOrderFilters, cncSearchedOrderIds)
+        : cards;
+    },
+    [
+      cncDisplayOrderStatusCards,
+      cncMutedOrderIds,
+      cncOrderFilterKey,
+      cncOriginalView,
+      cncSearchActive,
+      cncSearchedOrderIds,
+      cncTerminalColumnsVisible,
+    ],
   );
   const cncOrderSortPreference = useMemo(
     () => ({ sortBy: viewState.sortBy, sortOrder: viewState.sortOrder }),
@@ -2964,13 +2989,25 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 onClick={() => updateCncWorkday(cncNavigationDate.add(1, 'day'))}
               />
             </Tooltip>
-            <Button
-              size="small"
-              icon={<CalendarOutlined />}
-              onClick={() => updateCncWorkday(dayjs())}
-            >
-              Сегодня
-            </Button>
+            <Tooltip title="Перейти на сегодняшнюю дату">
+              <Button
+                size="small"
+                aria-label="Перейти на сегодняшнюю дату"
+                icon={<CalendarOutlined />}
+                onClick={() => updateCncWorkday(dayjs())}
+              />
+            </Tooltip>
+            <Tooltip title="Только заказы с плановой датой сегодня, как в календаре">
+              <Button
+                size="small"
+                type={viewState.cncPlannedTodayOnly ? 'primary' : 'default'}
+                aria-pressed={viewState.cncPlannedTodayOnly}
+                icon={<ScheduleOutlined />}
+                onClick={toggleCncPlannedTodayFilter}
+              >
+                Сегодня
+              </Button>
+            </Tooltip>
             <Button
               type="primary"
               size="small"
@@ -2993,13 +3030,12 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               suffixIcon={<SearchOutlined />}
               value={cncOrderFilters}
               onChange={(values) => updateViewState({ cncOrderFilters: values })}
+              open={cncOrderSearchOpen}
+              onDropdownVisibleChange={setCncOrderSearchOpen}
+              onSelect={() => setCncOrderSearchOpen(false)}
+              onSearch={(text) => { if (text) setCncOrderSearchOpen(true); }}
+              onInputKeyDown={(event) => { if (event.key === 'Enter') setCncOrderSearchOpen(false); }}
               aria-label="Фильтр МДФ-работ по номеру заказа"
-            />
-            <StatusBoardToolbarIconToggle
-              active={viewState.cncPlannedTodayOnly}
-              label="Плановая дата сегодня"
-              icon={<ScheduleOutlined />}
-              onToggle={toggleCncPlannedTodayFilter}
             />
             <div
               className="status-board-toolbar__cnc-period"
@@ -3193,6 +3229,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 orderMovesEnabled={!cncOrderStatusesLoading}
                 pendingOrderIds={pendingOrders}
                 terminalColumnsVisible={cncTerminalColumnsVisible || cncSearchActive}
+                searchOrderFilters={cncSearchActive ? cncOrderFilters : NO_CNC_ORDER_FILTERS}
                 originalMode={cncOriginalView}
                 currentLocations={cncOriginalCurrentLocations}
                 originalOrderCreatedAt={cncOriginalOrderCreatedAt}
@@ -3363,6 +3400,8 @@ interface CncTelegramTodayColumnsProps {
   orderMovesEnabled: boolean;
   pendingOrderIds: ReadonlySet<number>;
   terminalColumnsVisible: boolean;
+  /** Searched order numbers; empty when no search is active. */
+  searchOrderFilters: readonly string[];
   originalMode: boolean;
   currentLocations: CncOriginalCurrentLocationMap;
   originalOrderCreatedAt: ReadonlyMap<number, string>;
@@ -3758,6 +3797,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   orderMovesEnabled,
   pendingOrderIds,
   terminalColumnsVisible,
+  searchOrderFilters,
   originalMode,
   currentLocations,
   originalOrderCreatedAt,
@@ -4110,6 +4150,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
         const columnClassNames = [`cnc-today-column--${column.key}`];
         const title = cncColumnDisplayTitle(column);
         const totals = buildCncColumnTotals(column, relationContext, detailedContext);
+        const searchTotals = buildCncSearchedOrderTotals(column, searchOrderFilters);
         const loadPercent = Math.min(100, Math.round(totals.areaM2));
         const bathSourceCards = column.baths ?? [];
         const packetSourceCards = column.packets ?? [];
@@ -4207,9 +4248,38 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                   <Skeleton.Input active size="small" />
                 </div>
               ) : (
-                <Typography.Text className="cnc-today-column__totals" type="secondary">
-                  {totals.details} дет. · {formatArea(totals.areaM2)}
-                </Typography.Text>
+                <>
+                  {searchTotals ? (
+                    <Typography.Text
+                      strong
+                      className="cnc-today-column__totals cnc-today-column__totals--search"
+                      title="Детали и площадь только искомого заказа"
+                    >
+                      {searchTotals.details} дет. · {formatArea(searchTotals.areaM2)}
+                    </Typography.Text>
+                  ) : null}
+                  {searchTotals?.otherDetails ? (
+                    <Typography.Text
+                      className="cnc-today-column__totals cnc-today-column__totals--search-other"
+                      title="Детали искомого заказа в файлах не из МДФ (ЛДСП, ХДФ…): в итоги МДФ не входят"
+                    >
+                      не МДФ: {searchTotals.otherDetails} дет. · {formatArea(searchTotals.otherAreaM2 ?? 0)}
+                    </Typography.Text>
+                  ) : null}
+                  {!searchTotals ? (
+                    <Typography.Text className="cnc-today-column__totals" type="secondary">
+                      {totals.details} дет. · {formatArea(totals.areaM2)}
+                      {totals.otherDetails ? (
+                        <span
+                          className="cnc-today-column__totals-other"
+                          title="Детали файлов не из МДФ (ЛДСП, ХДФ…): карточки видны на доске, в итоги МДФ не входят"
+                        >
+                          +{totals.otherDetails} не МДФ
+                        </span>
+                      ) : null}
+                    </Typography.Text>
+                  ) : null}
+                </>
               )}
               {!orderColumn && !loading && (
                 <div className="cnc-today-column__load">
@@ -5794,6 +5864,7 @@ const CncTelegramPrintBoard: React.FC<CncTelegramPrintBoardProps> = ({
                 </div>
                 <small>
                   {column.totals.details} дет. · {formatArea(column.totals.areaM2)}
+                  {column.totals.otherDetails ? ` +${column.totals.otherDetails} не МДФ` : ''}
                 </small>
               </th>
             ))}
@@ -5983,6 +6054,7 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
   const orderSummaries = buildCncOrderSummaries(card.items);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const minimal = displayMode === 'minimal';
+  const otherMaterial = cncBazisCutSetHasOtherMaterial(card);
   const openSet = (event: React.MouseEvent) => {
     event.stopPropagation();
     onOpenBazisCut(card.bazisCutSetId);
@@ -5995,10 +6067,12 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
           'status-board-card cnc-packet-card cnc-bazis-cut-card',
           minimal ? 'cnc-bazis-cut-card--minimal cnc-compact-card' : '',
           summaryOnly ? 'cnc-card--summary-only' : '',
+          otherMaterial ? 'cnc-packet-card--other-material' : '',
         ].filter(Boolean).join(' '),
         relationState,
         highlightEnabled,
       )}
+      data-cnc-material-kind={otherMaterial ? 'other' : undefined}
       data-cnc-relation-state={highlightEnabled ? relationState : undefined}
       data-cnc-card-view={minimal ? 'minimal' : summaryOnly ? 'compact' : 'standard'}
       data-bazis-cut-set-id={card.bazisCutSetId}
@@ -9534,6 +9608,10 @@ function cncColumnCardNoun(columnKey: CncTelegramTodayDisplayColumnKey): string 
 interface CncColumnTotals {
   details: number;
   areaM2: number;
+  /** Details of non-MDF files (cream cards): shown on the board, never part of the MDF totals. */
+  otherDetails?: number;
+  /** Area of those non-MDF details; filled for the searched-order totals. */
+  otherAreaM2?: number;
 }
 
 interface CncColumnTotalItem {
@@ -9568,6 +9646,7 @@ function buildCncColumnTotals(
         { details: 0, areaM2: 0 },
       );
   }
+  const otherItems: CncColumnTotalItem[] = [];
   const items: CncColumnTotalItem[] =
     isCncBathColumnKey(column.key)
       ? column.baths
@@ -9581,16 +9660,61 @@ function buildCncColumnTotals(
               (!relationContext && !detailedPacketHighlightEnabled) ||
               getCncPacketDisplayState(packet, relationContext, detailedContext) !== 'dimmed',
             )
-            .flatMap((packet) => packet.items),
+            .flatMap((packet) => {
+              if (!cncPacketHasOtherMaterialMarker(packet)) return packet.items;
+              otherItems.push(...packet.items);
+              return [];
+            }),
           ...(column.bazisCutSets ?? [])
             .filter((card) =>
               (!relationContext && !detailedPacketHighlightEnabled) ||
               getCncBazisCutSetDisplayState(card, relationContext, detailedContext) !== 'dimmed',
             )
-            .flatMap((card) => card.items),
+            .flatMap((card) => card.items.filter((item) => {
+              if (!cncMaterialNameIsOther(item.materialName)) return true;
+              otherItems.push(item);
+              return false;
+            })),
         ];
 
-  return items.reduce<CncColumnTotals>(
+  const totals = items.reduce<CncColumnTotals>(
+    (totals, item) => {
+      const quantity = Math.max(0, Number.isFinite(item.quantity) ? item.quantity : 0);
+      totals.details += quantity;
+      totals.areaM2 += cncItemAreaM2(item, quantity);
+      return totals;
+    },
+    { details: 0, areaM2: 0 },
+  );
+  const otherDetails = otherItems.reduce(
+    (sum, item) => sum + Math.max(0, Number.isFinite(item.quantity) ? item.quantity : 0), 0);
+  return otherDetails > 0 ? { ...totals, otherDetails } : totals;
+}
+
+const NO_CNC_ORDER_FILTERS: readonly string[] = [];
+
+// Header totals of the searched orders; null only when nothing is searched. While
+// searching, the header shows these instead of the column totals (zero when the
+// column has no card of the searched orders). Order columns hold only them already.
+function buildCncSearchedOrderTotals(
+  column: CncTelegramTodayDisplayColumn,
+  searchOrderFilters: readonly string[],
+): CncColumnTotals | null {
+  if (searchOrderFilters.length === 0) return null;
+  if (isCncOrderColumnKey(column.key)) {
+    return (column.orderCards ?? []).length > 0
+      ? buildCncColumnTotals(column, null, null)
+      : { details: 0, areaM2: 0 };
+  }
+  const { mdf, other } = splitCncSearchedOrderItems(column, searchOrderFilters);
+  const totals = sumCncTotalItems(mdf);
+  if (other.length === 0) return totals;
+  const otherTotals = sumCncTotalItems(other);
+  return { ...totals, otherDetails: otherTotals.details, otherAreaM2: otherTotals.areaM2 };
+}
+
+function sumCncTotalItems(items: readonly CncColumnTotalItem[]): { details: number; areaM2: number } {
+  return items.reduce(
     (totals, item) => {
       const quantity = Math.max(0, Number.isFinite(item.quantity) ? item.quantity : 0);
       totals.details += quantity;

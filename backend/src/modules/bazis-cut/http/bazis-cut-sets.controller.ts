@@ -65,6 +65,7 @@ const summaryProperties: NonNullable<SchemaObject['properties']> = {
   version: { type: 'integer', minimum: 0 }, createdAt: { type: 'string', format: 'date-time' },
   updatedAt: { type: 'string', format: 'date-time' }, quantity: { type: 'integer', minimum: 0 },
   positionCount: { type: 'integer', minimum: 0 }, totalAreaM2: { type: 'number', minimum: 0 },
+  materialNames: { type: 'array', items: { type: 'string' } },
   orders: sourceRefs(), projects: sourceRefs(),
   bazisProjects: sourceRefs(), bazisOrders: sourceRefs(),
 };

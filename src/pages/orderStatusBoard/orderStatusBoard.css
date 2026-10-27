@@ -683,8 +683,10 @@
 
 .cnc-detailed-machine-map--other-material {
   border-color: #8b5a2b;
+  background: color-mix(in srgb, #f3dfb8 42%, var(--app-surface));
   box-shadow:
-    0 0 0 2px rgba(139, 90, 43, 0.34),
+    inset 0 0 0 1px #8b5a2b,
+    0 0 0 4px rgba(139, 90, 43, 0.34),
     var(--app-shadow-border);
 }
 
@@ -981,6 +983,17 @@
   line-height: 1.25;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* Details of non-MDF files: on its own line in the cream cards' brown, outside the MDF totals. */
+.cnc-today-column__totals-other {
+  display: block;
+  color: #8b5a2b;
+}
+
+.cnc-today-column__totals--search-other {
+  color: #8b5a2b;
+  font-weight: 600;
 }
 
 .cnc-today-column__badge-placeholder,
@@ -1281,10 +1294,19 @@
     0 2px 8px rgba(250, 84, 28, 0.28);
 }
 
-.cnc-packet-card--other-material {
+/* Non-MDF machine files: cream fill and a double brown outline that stays the
+   same on hover, click (relation highlight), touch drag and deep link. */
+.cnc-board-card-shell > .status-board-card.cnc-packet-card--other-material,
+.status-board-card.cnc-packet-card--other-material:hover,
+.status-board-card.cnc-packet-card--other-material {
   border-color: #8b5a2b;
+  /* Solid even on Bazis-cut cards: their dashed border showed as a light dashed
+     line between the inset and outer brown outline. */
+  border-style: solid;
+  background: color-mix(in srgb, #f3dfb8 42%, var(--app-surface));
   box-shadow:
-    0 0 0 2px rgba(139, 90, 43, 0.34),
+    inset 0 0 0 1px #8b5a2b,
+    0 0 0 4px rgba(139, 90, 43, 0.34),
     0 2px 8px var(--app-shadow);
 }
 
