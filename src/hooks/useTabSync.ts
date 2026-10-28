@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { resolveTabOpenerKey, syncWorkspaceTabsForCurrentUser, useTabStore } from '../stores/tabStore';
 import { resolveTabLabel, resourceFromPath, shouldPreserveTabLabel } from '../utils/tabLabels';
+import { workspaceTabPath } from '../utils/workspaceTabPath';
 
 const IGNORED = new Set(['/', '/login']);
 
@@ -19,7 +20,7 @@ export const useTabSync = (): void => {
     const openerKey = resolveTabOpenerKey(tabsBeforeOpen, location.pathname, previousTabKeyRef.current);
     openTab({
       key: location.pathname,
-      path: `${location.pathname}${location.search}`,
+      path: workspaceTabPath(location.pathname, location.search),
       label: resolveTabLabel(location.pathname),
       resource: resourceFromPath(location.pathname) ?? location.pathname,
       openerKey,
