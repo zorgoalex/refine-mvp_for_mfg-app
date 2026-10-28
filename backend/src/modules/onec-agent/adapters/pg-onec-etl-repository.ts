@@ -115,6 +115,24 @@ export interface EntityOutcome {
   fullRead: boolean;
 }
 
+/**
+ * One set-based statement over a whole 1C set of a run (publish / missing marks / snapshot replace): on a full run the
+ * largest sets have tens of thousands of rows (stage 27.10: `reg_customer_orders` 51 441), which does not fit the
+ * common per-query limit under load and failed `complete` with «Query read timeout». This statement gets its own limit,
+ * server side (`statement_timeout`, transaction-local) and in the driver (`timeoutMs`); the previous server limit is
+ * restored right after, so the rest of the transaction keeps the common one.
+ */
+export const BULK_STATEMENT_TIMEOUT_MS = 120_000;
+
+export async function bulkQuery(tx: DatabaseClient, text: string, params: readonly unknown[]) {
+  const { rows: [previous] } = await tx.query<{ value: string }>(`SELECT current_setting('statement_timeout') AS value`);
+  await tx.query(`SELECT set_config('statement_timeout', $1, true)`, [`${BULK_STATEMENT_TIMEOUT_MS}ms`]);
+  const result = await tx.query(text, params, { timeoutMs: BULK_STATEMENT_TIMEOUT_MS });
+  // Only on success: after an error the transaction is aborted and rolled back anyway.
+  await tx.query(`SELECT set_config('statement_timeout', $1, true)`, [previous.value]);
+  return result;
+}
+
 @Injectable()
 export class PgOnecEtlRepository {
   constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
@@ -394,7 +412,7 @@ export class PgOnecEtlRepository {
    * the snapshot version already decided), rows absent from it are removed.
    */
   async replaceSnapshot(tx: DatabaseClient, run: RunRow, entityCode: string): Promise<{ upserted: number; removed: number }> {
-    const upsert = await tx.query(
+    const upsert = await bulkQuery(tx,
       `WITH latest AS (
          SELECT DISTINCT ON (s.source_key) s.source_key, s.source_updated_at, s.deleted, s.data
            FROM onec_etl_staging_rows s JOIN onec_etl_batches b ON b.batch_id = s.batch_id
@@ -410,7 +428,7 @@ export class PgOnecEtlRepository {
          row_hash = EXCLUDED.row_hash, last_run_id = EXCLUDED.last_run_id, updated_at = now()`,
       [run.runId, run.sourceId, entityCode],
     );
-    const removed = await tx.query(
+    const removed = await bulkQuery(tx,
       `DELETE FROM onec_etl_mirror_rows WHERE source_id = $1 AND entity_code = $2 AND last_run_id <> $3`,
       [run.sourceId, entityCode, run.runId],
     );
@@ -432,7 +450,7 @@ export class PgOnecEtlRepository {
    * the run always clears its missing mark.
    */
   async publishEntity(tx: DatabaseClient, run: RunRow, entityCode: string): Promise<{ upserted: number }> {
-    const { rowCount } = await tx.query(
+    const { rowCount } = await bulkQuery(tx,
       `WITH latest AS (
          SELECT DISTINCT ON (s.source_key) s.source_key, s.source_updated_at, s.deleted, s.data
            FROM onec_etl_staging_rows s JOIN onec_etl_batches b ON b.batch_id = s.batch_id
@@ -459,7 +477,7 @@ export class PgOnecEtlRepository {
 
   /** Full read: rows of the entity not seen in this run are marked missing (diagnostics, plan §20). */
   async markMissing(tx: DatabaseClient, run: RunRow, entityCode: string): Promise<number> {
-    const { rowCount } = await tx.query(
+    const { rowCount } = await bulkQuery(tx,
       `UPDATE onec_etl_mirror_rows SET missing_in_source_at = now(), missing_in_source_run = $1, updated_at = now()
         WHERE source_id = $2 AND entity_code = $3 AND last_run_id <> $1 AND missing_in_source_at IS NULL`,
       [run.runId, run.sourceId, entityCode],
