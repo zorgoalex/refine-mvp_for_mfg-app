@@ -4,7 +4,7 @@ import ts from 'typescript';
 
 // Read actual page JSX so checks cannot pass against a copied compatibility example.
 export const popconfirmCases = [
-  { name: 'Bazis project', file: 'src/pages/bazis/BazisPage.tsx', index: 0, title: 'Удалить Базис-проект?', description: '«Тест» и все его ревизии будут удалены безвозвратно.' },
+  { name: 'Bazis project', file: 'src/pages/bazis/BazisPage.tsx', index: 0, title: 'Удалить XML-проект?', description: '«Тест» и все его ревизии будут удалены безвозвратно.' },
   { name: 'Bazis cut set', file: 'src/pages/bazis-cut/BazisCutListPage.tsx', index: 0, title: 'Удалить пустой набор?', description: '«Тест» будет удалён безвозвратно.' },
   { name: 'export template', file: 'src/pages/configuration/components/ExportTemplatesConfigTab.tsx', index: 0, title: 'Удалить шаблон?', description: 'Это действие скроет шаблон из экспорта.' },
   { name: 'status automation', file: 'src/pages/configuration/components/StatusAutomationConfig.tsx', index: 0, title: 'Обновить автостатусы', description: 'Будут проверены заказы за последние два месяца. Правила событий МДФ-доски пропускаются: для них нужна исходная карточка.' },

@@ -8,6 +8,8 @@ export interface DowelingLinkedOrder {
   managerUserId: string | null;
   deleted: boolean;
   productionOrder: boolean;
+  /** Client of the order: a Bazis project (doweling card) links orders of its own client only. */
+  clientId: number | null;
 }
 
 export type DowelingAccessDecision =

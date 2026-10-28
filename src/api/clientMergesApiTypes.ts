@@ -28,6 +28,8 @@ export interface MergePreview {
     ordersShown: Array<{ orderId: number; name: string; deleted: boolean }>;
     ordersHidden: boolean;
     onecLink: boolean;
+    /** Bazis project cards of the merged client: they move to the survivor (absent from an older backend). */
+    bazisCards?: number;
   };
   phones: {
     moved: Array<{ phoneId: number; number: string }>;

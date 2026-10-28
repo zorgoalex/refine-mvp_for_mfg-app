@@ -4,8 +4,25 @@ import type { DatabaseClient, TransactionClient } from '../../../database/databa
 import type { UpdateDowelingOrderCommand } from '../application/doweling.types';
 import type { DowelingOrderLinkDto, UpdateDowelingOrderRequestDto, UpdateDowelingOrderResponseDto } from '../dto/doweling.dto';
 import { hasDowelingMoney } from '../dto/doweling.dto';
-import { DowelingLinksConflictError, DowelingOrderNotFoundError, DowelingVersionConflictError } from '../errors/doweling.errors';
-import { assertDowelingAccess, assertDowelingMoneyAllowed, lockOrders, mapDowelingWriteError, readOrders, requestIdOrFallback, setSessionUser, SOURCE } from './doweling-sql';
+import {
+  BazisProjectClientAmbiguousError,
+  BazisProjectClientMismatchError,
+  DowelingLinksConflictError,
+  DowelingOrderNotFoundError,
+  DowelingVersionConflictError,
+} from '../errors/doweling.errors';
+import {
+  assertDowelingAccess,
+  assertDowelingMoneyAllowed,
+  assertOrdersOfClient,
+  lockOrders,
+  mapDowelingWriteError,
+  readAttachedXmlClients,
+  readOrders,
+  requestIdOrFallback,
+  setSessionUser,
+  SOURCE,
+} from './doweling-sql';
 
 /** The editable state of a doweling order, compared field by field to decide what changed. */
 export interface DowelingState {
@@ -27,6 +44,8 @@ export interface DowelingState {
   linkPdfFile: string | null;
   refKey1c: string | null;
   isActive: boolean;
+  /** Client of the Bazis project (migration 279). */
+  clientId: number;
 }
 
 const STATUS_FIELDS: ReadonlyArray<{ field: 'productionStatusId' | 'paymentStatusId'; column: string }> = [
@@ -64,7 +83,7 @@ export interface DowelingOrderUpdatedEvent {
 const STATE_FIELDS: ReadonlyArray<keyof DowelingState> = [
   'dowelingOrderName', 'dowelingOrderDate', 'paymentStatusId', 'productionStatusId', 'designEngineerId', 'operatorId',
   'issueDate', 'paymentDate', 'partsCount', 'totalAmount', 'finalAmount', 'discount', 'surcharge', 'paidAmount',
-  'linkCadFile', 'linkPdfFile', 'refKey1c', 'isActive',
+  'linkCadFile', 'linkPdfFile', 'refKey1c', 'isActive', 'clientId',
 ];
 
 interface DowelingRow extends QueryResultRow {
@@ -88,6 +107,8 @@ interface DowelingRow extends QueryResultRow {
   ref_key_1c: string | null;
   delete_flag: boolean;
   version: number;
+  client_id: string | number;
+  client_source: string;
 }
 
 interface LinkRow extends QueryResultRow {
@@ -106,7 +127,7 @@ const DOWELING_COLUMNS = `
   parts_count,
   total_amount::text AS total_amount, final_amount::text AS final_amount, discount::text AS discount,
   surcharge::text AS surcharge, paid_amount::text AS paid_amount,
-  link_cad_file, link_pdf_file, ref_key_1c::text AS ref_key_1c, delete_flag, version`;
+  link_cad_file, link_pdf_file, ref_key_1c::text AS ref_key_1c, delete_flag, version, client_id, client_source`;
 
 export async function updateDowelingOrder(
   database: DatabaseClient & { transaction<T>(handler: (tx: TransactionClient) => Promise<T>): Promise<T> },
@@ -203,12 +224,38 @@ export async function updateDowelingOrder(
       // 4. What changes.
       const before = stateFromRow(row);
       const after = stateFromDto(dto, before);
+      // The client (migration 279): a given client is the user's choice; a card of an unknown client (written by the
+      // previous backend, 'default') takes the client of its orders; the card's live orders and XML share it.
+      let nextClientSource = row.client_source;
+      if (dto.clientId !== undefined) {
+        if (dto.clientId !== before.clientId || row.client_source === 'default') nextClientSource = 'manual';
+      } else if (row.client_source === 'default') {
+        const clients = [...new Set(wantedOrderIds
+          .map((orderId) => orders.get(orderId))
+          .filter((order) => order !== undefined && !order.deleted && order.clientId !== null)
+          .map((order) => order!.clientId as number))].sort((a, b) => a - b);
+        if (clients.length > 1) {
+          throw new BazisProjectClientAmbiguousError(dowelingOrderId, clients);
+        }
+        if (clients.length === 1) {
+          after.clientId = clients[0];
+          nextClientSource = 'order';
+        }
+      }
+      if (nextClientSource !== 'default') {
+        assertOrdersOfClient(dowelingOrderId, after.clientId, wantedOrderIds, orders);
+        const foreignXml = (await readAttachedXmlClients(tx, dowelingOrderId)).filter((xml) => xml.clientId !== after.clientId);
+        if (foreignXml.length > 0) {
+          throw new BazisProjectClientMismatchError(dowelingOrderId, [], foreignXml.map((xml) => xml.bazisProjectId));
+        }
+      }
+      const clientSourceChanged = nextClientSource !== row.client_source;
       const changedFields = STATE_FIELDS.filter((field) => before[field] !== after[field]);
       const removedOrderIds = currentOrderIds.filter((orderId) => !wantedOrderIds.includes(orderId));
       const nextLegacyOrderId = legacyOrderId !== null && wantedOrderIds.includes(legacyOrderId) ? legacyOrderId : null;
       const legacyChanged = nextLegacyOrderId !== legacyOrderId;
 
-      if (changedFields.length === 0 && addedOrderIds.length === 0 && removedOrderIds.length === 0) {
+      if (changedFields.length === 0 && addedOrderIds.length === 0 && removedOrderIds.length === 0 && !clientSourceChanged) {
         return {
           dowelingOrder: { dowelingOrderId, dowelingOrderName: row.doweling_order_name, version: row.version, isActive: !row.delete_flag },
           links: activeLinks(links),
@@ -225,6 +272,7 @@ export async function updateDowelingOrder(
             design_engineer_id = $6, operator_id = $7, issue_date = $8::date, payment_date = $9::date, parts_count = $10,
             total_amount = $11, final_amount = $12, discount = $13, surcharge = $14, paid_amount = $15,
             link_cad_file = $16, link_pdf_file = $17, ref_key_1c = $18::uuid, delete_flag = $19, order_id = $20,
+            client_id = $21, client_source = $22,
             version = version + 1
         WHERE doweling_order_id = $1
         RETURNING version, doweling_order_name, delete_flag
@@ -234,6 +282,7 @@ export async function updateDowelingOrder(
           after.designEngineerId, after.operatorId, after.issueDate, after.paymentDate, after.partsCount,
           after.totalAmount, after.finalAmount, after.discount, after.surcharge, after.paidAmount,
           after.linkCadFile, after.linkPdfFile, after.refKey1c, !after.isActive, nextLegacyOrderId,
+          after.clientId, nextClientSource,
         ],
       );
       const result = updated.rows[0];
@@ -297,6 +346,9 @@ export async function updateDowelingOrder(
       if (legacyChanged) {
         diff.legacyOrderId = { from: legacyOrderId, to: nextLegacyOrderId };
       }
+      if (clientSourceChanged) {
+        diff.clientSource = { from: row.client_source, to: nextClientSource };
+      }
       const auditId = await auditService.record(tx, {
         event,
         entityType: 'doweling_order',
@@ -307,6 +359,7 @@ export async function updateDowelingOrder(
         requestId,
         source: SOURCE,
         relatedOrderId: touchedOrderIds.length === 1 ? touchedOrderIds[0] : null,
+        relatedClientId: after.clientId,
         statusField: primaryStatus?.field ?? null,
         statusId: primaryStatus?.to ?? null,
         statusCode: before.isActive !== after.isActive ? (after.isActive ? 'activated' : 'deactivated') : null,
@@ -434,6 +487,7 @@ export function stateFromRow(row: DowelingRow): DowelingState {
     linkPdfFile: row.link_pdf_file,
     refKey1c: row.ref_key_1c === null ? null : row.ref_key_1c.toLowerCase(),
     isActive: row.delete_flag !== true,
+    clientId: Number(row.client_id),
   };
 }
 
@@ -459,5 +513,6 @@ export function stateFromDto(dto: UpdateDowelingOrderRequestDto, before: Dowelin
     linkPdfFile: dto.linkPdfFile,
     refKey1c: dto.refKey1c === null ? null : dto.refKey1c.toLowerCase(),
     isActive: dto.isActive,
+    clientId: dto.clientId ?? before.clientId,
   };
 }

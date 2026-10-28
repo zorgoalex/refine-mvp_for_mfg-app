@@ -11,6 +11,8 @@ export interface BazisImportResponseDto {
   unmappedMaterials: Array<{ name: string; kindGuess: string; usageCount: number }>;
   warnings: string[];
   requestId: string;
+  /** The Bazis project card of the XML project (route /bazis/cards/imports); null — none. */
+  dowelingOrderId?: number | null;
 }
 
 export interface BazisProjectListItemDto {
@@ -28,6 +30,11 @@ export interface BazisProjectListItemDto {
   designEngineerSource: 'xml' | 'manual' | null;
   linkedOrderIds: number[];
   linkedOrders: BazisOrderRefDto[];
+  /**
+   * The Bazis project card the XML project belongs to (migration 279). Given only when the reader may read the card
+   * (doweling.view and every order of the card readable), otherwise null.
+   */
+  card: { dowelingOrderId: number; name: string; orderIds: number[] } | null;
 }
 
 export interface BazisProjectNameDto {

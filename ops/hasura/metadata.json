@@ -2995,7 +2995,9 @@
                                     "created_at",
                                     "updated_at",
                                     "design_engineer_id",
-                                    "operator_id"
+                                    "operator_id",
+                                    "client_id",
+                                    "client_source"
                                 ],
                                 "filter": {
                                     "_and": [
@@ -3312,7 +3314,9 @@
                                     "created_at",
                                     "updated_at",
                                     "design_engineer_id",
-                                    "operator_id"
+                                    "operator_id",
+                                    "client_id",
+                                    "client_source"
                                 ],
                                 "filter": {
                                     "_and": [
@@ -3629,7 +3633,9 @@
                                     "created_at",
                                     "updated_at",
                                     "design_engineer_id",
-                                    "operator_id"
+                                    "operator_id",
+                                    "client_id",
+                                    "client_source"
                                 ],
                                 "filter": {
                                     "_and": [
@@ -3946,7 +3952,9 @@
                                     "created_at",
                                     "updated_at",
                                     "design_engineer_id",
-                                    "operator_id"
+                                    "operator_id",
+                                    "client_id",
+                                    "client_source"
                                 ],
                                 "filter": {
                                     "_and": [
@@ -4263,7 +4271,9 @@
                                     "created_at",
                                     "updated_at",
                                     "design_engineer_id",
-                                    "operator_id"
+                                    "operator_id",
+                                    "client_id",
+                                    "client_source"
                                 ],
                                 "filter": {
                                     "_and": [
@@ -4580,7 +4590,9 @@
                                     "created_at",
                                     "updated_at",
                                     "design_engineer_id",
-                                    "operator_id"
+                                    "operator_id",
+                                    "client_id",
+                                    "client_source"
                                 ],
                                 "filter": {
                                     "_and": [
@@ -4897,7 +4909,9 @@
                                     "created_at",
                                     "updated_at",
                                     "design_engineer_id",
-                                    "operator_id"
+                                    "operator_id",
+                                    "client_id",
+                                    "client_source"
                                 ],
                                 "filter": {
                                     "_and": [
@@ -5214,7 +5228,9 @@
                                     "created_at",
                                     "updated_at",
                                     "design_engineer_id",
-                                    "operator_id"
+                                    "operator_id",
+                                    "client_id",
+                                    "client_source"
                                 ],
                                 "filter": {
                                     "_and": [
@@ -5579,7 +5595,9 @@
                                     "updated_at",
                                     "client_ref_key_1c",
                                     "order_ref_key_1c",
-                                    "delete_flag"
+                                    "delete_flag",
+                                    "client_source",
+                                    "bazis_xml_count"
                                 ],
                                 "filter": {
                                     "_and": [
@@ -5913,7 +5931,9 @@
                                     "updated_at",
                                     "client_ref_key_1c",
                                     "order_ref_key_1c",
-                                    "delete_flag"
+                                    "delete_flag",
+                                    "client_source",
+                                    "bazis_xml_count"
                                 ],
                                 "filter": {
                                     "_and": [
@@ -6247,7 +6267,9 @@
                                     "updated_at",
                                     "client_ref_key_1c",
                                     "order_ref_key_1c",
-                                    "delete_flag"
+                                    "delete_flag",
+                                    "client_source",
+                                    "bazis_xml_count"
                                 ],
                                 "filter": {
                                     "_and": [
@@ -6581,7 +6603,9 @@
                                     "updated_at",
                                     "client_ref_key_1c",
                                     "order_ref_key_1c",
-                                    "delete_flag"
+                                    "delete_flag",
+                                    "client_source",
+                                    "bazis_xml_count"
                                 ],
                                 "filter": {
                                     "_and": [
@@ -6915,7 +6939,9 @@
                                     "updated_at",
                                     "client_ref_key_1c",
                                     "order_ref_key_1c",
-                                    "delete_flag"
+                                    "delete_flag",
+                                    "client_source",
+                                    "bazis_xml_count"
                                 ],
                                 "filter": {
                                     "_and": [
@@ -7249,7 +7275,9 @@
                                     "updated_at",
                                     "client_ref_key_1c",
                                     "order_ref_key_1c",
-                                    "delete_flag"
+                                    "delete_flag",
+                                    "client_source",
+                                    "bazis_xml_count"
                                 ],
                                 "filter": {
                                     "_and": [
