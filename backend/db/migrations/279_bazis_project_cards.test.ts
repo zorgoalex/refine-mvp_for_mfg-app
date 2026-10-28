@@ -85,6 +85,7 @@ describe('migration 279: Bazis project cards (doweling orders with a client)', (
 
   it('has an end-state probe in the runner', () => {
     expect(runner).toContain('279_bazis_project_cards*) probe_all');
-    expect(runner).toContain('|279_bazis_project_cards*)');
+    // its own post-apply case (the shared list is not touched on main)
+    expect(runner).toMatch(/\n    279_bazis_project_cards\*\)\n      probe_file/);
   });
 });
