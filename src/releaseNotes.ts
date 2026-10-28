@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-28", title: "МДФ-доска: без лишнего «Карточка не найдена»",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "Вкладка «МДФ-работы» больше не запоминает ссылку на карточку (переход «Открыть на МДФ-доске» из раскроя или истории): при следующем открытии доска открывается как обычно — на сегодня и без уведомления «Карточка не найдена в выбранном периоде МДФ-доски».",
+      "По ссылке на карточку доска ищет её только после загрузки данных; ванна вне периода доски подгружается отдельно.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-28", title: "NewLine: МДФ-доска в прежних цветах",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

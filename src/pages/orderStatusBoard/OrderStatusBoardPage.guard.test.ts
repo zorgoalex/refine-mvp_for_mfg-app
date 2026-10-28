@@ -1934,3 +1934,34 @@ describe('MDF board order search', () => {
     expect(page).toContain("onInputKeyDown={(event) => { if (event.key === 'Enter') setCncOrderSearchOpen(false); }}");
   });
 });
+
+describe('MDF board card link (cardKind/cardId)', () => {
+  const section = page.slice(page.indexOf('const mdfDeepLinkState'), page.indexOf('const cncMutedOrderIds'));
+
+  it('looks for the card only on the shown board, once today and its order cards for the link are in', () => {
+    expect(section).toContain('mdfDeepLinkLookup({');
+    expect(section).toContain('ordersLoading: cncOrderBoardLoading,');
+    expect(section).toContain('todayFocusBathCardId: cncTodayFocusBathCardId,');
+    expect(section).toContain("if (mdfDeepLinkState !== 'look') return undefined;");
+    expect(section).toContain('loadFailed: loadError !== null,');
+    // not while a read runs (background refresh on return): its end re-runs the lookup, even with the same data
+    expect(section).toContain('if (cncTodaySettledRevisionRef.current !== datasetRevisionRef.current) return undefined;');
+    expect(section).toContain('[cncShownDataColumns, cncTodaySettledRevision, isCncToday, mdfDeepLinkState,');
+    expect(page.split('setCncTodaySettledRevision(revision);').length - 1).toBe(3);
+    expect(section).not.toContain("delete('cardKind')");
+  });
+
+  it('a bath linked on an open board reads today again with it as its focus, once, unless a read is running', () => {
+    expect(section).toContain('if (!cncToday || cncTodayFocusBathCardId === viewState.cncCardId) return;');
+    expect(section).toContain('if (cncTodaySettledRevisionRef.current !== datasetRevisionRef.current) return;');
+    expect(page).toContain("setCncTodayFocusBathCardId(currentViewState.cncCardKind === 'bath' && currentViewState.cncCardId");
+  });
+
+  it('orders stop loading in the render that shows them', () => {
+    expect(page).toContain(`startTransition(() => {
+              setCncOrderBoard(orderBoardResponse);
+              setCncOrderBoardLoading(false);
+            });`);
+    expect(page).toContain('if (!orderBoardApplied) setCncOrderBoardLoading(false);');
+  });
+});
