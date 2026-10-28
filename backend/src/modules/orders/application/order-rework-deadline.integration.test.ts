@@ -692,4 +692,27 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
     await falsePositive(imported.orderId, 3);
     expect(await active(imported.orderId)).toEqual([expect.objectContaining({ at: addDays(today, 7), metadata_json: expect.objectContaining({ reworkRoundNo: 2 }) })]);
   });
+
+  it('R2.1 (port review): an import whose round deadline names a predecessor outside the snapshot keeps the round tag', async () => {
+    const order = await orderWithDeadline('legacy_6', true);
+    await start(order.orderId, order.detailIds[0], addDays(today, 7));
+    const snapshots = new PgOrderSnapshot(database());
+    const exported = JSON.parse((await snapshots.exportOrderSnapshot({ orderId: order.orderId, currentUser: admin, requestId: key() })).content) as OrderSnapshotDto;
+    // Drop D0 (the predecessor) from the snapshot: the round instance's previousDeadlineId points outside it.
+    const round = exported.data.deadlineInstances.find((row) => (row.metadata_json as Record<string, unknown> | null)?.reworkRoundNo === 2)!;
+    const previous = (round.metadata_json as Record<string, unknown>).previousDeadlineId as string;
+    exported.data.deadlineInstances = exported.data.deadlineInstances.filter((row) => row.deadline_id !== previous);
+    exported.data.deadlineEvents = exported.data.deadlineEvents.filter((row) => row.deadline_id !== previous);
+    exported.source.sourceInstanceId = `${importSource}-${randomUUID()}`;
+    exported.source.payloadHash = '';
+    exported.data.order.orderName = `E2E-Тест срок переделки ${tag} импорт-внешний`;
+    const imported = await snapshots.importOrderSnapshot({ snapshot: exported, currentUser: admin, requestId: key() });
+    orderIds.push(imported.orderId);
+    const project = (await pool.query('SELECT project_id FROM orders WHERE order_id = $1', [imported.orderId])).rows[0];
+    if (project && Number(project.project_id) !== projectId) importProjectIds.push(Number(project.project_id));
+    const [current] = await active(imported.orderId);
+    expect(current.metadata_json).toMatchObject({ reworkRoundNo: 2, previousDeadlineId: null, label: 'Финальный дедлайн заказа' });
+    await falsePositive(imported.orderId, 2);
+    expect((await finals(imported.orderId)).filter((row) => row.metadata_json?.reworkRoundNo === 2).every((row) => row.status === 'cancelled')).toBe(true);
+  });
 });

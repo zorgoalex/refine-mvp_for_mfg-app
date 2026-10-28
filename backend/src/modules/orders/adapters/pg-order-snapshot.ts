@@ -3216,7 +3216,8 @@ async function upsertDeadlines(
     if (typeof previous !== 'string') continue;
     await tx.query(
       `UPDATE deadline_instances
-          SET metadata_json = jsonb_set(metadata_json, '{previousDeadlineId}', to_jsonb($2::text))
+          -- An external predecessor becomes JSON null (a SQL NULL would null the whole metadata, round tag included).
+          SET metadata_json = jsonb_set(metadata_json, '{previousDeadlineId}', COALESCE(to_jsonb($2::text), 'null'::jsonb))
         WHERE deadline_id = $1::uuid`,
       [requiredString(deadlineIds.get(requiredString(raw.deadline_id, 'deadline_id')), 'deadline mapping'), deadlineIds.get(previous) ?? null],
     );

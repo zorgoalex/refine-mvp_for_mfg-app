@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyBackendStageOverrides,
+  knownRoundOf,
   removeBackendStageOverridesForOrder,
 } from './useProductionStatusEvent';
 
@@ -57,5 +58,19 @@ describe('legacy Hasura stage-event writes after production rounds', () => {
     const error = legacyStageWriteUnsupportedError(cause);
     expect(error.message).toBe(LEGACY_STAGE_WRITE_UNSUPPORTED_MESSAGE);
     expect((error as Error & { cause?: unknown }).cause).toBe(cause);
+  });
+
+  it('«Переделка»: an override made in an earlier production round does not apply once the order is in another round', () => {
+    // Another user opened round 2 before the round-1 command was confirmed: the loaded marks are round 2's.
+    const round2 = [{
+      event_id: 20, order_id: 15, detail_id: null, production_status_id: 1, event_at: '2026-10-28T00:00:00.000Z', payload: {}, round_no: 2,
+    }];
+    const overrides = { '15:7': { active: true, eventId: 99, round: 1 } };
+    expect(knownRoundOf(round2, 15)).toBe(2);
+    expect(applyBackendStageOverrides(round2, overrides, 15, (id) => knownRoundOf(round2, id))
+      .map((event) => event.production_status_id)).toEqual([1]);
+    // In its own round it still applies (optimistic state until the refetch confirms it).
+    expect(applyBackendStageOverrides(round2, { '15:7': { active: true, eventId: 99, round: 2 } }, 15, (id) => knownRoundOf(round2, id))
+      .map((event) => event.production_status_id)).toEqual([1, 7]);
   });
 });

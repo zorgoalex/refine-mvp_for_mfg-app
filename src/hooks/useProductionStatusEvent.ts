@@ -40,6 +40,8 @@ export interface ProductionStatusCommandOptions {
 interface BackendStageOverride {
   active: boolean;
   eventId?: number;
+  /** «Переделка»: the order's production round the command acted in; another round makes it stale. */
+  round?: number;
 }
 
 export type BackendStageOverrides = Record<string, BackendStageOverride>;
@@ -123,9 +125,18 @@ export const useProductionStatusEvent = (
     [eventsData, orderId, productionRound],
   );
   sourceEventsRef.current = sourceEvents;
+  // «Переделка»: the order's current round as the data shows it (given, else the round of its loaded marks).
+  const roundOf = useCallback(
+    (targetOrderId: number, from: ProductionStatusEvent[]) =>
+      (orderId && productionRound && Number(targetOrderId) === Number(orderId) ? Number(productionRound) : undefined)
+        ?? knownRoundOf(from, targetOrderId),
+    [orderId, productionRound],
+  );
+  const roundOfRef = useRef(roundOf);
+  roundOfRef.current = roundOf;
   const events = useMemo(
-    () => applyBackendStageOverrides(sourceEvents, backendStageOverrides, orderId),
-    [sourceEvents, backendStageOverrides, orderId],
+    () => applyBackendStageOverrides(sourceEvents, backendStageOverrides, orderId, (id) => roundOf(id, sourceEvents)),
+    [sourceEvents, backendStageOverrides, orderId, roundOf],
   );
 
   useEffect(() => {
@@ -144,7 +155,10 @@ export const useProductionStatusEvent = (
             event.order_id === overrideOrderId &&
             event.production_status_id === productionStatusId,
         );
-        if ((override.active && sourceHasEvent) || (!override.active && !sourceHasEvent)) {
+        // A command of an earlier round says nothing about the order's current round.
+        const dataRound = roundOf(overrideOrderId, sourceEvents);
+        const staleRound = override.round !== undefined && dataRound !== undefined && override.round !== dataRound;
+        if (staleRound || (override.active && sourceHasEvent) || (!override.active && !sourceHasEvent)) {
           delete next[key];
           changed = true;
         }
@@ -154,7 +168,7 @@ export const useProductionStatusEvent = (
       backendStageOverridesRef.current = result;
       return result;
     });
-  }, [orderId, sourceEvents]);
+  }, [orderId, sourceEvents, roundOf]);
 
   const clearBackendStageOverridesForOrder = useCallback((targetOrderId: number) => {
     const result = removeBackendStageOverridesForOrder(
@@ -194,6 +208,7 @@ export const useProductionStatusEvent = (
         [backendStageOverrideKey(targetOrderId, productionStatusId)]: {
           active,
           eventId,
+          round: roundOfRef.current(targetOrderId, sourceEventsRef.current),
         },
       };
       backendStageOverridesRef.current = next;
@@ -207,6 +222,8 @@ export const useProductionStatusEvent = (
       const effectiveEvents = applyBackendStageOverrides(
         sourceEventsRef.current,
         backendStageOverridesRef.current,
+        undefined,
+        (id) => roundOfRef.current(id, sourceEventsRef.current),
       );
       return effectiveEvents.some(
         (event) =>
@@ -222,6 +239,8 @@ export const useProductionStatusEvent = (
       const effectiveEvents = applyBackendStageOverrides(
         sourceEventsRef.current,
         backendStageOverridesRef.current,
+        undefined,
+        (id) => roundOfRef.current(id, sourceEventsRef.current),
       );
       return effectiveEvents.find(
         (event) =>
@@ -536,12 +555,18 @@ export function applyBackendStageOverrides(
   sourceEvents: ProductionStatusEvent[],
   overrides: BackendStageOverrides,
   currentOrderId?: number,
+  currentRoundOf?: (orderId: number) => number | undefined,
 ): ProductionStatusEvent[] {
   let result = sourceEvents;
 
   for (const [key, override] of Object.entries(overrides)) {
     const [orderId, productionStatusId] = key.split(':').map(Number);
     if (currentOrderId !== undefined && orderId !== currentOrderId) {
+      continue;
+    }
+    // «Переделка»: an override made in another production round does not apply to the current one.
+    const round = currentRoundOf?.(orderId);
+    if (override.round !== undefined && round !== undefined && override.round !== round) {
       continue;
     }
 
@@ -574,6 +599,17 @@ export function applyBackendStageOverrides(
   }
 
   return result;
+}
+
+/** The round of an order's loaded marks (they are the current round's only); undefined without marks. */
+export function knownRoundOf(events: ProductionStatusEvent[], orderId: number): number | undefined {
+  let round: number | undefined;
+  for (const event of events) {
+    if (Number(event.order_id) !== Number(orderId)) continue;
+    const value = Number(event.round_no ?? 1) || 1;
+    round = round === undefined ? value : Math.max(round, value);
+  }
+  return round;
 }
 
 function syntheticProductionEventId(orderId: number, productionStatusId: number): number {
