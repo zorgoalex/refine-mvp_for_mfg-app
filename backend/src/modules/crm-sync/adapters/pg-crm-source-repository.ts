@@ -76,10 +76,15 @@ export class PgCrmSourceRepository implements CrmSourcePort {
     const { rows } = await this.db.query(
       `SELECT o.order_id, o.order_name, o.client_id, o.total_amount, o.final_amount, o.paid_amount,
               o.order_date, o.completion_date, o.delete_flag, o.order_kind, o.source_system,
-              os.order_status_name, ps.payment_status_name
+              os.order_status_name, ps.payment_status_name,
+              COALESCE(NULLIF(mu.full_name, ''), mu.username) AS manager_name,
+              -- A service account (Bitrix24 sync, 1C) is not a person to show as the author.
+              CASE WHEN au.is_service_account THEN NULL ELSE COALESCE(NULLIF(au.full_name, ''), au.username) END AS author_name
          FROM orders o
          LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
          LEFT JOIN payment_statuses ps ON ps.payment_status_id = o.payment_status_id
+         LEFT JOIN users mu ON mu.user_id = o.manager_id
+         LEFT JOIN users au ON au.user_id = o.created_by
         WHERE o.order_id = $1`,
       [id],
     );
@@ -102,6 +107,8 @@ export class PgCrmSourceRepository implements CrmSourcePort {
       deleteFlag: Boolean(r.delete_flag),
       orderKind: r.order_kind,
       sourceSystem: r.source_system,
+      managerName: r.manager_name ?? null,
+      authorName: r.author_name ?? null,
     };
   }
 
