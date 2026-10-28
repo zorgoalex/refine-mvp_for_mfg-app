@@ -56,8 +56,9 @@ export interface DeleteClientPhoneRequestDto {
 export interface ClientPhoneSetExpectedDto {
   phoneId: number;
   phoneNumber: string;
-  phoneType: ClientPhoneTypeDto;
-  isPrimary: boolean;
+  /** As stored: client_phones.phone_type and is_primary are nullable columns. */
+  phoneType: ClientPhoneTypeDto | null;
+  isPrimary: boolean | null;
 }
 
 /** A phone of the wanted set: an existing one keeps its id, a new one has none. */

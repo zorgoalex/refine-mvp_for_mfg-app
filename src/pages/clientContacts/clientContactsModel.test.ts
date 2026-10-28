@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { clientContactsSearch, type ClientContactsRow } from '../../api/clientContactsApi';
 import { draftToInput } from '../../components/contacts/contactsModel';
 import {
-  DEFAULT_QUERY, addPhoneDraft, columnValues, hasFilters, keyFor, kindDraftToSet, kindToDraft, phoneDraftToLines, phonesToDraft, readQuery,
+  DEFAULT_QUERY, addPhoneDraft, phoneLines, columnValues, hasFilters, keyFor, kindDraftToSet, kindToDraft, phoneDraftToLines, phonesToDraft, readQuery,
   listError, rebaseKindDraft, rebasePhoneDraft, removePhoneDraft, requestGate, setPhonePrimary, writeQuery,
 } from './clientContactsModel';
 import { ApiError } from '../../api/apiError';
@@ -65,6 +65,12 @@ describe('phones editor', () => {
     const twice = [...rows, { ...rows[0], rowKey: 'x', phoneId: null, phoneNumber: '+7(701)555-01-01', isPrimary: false }];
     expect(phoneDraftToLines(twice)).toEqual({ error: 'Телефон «+7(701)555-01-01» указан дважды' });
     expect(phoneDraftToLines(rows)).toEqual({ phones: [{ phoneId: 1, phoneNumber: '+7 701 555 01 01', phoneType: 'mobile', isPrimary: true }] });
+  });
+
+  it('an old phone with no type / no primary mark: sent back as seen, drafted as «mobile» / not primary', () => {
+    const old = { phoneId: 9, phoneNumber: '8 727 000 00 01', phoneType: null, isPrimary: null };
+    expect(phoneLines([old])).toEqual([old]);
+    expect(phonesToDraft([old])[0]).toMatchObject({ phoneType: 'mobile', isPrimary: false });
   });
 
   it('after a conflict keeps the draft; a phone that is gone becomes new', () => {

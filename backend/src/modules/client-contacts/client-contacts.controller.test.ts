@@ -16,6 +16,22 @@ describe('ClientContactsController phones save', () => {
     expect(answer).toEqual({ result: stored, row: now });
   });
 
+  it('takes back a seen phone with no type and no primary mark (nullable columns), but not in the wanted set', async () => {
+    let passed: unknown;
+    const controller = new ClientContactsController(
+      { row: async () => null } as never,
+      {} as never,
+      { replaceSet: async (command: { dto: unknown }) => { passed = command.dto; return { clientId: 1 }; } } as never,
+      { getFeatureFlags: () => ({ clientPhonesEnabled: true }) } as never,
+    );
+    const request = { user: { id: '11', permissions: ['clients.contacts.manage'] }, requestId: 'r' } as never;
+    const old = { phoneId: 102, phoneNumber: '8 727 222 33 44', phoneType: null, isPrimary: null };
+    await controller.replacePhones('1', { idempotencyKey: 'key-12345678', expected: [old], phones: [] }, request).catch(() => undefined);
+    expect(passed).toMatchObject({ expected: [old] });
+    await expect(controller.replacePhones('1', { idempotencyKey: 'key-12345678', expected: [], phones: [{ ...old, phoneId: null }] }, request))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
   it('refuses while the client phones commands are off', async () => {
     const controller = new ClientContactsController({} as never, {} as never, {} as never, { getFeatureFlags: () => ({ clientPhonesEnabled: false }) } as never);
     await expect(controller.replacePhones('1', {}, {} as never)).rejects.toMatchObject({ statusCode: 503, code: 'CLIENT_PHONES_DISABLED' });

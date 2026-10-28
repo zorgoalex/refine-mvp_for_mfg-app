@@ -12,9 +12,13 @@ export type ClientContactSort = 'client' | 'updated' | ClientContactColumn;
 export interface ClientContactsPhone {
   phoneId: number;
   phoneNumber: string;
-  phoneType: ClientPhoneType;
-  isPrimary: boolean;
+  /** As stored: may be null in old rows. */
+  phoneType: ClientPhoneType | null;
+  isPrimary: boolean | null;
 }
+
+/** A phone of the set the screen saw, sent back as it is (nulls included). */
+export type ExpectedPhoneLine = Pick<ClientContactsPhone, 'phoneId' | 'phoneNumber' | 'phoneType' | 'isPrimary'>;
 
 export interface ClientContactsContact {
   contactId: number;
@@ -90,6 +94,6 @@ export const clientContactsApi = {
   replaceContacts: (clientId: number, body: { version: number; contacts: EmployeeContactInput[] }) =>
     httpClient.put<ClientContactsRow>(apiRoutes.clientContacts.contacts(clientId), body),
   /** Phones of the client: `expected` is the set the screen saw; a new key per attempt after a conflict. */
-  replacePhones: (clientId: number, body: { idempotencyKey: string; expected: PhoneSetLine[]; phones: PhoneSetLine[] }) =>
+  replacePhones: (clientId: number, body: { idempotencyKey: string; expected: ExpectedPhoneLine[]; phones: PhoneSetLine[] }) =>
     httpClient.put<{ result: { created: number; updated: number; deleted: number }; row: ClientContactsRow }>(apiRoutes.clientContacts.phones(clientId), body),
 };

@@ -39,7 +39,8 @@ const phoneNumber = z.string().trim().min(7).max(20);
 const phonesSchema = z.object({
   idempotencyKey: z.string().trim().min(8).max(200),
   expected: z.array(z.object({
-    phoneId: z.number().int().positive(), phoneNumber: z.string().max(20), phoneType, isPrimary: z.boolean(),
+    // As the list showed it: phone_type and is_primary of client_phones may be NULL in stored rows.
+    phoneId: z.number().int().positive(), phoneNumber: z.string().max(20), phoneType: phoneType.nullable(), isPrimary: z.boolean().nullable(),
   }).strict()).max(100),
   phones: z.array(z.object({
     phoneId: z.number().int().positive().nullable(), phoneNumber, phoneType, isPrimary: z.boolean(),

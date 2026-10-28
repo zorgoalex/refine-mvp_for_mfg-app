@@ -25,7 +25,8 @@ export interface ClientContactsQuery {
 
 export interface ClientContactsRow {
   client: { id: number; name: string; isActive: boolean; personType: string | null };
-  phones: Array<{ phoneId: number; phoneNumber: string; phoneType: string; isPrimary: boolean }>;
+  /** As stored (phone_type and is_primary are nullable columns). */
+  phones: Array<{ phoneId: number; phoneNumber: string; phoneType: string | null; isPrimary: boolean | null }>;
   /** Copies of 1C (`origin: 'onec'`, K4b) — only to readers with `clients.onec_data.view`, read-only. */
   contacts: Array<{ contactId: number; kind: PartyContactKind; value: string; valueNormalized: string; isPrimary: boolean; note: string | null; origin: PartyContactOrigin }>;
   /** Version of the client's emails and messengers (the set command compares it). */

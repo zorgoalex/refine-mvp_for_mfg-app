@@ -1052,7 +1052,7 @@ paths:
         - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
       requestBody:
         required: true
-        content: {application/json: {schema: {$ref: '#/components/schemas/EmployeeContactsReplace'}}}
+        content: {application/json: {schema: {$ref: '#/components/schemas/PartyContactsReplace'}}}
       responses:
         '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/PartyContacts'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
@@ -1133,7 +1133,7 @@ paths:
         - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
       requestBody:
         required: true
-        content: {application/json: {schema: {$ref: '#/components/schemas/EmployeeContactsReplace'}}}
+        content: {application/json: {schema: {$ref: '#/components/schemas/PartyContactsReplace'}}}
       responses:
         '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/PartyContacts'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
@@ -1181,7 +1181,7 @@ paths:
         - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
       requestBody:
         required: true
-        content: {application/json: {schema: {$ref: '#/components/schemas/EmployeeContactsReplace'}}}
+        content: {application/json: {schema: {$ref: '#/components/schemas/PartyContactsReplace'}}}
       responses:
         '200': {description: Contacts, content: {application/json: {schema: {$ref: '#/components/schemas/PartyContacts'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
@@ -1382,7 +1382,7 @@ paths:
         - {name: clientId, in: path, required: true, schema: {type: integer, minimum: 1}}
       requestBody:
         required: true
-        content: {application/json: {schema: {type: object, required: [idempotencyKey, expected, phones], properties: {idempotencyKey: {type: string, minLength: 8, maxLength: 200}, expected: {type: array, items: {type: object, required: [phoneId, phoneNumber, phoneType, isPrimary], properties: {phoneId: {type: integer}, phoneNumber: {type: string}, phoneType: {type: string, enum: [mobile, work, home, fax]}, isPrimary: {type: boolean}}}}, phones: {type: array, items: {type: object, required: [phoneId, phoneNumber, phoneType, isPrimary], properties: {phoneId: {type: integer, nullable: true}, phoneNumber: {type: string, minLength: 7, maxLength: 20}, phoneType: {type: string, enum: [mobile, work, home, fax]}, isPrimary: {type: boolean}}}}}}}}
+        content: {application/json: {schema: {type: object, required: [idempotencyKey, expected, phones], properties: {idempotencyKey: {type: string, minLength: 8, maxLength: 200}, expected: {type: array, maxItems: 100, description: 'The set the screen saw, as stored (phoneType / isPrimary may be null)', items: {type: object, required: [phoneId, phoneNumber, phoneType, isPrimary], properties: {phoneId: {type: integer}, phoneNumber: {type: string}, phoneType: {type: string, enum: [mobile, work, home, fax], nullable: true}, isPrimary: {type: boolean, nullable: true}}}}, phones: {type: array, items: {type: object, required: [phoneId, phoneNumber, phoneType, isPrimary], properties: {phoneId: {type: integer, nullable: true}, phoneNumber: {type: string, minLength: 7, maxLength: 20}, phoneType: {type: string, enum: [mobile, work, home, fax]}, isPrimary: {type: boolean}}}}}}}}
       responses:
         '200': {description: 'The stored command answer (the same on a repeat) and the client row now', content: {application/json: {schema: {type: object, required: [result, row], properties: {result: {type: object, required: [clientId, phones, created, updated, deleted, requestId], properties: {clientId: {type: integer}, phones: {type: array, items: {type: object}}, created: {type: integer}, updated: {type: integer}, deleted: {type: integer}, requestId: {type: string}}}, row: {$ref: '#/components/schemas/ClientContactsRow'}}}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
@@ -22633,8 +22633,8 @@ components:
       required: [client, phones, contacts, contactsVersion, updatedAt]
       properties:
         client: {type: object, required: [id, name, isActive, personType], properties: {id: {type: integer}, name: {type: string}, isActive: {type: boolean}, personType: {type: string, nullable: true}}}
-        phones: {type: array, items: {type: object, required: [phoneId, phoneNumber, phoneType, isPrimary], properties: {phoneId: {type: integer}, phoneNumber: {type: string}, phoneType: {type: string}, isPrimary: {type: boolean}}}}
-        contacts: {type: array, items: {type: object, required: [contactId, kind, value, valueNormalized, isPrimary, note], properties: {contactId: {type: integer}, kind: {type: string}, value: {type: string}, valueNormalized: {type: string}, isPrimary: {type: boolean}, note: {type: string, nullable: true}}}}
+        phones: {type: array, items: {type: object, required: [phoneId, phoneNumber, phoneType, isPrimary], properties: {phoneId: {type: integer}, phoneNumber: {type: string}, phoneType: {type: string, nullable: true, description: 'As stored (nullable column)'}, isPrimary: {type: boolean, nullable: true, description: 'As stored (nullable column)'}}}}
+        contacts: {type: array, items: {type: object, required: [contactId, kind, value, valueNormalized, isPrimary, note, origin], properties: {contactId: {type: integer}, kind: {type: string}, value: {type: string}, valueNormalized: {type: string}, isPrimary: {type: boolean}, note: {type: string, nullable: true}, origin: {type: string, enum: [erp, onec], description: 'onec — a read-only 1C copy, only with clients.onec_data.view'}}}}
         contactsVersion: {type: integer}
         updatedAt: {type: string, format: date-time, nullable: true}
     ClientScreenSettings:
@@ -33164,14 +33164,46 @@ components:
         valueNormalized: {type: string, description: 'phone 7XXXXXXXXXX, email lower case, Telegram username without @'}
         isPrimary: {type: boolean}
         note: {type: string, nullable: true, maxLength: 200}
+    PartyContact:
+      type: object
+      required: [contactId, kind, value, valueNormalized, isPrimary, note, origin]
+      properties:
+        contactId: {type: integer}
+        kind: {type: string, enum: [phone, email, telegram, address, whatsapp, viber, instagram, other], description: 'Supplier: phone, email, telegram, address. Vendor: phone, email, telegram. Client: email, telegram, whatsapp, viber, instagram, other (client phones are client_phones).'}
+        value: {type: string, maxLength: 500, description: 'Up to 200 characters; an address — up to 500'}
+        valueNormalized: {type: string, description: 'phone / WhatsApp / Viber 7XXXXXXXXXX, email lower case, Telegram / Instagram username without @, address and «other» — trimmed lower case'}
+        isPrimary: {type: boolean}
+        note: {type: string, nullable: true, maxLength: 200, description: 'Required for «other» (what it is)'}
+        origin: {type: string, enum: [erp, onec], description: 'onec — a read-only copy from the linked 1C counterparty (shown only while its 1C data may be used)'}
     PartyContacts:
       type: object
-      required: [party, partyId, version, contacts]
+      required: [party, partyId, version, contacts, kinds]
       properties:
         party: {type: string, enum: [supplier, vendor, client]}
         partyId: {type: integer}
-        version: {type: integer, minimum: 0, description: 'Version of the whole set (0 = never saved); for a client — of emails and Telegram accounts only'}
-        contacts: {type: array, items: {$ref: '#/components/schemas/EmployeeContact'}}
+        version: {type: integer, minimum: 0, description: 'Version of the whole set (0 = never saved); for a client — of emails and messengers only'}
+        contacts: {type: array, items: {$ref: '#/components/schemas/PartyContact'}}
+        kinds: {type: array, items: {type: string, enum: [phone, email, telegram, address, whatsapp, viber, instagram, other]}, description: 'Kinds a new or changed contact may have now (the editor offers only these)'}
+    PartyContactsReplace:
+      type: object
+      additionalProperties: false
+      required: [version, contacts]
+      description: 'Which kinds an owner keeps and how many own rows it may have (20) is checked by the server; a line naming a 1C copy may only change its primary flag and position.'
+      properties:
+        version: {type: integer, minimum: 0}
+        contacts:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required: [contactId, kind, value, isPrimary]
+            properties:
+              contactId: {type: integer, minimum: 1, nullable: true}
+              kind: {type: string, enum: [phone, email, telegram, address, whatsapp, viber, instagram, other]}
+              value: {type: string, minLength: 1, maxLength: 500}
+              isPrimary: {type: boolean}
+              note: {type: string, nullable: true, maxLength: 200}
     SupplierCounterparty:
       type: object
       required: [refKey1c, name, isSupplier, supplierId, supplierName]
