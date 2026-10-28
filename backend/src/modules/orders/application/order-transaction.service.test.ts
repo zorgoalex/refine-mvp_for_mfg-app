@@ -2765,6 +2765,18 @@ describe('OrderTransactionService', () => {
       ]);
     });
 
+    it('a replay of a successful manager change with its original version is refused and changes nothing', async () => {
+      const transactions = seeded();
+      await update(transactions, currentUser('admin'), { managerUserId: 12 });
+      const audits = transactions.state.auditEvents.length;
+      const events = transactions.state.outboxEvents.length;
+      await expect(update(transactions, currentUser('admin'), { managerUserId: 14 })).rejects.toMatchObject({ statusCode: 409 });
+      expect(transactions.state.orders.get(42)?.header.managerId).toBe(12);
+      expect(transactions.state.orders.get(42)?.managerUserId).toBe('12');
+      expect(transactions.state.auditEvents).toHaveLength(audits);
+      expect(transactions.state.outboxEvents).toHaveLength(events);
+    });
+
     it('changes the manager with the permission and audits both managers', async () => {
       const transactions = seeded();
       await update(transactions, currentUser('admin'), { managerUserId: 12 });
