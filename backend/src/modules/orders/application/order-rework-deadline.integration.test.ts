@@ -754,4 +754,29 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
     expect(await active(copy)).toEqual([expect.objectContaining({ at: addDays(today, 9), metadata_json: expect.objectContaining({ reworkRoundNo: 2 }) })]);
     expect((await roundRow(copy, 2)).mark).toBeNull();
   });
+
+  for (const outcome of ['expired', 'completed'] as const) {
+    it(`R5.1 (port review): an import after «Это не переделка» whose restored deadline is ${outcome} restores nothing again`, async () => {
+      const order = await orderWithDeadline('legacy_6', false); // active D0
+      await start(order.orderId, order.detailIds[0], addDays(today, 7));
+      await falsePositive(order.orderId, 2); // D0′ restored, marked as the restore of round 2
+      const [restored] = await active(order.orderId);
+      expect(restored.metadata_json).toMatchObject({ reworkRestoreOfRound: 2 });
+      if (outcome === 'expired') {
+        await pool.query("UPDATE deadline_instances SET status = 'expired', expired_at = now() WHERE deadline_id = $1", [restored.deadline_id]);
+      } else {
+        await pool.query('UPDATE orders SET completion_date = $2::date WHERE order_id = $1', [order.orderId, addDays(today, -1)]);
+        await reconcile(order.orderId);
+      }
+      const copy = await importCopy(order.orderId, `импорт-${outcome}`);
+      const instancesBefore = (await finals(copy)).length;
+      const events = async () => Number((await pool.query('SELECT count(*)::int AS n FROM deadline_events WHERE order_id = $1', [copy])).rows[0].n);
+      const eventsBefore = await events();
+      await sweeperFor().sweep(new Date(Date.now() + 60_000)); // the import asked for a reconciliation
+      await sync().reconcileOrderFinalDeadline({ orderId: copy, currentUser: { id: ORDER_FINAL_DEADLINE_SYSTEM_ACTOR }, requestId: key() });
+      expect((await finals(copy)).length).toBe(instancesBefore);
+      expect(await events()).toBe(eventsBefore);
+      expect(await active(copy)).toEqual([]);
+    });
+  }
 });
