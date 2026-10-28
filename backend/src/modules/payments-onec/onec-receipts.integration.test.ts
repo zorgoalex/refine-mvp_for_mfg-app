@@ -79,7 +79,7 @@ describe.skipIf(!url)('1C incoming payments — read model, real PostgreSQL', { 
     return rows[0].id as number;
   };
   const onecOrder = (number: string, date = '2026-09-02', sourceId = source) => onecDoc('customer_order', number, date, { sourceId });
-  const ctx = (userId: number, scope: ReceiptsReadContext['scope'], series: string | null = SERIES): ReceiptsReadContext => ({ userId: String(userId), scope, series });
+  const ctx = (userId: number, scope: ReceiptsReadContext['scope'], series: string | null = SERIES): ReceiptsReadContext => ({ userId: String(userId), scope, series, commands: false });
   const all = ctx(OWNER, 'all');
   const find = async (context: ReceiptsReadContext, lineId: number) =>
     (await repo.list(context, { page: 1, pageSize: 100, search: tag })).data.find((row) => row.lineId === lineId);
@@ -403,7 +403,7 @@ describe.skipIf(!url)('1C incoming payments — read model, real PostgreSQL', { 
       id: String(MANAGER), username: `${tag}-manager`, role: 'manager', roleId: 10, permissions: permissions as never,
       policyScopes: { payments: { view, create: 'own', update: 'own', delete: 'own' } } as never,
     });
-    const service = (viewEnabled: boolean) => new OnecReceiptsService({ read: repo, settings: () => ({ viewEnabled, series: SERIES }), auditClient: database });
+    const service = (viewEnabled: boolean) => new OnecReceiptsService({ read: repo, settings: () => ({ viewEnabled, commandsEnabled: false, series: SERIES }), auditClient: database });
     const full = ['payments.onec.view', 'payments.view', 'orders.view_financials'];
     await expect(service(false).list(user(full, 'own'), { page: 1, pageSize: 10 }, 'req-off')).rejects.toMatchObject({ statusCode: 503, code: 'ONEC_PAYMENT_MATCHING_DISABLED' });
     const denied = async (requestId: string) => (await db.query(

@@ -103,3 +103,81 @@ export function onecReceiptPaymentText(row: Pick<OnecReceiptListItemDto, 'paymen
 export function onecReceiptHasRefund(row: Pick<OnecReceiptListItemDto, 'refundedAmount' | 'isRefund'>): boolean {
   return !row.isRefund && Number(row.refundedAmount) > 0;
 }
+
+const CHANGE_LABELS: Record<string, string> = {
+  line_inactive: 'документ или строка 1С больше не действует',
+  currency: 'изменилась валюта документа 1С',
+  onec_amount: 'изменилась сумма в 1С',
+  onec_date: 'изменилась дата документа 1С',
+  onec_order: 'в 1С указан другой заказ покупателя',
+  erp_order: 'поступление теперь относится к другому заказу приложения',
+  erp_order_not_ready: 'заказ приложения удалён или не готов к платежам',
+  payment_deleted: 'платёж удалён',
+  payment_order: 'платёж перенесён в другой заказ',
+  payment_amount: 'изменилась сумма платежа',
+  payment_date: 'изменилась дата платежа',
+  payment_changed: 'платёж изменён',
+};
+
+/** Что изменилось у сверки в состоянии «Изменилось — проверить». */
+export function onecReceiptChangesText(changes: readonly string[] | null | undefined): string | null {
+  if (!changes || changes.length === 0) return null;
+  return changes.map((code) => CHANGE_LABELS[code] ?? code).join('; ');
+}
+
+export interface OnecReceiptActions {
+  /** «Сопоставить» с платежом заказа. */
+  match: boolean;
+  /** «Разобрано…» (без платежа, с комментарием). */
+  dismiss: boolean;
+  /** «Снять сверку» / «Снять отметку». */
+  unmatch: boolean;
+  /** «Заказ…»: связать заказ 1С с заказом приложения или отметить «не относится». */
+  link: boolean;
+  /** Вернуть связь по номеру (снять ручную). */
+  unlink: boolean;
+}
+
+/** Доступные действия строки: команды включены (`capabilities.commands`) и состояние строки их допускает. */
+export function onecReceiptActions(
+  line: Pick<OnecReceiptListItemDto, 'state' | 'match' | 'onecOrder' | 'erpOrder' | 'isRefund'>,
+  commands: boolean,
+): OnecReceiptActions {
+  if (!commands) return { match: false, dismiss: false, unmatch: false, link: false, unlink: false };
+  return {
+    match: line.state === 'review' && line.match === null,
+    dismiss: line.match === null,
+    unmatch: line.match !== null,
+    link: line.onecOrder !== null && !line.isRefund,
+    // Any manual link, also «not an ERP order» (then `erpOrder` is empty) — code review R1-8.
+    unlink: line.onecOrder !== null && !line.isRefund && line.onecOrder.manualLink,
+  };
+}
+
+const COMMAND_ERRORS: Record<string, string> = {
+  ONEC_RECEIPT_STATE_CHANGED: 'Данные поступления изменились. Строка обновлена — проверьте и повторите.',
+  ONEC_RECEIPT_ALREADY_MATCHED: 'У поступления уже есть сверка или отметка «разобрано».',
+  PAYMENT_ALREADY_MATCHED: 'Этот платёж уже сверен с другим поступлением 1С.',
+  ONEC_PAYMENT_NOT_OF_ORDER: 'Платёж не относится к заказу этого поступления.',
+  ONEC_RECEIPT_NOT_ELIGIBLE: 'Поступление сейчас нельзя сверить.',
+  ONEC_MATCH_NOTE_REQUIRED: 'Суммы различаются — укажите комментарий.',
+  ONEC_DISMISS_NOTE_REQUIRED: 'Укажите, почему поступление разобрано без сверки.',
+  ONEC_NOTE_TOO_LONG: 'Комментарий длиннее 500 символов.',
+  ONEC_LINK_ORDER_TAKEN: 'Этот заказ приложения уже связан с другим заказом 1С.',
+  ONEC_LINK_ORDER_NOT_ELIGIBLE: 'Заказ не найден или это не производственный заказ.',
+  ONEC_RECEIPT_NO_ONEC_ORDER: 'У поступления нет заказа 1С.',
+  ONEC_PAYMENT_MATCHING_COMMANDS_DISABLED: 'Команды сверки сейчас выключены.',
+  PERMISSION_DENIED: 'Недостаточно прав для этого действия.',
+};
+
+/** Итог «Сверить сейчас». */
+export function onecAutoMatchResultText(result: { matched: number; candidates: number; skipped: boolean }): string {
+  if (result.skipped) return 'Автосверка уже идёт — обновите список через минуту.';
+  if (result.matched === 0) return 'Новых совпадений нет.';
+  return `Сверено автоматически: ${result.matched}.`;
+}
+
+/** Сообщение пользователю по коду ошибки команды. */
+export function onecReceiptCommandErrorText(code: string | null | undefined): string {
+  return (code && COMMAND_ERRORS[code]) || 'Не удалось выполнить действие.';
+}
