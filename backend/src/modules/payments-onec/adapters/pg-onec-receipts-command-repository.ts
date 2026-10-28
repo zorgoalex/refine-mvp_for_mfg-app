@@ -39,6 +39,8 @@ const notFound = () => new ApiError(404, 'ONEC_RECEIPT_NOT_FOUND', 'Поступ
 const NOTE_MAX = 500;
 /** Окно дат автосверки (план §1, решение пользователя п. 3). */
 export const AUTO_MATCH_DAYS = 3;
+/** Limit of the auto-match candidates query (whole read model), transaction-local. */
+export const AUTO_MATCH_CANDIDATES_TIMEOUT_MS = 60_000;
 
 function requireNote(note: string | null | undefined, code: string, message: string): string {
   const value = (note ?? '').trim();
@@ -337,23 +339,31 @@ export class PgOnecReceiptsCommandRepository {
    * Read only; every pair is re-checked under locks by `autoMatchPair`.
    */
   async autoMatchCandidates(): Promise<Array<{ lineId: number; paymentId: number; orderId: number; createdBy: string | null; managerId: string | null }>> {
-    const { rows } = await this.database.query<{ line_id: string; payment_id: string; order_id: string; created_by: string | null; manager_id: string | null }>(
-      `${BASE_SQL},
-       pairs AS (
-         SELECT b.line_id, p.payment_id, b.erp_order_id AS order_id
-           FROM base b
-           JOIN payments p ON p.order_id = b.erp_order_id AND p.delete_flag = false AND p.amount = b.line_amount
-                          AND abs(p.payment_date - b.doc_date) <= ${AUTO_MATCH_DAYS}
-          WHERE b.state = 'review'
-            AND NOT EXISTS (SELECT 1 FROM payment_onec_matches pm WHERE pm.payment_id = p.payment_id AND pm.removed_at IS NULL)
-       )
-       SELECT pr.line_id, pr.payment_id, pr.order_id, o.created_by, o.manager_id
-         FROM pairs pr JOIN orders o ON o.order_id = pr.order_id
-        WHERE (SELECT count(*) FROM pairs x WHERE x.line_id = pr.line_id) = 1
-          AND (SELECT count(*) FROM pairs y WHERE y.payment_id = pr.payment_id) = 1
-        ORDER BY pr.order_id, pr.line_id`,
-      [[...INCOMING_KINDS], this.series(), 'all', 0],
-    );
+    // The candidates read the whole receipts read model (every line, ~7 s on stage under load): this one query gets
+    // its own limit, as the 1C ETL bulk statements, instead of the common 10 s (28.10: «Database query timed out», the
+    // pass matched nothing). Shared by the scheduled pass and the «Сверить сейчас» button; the pairs then run one by
+    // one, each re-checked under locks with the common limit, so a whole pass can take longer. Transaction-local.
+    const { rows } = await this.database.transaction(async (tx) => {
+      await tx.query(`SELECT set_config('statement_timeout', $1, true)`, [`${AUTO_MATCH_CANDIDATES_TIMEOUT_MS}ms`]);
+      return tx.query<{ line_id: string; payment_id: string; order_id: string; created_by: string | null; manager_id: string | null }>(
+        `${BASE_SQL},
+         pairs AS (
+           SELECT b.line_id, p.payment_id, b.erp_order_id AS order_id
+             FROM base b
+             JOIN payments p ON p.order_id = b.erp_order_id AND p.delete_flag = false AND p.amount = b.line_amount
+                            AND abs(p.payment_date - b.doc_date) <= ${AUTO_MATCH_DAYS}
+            WHERE b.state = 'review'
+              AND NOT EXISTS (SELECT 1 FROM payment_onec_matches pm WHERE pm.payment_id = p.payment_id AND pm.removed_at IS NULL)
+         )
+         SELECT pr.line_id, pr.payment_id, pr.order_id, o.created_by, o.manager_id
+           FROM pairs pr JOIN orders o ON o.order_id = pr.order_id
+          WHERE (SELECT count(*) FROM pairs x WHERE x.line_id = pr.line_id) = 1
+            AND (SELECT count(*) FROM pairs y WHERE y.payment_id = pr.payment_id) = 1
+          ORDER BY pr.order_id, pr.line_id`,
+        [[...INCOMING_KINDS], this.series(), 'all', 0],
+        { timeoutMs: AUTO_MATCH_CANDIDATES_TIMEOUT_MS },
+      );
+    });
     return rows.map((r) => ({
       lineId: Number(r.line_id), paymentId: Number(r.payment_id), orderId: Number(r.order_id),
       createdBy: r.created_by === null ? null : String(r.created_by), managerId: r.manager_id === null ? null : String(r.manager_id),
