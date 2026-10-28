@@ -40,8 +40,10 @@ export interface ProductionStatusCommandOptions {
 interface BackendStageOverride {
   active: boolean;
   eventId?: number;
-  /** «Переделка»: the order's production round the command acted in; another round makes it stale. */
+  /** «Переделка»: the order's production round the command acted in (from the command's answer). */
   round?: number;
+  /** When the command answered: marks loaded after it are authoritative and replace this override. */
+  at?: number;
 }
 
 export type BackendStageOverrides = Record<string, BackendStageOverride>;
@@ -104,7 +106,7 @@ export const useProductionStatusEvent = (
   const backendStageOverridesRef = useRef<BackendStageOverrides>({});
 
   // Load existing events for the order (if orderId provided)
-  const { data: eventsData, isLoading, refetch } = useList<ProductionStatusEvent>({
+  const { data: eventsData, isLoading, refetch, dataUpdatedAt } = useList<ProductionStatusEvent>({
     resource: 'production_status_events',
     filters: orderId
       ? [{ field: 'order_id', operator: 'eq', value: orderId }]
@@ -155,10 +157,9 @@ export const useProductionStatusEvent = (
             event.order_id === overrideOrderId &&
             event.production_status_id === productionStatusId,
         );
-        // A command of an earlier round says nothing about the order's current round.
-        const dataRound = roundOf(overrideOrderId, sourceEvents);
-        const staleRound = override.round !== undefined && dataRound !== undefined && override.round !== dataRound;
-        if (staleRound || (override.active && sourceHasEvent) || (!override.active && !sourceHasEvent)) {
+        // A command of another round says nothing about the order's current round; marks loaded after the command
+        // answered already include it (or a newer state, e.g. an empty new round) — the override is done either way.
+        if (isOverrideSettled(override, { sourceHasEvent, dataRound: roundOf(overrideOrderId, sourceEvents), dataUpdatedAt })) {
           delete next[key];
           changed = true;
         }
@@ -168,7 +169,7 @@ export const useProductionStatusEvent = (
       backendStageOverridesRef.current = result;
       return result;
     });
-  }, [orderId, sourceEvents, roundOf]);
+  }, [orderId, sourceEvents, roundOf, dataUpdatedAt]);
 
   const clearBackendStageOverridesForOrder = useCallback((targetOrderId: number) => {
     const result = removeBackendStageOverridesForOrder(
@@ -202,13 +203,17 @@ export const useProductionStatusEvent = (
       productionStatusId: number,
       active: boolean,
       eventId?: number,
+      round?: number,
     ) => {
+      // «Переделка»: an answer of a round the loaded marks have already left (a late answer) is not shown.
+      if (isStaleCommandAnswer(round, roundOfRef.current(targetOrderId, sourceEventsRef.current))) return;
       const next = {
         ...backendStageOverridesRef.current,
         [backendStageOverrideKey(targetOrderId, productionStatusId)]: {
           active,
           eventId,
-          round: roundOfRef.current(targetOrderId, sourceEventsRef.current),
+          round,
+          at: Date.now(),
         },
       };
       backendStageOverridesRef.current = next;
@@ -283,6 +288,7 @@ export const useProductionStatusEvent = (
             productionStatusId,
             true,
             response.event?.productionEventId,
+            response.order?.productionRound,
           );
           options.onResponse?.(response);
           return true;
@@ -433,6 +439,7 @@ export const useProductionStatusEvent = (
             productionStatusId,
             false,
             response.event?.productionEventId,
+            response.order?.productionRound,
           );
           options.onResponse?.(response);
           return true;
@@ -599,6 +606,24 @@ export function applyBackendStageOverrides(
   }
 
   return result;
+}
+
+/** «Переделка»: a command answered for a round the loaded marks have already left (a late answer). */
+export function isStaleCommandAnswer(answerRound: number | undefined, dataRound: number | undefined): boolean {
+  return answerRound !== undefined && dataRound !== undefined && answerRound !== dataRound;
+}
+
+/**
+ * An optimistic override is done when the loaded marks confirm it, when they belong to another round than the command,
+ * or when they were loaded after the command answered (they include it, or a newer state such as an empty new round).
+ */
+export function isOverrideSettled(
+  override: { active: boolean; round?: number; at?: number },
+  data: { sourceHasEvent: boolean; dataRound: number | undefined; dataUpdatedAt: number },
+): boolean {
+  if (override.round !== undefined && data.dataRound !== undefined && override.round !== data.dataRound) return true;
+  if (override.at !== undefined && data.dataUpdatedAt > override.at) return true;
+  return override.active ? data.sourceHasEvent : !data.sourceHasEvent;
 }
 
 /** The round of an order's loaded marks (they are the current round's only); undefined without marks. */

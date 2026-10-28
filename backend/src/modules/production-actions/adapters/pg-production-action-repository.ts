@@ -1543,6 +1543,11 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       ], requestId, { tx, allowAssignedProductionWorker: true });
       const productionStatus = await loadProductionStatus(tx, command.productionStatusId);
       assertVersion(order, command.dto.version);
+      // «Переделка»: the production round the stage mark belongs to (the order row is locked above). The UI keeps an
+      // optimistic answer only for this round.
+      const productionRound = Number((await tx.query<{ production_round: string | number }>(
+        'SELECT production_round FROM orders WHERE order_id = $1', [order.orderId],
+      )).rows[0]?.production_round ?? 1);
 
       const existingEventId = await findProductionEventId(
         tx,
@@ -1554,6 +1559,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           order: {
             orderId: order.orderId,
             version: order.version,
+            productionRound,
           },
           event: {
             ...(existingEventId === null ? {} : { productionEventId: existingEventId }),
@@ -1652,6 +1658,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         order: {
           orderId: order.orderId,
           version: nextVersion,
+          productionRound,
         },
         event: {
           ...(productionEventId === null ? {} : { productionEventId }),

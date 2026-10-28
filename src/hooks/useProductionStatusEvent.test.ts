@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyBackendStageOverrides,
+  isOverrideSettled,
+  isStaleCommandAnswer,
   knownRoundOf,
   removeBackendStageOverridesForOrder,
 } from './useProductionStatusEvent';
@@ -72,5 +74,24 @@ describe('legacy Hasura stage-event writes after production rounds', () => {
     // In its own round it still applies (optimistic state until the refetch confirms it).
     expect(applyBackendStageOverrides(round2, { '15:7': { active: true, eventId: 99, round: 2 } }, 15, (id) => knownRoundOf(round2, id))
       .map((event) => event.production_status_id)).toEqual([1, 7]);
+  });
+
+  it('«Переделка»: a late command answer of round 1 is not shown once the loaded marks are round 2', () => {
+    expect(isStaleCommandAnswer(1, 2)).toBe(true);
+    expect(isStaleCommandAnswer(2, 2)).toBe(false);
+    expect(isStaleCommandAnswer(undefined, 2)).toBe(false); // an old backend answer without the round
+    expect(isStaleCommandAnswer(1, undefined)).toBe(false); // no marks loaded: decided by the next load
+  });
+
+  it('«Переделка»: an override ends with marks of another round, or with marks loaded after the command (an empty new round too)', () => {
+    const override = { active: true, round: 1, at: 1_000 };
+    // Still waiting: same round, marks loaded before the answer, mark not there yet.
+    expect(isOverrideSettled(override, { sourceHasEvent: false, dataRound: 1, dataUpdatedAt: 900 })).toBe(false);
+    // Confirmed by the marks.
+    expect(isOverrideSettled(override, { sourceHasEvent: true, dataRound: 1, dataUpdatedAt: 900 })).toBe(true);
+    // The order moved to round 2 (marks of round 2 loaded).
+    expect(isOverrideSettled(override, { sourceHasEvent: false, dataRound: 2, dataUpdatedAt: 900 })).toBe(true);
+    // The new round has no marks at all (Hasura shows the current round only → []): loaded after the answer.
+    expect(isOverrideSettled(override, { sourceHasEvent: false, dataRound: undefined, dataUpdatedAt: 1_500 })).toBe(true);
   });
 });
