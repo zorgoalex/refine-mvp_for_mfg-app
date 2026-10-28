@@ -836,6 +836,7 @@ export class OrderTransactionService {
         previousVersion: lockedOrder.version,
         actorUserId: command.currentUser.id,
       });
+      await unitOfWork.detectOnecMatchTransitions(command.orderId, command.currentUser, requestId);
       const auditId = await unitOfWork.writeOrderDeleteAudit({
         currentUser: command.currentUser,
         requestId,
@@ -928,6 +929,7 @@ export class OrderTransactionService {
           targetOrderName: effectiveTargetName,
           actorUserId: command.currentUser.id,
         });
+        await unitOfWork.detectOnecMatchTransitions(command.orderId, command.currentUser, requestId);
         await unitOfWork.recalcOrderProductionStatus(command.orderId);
         const auditId = await unitOfWork.writeOrderRestoreAudit({
           currentUser: command.currentUser,
@@ -1024,7 +1026,10 @@ export class OrderTransactionService {
     await unitOfWork.reconcileHdfDetails({ orderId, currentUser, requestId });
     await unitOfWork.recalcOrderProductionStatus(orderId);
     await unitOfWork.upsertPayments(orderId, prepared.order.payments);
+    await unitOfWork.releaseOnecMatchesBeforePaymentDelete(prepared.order.deleted.paymentIds, currentUser, requestId ?? 'orders-save');
     await unitOfWork.deletePayments(orderId, prepared.order.deleted.paymentIds);
+    // Payments, number and date of the order are saved by now (the header goes before the children).
+    await unitOfWork.detectOnecMatchTransitions(orderId, currentUser, requestId ?? 'orders-save');
     await unitOfWork.deleteWorkshops(orderId, prepared.order.deleted.workshopIds);
     await unitOfWork.upsertWorkshops(orderId, prepared.order.workshops);
     await unitOfWork.deleteRequirements(orderId, prepared.order.deleted.requirementIds);

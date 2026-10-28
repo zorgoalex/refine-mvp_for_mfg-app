@@ -28,6 +28,7 @@ import type {
 } from '../dto/payment.dto';
 import { PaymentNotFoundError, PaymentOrderNotFoundError } from '../errors/payment.errors';
 import { evaluateStatusAutomation } from '../../status-automation/application/status-automation-runtime';
+import { detectOnecMatchTransitions, releaseOnecMatchesBeforePaymentDelete } from '../../payments-onec/application/onec-match-transitions';
 
 interface PaymentRow extends QueryResultRow {
   payment_id: string | number;
@@ -126,14 +127,9 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
   updatePayment(command: UpdatePaymentCommand): Promise<PaymentMutationResult> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
-      const existing = await loadPaymentForUpdate(tx, command.paymentId);
-      if (!existing) {
-        throw new PaymentNotFoundError(command.paymentId);
-      }
-
+      const { existing, orders } = await lockOrdersThenPayment(tx, command.paymentId, (orderId) => [orderId, command.dto.orderId ?? orderId]);
       const previousOrderId = toNumber(existing.order_id);
       const nextOrderId = command.dto.orderId ?? previousOrderId;
-      const orders = await loadOrdersForUpdate(tx, uniqueNumbers([previousOrderId, nextOrderId]));
       const previousOrder = requireLockedOrder(orders, previousOrderId);
       const nextOrder = requireLockedOrder(orders, nextOrderId);
       assertPaymentReadyProductionOrder(previousOrder);
@@ -179,6 +175,8 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
 
       await writeAudit(tx, command.currentUser, command.requestId);
       const requestId = command.requestId ?? `payment-${payment.paymentId}`;
+      await detectOnecMatchTransitions(tx, { paymentIds: [payment.paymentId], orderIds: [...orders.keys()] },
+        { requestId, actorUserId: command.currentUser.id, writer: 'payment_command' });
       for (const change of paymentStatusChanges) {
         await evaluateStatusAutomation(tx, {
           eventType: 'order.payment_status_changed',
@@ -198,17 +196,15 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
   deletePayment(command: DeletePaymentCommand): Promise<DeletePaymentResponseDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
-      const existing = await loadPaymentForUpdate(tx, command.paymentId);
-      if (!existing) {
-        throw new PaymentNotFoundError(command.paymentId);
-      }
-
+      const { existing, orders } = await lockOrdersThenPayment(tx, command.paymentId, (orderId) => [orderId]);
       const orderId = toNumber(existing.order_id);
-      const orders = await loadOrdersForUpdate(tx, [orderId]);
       const order = requireLockedOrder(orders, orderId);
       assertPaymentReadyProductionOrder(order);
       await this.assertPaymentScope(command.currentUser, 'delete', command.paymentId, order, command.requestId ?? 'payment-command');
       await beginPaymentAuditCapture(tx);
+      await releaseOnecMatchesBeforePaymentDelete(tx, [command.paymentId], {
+        requestId: command.requestId ?? `payment-${command.paymentId}`, actorUserId: command.currentUser.id, writer: 'payment_command',
+      });
       await tx.query('DELETE FROM payments WHERE payment_id = $1', [command.paymentId]);
       const orderSummary = await recalculateOrderPaymentState(tx, order);
       await writeAudit(tx, command.currentUser, command.requestId);
@@ -319,6 +315,30 @@ async function loadPaymentForUpdate(
   );
 
   return result.rows[0] ?? null;
+}
+
+/**
+ * Lock order of every payments writer: order(s) `FOR UPDATE` by ascending id, then the payment (plan
+ * 2026-10-04-onec-incoming-payments §6 R1-1; the order form, Bitrix24 and 1C matching already go this way).
+ * The payment's order is read first without a lock. If the payment was moved to another order meanwhile, the command
+ * is refused with 409 `PAYMENT_CONCURRENTLY_MOVED` (no second round: locking the new order while holding the payment
+ * would reverse the order of locks). `ordersOf` gives the orders to lock for the payment's order.
+ */
+async function lockOrdersThenPayment(
+  tx: TransactionClient,
+  paymentId: number,
+  ordersOf: (orderId: number) => number[],
+): Promise<{ existing: PaymentRow; orders: Map<number, LockedOrder> }> {
+  const seen = await tx.query<{ order_id: string | number }>('SELECT order_id FROM payments WHERE payment_id = $1', [paymentId]);
+  if (!seen.rows[0]) throw new PaymentNotFoundError(paymentId);
+  const orderId = toNumber(seen.rows[0].order_id);
+  const orders = await loadOrdersForUpdate(tx, uniqueNumbers(ordersOf(orderId)));
+  const existing = await loadPaymentForUpdate(tx, paymentId);
+  if (!existing) throw new PaymentNotFoundError(paymentId);
+  if (toNumber(existing.order_id) !== orderId) {
+    throw new ApiError(409, 'PAYMENT_CONCURRENTLY_MOVED', 'Платёж одновременно перенесён в другой заказ; повторите действие', { paymentId });
+  }
+  return { existing, orders };
 }
 
 async function loadOrdersForUpdate(

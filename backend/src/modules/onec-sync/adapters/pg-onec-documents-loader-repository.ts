@@ -602,7 +602,7 @@ export class PgOnecDocumentsLoaderRepository {
       .filter((line) => line.removed_in_onec_at === null || line.load_conflict_code !== null)
       .map((line) => ({ lineId: Number(line.onec_document_line_id), lineNo: line.line_no, kind: 'remove' as const, before: stateOfRow(line), after: null }));
     const view: LoadedDocumentView = {
-      documentId, sourceId: ctx.sourceId, docKind: header.doc_kind, onecRefKey: refKey, docDate: header.doc_date,
+      documentId, sourceId: ctx.sourceId, requestId: ctx.requestId, correlationId: ctx.correlationId, docKind: header.doc_kind, onecRefKey: refKey, docDate: header.doc_date,
       posted: header.posted, deletedInOnec: header.deleted_in_onec, supplierId: header.supplier_id === null ? null : Number(header.supplier_id),
       counterpartyRefKey: header.counterparty_ref_key, counterpartyName: header.counterparty_name, amount: header.amount,
       currency: header.currency, previous: { currency: header.currency, amount: header.amount },
@@ -829,7 +829,7 @@ export class PgOnecDocumentsLoaderRepository {
 
     // 2. Проверки потребителей (под блокировками шапки и строк).
     const view: LoadedDocumentView = {
-      documentId, sourceId: ctx.sourceId, docKind: ctx.docKind, onecRefKey: refKey, docDate: target.docDate,
+      documentId, sourceId: ctx.sourceId, requestId: ctx.requestId, correlationId: ctx.correlationId, docKind: ctx.docKind, onecRefKey: refKey, docDate: target.docDate,
       posted: target.posted, deletedInOnec: target.deletedInOnec, supplierId: target.supplierId,
       counterpartyRefKey: target.counterpartyRefKey, counterpartyName: target.counterpartyName, amount: target.amount,
       currency: target.currency, previous: { currency: header.currency, amount: header.amount },
@@ -1120,7 +1120,7 @@ export class PgOnecDocumentsLoaderRepository {
       .filter((line) => line.load_conflict_code === null && line.removed_in_onec_at === null)
       .map((line) => ({ lineId: Number(line.onec_document_line_id), ...stateOfRow(line) }));
     const view: LoadedDocumentView = {
-      documentId, sourceId: ctx.sourceId, docKind: ctx.docKind, onecRefKey: refKey, docDate: header.doc_date,
+      documentId, sourceId: ctx.sourceId, requestId: ctx.requestId, correlationId: ctx.correlationId, docKind: ctx.docKind, onecRefKey: refKey, docDate: header.doc_date,
       posted: header.posted, deletedInOnec: header.deleted_in_onec, supplierId: header.supplier_id === null ? null : Number(header.supplier_id),
       counterpartyRefKey: header.counterparty_ref_key, counterpartyName: header.counterparty_name, amount: header.amount,
       currency: header.currency, previous: before === null ? null : { currency: before.currency, amount: before.amount },

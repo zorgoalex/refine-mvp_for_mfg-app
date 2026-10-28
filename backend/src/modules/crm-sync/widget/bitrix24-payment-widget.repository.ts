@@ -7,6 +7,7 @@ import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import { calculatePaymentStatusId, roundMoney } from '../../orders/domain/order-calculations';
 import { USER_ROLES, type UserRole } from '../../../permissions/permissions';
+import { detectOnecMatchTransitions } from '../../payments-onec/application/onec-match-transitions';
 
 export type WidgetCommandStatus =
   | 'processing'
@@ -1566,6 +1567,9 @@ export class Bitrix24PaymentWidgetRepository {
         origin: 'bitrix24_widget',
         requestRef: { bitrixDealId: command.bitrixDealId, bitrixPaymentId: command.bitrixPaymentId ?? '' },
       });
+      // A changed payment of an active 1C receipt match → review (same tx, after the widget's own locks).
+      await detectOnecMatchTransitions(tx, { paymentIds: [erpPaymentId], orderIds: [target.orderId] },
+        { requestId: command.originatingRequestId, actorUserId: command.erpActorUserId, writer: 'bitrix24_widget' });
       const response = commandResponse(command, 'completed', target.orderId, erpPaymentId);
       const completed = await tx.query<CommandRow>(
         `UPDATE bitrix24_manual_payment_command

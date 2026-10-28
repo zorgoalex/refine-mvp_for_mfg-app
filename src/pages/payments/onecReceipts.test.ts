@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { OnecReceiptState } from '../../api/types/paymentsOnecApi.types';
 import {
-  formatOnecMoney, ONEC_RECEIPT_GROUPS, ONEC_RECEIPT_STATE_COLORS, ONEC_RECEIPT_STATE_LABELS, onecReceiptHasRefund,
-  onecReceiptKindLabel, onecReceiptPaymentText, onecReceiptReasonLabel, onecReceiptSignedAmount,
+  formatOnecMoney, ONEC_RECEIPT_GROUPS, ONEC_RECEIPT_STATE_COLORS, ONEC_RECEIPT_STATE_LABELS, onecReceiptActions,
+  onecReceiptChangesText, onecReceiptCommandErrorText, onecReceiptHasRefund, onecReceiptKindLabel, onecReceiptPaymentText,
+  onecReceiptReasonLabel, onecReceiptSignedAmount,
 } from './onecReceipts';
 
 const STATES: OnecReceiptState[] = ['matched', 'changed', 'dismissed', 'inactive', 'foreign_currency', 'no_erp_order', 'to_create', 'review', 'refund_review', 'refund_info'];
@@ -57,5 +58,31 @@ describe('«Поступления 1С» — labels and display rules', () => {
     expect(onecReceiptHasRefund({ refundedAmount: '50.00', isRefund: false })).toBe(true);
     expect(onecReceiptHasRefund({ refundedAmount: '0.00', isRefund: false })).toBe(false);
     expect(onecReceiptHasRefund({ refundedAmount: '50.00', isRefund: true })).toBe(false);
+  });
+});
+
+describe('slice B: actions of a line and texts', () => {
+  const base = { state: 'review' as const, match: null, onecOrder: { refKey: 'r', documentId: 1, number: 'Ф25-1', date: null, manualLink: false }, erpOrder: null, isRefund: false };
+  it('no actions without the commands capability', () => {
+    expect(onecReceiptActions(base, false)).toEqual({ match: false, dismiss: false, unmatch: false, link: false, unlink: false });
+  });
+  it('a line waiting for a match can be matched, dismissed and linked; a matched one only unmatched and linked', () => {
+    expect(onecReceiptActions(base, true)).toEqual({ match: true, dismiss: true, unmatch: false, link: true, unlink: false });
+    const matched = { ...base, state: 'matched' as const, match: { matchId: 1, kind: 'matched' as const, origin: 'manual', note: null, createdAt: '' } };
+    expect(onecReceiptActions(matched, true)).toEqual({ match: false, dismiss: false, unmatch: true, link: true, unlink: false });
+    const manual = { ...base, state: 'to_create' as const, onecOrder: { ...base.onecOrder, manualLink: true },
+      erpOrder: { orderId: 1, orderName: '1', clientName: null, finalAmount: null, paidAmount: null, paymentsCount: 0, deleted: false, linkOrigin: 'manual' as const } };
+    expect(onecReceiptActions(manual, true)).toMatchObject({ match: false, dismiss: true, unlink: true });
+    // «Not an ERP order»: a manual link without an ERP order can be reverted too.
+    const notErp = { ...base, state: 'no_erp_order' as const, onecOrder: { ...base.onecOrder, manualLink: true } };
+    expect(onecReceiptActions(notErp, true)).toMatchObject({ link: true, unlink: true });
+    expect(onecReceiptActions({ ...base, isRefund: true }, true)).toMatchObject({ match: true, link: false, unlink: false });
+    expect(onecReceiptActions({ ...base, onecOrder: null }, true)).toMatchObject({ link: false });
+  });
+  it('change codes and command errors have Russian texts', () => {
+    expect(onecReceiptChangesText(['payment_amount', 'erp_order'])).toBe('изменилась сумма платежа; поступление теперь относится к другому заказу приложения');
+    expect(onecReceiptChangesText([])).toBeNull();
+    expect(onecReceiptCommandErrorText('PAYMENT_ALREADY_MATCHED')).toBe('Этот платёж уже сверен с другим поступлением 1С.');
+    expect(onecReceiptCommandErrorText('SOMETHING_NEW')).toBe('Не удалось выполнить действие.');
   });
 });
