@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
@@ -20,7 +21,15 @@ function rolesSelectPermissions(): SelectPermission[] {
 }
 
 // A minimal Hasura metadata API: export_metadata v2 and bulk with resource_version checks.
-function fakeHasura(initial: SelectPermission[], options: { bumpAfterExport?: boolean; extraTables?: Record<string, SelectPermission[]>; paddingTables?: number } = {}) {
+type FakeOptions = {
+  bumpAfterExport?: boolean;
+  extraTables?: Record<string, SelectPermission[]>;
+  paddingTables?: number;
+  /** Someone changes metadata right after our bulk (before the script re-exports for the manifest). */
+  afterBulk?: (state: { version: number; extra: Record<string, SelectPermission[]> }) => void;
+};
+
+function fakeHasura(initial: SelectPermission[], options: FakeOptions = {}) {
   const state = {
     version: 7,
     roles: JSON.parse(JSON.stringify(initial)) as SelectPermission[],
@@ -73,6 +82,7 @@ function fakeHasura(initial: SelectPermission[], options: { bumpAfterExport?: bo
         state.roles = roles;
         state.extra = extra;
         state.version += 1;
+        options.afterBulk?.(state);
         return reply(200, payload.args.map(() => ({ message: 'success' })));
       }
       return reply(400, { error: `unexpected ${payload.type}` });
@@ -235,5 +245,59 @@ describe('roles select aggregations', () => {
     expect(outsideResult.code).not.toBe(0);
     expect(outsideResult.output).toContain('not in --tables');
     expect(outside.state.bulkRequests).toBe(0);
+  });
+
+  const manifestPath = () => resolve(mkdtempSync(resolve(tmpdir(), 'aggregations-manifest-')), 'manifest.json');
+  const refPermissions = (): SelectPermission[] => [
+    { role: 'manager', permission: { columns: ['direction_id'], filter: {} } },
+    { role: 'operator', permission: { columns: ['direction_id'], filter: {} } },
+  ];
+
+  it('--manifest-out records exactly the applied pairs and the version after them; --revert --manifest undoes them', async () => {
+    const manifest = manifestPath();
+    const first = fakeHasura(live, { extraTables: { transaction_direction: refPermissions() } });
+    const applied = await runScript(first.server, ['--tables', 'transaction_direction', '--manifest-out', manifest]);
+    expect(applied.code, applied.output).toBe(0);
+    const written = JSON.parse(readFileSync(manifest, 'utf8'));
+    expect(written).toEqual({ tables: ['transaction_direction'], pairs: ['transaction_direction/manager', 'transaction_direction/operator'], resource_version: first.state.version });
+    // the rollback runs later against the same (unchanged) metadata
+    const extra = first.state.extra;
+    const version = first.state.version;
+    await new Promise<void>((done) => first.server.close(() => done()));
+    running = undefined;
+    const second = fakeHasura(live, { extraTables: extra });
+    second.state.version = version;
+    const reverted = await runScript(second.server, ['--revert', '--manifest', manifest]);
+    expect(reverted.code, reverted.output).toBe(0);
+    expect(second.state.extra.transaction_direction.map((entry) => entry.permission.allow_aggregations)).toEqual([false, false]);
+  });
+
+  it('--revert --manifest refuses after any later change of metadata (e.g. the pair re-created), sending nothing', async () => {
+    const manifest = manifestPath();
+    const first = fakeHasura(live, { extraTables: { transaction_direction: refPermissions() } });
+    expect((await runScript(first.server, ['--tables', 'transaction_direction', '--manifest-out', manifest])).code).toBe(0);
+    const extra = first.state.extra;
+    const version = first.state.version;
+    await new Promise<void>((done) => first.server.close(() => done()));
+    running = undefined;
+    const later = fakeHasura(live, { extraTables: extra });
+    later.state.version = version + 2; // dropped and re-created by someone else
+    const result = await runScript(later.server, ['--revert', '--manifest', manifest]);
+    expect(result.code).toBe(3);
+    expect(result.output).toContain('metadata changed after the fix');
+    expect(later.state.bulkRequests).toBe(0);
+    expect(later.state.extra.transaction_direction.every((entry) => entry.permission.allow_aggregations === true)).toBe(true);
+  });
+
+  it('--manifest-out writes no manifest when something else changed right after the fix', async () => {
+    const manifest = manifestPath();
+    const { server } = fakeHasura(live, {
+      extraTables: { transaction_direction: refPermissions() },
+      afterBulk: (state) => { state.extra.transaction_direction.push({ role: 'operator2', permission: { columns: ['direction_id'], filter: {}, allow_aggregations: true } }); state.version += 1; },
+    });
+    const result = await runScript(server, ['--tables', 'transaction_direction', '--manifest-out', manifest]);
+    expect(result.code).not.toBe(0);
+    expect(result.output).toContain('no rollback manifest');
+    expect(existsSync(manifest)).toBe(false);
   });
 });

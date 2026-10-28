@@ -7,7 +7,13 @@
 # metadata resource_version that was read: if anyone changed metadata in between,
 # Hasura answers 409 and nothing is applied (re-run to read the fresh permissions).
 #
-# Usage: roles-select-aggregations.sh [--dry-run] [--revert] [--tables a,b,c]
+# Usage: roles-select-aggregations.sh [--dry-run] [--revert] [--tables a,b,c] [--only t/r,…]
+#                                     [--manifest-out FILE] | --revert --manifest FILE
+#   --manifest-out  after a successful apply: re-export, check that nothing but the changed flags differs from the
+#             export the change was made on, and write the rollback manifest (the changed table/role pairs and
+#             the metadata resource_version right after the change). No manifest if anything else changed.
+#   --revert --manifest FILE  rollback of exactly that apply: only those pairs, and only while the metadata is
+#             still at the manifest version (any later change → ERROR, nothing sent; roll back by hand).
 #   --revert  sets allow_aggregations back to false (rollback), same safety rules.
 #   --only    table/role,table/role… — change only these select permissions (each must exist); every other
 #             permission stays as it is. A rollback passes exactly the pairs the fix changed, so a permission
@@ -22,6 +28,8 @@ DRY_RUN=false
 TARGET=true
 TABLES=roles
 ONLY=""
+MANIFEST_OUT=""
+MANIFEST_IN=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=true ;;
@@ -32,10 +40,25 @@ while [[ $# -gt 0 ]]; do
     --only)
       [[ $# -ge 2 && -n "$2" ]] || { printf 'missing value for --only\n' >&2; exit 2; }
       ONLY="$2"; shift ;;
+    --manifest-out)
+      [[ $# -ge 2 && -n "$2" ]] || { printf 'missing value for --manifest-out\n' >&2; exit 2; }
+      MANIFEST_OUT="$2"; shift ;;
+    --manifest)
+      [[ $# -ge 2 && -n "$2" ]] || { printf 'missing value for --manifest\n' >&2; exit 2; }
+      MANIFEST_IN="$2"; shift ;;
     *) printf 'unknown argument: %s\n' "$1" >&2; exit 2 ;;
   esac
   shift
 done
+EXPECT_VERSION=""
+if [[ -n "$MANIFEST_IN" ]]; then
+  [[ "$TARGET" == false ]] || { printf -- '--manifest is for --revert only\n' >&2; exit 2; }
+  [[ -z "$MANIFEST_OUT" && -z "$ONLY" ]] || { printf -- '--manifest replaces --only/--manifest-out\n' >&2; exit 2; }
+  [[ -s "$MANIFEST_IN" ]] || { printf 'manifest not found: %s\n' "$MANIFEST_IN" >&2; exit 2; }
+  read -r TABLES ONLY EXPECT_VERSION < <(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(",".join(m["tables"]), ",".join(m["pairs"]), int(m["resource_version"]))' "$MANIFEST_IN") \
+    || { printf 'invalid manifest: %s\n' "$MANIFEST_IN" >&2; exit 2; }
+fi
+[[ -z "$MANIFEST_OUT" || "$TARGET" == true ]] || { printf -- '--manifest-out is for the apply only\n' >&2; exit 2; }
 [[ "$TABLES" =~ ^[a-z_][a-z0-9_]*(,[a-z_][a-z0-9_]*)*$ ]] || { printf 'invalid --tables: %s\n' "$TABLES" >&2; exit 2; }
 if [[ -n "$ONLY" ]]; then
   [[ "$ONLY" =~ ^[a-z_][a-z0-9_]*/[A-Za-z0-9_-]+(,[a-z_][a-z0-9_]*/[A-Za-z0-9_-]+)*$ ]] || { printf 'invalid --only: %s\n' "$ONLY" >&2; exit 2; }
@@ -84,6 +107,7 @@ hasura_api '{"type":"export_metadata","version":2,"args":{}}' > "$METADATA_FILE"
 export _ROLES_TARGET="$TARGET"
 export _ROLES_TABLES="$TABLES"
 export _ROLES_ONLY="$ONLY"
+export _ROLES_EXPECT_VERSION="$EXPECT_VERSION"
 python3 - "$BULK_FILE" "$METADATA_FILE" <<'PY'
 import json
 import os
@@ -103,6 +127,11 @@ if not isinstance(resource_version, int) or not isinstance(metadata, dict):
     print("ERROR: export_metadata v2 did not return resource_version + metadata", file=sys.stderr)
     sys.exit(1)
 target = os.environ.get("_ROLES_TARGET") == "true"
+expect_version = os.environ.get("_ROLES_EXPECT_VERSION", "")
+if expect_version and resource_version != int(expect_version):
+    print(f"ERROR: Hasura metadata changed after the fix (resource_version {resource_version}, manifest {expect_version});"
+          " nothing sent. Roll back by hand.", file=sys.stderr)
+    sys.exit(3)
 
 target_tables = os.environ.get("_ROLES_TABLES", "roles").split(",")
 only = {item for item in os.environ.get("_ROLES_ONLY", "").split(",") if item}
@@ -153,7 +182,7 @@ with open(bulk_path, "w") as f:
     json.dump({"type": "bulk", "resource_version": resource_version, "args": args}, f)
 print(f"Permissions to update: {len(args) // 2}", file=sys.stderr)
 PY
-unset _ROLES_TARGET _ROLES_TABLES _ROLES_ONLY
+unset _ROLES_TARGET _ROLES_TABLES _ROLES_ONLY _ROLES_EXPECT_VERSION
 
 COUNT="$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))['args']) // 2)" "$BULK_FILE")"
 if [[ "$COUNT" == "0" ]]; then
@@ -178,3 +207,49 @@ case "$HTTP_CODE" in
   409) fail "Hasura metadata changed after it was read (409 conflict); nothing applied. Re-run the script." ;;
   *) fail "Hasura metadata API answered HTTP ${HTTP_CODE}: $(head -c 300 "$RESPONSE_FILE")" ;;
 esac
+
+if [[ -n "$MANIFEST_OUT" ]]; then
+  POST_FILE="$(mktemp /tmp/roles-aggregations-after-XXXXXX.json)"
+  trap 'rm -f "$METADATA_FILE" "$BULK_FILE" "$RESPONSE_FILE" "$POST_FILE"' EXIT
+  chmod 600 "$POST_FILE"
+  hasura_api '{"type":"export_metadata","version":2,"args":{}}' > "$POST_FILE"
+  python3 - "$METADATA_FILE" "$POST_FILE" "$BULK_FILE" "$MANIFEST_OUT" "$TABLES" <<'PY' || fail "No rollback manifest: see the error above (the change itself is applied)."
+import json
+import sys
+
+pre_path, post_path, bulk_path, manifest_path, tables = sys.argv[1:6]
+pre = json.load(open(pre_path))
+post = json.load(open(post_path))
+bulk = json.load(open(bulk_path))
+pairs = sorted(f"{a['args']['table']['name']}/{a['args']['role']}" for a in bulk["args"] if a["type"] == "pg_create_select_permission")
+
+def normalized(metadata, restore_from=None):
+    metadata = json.loads(json.dumps(metadata))
+    for source in metadata.get("sources", []):
+        for table in source.get("tables", []):
+            name = table.get("table", {}).get("name")
+            perms = table.get("select_permissions") or []
+            for perm in perms:
+                if restore_from is not None and f"{name}/{perm['role']}" in pairs:
+                    before = restore_from.get((name, perm["role"]))
+                    if before is None:
+                        perm["permission"].pop("allow_aggregations", None)
+                    else:
+                        perm["permission"]["allow_aggregations"] = before
+            if perms:
+                table["select_permissions"] = sorted(perms, key=lambda perm: perm["role"])
+    return json.dumps(metadata, sort_keys=True)
+
+before_flags = {}
+for source in pre["metadata"].get("sources", []):
+    for table in source.get("tables", []):
+        for perm in table.get("select_permissions") or []:
+            before_flags[(table["table"]["name"], perm["role"])] = perm["permission"].get("allow_aggregations")
+if normalized(pre["metadata"]) != normalized(post["metadata"], before_flags):
+    print("ERROR: something else changed in Hasura metadata between the fix and its check; no rollback manifest", file=sys.stderr)
+    sys.exit(4)
+with open(manifest_path, "w") as f:
+    json.dump({"tables": tables.split(","), "pairs": pairs, "resource_version": post["resource_version"]}, f, indent=2)
+print(f"Rollback manifest: {manifest_path} ({len(pairs)} pair(s), resource_version {post['resource_version']})", file=sys.stderr)
+PY
+fi
