@@ -31,7 +31,7 @@ import { overlayDetailProductionStatuses } from '../../utils/orderProductionSumm
 import { OrderDatesBlock } from "./components/sections/OrderDatesBlock";
 import { OrderFinanceBlock } from "./components/sections/OrderFinanceBlock";
 import { OrderProductionBlock } from "./components/sections/OrderProductionBlock";
-import { OrderProductionFlow, OrderProductionFlowCodes } from "./components/sections/OrderProductionFlow";
+import { mdfBoardOrderLink, OrderProductionFlow, OrderProductionFlowCodes } from "./components/sections/OrderProductionFlow";
 import { OrderMaterialsWorkbenchTable } from "./components/sections/OrderMaterialsWorkbenchTable";
 import { OrderHistorySpoiler } from "./components/sections/OrderHistorySpoiler";
 import { useWorkspaceChromeBottom } from "./useWorkspaceChromeBottom";
@@ -50,6 +50,7 @@ import {
   OrderShowProgressiveSurface,
 } from './components/OrderProgressiveLoading';
 import { OrderMetaBlock } from "./components/sections/OrderMetaBlock";
+import dayjs from "dayjs";
 import { featureFlags } from "../../config/featureFlags";
 import { isApiError } from "../../api/apiError";
 import { shouldShowOrderLoading } from "./utils/orderShowLoading";
@@ -4016,6 +4017,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       statuses={productionStatusesData?.data as any[] ?? []}
                       loading={productionStatusesLoading || !productionSummaryDetailsLoaded}
                     />
+                    {featureFlags.orderStatusBoard && featureFlags.cncTelegram && Number.isFinite(Number(record?.order_id)) ? (
+                      <div className="wb-order-flow__actions">
+                        <Link to={mdfBoardOrderLink(Number(record?.order_id), dayjs().format('YYYY-MM-DD'))}>
+                          На МДФ-доске
+                        </Link>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </section>

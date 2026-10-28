@@ -134,3 +134,12 @@ export const OrderProductionFlowCodes: React.FC<Omit<OrderProductionFlowProps, '
     </span>
   );
 };
+
+/**
+ * «На МДФ-доске»: the board highlights the order card when the order is in the board period (otherwise it warns
+ * «Карточка не найдена…»). `date` is required — without it the board's opening resets the link.
+ */
+export function mdfBoardOrderLink(orderId: number, today: string): string {
+  const params = new URLSearchParams({ flow: 'cnc', cardKind: 'order', cardId: String(orderId), date: today });
+  return `/mdf-work-board?${params.toString()}`;
+}
