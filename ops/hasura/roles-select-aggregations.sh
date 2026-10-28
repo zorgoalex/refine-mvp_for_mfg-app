@@ -9,6 +9,9 @@
 #
 # Usage: roles-select-aggregations.sh [--dry-run] [--revert] [--tables a,b,c]
 #   --revert  sets allow_aggregations back to false (rollback), same safety rules.
+#   --only    table/role,table/role… — change only these select permissions (each must exist); every other
+#             permission stays as it is. A rollback passes exactly the pairs the fix changed, so a permission
+#             added or changed by someone else later is never touched.
 #   --tables  the tables to change (default: roles). 28.10: also the reference lists
 #             movements_statuses, material_transaction_types, transaction_direction — their
 #             lists failed for every role with "<table>_aggregate not found".
@@ -18,6 +21,7 @@ set -euo pipefail
 DRY_RUN=false
 TARGET=true
 TABLES=roles
+ONLY=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=true ;;
@@ -25,11 +29,17 @@ while [[ $# -gt 0 ]]; do
     --tables)
       [[ $# -ge 2 && -n "$2" ]] || { printf 'missing value for --tables\n' >&2; exit 2; }
       TABLES="$2"; shift ;;
+    --only)
+      [[ $# -ge 2 && -n "$2" ]] || { printf 'missing value for --only\n' >&2; exit 2; }
+      ONLY="$2"; shift ;;
     *) printf 'unknown argument: %s\n' "$1" >&2; exit 2 ;;
   esac
   shift
 done
 [[ "$TABLES" =~ ^[a-z_][a-z0-9_]*(,[a-z_][a-z0-9_]*)*$ ]] || { printf 'invalid --tables: %s\n' "$TABLES" >&2; exit 2; }
+if [[ -n "$ONLY" ]]; then
+  [[ "$ONLY" =~ ^[a-z_][a-z0-9_]*/[A-Za-z0-9_-]+(,[a-z_][a-z0-9_]*/[A-Za-z0-9_-]+)*$ ]] || { printf 'invalid --only: %s\n' "$ONLY" >&2; exit 2; }
+fi
 
 log() {
   printf '[%s] %s\n' "$(date +'%F %T')" "$*"
@@ -73,6 +83,7 @@ chmod 600 "$METADATA_FILE" "$BULK_FILE"
 hasura_api '{"type":"export_metadata","version":2,"args":{}}' > "$METADATA_FILE"
 export _ROLES_TARGET="$TARGET"
 export _ROLES_TABLES="$TABLES"
+export _ROLES_ONLY="$ONLY"
 python3 - "$BULK_FILE" "$METADATA_FILE" <<'PY'
 import json
 import os
@@ -94,6 +105,12 @@ if not isinstance(resource_version, int) or not isinstance(metadata, dict):
 target = os.environ.get("_ROLES_TARGET") == "true"
 
 target_tables = os.environ.get("_ROLES_TABLES", "roles").split(",")
+only = {item for item in os.environ.get("_ROLES_ONLY", "").split(",") if item}
+for pair in only:
+    if pair.split("/", 1)[0] not in target_tables:
+        print(f"ERROR: --only {pair}: the table is not in --tables", file=sys.stderr)
+        sys.exit(1)
+seen_only = set()
 args = []
 found = set()
 for source in metadata.get("sources", []):
@@ -107,6 +124,10 @@ for source in metadata.get("sources", []):
         hasura_table = {"schema": "public", "name": target_table}
         for perm in table.get("select_permissions", []):
             role = perm["role"]
+            if only:
+                if f"{target_table}/{role}" not in only:
+                    continue
+                seen_only.add(f"{target_table}/{role}")
             permission = json.loads(json.dumps(perm["permission"]))
             if bool(permission.get("allow_aggregations", False)) is target:
                 print(f"  {target_table}/{role}/select: no-change", file=sys.stderr)
@@ -119,6 +140,10 @@ for source in metadata.get("sources", []):
                          "args": {"source": source_name, "table": hasura_table, "role": role,
                                   "permission": permission}})
 
+missing_only = sorted(only - seen_only)
+if missing_only:
+    print(f"ERROR: --only: no select permission for {', '.join(missing_only)}", file=sys.stderr)
+    sys.exit(1)
 missing = [name for name in target_tables if name not in found]
 if missing:
     print(f"ERROR: table(s) not tracked: {', '.join('public.' + name for name in missing)}", file=sys.stderr)
@@ -128,7 +153,7 @@ with open(bulk_path, "w") as f:
     json.dump({"type": "bulk", "resource_version": resource_version, "args": args}, f)
 print(f"Permissions to update: {len(args) // 2}", file=sys.stderr)
 PY
-unset _ROLES_TARGET _ROLES_TABLES
+unset _ROLES_TARGET _ROLES_TABLES _ROLES_ONLY
 
 COUNT="$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))['args']) // 2)" "$BULK_FILE")"
 if [[ "$COUNT" == "0" ]]; then

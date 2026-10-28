@@ -203,4 +203,37 @@ describe('roles select aggregations', () => {
     }
     expect(state.roles).toEqual(live);
   });
+
+  it('--only: a rollback turns off exactly the given permissions; one added later (manager2) keeps its aggregations', async () => {
+    const applied = { columns: ['direction_id'], filter: {}, allow_aggregations: true };
+    const { server, state } = fakeHasura(live, {
+      extraTables: {
+        transaction_direction: [
+          { role: 'manager', permission: { ...applied } },
+          { role: 'operator', permission: { ...applied } },
+          { role: 'manager2', permission: { ...applied } },
+        ],
+      },
+    });
+    const result = await runScript(server, ['--revert', '--tables', 'transaction_direction', '--only', 'transaction_direction/manager,transaction_direction/operator']);
+    expect(result.code, result.output).toBe(0);
+    const byRole = Object.fromEntries(state.extra.transaction_direction.map((entry) => [entry.role, entry.permission.allow_aggregations]));
+    expect(byRole).toEqual({ manager: false, operator: false, manager2: true });
+  });
+
+  it('--only: refuses a pair without a permission or outside --tables, changing nothing', async () => {
+    const { server, state } = fakeHasura(live, { extraTables: { transaction_direction: [{ role: 'manager', permission: { columns: ['direction_id'], filter: {} } }] } });
+    const result = await runScript(server, ['--tables', 'transaction_direction', '--only', 'transaction_direction/manager,transaction_direction/nobody']);
+    expect(result.code).not.toBe(0);
+    expect(result.output).toContain('no select permission for transaction_direction/nobody');
+    expect(state.bulkRequests).toBe(0);
+    await new Promise<void>((done) => server.close(() => done()));
+    running = undefined;
+
+    const outside = fakeHasura(live);
+    const outsideResult = await runScript(outside.server, ['--tables', 'roles', '--only', 'transaction_direction/manager']);
+    expect(outsideResult.code).not.toBe(0);
+    expect(outsideResult.output).toContain('not in --tables');
+    expect(outside.state.bulkRequests).toBe(0);
+  });
 });
