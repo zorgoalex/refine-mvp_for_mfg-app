@@ -13,6 +13,8 @@ import { ContactsCard } from "../../components/contacts/ContactsCard";
 import { CLIENT_CONTACTS } from "../../components/contacts/partyContactsSources";
 import { ClientCounterpartyCard } from "./ClientCounterpartyCard";
 import { ClientOrdersTab } from "./ClientOrdersTab";
+import { ClientPaymentsTab } from "./ClientPaymentsTab";
+import { canSeeClientPayments } from "./clientPaymentsModel";
 import { ClientOnecDocumentsTab } from "./ClientOnecDocumentsTab";
 import { canSeeClientOnecDocuments } from "./clientOnecDocumentsModel";
 import { can } from "../../utils/permissions";
@@ -182,7 +184,11 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
         defaultActiveKey="main"
         items={[
           { key: 'main', label: 'Основное', children: main },
-          { key: 'erp-documents', label: 'Документы ERP', children: <ClientOrdersTab clientId={clientId} /> },
+          { key: 'orders', label: 'Заказы', children: <ClientOrdersTab clientId={clientId} /> },
+          // «Платежи»: платежи по заказам клиента (условие показа — clientPaymentsModel, видимость — backend).
+          ...(canSeeClientPayments(can)
+            ? [{ key: 'payments', label: 'Платежи', children: <ClientPaymentsTab clientId={clientId} /> }]
+            : []),
           // «Документы 1С»: условие показа и компонент — в файлах вкладки (clientOnecDocumentsModel, ClientOnecDocumentsTab).
           ...(canSeeClientOnecDocuments(can)
             ? [{ key: 'onec-documents', label: 'Документы 1С', children: <ClientOnecDocumentsTab clientId={clientId} /> }]

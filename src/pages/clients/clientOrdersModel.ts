@@ -13,7 +13,7 @@ export function clientOrderNumber(order: Pick<ClientOrder, 'fullNumber' | 'order
 }
 
 /**
- * Итог вкладки «Документы ERP» по всем заказам клиента, видимым пользователю (все страницы): число заказов и —
+ * Итог вкладки «Заказы» по всем заказам клиента, видимым пользователю (все страницы): число заказов и —
  * если backend отдал деньги (право видеть финансы) — сумма, оплачено и долг.
  */
 export function clientOrdersTotals(response: Pick<ClientOrdersResponse, 'pagination' | 'summary'>): Array<{ label: string; value: string }> {

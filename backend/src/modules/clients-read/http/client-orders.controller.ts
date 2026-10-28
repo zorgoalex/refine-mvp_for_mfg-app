@@ -12,7 +12,7 @@ const querySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(CLIENT_ORDERS_PAGE_SIZE_MAX).default(20),
 }).strict();
 
-/** Client card, tab «Документы ERP»: the orders of one client the user may see, with totals. Read-only. */
+/** Client card, tab «Заказы»: the orders of one client the user may see, with totals. Read-only. */
 @ApiTags('Client Phones')
 @ApiBearerAuth('bearerAuth')
 @Controller('clients')
