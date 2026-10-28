@@ -107,7 +107,6 @@ describe('navigation permissions', () => {
     [
       'order-status-board',
       'mdf-work-board',
-      'doweling_orders_view',
       'order_workshops',
       'order_resource_requirements',
     ].forEach(
@@ -124,6 +123,11 @@ describe('navigation permissions', () => {
         ).toBe(true);
       },
     );
+  });
+
+  it('opens «Базис-проекты» (doweling_orders_view) with doweling.view, not with orders.view', () => {
+    expect(canViewNavigationResource('doweling_orders_view', { permissions: ['doweling.view'] }, true)).toBe(true);
+    expect(canViewNavigationResource('doweling_orders_view', { permissions: ['orders.view'] }, true)).toBe(false);
   });
 
   it('requires procurement.view for the 1C documents screen', () => {
