@@ -9,6 +9,7 @@ const FRONTEND_PUBLIC_ENV_KEYS = [
   "VITE_CURRENCY_CODE",
   "VITE_CURRENCY_NAME",
   "VITE_CURRENCY_SYMBOL",
+  "VITE_ENABLE_CLIENT_SCREEN",
   "VITE_ENABLE_LEGACY_HASURA",
   "VITE_HASURA_GRAPHQL_URL",
   "VITE_ORDER_REALTIME",
@@ -112,6 +113,8 @@ export default defineConfig(({ mode }) => {
     build: {
       chunkSizeWarningLimit: 1100,
       rollupOptions: {
+        // client-screen.html is the customer window: a page of its own that never loads the app.
+        input: { main: "index.html", clientScreen: "client-screen.html" },
         output: {
           manualChunks(id) {
             if (!id.includes("node_modules")) return;

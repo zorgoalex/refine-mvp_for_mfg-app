@@ -18,6 +18,7 @@ export interface FrontendFeatureFlags {
   useBackendBazis: boolean;
   labels: boolean;
   statusAutomation: boolean;
+  clientScreen: boolean;
   orderStatusBoard: boolean;
   orderRealtime: boolean;
   cncTelegram: boolean;
@@ -65,6 +66,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   bazisImport: string | boolean;
   labels: string | boolean;
   statusAutomation: string | boolean;
+  clientScreen: string | boolean;
   orderStatusBoard: string | boolean;
   orderRealtime: string | boolean;
   cncTelegram: string | boolean;
@@ -105,6 +107,7 @@ export function getFeatureFlags(
     useBackendBazis: readBooleanFlag(env.VITE_USE_BACKEND_BAZIS, false),
     labels: readBooleanFlag(env.VITE_USE_BACKEND_LABELS, false),
     statusAutomation: readBooleanFlag(env.VITE_STATUS_AUTOMATION, false),
+    clientScreen: readBooleanFlag(env.VITE_ENABLE_CLIENT_SCREEN, false),
     orderStatusBoard: readBooleanFlag(env.VITE_ORDER_STATUS_BOARD, false),
     orderRealtime: readBooleanFlag(env.VITE_ORDER_REALTIME, false),
     cncTelegram: readBooleanFlag(env.VITE_USE_BACKEND_CNC_TELEGRAM, false),
@@ -166,6 +169,7 @@ export function mergeRuntimeFeatureFlags(
     labels: readOptionalBooleanFlag(runtimeFeatures.labels) ?? fallback.labels,
     statusAutomation:
       readOptionalBooleanFlag(runtimeFeatures.statusAutomation) ?? fallback.statusAutomation,
+    clientScreen: readOptionalBooleanFlag(runtimeFeatures.clientScreen) ?? fallback.clientScreen,
     orderStatusBoard:
       readOptionalBooleanFlag(runtimeFeatures.orderStatusBoard) ?? fallback.orderStatusBoard,
     orderRealtime: readOptionalBooleanFlag(runtimeFeatures.orderRealtime) ?? fallback.orderRealtime,

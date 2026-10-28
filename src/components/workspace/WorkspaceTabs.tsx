@@ -3,6 +3,7 @@ import { Tabs, Modal, message } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTabStore, computeCloseTargetPath } from '../../stores/tabStore';
 import { DraggableModalWrapper } from '../DraggableModalWrapper';
+import { ClientScreenTabEye } from '../../pages/clientScreen/ClientScreenGlobalIndicator';
 
 export const WorkspaceTabs: React.FC = () => {
   const location = useLocation();
@@ -49,7 +50,10 @@ export const WorkspaceTabs: React.FC = () => {
         navigate(t ? t.path : key);
       }}
       onEdit={onEdit}
-      items={tabs.map((t) => ({ key: t.key, label: t.dirty ? `● ${t.label}` : t.label }))}
+      items={tabs.map((t) => ({
+        key: t.key,
+        label: <><ClientScreenTabEye tabKey={t.key} />{t.dirty ? `● ${t.label}` : t.label}</>,
+      }))}
       style={{ padding: '4px 8px 0' }}
     />
   );
