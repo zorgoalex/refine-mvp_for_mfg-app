@@ -5,6 +5,10 @@
 -- Ledger: строка 281 удаляется, повторный apply снова применит миграцию.
 BEGIN;
 
+-- No round command or snapshot import may write these columns between the check and the DROP: the table is held
+-- exclusively until COMMIT (NOWAIT — a busy table refuses the rollback instead of queueing behind the writers).
+LOCK TABLE public.order_production_rounds IN ACCESS EXCLUSIVE MODE NOWAIT;
+
 DO $$
 BEGIN
   IF EXISTS (

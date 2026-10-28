@@ -434,6 +434,8 @@ export interface ProductionStatusEvent {
   event_by?: number | null;
   note?: string | null;
   payload?: Record<string, unknown>;
+  /** «Переделка»: production round of the mark (migration 274; absent before it = 1). */
+  round_no?: number | null;
 }
 
 // ============================================================================

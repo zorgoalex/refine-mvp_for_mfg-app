@@ -68,6 +68,7 @@ import {
   assertSnapshotRoundStatusModel,
   readSnapshotProductionRounds,
   resolveSnapshotReworkReasons,
+  requestRoundDeadlineSync,
   restoreSnapshotOrderRound,
   restoreSnapshotProductionRounds,
   snapshotHasProductionRounds,
@@ -1378,6 +1379,9 @@ async function importSnapshotInTransaction(
     reworkReasonIds,
   );
   await upsertDeadlines(tx, snapshot, orderId, payloadHash);
+  // «Переделка» 1.1: the imported final deadline may lag behind a round command whose reconciliation had not run in
+  // the source; the order's newest round asks for one here (background pass; the importer is the initiator).
+  if (restoresRounds) await requestRoundDeadlineSync(tx, orderId, command.currentUser.id, command.requestId ?? 'order-snapshot-import');
   await upsertMap(tx, {
     source,
     entityType: SNAPSHOT_ENTITY_TYPES.order,
@@ -3281,6 +3285,32 @@ async function upsertDeadlines(
       localOrderId: orderId,
       payloadHash,
     });
+  }
+
+  // «Переделка» 1.1: a round's deadline instance names the instance it replaced (`previousDeadlineId`, the target of
+  // «Это не переделка»). Imported instances get local ids, so the reference follows the mapping (null outside the snapshot).
+  for (const raw of snapshot.data.deadlineInstances) {
+    const metadata = raw.metadata_json as Record<string, unknown> | null | undefined;
+    // A false-positive restore made before it was marked `reworkRestoreOfRound` is known by its source idempotency key
+    // (`order:<source order>:rework-round:<N>:fp-restore`, dropped on import): the mark keeps it from being repeated.
+    const restoreKey = typeof raw.idempotency_key === 'string' ? /^order:\d+:rework-round:(\d+):fp-restore$/.exec(raw.idempotency_key) : null;
+    if (restoreKey && metadata?.reworkRestoreOfRound === undefined) {
+      await tx.query(
+        `UPDATE deadline_instances
+            SET metadata_json = COALESCE(metadata_json, '{}'::jsonb) || jsonb_build_object('reworkRestoreOfRound', $2::int)
+          WHERE deadline_id = $1::uuid`,
+        [requiredString(deadlineIds.get(requiredString(raw.deadline_id, 'deadline_id')), 'deadline mapping'), Number(restoreKey[1])],
+      );
+    }
+    const previous = metadata?.previousDeadlineId;
+    if (typeof previous !== 'string') continue;
+    await tx.query(
+      `UPDATE deadline_instances
+          -- An external predecessor becomes JSON null (a SQL NULL would null the whole metadata, round tag included).
+          SET metadata_json = jsonb_set(metadata_json, '{previousDeadlineId}', COALESCE(to_jsonb($2::text), 'null'::jsonb))
+        WHERE deadline_id = $1::uuid`,
+      [requiredString(deadlineIds.get(requiredString(raw.deadline_id, 'deadline_id')), 'deadline mapping'), deadlineIds.get(previous) ?? null],
+    );
   }
 
   await deleteMissingImportedDeadlineRows(

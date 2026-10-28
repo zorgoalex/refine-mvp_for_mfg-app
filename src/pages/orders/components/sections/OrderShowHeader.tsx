@@ -1,4 +1,5 @@
 // Order Show Header (Read-only summary for show page)
+import { currentRoundStageEvents } from '../../../../utils/currentRoundStageEvents';
 import { withRoundSuffix } from '../../../../api/orderReworkApi';
 // Adapted from OrderHeaderSummary for use with props instead of store
 
@@ -266,9 +267,14 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
   const currentProductionStatusCodes = useMemo(() => {
     if (!orderMarkEvents) return resolveOrderStageCodes(backendStageCodes);
     const idToCode = buildActiveProductionStatusCodeMap(allProductionStatusesData?.data || []);
-    return resolveOrderStageCodes(undefined, (orderMarkEvents.data || [])
-      .map((event: any) => idToCode.get(event.production_status_id)));
-  }, [allProductionStatusesData, backendStageCodes, orderMarkEvents]);
+    // «Переделка»: only the marks of the order's current round (earlier rounds are history).
+    const round = Number(record?.production_round ?? 0) || undefined;
+    const marks = currentRoundStageEvents(
+      (orderMarkEvents.data || []) as Array<{ order_id?: number | null; round_no?: number | null; production_status_id?: number }>,
+      round && record?.order_id != null ? new Map([[Number(record.order_id), round]]) : undefined,
+    );
+    return resolveOrderStageCodes(undefined, marks.map((event) => idToCode.get(event.production_status_id as number)));
+  }, [allProductionStatusesData, backendStageCodes, orderMarkEvents, record?.order_id, record?.production_round]);
 
   const fallbackBasisProjectName =
     latestDowelingLink?.doweling_order?.doweling_order_name ||

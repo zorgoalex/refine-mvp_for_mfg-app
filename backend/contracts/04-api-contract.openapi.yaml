@@ -29305,6 +29305,10 @@ components:
               format: int64
             productionStatusFromDetailsEnabled:
               type: boolean
+            productionRound:
+              type: integer
+              minimum: 1
+              description: «Переделка» — круг производства заказа, в котором выполнена команда этапа.
             version:
               type: integer
               minimum: 0
