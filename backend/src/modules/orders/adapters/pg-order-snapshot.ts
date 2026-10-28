@@ -60,6 +60,7 @@ import type {
   SaveOrderDto,
 } from '../dto/save-order.dto';
 import { prepareOrderSave } from '../domain/order-save-preparer';
+import { invalidOrderManagerError, resolveOrderManagerAssignment } from '../domain/order-manager-assignment';
 import { OrderNotFoundError } from '../errors/order.errors';
 import { insertAutoRoot } from './pg-order-transaction-manager';
 import { assertMdfSupportsRounds } from '../application/order-rework.service';
@@ -1460,6 +1461,33 @@ async function isMergedSnapshotClient(tx: TransactionClient, snapshot: OrderSnap
   return mapped ? (await mergedInto(tx, Number(mapped.local_entity_id))) !== null : false;
 }
 
+/**
+ * The same manager rule as save-order (order-manager-assignment.ts) for an imported order: a snapshot that names another
+ * manager than the importing user needs orders.manager.change, and that manager must be an active, non-service user.
+ * A snapshot without a manager (or whose manager does not exist here) keeps the import's previous behaviour (none).
+ */
+export async function assertImportedManagerAllowed(
+  tx: TransactionClient,
+  managerId: number | null,
+  command: ImportOrderSnapshotCommand,
+): Promise<void> {
+  if (managerId === null) return;
+  const assignment = resolveOrderManagerAssignment({
+    mode: 'create',
+    currentUserId: String(command.currentUser.id),
+    storedManagerId: null,
+    managerUserId: managerId,
+    legacyManagerId: undefined,
+    canChangeManager: command.currentUser.permissions.includes('orders.manager.change'),
+  });
+  if (!assignment.changed) return;
+  const active = await tx.query<{ ok: boolean }>(
+    'SELECT EXISTS (SELECT 1 FROM users WHERE user_id = $1::bigint AND is_active AND NOT is_service_account) AS ok',
+    [managerId],
+  );
+  if (active.rows[0]?.ok !== true) throw invalidOrderManagerError(String(managerId));
+}
+
 /** The client a merged client lives on in (`client_merge_redirects`, always the last one), or null. */
 async function mergedInto(tx: TransactionClient, clientId: number): Promise<number | null> {
   const row = (await tx.query<{ survivor_id: string }>('SELECT survivor_id FROM client_merge_redirects WHERE merged_client_id = $1', [clientId])).rows[0];
@@ -1479,6 +1507,7 @@ async function upsertOrderHeader(
   const prepared = prepareOrderSave(dto, {
     mode: 'create',
   });
+  await assertImportedManagerAllowed(tx, prepared.order.header.managerId ?? null, command);
 
   const orderId = await insertOrderHeader(
     tx,

@@ -915,6 +915,14 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     return Number(result.rows[0].order_id);
   }
 
+  async isActiveOrderManager(userId: string): Promise<boolean> {
+    const result = await this.tx.query<{ ok: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM users WHERE user_id = $1::bigint AND is_active AND NOT is_service_account) AS ok`,
+      [userId],
+    );
+    return result.rows[0]?.ok === true;
+  }
+
   async updateOrderHeader(input: {
     orderId: number;
     header: NormalizedSaveOrderHeaderDto;
@@ -959,7 +967,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         input.header.clientId,
         input.header.orderDate,
         input.header.priority,
-        input.header.managerId ?? Number(input.currentUser.id),
+        // Resolved by resolveOrderManagerAssignment: the stored manager unless this command changes it.
+        input.header.managerId ?? null,
         input.header.orderStatusId,
         input.header.plannedCompletionDate ?? null,
         input.header.completionDate ?? null,
@@ -1708,13 +1717,14 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
       source: SOURCE,
       relatedOrderId: event.orderId,
       relatedClientId: event.clientId ?? null,
+      relatedUserId: event.managerChange?.managerId ? Number(event.managerChange.managerId) : null,
       before: event.before ?? null,
       after: event.after ?? null,
       diff: computeDiff(event.before ?? null, event.after ?? null),
-      metadata: (event.metadata ?? { commandName: event.action }) as unknown as Record<
-        string,
-        unknown
-      >,
+      metadata: {
+        ...((event.metadata ?? { commandName: event.action }) as unknown as Record<string, unknown>),
+        ...(event.managerChange ? { managerChange: event.managerChange } : {}),
+      },
       relatedEntities: sheetIds.map((entityId) => ({ entityType: 'sheet_material_type', entityId })),
     });
   }

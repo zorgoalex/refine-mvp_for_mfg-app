@@ -1148,6 +1148,19 @@ export class OrdersController {
     return this.orderQueries.getFormData({ currentUser });
   }
 
+  @ApiResponse({ status: 200, description: 'Who may be chosen as the manager of an order' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled' })
+  @ApiOperation({ operationId: 'listOrderManagerOptions', summary: 'List order manager candidates (ERP users)' })
+  @Get('manager-options')
+  async getManagerOptions(
+    @Req() request: RequestWithCurrentUser,
+  ): Promise<{ managers: Array<{ id: number; fullName: string }> }> {
+    this.assertOrdersReadEnabled();
+    return this.orderQueries.getManagerOptions({ currentUser: this.requireCurrentUser(request) });
+  }
+
   @ApiResponse({ status: 200, description: 'Next available numeric order name' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })

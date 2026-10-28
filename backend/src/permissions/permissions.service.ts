@@ -554,6 +554,7 @@ export class PermissionsService {
         'references.quick_create': 'Справочники: быстрое добавление из заказа',
         'clients.contacts.view': 'Клиенты: экран «Контакты клиентов»', 'clients.contacts.manage': 'Клиенты: правка на экране «Контакты клиентов»',
         'orders.rework': 'Заказы: переделка',
+        'orders.manager.change': 'Заказы: смена менеджера',
         'integrations.duplicates.view': 'Интеграции: журнал дублей', 'integrations.duplicates.resolve': 'Интеграции: решения по дублям',
         'clients.merge': 'Клиенты: объединение дублей' } as Partial<Record<PermissionName, string>>)[permission] ?? permission,
       description: null as string | null,
@@ -849,7 +850,7 @@ function normalizeRequestedMatrix(
   return next;
 }
 
-function applyPermissionDependencies(row: Record<string, boolean>): void {
+export function applyPermissionDependencies(row: Record<string, boolean>): void {
   for (const permission of Object.keys(row)) {
     if (!row[permission]) continue;
     if (
@@ -867,6 +868,10 @@ function applyPermissionDependencies(row: Record<string, boolean>): void {
     }
     if (permission === 'references.quick_create' && 'references.view' in row) {
       row['references.view'] = true;
+    }
+    if (permission === 'orders.manager.change' && 'orders.update' in row) {
+      row['orders.update'] = true;
+      row['orders.view'] = true;
     }
   }
 }

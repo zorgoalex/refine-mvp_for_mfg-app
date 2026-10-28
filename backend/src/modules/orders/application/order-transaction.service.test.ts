@@ -144,6 +144,8 @@ class FakeOrderTransactions implements OrderTransactionManagerPort {
     bazisPanelReconciliations: [],
   };
   reconciledBazisPanelLinks: BazisPanelOrderLink[] = [];
+  /** ERP users that are not active managers (isActiveOrderManager → false). */
+  inactiveManagerIds = new Set<string>();
   completedDeleteResponse?: DeleteOrderResponseDto;
   completedRestoreResponse?: RestoreOrderResponseDto;
   completedCreateResponse?: OrderDto;
@@ -543,6 +545,11 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     });
 
     return orderId;
+  }
+
+  async isActiveOrderManager(userId: string): Promise<boolean> {
+    this.call('isActiveOrderManager');
+    return !this.owner.inactiveManagerIds.has(userId);
   }
 
   async updateOrderHeader(input: {
@@ -2674,6 +2681,64 @@ describe('OrderTransactionService', () => {
     expect(transactions.state.auditEvents).toMatchObject([
       expect.objectContaining({ action: 'orders.update', orderId: 42, actorUserId: 'user_manager', actorUsername: 'manager', actorRole: 'manager', clientId: 1001 }),
     ]);
+  });
+
+  describe('manager of the order (orders.manager.change)', () => {
+    const header = { orderId: 42, orderName: 'Manager order', clientId: 1001, orderDate: '2026-04-30', orderStatusId: 1001, discount: 0, surcharge: 0 };
+    const details = [{ id: 11, height: 550, width: 200, quantity: 3, materialId: null, sheetMaterialTypeId: 1001, millingTypeId: 1001, edgeTypeId: 1001, detailCost: 15000 }];
+    const seeded = () => {
+      const transactions = new FakeOrderTransactions();
+      transactions.seedOrder({ orderId: 42, version: 0, managerUserId: '10', details: [calculatedDetail({ id: 11, detailCost: 5000 })] });
+      return transactions;
+    };
+    const update = (transactions: FakeOrderTransactions, user: CurrentUser, extra: Record<string, unknown>) =>
+      new OrderTransactionService({ transactions }).update({
+        currentUser: user,
+        orderId: 42,
+        dto: createSaveDto({ header: { ...header, ...extra }, details, payments: [], version: 0 }),
+      });
+
+    it('keeps the stored manager when the field is absent or null (it no longer goes to whoever saves)', async () => {
+      for (const extra of [{}, { managerUserId: null, managerId: null }]) {
+        const transactions = seeded();
+        await update(transactions, currentUser('admin'), extra);
+        const order = transactions.state.orders.get(42);
+        expect(order?.header.managerId).toBe(10);
+      }
+    });
+
+    it('refuses another manager without orders.manager.change (403) and writes nothing', async () => {
+      const transactions = seeded();
+      await expect(update(transactions, currentUser('manager'), { managerUserId: 12 })).rejects.toMatchObject({
+        statusCode: 403, code: 'ORDER_MANAGER_CHANGE_FORBIDDEN',
+      });
+      expect(transactions.calls).not.toContain('updateOrderHeader');
+    });
+
+    it('refuses the former field with another value as an outdated form (409), even for an administrator', async () => {
+      const transactions = seeded();
+      await expect(update(transactions, currentUser('admin'), { managerId: 3 })).rejects.toMatchObject({
+        statusCode: 409, code: 'ORDER_FORM_OUTDATED',
+      });
+    });
+
+    it('refuses an inactive or service user as the manager (422)', async () => {
+      const transactions = seeded();
+      transactions.inactiveManagerIds.add('12');
+      await expect(update(transactions, currentUser('admin'), { managerUserId: 12 })).rejects.toMatchObject({
+        statusCode: 422, code: 'ORDER_MANAGER_INVALID',
+      });
+    });
+
+    it('changes the manager with the permission and audits both managers', async () => {
+      const transactions = seeded();
+      await update(transactions, currentUser('admin'), { managerUserId: 12 });
+      const order = transactions.state.orders.get(42);
+      expect(order?.header.managerId).toBe(12);
+      expect(transactions.state.auditEvents).toEqual(expect.arrayContaining([
+        expect.objectContaining({ action: 'orders.update', managerChange: { previousManagerId: '10', managerId: '12' } }),
+      ]));
+    });
   });
 
   it('updates a legacy order whose current optimistic lock version is zero', async () => {

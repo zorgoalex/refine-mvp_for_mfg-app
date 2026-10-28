@@ -96,6 +96,8 @@ interface OrderHeaderRow extends QueryResultRow, ProductionSummaryRow {
   surcharge: string | number | null;
   notes: string | null;
   manager_id: string | number | null;
+  /** Detail read only: the manager as people see him (employee name via users.employee_id, else the user). */
+  manager_name?: string | null;
   link_cutting_file: string | null;
   link_cutting_image_file: string | null;
   link_cad_file: string | null;
@@ -815,6 +817,8 @@ export class PgOrderReadRepository
         o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
         o.hdf_min_threshold_mm,
         ${headerSheetCols}${deletedHeaderSelect}
+        , (SELECT COALESCE(NULLIF(e.full_name,''), NULLIF(u.full_name,''), u.username) FROM users u
+             LEFT JOIN employees e ON e.employee_id = u.employee_id WHERE u.user_id=o.manager_id) AS manager_name
         , (SELECT CASE WHEN u.is_service_account THEN 'Сервис интеграции ERP' ELSE COALESCE(NULLIF(u.full_name,''),u.username) END FROM users u WHERE u.user_id=o.created_by) AS created_by_label
         , (SELECT CASE WHEN u.is_service_account THEN 'Сервис интеграции ERP' ELSE COALESCE(NULLIF(u.full_name,''),u.username) END FROM users u WHERE u.user_id=o.edited_by) AS edited_by_label
       FROM orders o
@@ -1245,6 +1249,11 @@ export class PgOrderReadRepository
     };
   }
 
+  async listOrderManagerOptions(): Promise<Array<{ id: number; fullName: string }>> {
+    const rows = await this.database.query<EmployeeLookupRow>(ORDER_MANAGER_OPTIONS_SQL);
+    return rows.rows.map(mapEmployeeLookup);
+  }
+
   async getOrderFormData(_command: GetOrderFormDataCommand): Promise<OrderFormDataResponseDto> {
     const [
       clients,
@@ -1258,6 +1267,7 @@ export class PgOrderReadRepository
       productionStatuses,
       workshops,
       employees,
+      managers,
       units,
       sheetMaterialTypes,
     ] = await Promise.all([
@@ -1355,6 +1365,7 @@ export class PgOrderReadRepository
         ORDER BY full_name ASC, employee_id ASC
         `,
       ),
+      this.database.query<EmployeeLookupRow>(ORDER_MANAGER_OPTIONS_SQL),
       this.database.query<UnitLookupRow>(
         `
         SELECT unit_id AS id, unit_code AS code, COALESCE(unit_name, unit_code) AS name, unit_symbol AS symbol, sort_order
@@ -1388,6 +1399,7 @@ export class PgOrderReadRepository
       productionStatuses: productionStatuses.rows.map(mapStatusLookup),
       workshops: workshops.rows.map(mapIdNameLookup),
       employees: employees.rows.map(mapEmployeeLookup),
+      managers: managers.rows.map(mapEmployeeLookup),
       units: units.rows.map(mapUnitLookup),
       sheetMaterialTypes: sheetMaterialTypes.rows.map(mapSheetMaterialTypeLookup),
     };
@@ -1594,6 +1606,18 @@ function mapSheetMaterialTypeLookup(row: SheetMaterialTypeLookupRow) {
   };
 }
 
+/**
+ * Who may be chosen as the manager of an order: active ERP users that are not service accounts (orders.manager_id →
+ * users), named as the MDF board names them (employee via users.employee_id, else the user).
+ */
+export const ORDER_MANAGER_OPTIONS_SQL = `
+  SELECT u.user_id AS id, COALESCE(NULLIF(e.full_name, ''), NULLIF(u.full_name, ''), u.username) AS full_name
+    FROM users u
+    LEFT JOIN employees e ON e.employee_id = u.employee_id
+   WHERE u.is_active AND NOT u.is_service_account
+   ORDER BY 2 ASC, u.user_id ASC
+`;
+
 function mapEmployeeLookup(row: EmployeeLookupRow) {
   return {
     id: toNumber(row.id),
@@ -1768,6 +1792,7 @@ function mapListItem(row: OrderHeaderRow, includeDeleted: boolean = false): Orde
     partsCount: toNumber(row.parts_count),
     totalArea: toNumber(row.total_area),
     managerId: toNullableNumber(row.manager_id),
+    managerName: row.manager_name ?? null,
     notes: row.notes,
     // Variant B: materialIds is empty (material_id is NULL post-034); sheetMaterialTypeIds is authoritative.
     materialIds: toNumberArray(row.material_ids),

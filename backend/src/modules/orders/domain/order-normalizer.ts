@@ -109,6 +109,7 @@ function normalizeHeader(header: SaveOrderHeaderDto): NormalizedSaveOrderHeaderD
     orderDate: normalizeDateOnly(raw.orderDate) ?? '',
     priority: optionalNumber(raw.priority, 'header.priority') ?? 100,
     managerId: optionalInteger(raw.managerId, 'header.managerId'),
+    managerUserId: optionalInteger(raw.managerUserId, 'header.managerUserId'),
     orderStatusId: requiredNumber(raw.orderStatusId, 'header.orderStatusId'),
     paymentStatusId: optionalInteger(raw.paymentStatusId, 'header.paymentStatusId'),
     productionStatusId: optionalInteger(raw.productionStatusId, 'header.productionStatusId'),
