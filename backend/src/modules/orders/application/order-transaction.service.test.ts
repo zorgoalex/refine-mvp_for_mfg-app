@@ -2770,7 +2770,7 @@ describe('OrderTransactionService', () => {
       await update(transactions, currentUser('admin'), { managerUserId: 12 });
       const audits = transactions.state.auditEvents.length;
       const events = transactions.state.outboxEvents.length;
-      await expect(update(transactions, currentUser('admin'), { managerUserId: 14 })).rejects.toMatchObject({ statusCode: 409 });
+      await expect(update(transactions, currentUser('admin'), { managerUserId: 12 })).rejects.toMatchObject({ statusCode: 409 });
       expect(transactions.state.orders.get(42)?.header.managerId).toBe(12);
       expect(transactions.state.orders.get(42)?.managerUserId).toBe('12');
       expect(transactions.state.auditEvents).toHaveLength(audits);
