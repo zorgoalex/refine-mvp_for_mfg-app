@@ -5,7 +5,12 @@ vi.mock('./mdfCorrectionApi', () => ({ mdfCorrectionApi: { getEngineMode: api.ge
 vi.mock('./mdfPublishedApi', () => ({ mdfPublishedApi: { get: api.get } }));
 vi.mock('./authSession', () => ({ authSession: { getSessionGeneration: () => api.generation } }));
 
-import { prefetchMdfBoardOpen, takePrefetchedMdfEngineMode, takePrefetchedMdfSnapshot } from './mdfBoardOpenPrefetch';
+import {
+  mdfBoardOpenPrefetchFresh,
+  prefetchMdfBoardOpen,
+  takePrefetchedMdfEngineMode,
+  takePrefetchedMdfSnapshot,
+} from './mdfBoardOpenPrefetch';
 
 const query = { dateTo: '2026-10-27', displayFrom: '2026-09-27' };
 
@@ -14,8 +19,9 @@ describe('MDF board open prefetch', () => {
     api.generation = 1;
     api.getEngineMode.mockReset().mockResolvedValue({ mode: 'active' });
     api.get.mockReset().mockResolvedValue({ sessionGeneration: 1, snapshot: 'S' });
-    takePrefetchedMdfEngineMode();
     takePrefetchedMdfSnapshot(query);
+    takePrefetchedMdfEngineMode();
+    takePrefetchedMdfEngineMode();
     api.getEngineMode.mockClear();
     api.get.mockClear();
   });
@@ -25,8 +31,9 @@ describe('MDF board open prefetch', () => {
     prefetchMdfBoardOpen(query);
     expect(api.getEngineMode).toHaveBeenCalledTimes(1);
     expect(api.get).toHaveBeenCalledTimes(1);
-    await expect(takePrefetchedMdfEngineMode()).resolves.toEqual({ mode: 'active' });
+    // the board's cycle takes the snapshot first, then the mode
     await expect(takePrefetchedMdfSnapshot(query)).resolves.toEqual({ sessionGeneration: 1, snapshot: 'S' });
+    await expect(takePrefetchedMdfEngineMode()).resolves.toEqual({ mode: 'active' });
     expect(takePrefetchedMdfEngineMode()).toBeNull();
     expect(takePrefetchedMdfSnapshot(query)).toBeNull();
   });
@@ -47,5 +54,36 @@ describe('MDF board open prefetch', () => {
     await expect(takePrefetchedMdfEngineMode()).resolves.toEqual({ mode: 'active' });
     expect(api.get).toHaveBeenCalledTimes(2);
     expect(api.getEngineMode).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a warm-up for minutes (sign-in → the board opened later) and says when it is no longer fresh', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-10-28T08:00:00Z'));
+      prefetchMdfBoardOpen(query);
+      expect(mdfBoardOpenPrefetchFresh()).toBe(true);
+      vi.setSystemTime(new Date('2026-10-28T08:03:00Z')); // 3 min later
+      expect(mdfBoardOpenPrefetchFresh()).toBe(false);
+      expect(takePrefetchedMdfEngineMode()).not.toBeNull();
+      expect(takePrefetchedMdfSnapshot(query)).not.toBeNull();
+      prefetchMdfBoardOpen(query);
+      vi.setSystemTime(new Date('2026-10-28T08:09:00Z')); // past 5 min: not used
+      expect(takePrefetchedMdfEngineMode()).toBeNull();
+      expect(takePrefetchedMdfSnapshot(query)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets a first cycle on a default period use the mode without consuming it; the matching cycle takes both', async () => {
+    prefetchMdfBoardOpen(query);
+    // first cycle: default period, its snapshot is not the prefetched one
+    expect(takePrefetchedMdfSnapshot({ ...query, displayFrom: '2026-09-28' })).toBeNull();
+    await expect(takePrefetchedMdfEngineMode()).resolves.toEqual({ mode: 'active' });
+    // second cycle: the user's period restored — snapshot and mode are both prefetched
+    await expect(takePrefetchedMdfSnapshot(query)).resolves.toEqual({ sessionGeneration: 1, snapshot: 'S' });
+    await expect(takePrefetchedMdfEngineMode()).resolves.toEqual({ mode: 'active' });
+    expect(takePrefetchedMdfEngineMode()).toBeNull();
+    expect(api.getEngineMode).toHaveBeenCalledTimes(1);
   });
 });

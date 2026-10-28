@@ -43,7 +43,7 @@ import {
 import { authSession } from "./api/authSession";
 import { cncTelegramApi } from "./api/cncTelegramApi";
 import { MDF_BOARD_PREFETCH_EVENT } from "./utils/siderMenuItems";
-import { markMdfBoardSnapshotReady } from "./utils/mdfBoardPrewarm";
+import { markMdfBoardSnapshotReady, mdfBoardOpenedRecently } from "./utils/mdfBoardPrewarm";
 import { prefetchMdfBoardOpen } from "./api/mdfBoardOpenPrefetch";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
@@ -349,30 +349,57 @@ const ThemedApp = () => {
     if (!featureFlags.orderStatusBoard || !featureFlags.cncTelegram) return;
     let warming = false;
     let lastWarmStartedAt = 0;
-    const warmMdfData = () => {
-      if (!authSession.getAccessToken() || !authSession.getUser()) return;
-      if (document.visibilityState !== 'visible') return;
-      if (window.location.pathname === '/mdf-work-board') return;
+    let warmingGeneration = -1;
+    let warmRun = 0;
+    /** Warms the board's first view (engine mode and snapshot, today, order board); false when a guard declined. */
+    const warmMdfData = (): boolean => {
+      if (!authSession.getAccessToken() || !authSession.getUser()) return false;
+      if (document.visibilityState !== 'visible') return false;
+      if (window.location.pathname === '/mdf-work-board') return false;
       const now = Date.now();
-      if (warming || now - lastWarmStartedAt < MDF_PREFETCH_COOLDOWN_MS) return;
-      warming = true;
-      lastWarmStartedAt = now;
       const sessionGeneration = authSession.getSessionGeneration();
+      // busy/cooldown belong to one auth session: a new sign-in warms at once
+      if (warmingGeneration === sessionGeneration
+        && (warming || now - lastWarmStartedAt < MDF_PREFETCH_COOLDOWN_MS)) return false;
+      const run = ++warmRun;
+      warming = true;
+      warmingGeneration = sessionGeneration;
+      lastWarmStartedAt = now;
       const range = mdfDefaultDateRange();
+      prefetchMdfBoardOpen({ dateTo: range.dateTo, displayFrom: range.dateFrom });
       const boardPromise = cncTelegramApi.prefetchToday(range);
       void Promise.all([loadOrderStatusBoardModule(), boardPromise])
         .then(([module, response]) => module.prefetchMdfOrderStatusBoard(response, range.dateFrom, sessionGeneration))
         .then((stored) => { if (stored) markMdfBoardSnapshotReady(); })
         .catch(() => {
-          lastWarmStartedAt = 0;
+          if (run === warmRun) lastWarmStartedAt = 0;
         })
         .finally(() => {
-          warming = false;
+          if (run === warmRun) warming = false;
         });
+      return true;
     };
-    window.addEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData);
+    const warmOnMenuIntent = () => { warmMdfData(); };
+    window.addEventListener(MDF_BOARD_PREFETCH_EVENT, warmOnMenuIntent);
+    // A user who opened the board within the last days gets it warmed right after sign-in, whatever screen the app
+    // opens on: once its snapshot is ready the persistent host mounts it in the background, so the first click on the
+    // board shows it at once.
+    // Once per sign-in (user and auth session generation: a re-login without a page reload warms again); marked only
+    // when the warm-up really started.
+    let warmedSignIn: string | null = null;
+    const warmForHabitualUser = () => {
+      const user = authSession.getUser();
+      if (!user || !authSession.getAccessToken()) return;
+      const signIn = `${String(user.id)}|${authSession.getSessionGeneration()}`;
+      if (warmedSignIn === signIn) return;
+      if (!mdfBoardOpenedRecently(user.id)) return;
+      if (warmMdfData()) warmedSignIn = signIn;
+    };
+    const unsubscribe = authSession.subscribe(warmForHabitualUser);
+    warmForHabitualUser();
     return () => {
-      window.removeEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData);
+      unsubscribe();
+      window.removeEventListener(MDF_BOARD_PREFETCH_EVENT, warmOnMenuIntent);
     };
   }, []);
 

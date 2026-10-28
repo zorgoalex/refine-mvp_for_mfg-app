@@ -10,7 +10,11 @@ import {
   isMdfBoardGenerationCurrent,
   type MdfBoardGenerationState,
 } from './mdfBoardGeneration';
-import { takePrefetchedMdfEngineMode, takePrefetchedMdfSnapshot } from '../../api/mdfBoardOpenPrefetch';
+import {
+  mdfBoardOpenPrefetchFresh,
+  takePrefetchedMdfEngineMode,
+  takePrefetchedMdfSnapshot,
+} from '../../api/mdfBoardOpenPrefetch';
 import { selectMdfBoardMode, type MdfBoardMode, type MdfEngineModeFetchResult } from './mdfBoardMode';
 import { isMdfEngineModeEndpointMissing } from './mdfReturnSelection';
 import { planMdfPublishedSearchOrderIds } from './mdfPublishedBoard';
@@ -69,6 +73,7 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
   const generationRef = useRef<MdfBoardGenerationState>(createMdfBoardGenerationState());
   // the workday the shown snapshot was read for
   const shownWorkdayRef = useRef<string | null>(null);
+  const refreshAfterStalePrefetchRef = useRef<() => void>(() => undefined);
   const sessionRef = useRef<MdfSessionSnapshot | null>(null);
   const searchOrderIdsRef = useRef<number[]>([]);
   const orderIdsRef = useRef<number[]>([]);
@@ -112,12 +117,17 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     // the mode still decides whether that result is used at all.
     // A direct open may have started both reads already (mdfBoardOpenPrefetch); its default query only.
     const plainQuery = !(focusKind && focusId) && !searchOrderIdsRef.current.length && !orderIdsRef.current.length;
-    const earlyRead = modeRef.current === 'legacy' ? null
-      : (plainQuery ? takePrefetchedMdfSnapshot({ dateTo: workday, displayFrom }) : null) ?? readPublished();
+    // a prefetch older than its fresh window is shown at once and read again right after
+    const prefetchStale = !mdfBoardOpenPrefetchFresh();
+    const prefetchedSnapshot = modeRef.current === 'legacy' || !plainQuery ? null
+      : takePrefetchedMdfSnapshot({ dateTo: workday, displayFrom });
+    const prefetchedMode = takePrefetchedMdfEngineMode();
+    const usedStalePrefetch = prefetchStale && Boolean(prefetchedSnapshot || prefetchedMode);
+    const earlyRead = modeRef.current === 'legacy' ? null : prefetchedSnapshot ?? readPublished();
     earlyRead?.catch(() => undefined);
     let engineModeFetch: MdfEngineModeFetchResult;
     try {
-      const engineMode = await (takePrefetchedMdfEngineMode() ?? mdfCorrectionApi.getEngineMode());
+      const engineMode = await (prefetchedMode ?? mdfCorrectionApi.getEngineMode());
       engineModeFetch = { kind: 'ok', engineMode };
     } catch (error) {
       engineModeFetch = isMdfEngineModeEndpointMissing(error) ? { kind: 'endpointMissing' } : { kind: 'error' };
@@ -133,6 +143,7 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
       setMode(resolvedMode);
       setSession(null);
       setLoading(false);
+      if (usedStalePrefetch) refreshAfterStalePrefetchRef.current();
       return;
     }
     let publishedReadsFailed = false;
@@ -148,6 +159,7 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     setMode(resolvedMode);
     setSession(resolvedMode === 'published' ? nextSession : null);
     setLoading(false);
+    if (usedStalePrefetch) refreshAfterStalePrefetchRef.current();
   }, [workday, period, focusKind, focusId]);
 
   const refresh = useCallback(() => {
@@ -155,6 +167,7 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     const requestGeneration = bump();
     void runCycle(requestGeneration);
   }, [bump, runCycle]);
+  refreshAfterStalePrefetchRef.current = refresh;
 
   // Query change (workday, period — which drives `displayFrom` — focus, mode-affecting session
   // state, searchOrderIds) or enable/disable: one board-wide generation bump per change, superseded

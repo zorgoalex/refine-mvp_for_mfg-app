@@ -1,9 +1,11 @@
 import React, { lazy, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { MDF_BOARD_PREFETCH_EVENT } from '../../utils/siderMenuItems';
+import { authSession } from '../../api/authSession';
 import {
   isMdfBoardSnapshotReady,
   MDF_BOARD_SNAPSHOT_READY_EVENT,
+  rememberMdfBoardOpened,
 } from '../../utils/mdfBoardPrewarm';
 
 const MdfWorkBoardPage = lazy(async () => ({
@@ -19,7 +21,10 @@ export const PersistentMdfBoardHost: React.FC = () => {
   const hostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (active) setMounted(true);
+    if (!active) return;
+    setMounted(true);
+    // habitual board users get its data warmed right after the next sign-in (App)
+    rememberMdfBoardOpened(authSession.getUser()?.id);
   }, [active]);
 
   useEffect(() => {

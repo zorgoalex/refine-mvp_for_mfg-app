@@ -1244,6 +1244,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('renderDependencies={cncOrderCardRenderDependencies({');
     // a packet card navigates without subscribing to the location (no re-render of every card on a route change)
     expect(page).toContain('const { navigator } = useContext(UNSAFE_NavigationContext);');
+    // a warmed snapshot shown later is refreshed in the background
+    expect(page).toContain('if (initialMdfSnapshot && Date.now() - initialMdfSnapshot.createdAt > MDF_INITIAL_SNAPSHOT_FRESH_MS) {');
     expect(page).toContain('navigator.push(cutJobPath);');
     // column headers stick under the toolbar while the board scrolls (columns clip, not scroll)
     expect(css).toContain('.status-board-page--cnc .status-board-columns--cnc > .status-board-column {\n  overflow: clip;');
@@ -1375,7 +1377,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-deferred-card--revealed');
   });
 
-  it('prefetches MDF data only when the operator navigates to the board', () => {
+  it('prefetches MDF data when the operator navigates to the board, or after sign-in for a recent board user only', () => {
     expect(siderMenuItems).toContain("MDF_BOARD_PREFETCH_EVENT = 'erp:mdf-board-prefetch'");
     expect(siderMenuItems).toContain('requestMdfBoardPrefetch(route);');
     expect(customSider).toContain('onClick: () => sider.handleNavigate(item.route)');
@@ -1384,9 +1386,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(orderStatusBoardApi).toContain('STATUS_BOARD_PREFETCH_MAX_AGE_MS = 20_000');
     expect(app).toContain("document.visibilityState !== 'visible'");
     expect(app).toContain("window.location.pathname === '/mdf-work-board'");
-    expect(app).toContain('window.addEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData)');
-    expect(app).toContain('window.removeEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData)');
-    expect(app).not.toContain('warmMdfData();');
+    expect(app).toContain('window.addEventListener(MDF_BOARD_PREFETCH_EVENT, warmOnMenuIntent)');
+    expect(app).toContain('window.removeEventListener(MDF_BOARD_PREFETCH_EVENT, warmOnMenuIntent)');
+    // the only direct warm-up: right after sign-in, for a user who opened the board within the last days
+    expect(app).toMatch(/if \(!mdfBoardOpenedRecently\(user\.id\)\) return;\s*if \(warmMdfData\(\)\) warmedSignIn = signIn;/);
+    expect(app).toContain('const signIn = `${String(user.id)}|${authSession.getSessionGeneration()}`;');
+    // busy/cooldown are per auth session; a superseded warm-up does not reset the new one
+    expect(app).toContain('if (warmingGeneration === sessionGeneration');
+    expect(app).toContain('if (run === warmRun) warming = false;');
     expect(app).not.toContain('authSession.subscribe(warmMdfData)');
     expect(app).not.toContain('window.setInterval(warmMdfData');
     expect(app).not.toContain("document.addEventListener('visibilitychange', warmVisibleMdfData)");

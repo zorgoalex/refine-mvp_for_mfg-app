@@ -411,6 +411,8 @@ interface MdfInitialSnapshot {
 }
 
 const MDF_INITIAL_SNAPSHOT_MAX_AGE_MS = 30_000;
+/** Older than this, a shown initial snapshot is refreshed in the background. */
+const MDF_INITIAL_SNAPSHOT_FRESH_MS = 20_000;
 const CNC_INITIAL_EAGER_COLUMNS = 4;
 const CNC_INITIAL_VISIBLE_CARDS_PER_COLUMN = 6;
 const CNC_OVERFLOW_CARD_DELAY_MS = 1_200;
@@ -1258,6 +1260,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       shownDatasetKeyRef.current = shownKey;
       setStale(false);
       loadingColumnTokensRef.current.clear();
+      // a snapshot warmed in the background (after sign-in, on menu hover) is shown at once; an older one is also
+      // refreshed in the background
+      if (initialMdfSnapshot && Date.now() - initialMdfSnapshot.createdAt > MDF_INITIAL_SNAPSHOT_FRESH_MS) {
+        void fetchInitial({ preserveLoading: true });
+      }
       return;
     }
     // Back on the board (the persistent host only hid it) with the same data: what was shown stays on screen and is
