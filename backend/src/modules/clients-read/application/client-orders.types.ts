@@ -1,4 +1,4 @@
-/** One order of a client in the «Документы ERP» tab of the client card. Money only for a user who may see order financials. */
+/** One order of a client in the «Заказы» tab of the client card. Money only for a user who may see order financials. */
 export interface ClientOrderDto {
   orderId: number;
   orderName: string;

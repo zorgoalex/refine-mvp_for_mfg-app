@@ -16,7 +16,7 @@ export interface ClientOrdersReadPort {
 const money = (value: number) => Math.round(value * 100) / 100;
 
 /**
- * «Документы ERP» of the client card: the orders of one client the user may see, with totals over all pages.
+ * «Заказы» of the client card: the orders of one client the user may see, with totals over all pages.
  * Needs `clients.view` and `orders.view`; the rows follow the shared order read visibility (all, or only his own —
  * the same rule as the orders list, the order card and the order facts of the clients list); money needs
  * `orders.view_financials`. Rights are

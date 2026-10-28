@@ -20,7 +20,7 @@ export const clientsReadApi = {
   },
 };
 
-/** Заказ клиента во вкладке «Документы ERP»; денег нет, если у пользователя нет права видеть финансы заказов. */
+/** Заказ клиента во вкладке «Заказы»; денег нет, если у пользователя нет права видеть финансы заказов. */
 export interface ClientOrder {
   orderId: number;
   orderName: string;
@@ -43,10 +43,36 @@ export interface ClientOrdersResponse {
   summary?: { finalAmount: number; paidAmount: number; debtAmount: number };
 }
 
-/** Карточка клиента, «Документы ERP»: область видимости заказов применяет backend. */
+/** Карточка клиента, «Заказы»: область видимости заказов применяет backend. */
 export const clientOrdersApi = {
   list(clientId: number, page: number, pageSize: number): Promise<ClientOrdersResponse> {
     return httpClient.get<ClientOrdersResponse>(withQuery(apiRoutes.clientsRead.orders(clientId), { page, pageSize }));
+  },
+};
+
+/** One payment of an order of the client («Платежи» of the client card). */
+export interface ClientPayment {
+  paymentId: number;
+  paymentDate: string;
+  amount: number;
+  typePaidName: string | null;
+  notes: string | null;
+  /** The payment came from 1C. */
+  fromOnec: boolean;
+  order: { orderId: number; orderName: string; fullNumber: string | null };
+}
+
+export interface ClientPaymentsResponse {
+  data: ClientPayment[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  /** «own»: only payments of the user's own orders; «restricted»: of the orders the user otherwise has access to. */
+  scope: 'all' | 'own' | 'restricted';
+  summary: { amount: number };
+}
+
+export const clientPaymentsApi = {
+  list(clientId: number, page: number, pageSize: number): Promise<ClientPaymentsResponse> {
+    return httpClient.get<ClientPaymentsResponse>(withQuery(apiRoutes.clientsRead.payments(clientId), { page, pageSize }));
   },
 };
 

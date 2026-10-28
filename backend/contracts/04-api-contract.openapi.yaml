@@ -20453,7 +20453,7 @@ paths:
       tags:
         - Client Phones
       operationId: listClientOrders
-      summary: "Orders of one client within the order visibility of the user, with totals over all pages (client card, tab «Документы ERP»; read-only)"
+      summary: "Orders of one client within the order visibility of the user, with totals over all pages (client card, tab «Заказы»; read-only)"
       security:
         - {bearerAuth: []}
       x-permission: clients.view
@@ -20472,6 +20472,32 @@ paths:
         '400': {description: "VALIDATION_FAILED"}
         '401': {description: Authentication required}
         '403': {description: "Permission denied (audited as clients.orders_denied)"}
+        '404': {description: "CLIENT_NOT_FOUND"}
+  /api/v1/clients/{clientId}/payments:
+    get:
+      tags:
+        - Client Phones
+      operationId: listClientPayments
+      summary: "Payments of the orders of one client within the order and payment visibility of the user, with their sum (client card, tab «Платежи»; read-only)"
+      security:
+        - {bearerAuth: []}
+      x-permission: clients.view
+      description: >-
+        Requires clients.view, orders.view, payments.view and orders.view_financials (payment amounts are order money).
+        A payment (not deleted) of a real order of the client
+        (not deleted, not a CRM request or draft) is shown when the order is visible to the user (the shared order read
+        visibility of the orders list and the order card) AND the payment visibility of the user allows that order
+        (payments.view all / own / assigned, the rule of one payment). Rows, the count and the sum use the same predicate.
+        Count, sum and page come from one statement. A visibility that grants nothing is refused. Newest first.
+      parameters:
+        - {name: clientId, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: page, in: query, required: false, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: pageSize, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200': {description: "{data[{paymentId, paymentDate, amount, typePaidName, notes, fromOnec, order{orderId, orderName, fullNumber}}], pagination{page, pageSize, total, totalPages}, scope: all|own|restricted, summary{amount}}"}
+        '400': {description: "VALIDATION_FAILED"}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as clients.payments_denied)"}
         '404': {description: "CLIENT_NOT_FOUND"}
   /api/v1/clients-analytics/dashboard:
     get:

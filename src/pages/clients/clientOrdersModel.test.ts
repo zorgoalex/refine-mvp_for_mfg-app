@@ -4,7 +4,7 @@ import { clientOrderMoney, clientOrderNumber, clientOrdersProblem, clientOrdersS
 
 const pagination = { page: 1, pageSize: 20, total: 37, totalPages: 2 };
 
-describe('orders of a client in the client card («Документы ERP»)', () => {
+describe('orders of a client in the client card («Заказы»)', () => {
   it('shows money only when the backend gave it', () => {
     expect(clientOrderMoney(12500)).toMatch(/^12\s500,00$/);
     expect(clientOrderMoney(0)).toBe('0,00');

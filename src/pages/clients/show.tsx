@@ -15,6 +15,8 @@ import { ClientCounterpartyCard } from "./ClientCounterpartyCard";
 import { ClientOnecContactsStatus } from "./ClientOnecContactsStatus";
 import { ClientOrdersTab } from "./ClientOrdersTab";
 import { ClientOnecDocumentsTab } from "./ClientOnecDocumentsTab";
+import { ClientPaymentsTab } from "./ClientPaymentsTab";
+import { canSeeClientPayments } from "./clientPaymentsModel";
 import { canSeeClientOnecDocuments } from "./clientOnecDocumentsModel";
 import { can } from "../../utils/permissions";
 import { useClientMergeHistory } from "./useClientMergeHistory";
@@ -87,7 +89,7 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
     void refetchPhones();
     setRefreshKey((key) => key + 1);
   };
-  // «Основное» — сведения, контакты и сопоставление с 1С; «Документы ERP» — заказы клиента и итог по ним;
+  // «Основное» — сведения, контакты и сопоставление с 1С; «Заказы» — заказы клиента и итог по ним; «Платежи» — платежи по ним;
   // «Документы 1С» — отдельная вкладка сопоставленного контрагента со своим итогом (итоги не складываются).
   const main = (
     <>
@@ -187,7 +189,11 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
         defaultActiveKey="main"
         items={[
           { key: 'main', label: 'Основное', children: main },
-          { key: 'erp-documents', label: 'Документы ERP', children: <ClientOrdersTab clientId={clientId} /> },
+          { key: 'orders', label: 'Заказы', children: <ClientOrdersTab clientId={clientId} /> },
+          // «Платежи»: платежи по заказам клиента (условие показа — clientPaymentsModel, видимость — backend).
+          ...(canSeeClientPayments(can)
+            ? [{ key: 'payments', label: 'Платежи', children: <ClientPaymentsTab clientId={clientId} /> }]
+            : []),
           // «Документы 1С»: условие показа и компонент — в файлах вкладки (clientOnecDocumentsModel, ClientOnecDocumentsTab).
           ...(canSeeClientOnecDocuments(can)
             ? [{ key: 'onec-documents', label: 'Документы 1С', children: <ClientOnecDocumentsTab clientId={clientId} /> }]
