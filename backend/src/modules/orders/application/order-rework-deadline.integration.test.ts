@@ -715,4 +715,43 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
     await falsePositive(imported.orderId, 2);
     expect((await finals(imported.orderId)).filter((row) => row.metadata_json?.reworkRoundNo === 2).every((row) => row.status === 'cancelled')).toBe(true);
   });
+
+  async function importCopy(orderId: number, label: string): Promise<number> {
+    const snapshots = new PgOrderSnapshot(database());
+    const exported = JSON.parse((await snapshots.exportOrderSnapshot({ orderId, currentUser: admin, requestId: key() })).content) as OrderSnapshotDto;
+    exported.source.sourceInstanceId = `${importSource}-${randomUUID()}`;
+    exported.source.payloadHash = '';
+    exported.data.order.orderName = `E2E-Тест срок переделки ${tag} ${label}`;
+    const imported = await snapshots.importOrderSnapshot({ snapshot: exported, currentUser: admin, requestId: key() });
+    orderIds.push(imported.orderId);
+    const project = (await pool.query('SELECT project_id FROM orders WHERE order_id = $1', [imported.orderId])).rows[0];
+    if (project && Number(project.project_id) !== projectId) importProjectIds.push(Number(project.project_id));
+    return imported.orderId;
+  }
+
+  it('R4.1 (port review): an import after «Это не переделка» keeps exactly one active deadline; repeated reconciliations add nothing', async () => {
+    const order = await orderWithDeadline('legacy_6', false); // active D0
+    await start(order.orderId, order.detailIds[0], addDays(today, 7));
+    await falsePositive(order.orderId, 2); // D0 superseded, D0′ restored active
+    expect(await active(order.orderId)).toHaveLength(1);
+    const copy = await importCopy(order.orderId, 'импорт-после-отмены');
+    await sync().reconcileOrderFinalDeadline({ orderId: copy, currentUser: { id: ORDER_FINAL_DEADLINE_SYSTEM_ACTOR }, requestId: key() });
+    const events = async () => Number((await pool.query('SELECT count(*)::int AS n FROM deadline_events WHERE order_id = $1', [copy])).rows[0].n);
+    const afterFirst = await events();
+    await sync().reconcileOrderFinalDeadline({ orderId: copy, currentUser: { id: ORDER_FINAL_DEADLINE_SYSTEM_ACTOR }, requestId: key() });
+    await reconcile(copy);
+    expect(await active(copy)).toHaveLength(1);
+    expect(await events()).toBe(afterFirst);
+  });
+
+  it('R4.2 (port review): an import made before the reconciliation ran asks for one; the background pass sets the deadline', async () => {
+    const order = await orderWithDeadline('legacy_6', true);
+    await start(order.orderId, order.detailIds[0], addDays(today, 9), bare); // reconciliation never ran in the source
+    expect(await active(order.orderId)).toEqual([]);
+    const copy = await importCopy(order.orderId, 'импорт-до-сверки');
+    expect((await roundRow(copy, 2)).mark).not.toBeNull();
+    await sweeperFor().sweep(new Date(Date.now() + 60_000));
+    expect(await active(copy)).toEqual([expect.objectContaining({ at: addDays(today, 9), metadata_json: expect.objectContaining({ reworkRoundNo: 2 }) })]);
+    expect((await roundRow(copy, 2)).mark).toBeNull();
+  });
 });

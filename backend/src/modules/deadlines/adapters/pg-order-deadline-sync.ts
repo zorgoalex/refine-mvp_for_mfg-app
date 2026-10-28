@@ -217,7 +217,11 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
       const predecessor = instances.find((row) => row.deadline_id === predecessorId);
       // A predecessor the round superseded (was active/paused) is restored on the current order date — but only if
       // there is a date (a manually cleared date is kept: nothing active then). Completed/expired: it is current again.
-      if (predecessor && predecessor.status === 'superseded' && plannedAt) {
+      // One active/paused final deadline at most: a predecessor already restored (e.g. carried by an imported order
+      // snapshot, whose instances lose their idempotency keys) is not restored again.
+      const activeOutsideRound = instances.some((row) =>
+        (row.status === 'active' || row.status === 'paused') && roundOf(row) !== round.round_no);
+      if (predecessor && predecessor.status === 'superseded' && plannedAt && !activeOutsideRound) {
         const restored = await this.replaceDeadlineIfNeeded(tx, null, plannedAt, {
           ...base, metadata: { ...label, ...(predecessor.metadata_json ?? {}) },
         }, { idempotencyKey: `order:${orderId}:rework-round:${round.round_no}:fp-restore`, supersedeExisting: false });

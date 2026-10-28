@@ -435,6 +435,22 @@ export async function restoreSnapshotProductionRounds(
   return state.rounds.length;
 }
 
+/** Marks the order's newest round «final deadline to be reconciled» (281; a no-op on a database without it). */
+export async function requestRoundDeadlineSync(tx: TransactionClient, orderId: number, actorUserId: string, requestId: string): Promise<void> {
+  const present = await tx.query<{ present: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public'
+       AND table_name = 'order_production_rounds' AND column_name = 'deadline_sync_requested_by') AS present`,
+  );
+  if (!present.rows[0]?.present) return;
+  const actor = Number(actorUserId);
+  await tx.query(
+    `UPDATE order_production_rounds
+        SET deadline_sync_requested_at = now(), deadline_sync_request_id = $2, deadline_sync_requested_by = $3
+      WHERE order_id = $1 AND round_no = (SELECT max(round_no) FROM order_production_rounds WHERE order_id = $1)`,
+    [orderId, requestId, Number.isSafeInteger(actor) && actor > 0 ? actor : null],
+  );
+}
+
 function nullableString(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value);
 }

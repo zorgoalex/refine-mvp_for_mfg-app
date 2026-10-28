@@ -67,6 +67,7 @@ import {
   assertSnapshotRoundStatusModel,
   readSnapshotProductionRounds,
   resolveSnapshotReworkReasons,
+  requestRoundDeadlineSync,
   restoreSnapshotOrderRound,
   restoreSnapshotProductionRounds,
   snapshotHasProductionRounds,
@@ -1374,6 +1375,9 @@ async function importSnapshotInTransaction(
     reworkReasonIds,
   );
   await upsertDeadlines(tx, snapshot, orderId, payloadHash);
+  // «Переделка» 1.1: the imported final deadline may lag behind a round command whose reconciliation had not run in
+  // the source; the order's newest round asks for one here (background pass; the importer is the initiator).
+  if (restoresRounds) await requestRoundDeadlineSync(tx, orderId, command.currentUser.id, command.requestId ?? 'order-snapshot-import');
   await upsertMap(tx, {
     source,
     entityType: SNAPSHOT_ENTITY_TYPES.order,
