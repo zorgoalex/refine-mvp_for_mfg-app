@@ -164,8 +164,6 @@ export interface OrderListItemDto {
   partsCount: number;
   totalArea: number;
   managerId: number | null;
-  /** The manager's name (employee name, else the user); null when unknown or not read. */
-  managerName?: string | null;
   notes: string | null;
   /** @deprecated Variant B: always empty post-034; use sheetMaterialTypeIds. */
   materialIds: number[];
@@ -199,6 +197,8 @@ export interface OrderListItemDto {
 }
 
 export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
+  /** The manager's name (employee via users.employee_id, else the user) — also for an inactive manager. */
+  managerName?: string | null;
   productionDetailCount?: number;
   productionUnassignedCount?: number;
   productionDistinctStatusCount?: number;

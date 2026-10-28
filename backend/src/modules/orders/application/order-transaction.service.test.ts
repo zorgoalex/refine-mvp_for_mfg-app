@@ -561,6 +561,10 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     const order = this.getOrder(input.orderId);
     order.header = input.header;
     order.totals = input.totals;
+    // Like the orders row: the next loadOrderForUpdate reads the manager this update wrote.
+    order.managerUserId = input.header.managerId === null || input.header.managerId === undefined
+      ? null
+      : String(input.header.managerId);
   }
 
   async upsertDetails(orderId: number, details: readonly CalculatedOrderDetailDto[]): Promise<void> {
@@ -2728,6 +2732,27 @@ describe('OrderTransactionService', () => {
       await expect(update(transactions, currentUser('admin'), { managerUserId: 12 })).rejects.toMatchObject({
         statusCode: 422, code: 'ORDER_MANAGER_INVALID',
       });
+    });
+
+    it('order.updated carries both managers on each change (A→B→C keeps every transition), none without a change', async () => {
+      const transactions = seeded();
+      await update(transactions, currentUser('admin'), { managerUserId: 12 });
+      const orderAfterB = transactions.state.orders.get(42)!;
+      const second = await new OrderTransactionService({ transactions }).update({
+        currentUser: currentUser('admin'),
+        orderId: 42,
+        dto: createSaveDto({ header: { ...header, managerUserId: 14 }, details, payments: [], version: orderAfterB.version }),
+      });
+      expect(second.version).toBeGreaterThan(0);
+      await new OrderTransactionService({ transactions }).update({
+        currentUser: currentUser('admin'),
+        orderId: 42,
+        dto: createSaveDto({ header: { ...header, managerUserId: 14 }, details, payments: [], version: transactions.state.orders.get(42)!.version }),
+      });
+      const updated = transactions.state.outboxEvents.filter((event) => event.eventType === 'order.updated');
+      expect(updated.map((event) => [event.payload?.previousManagerId, event.payload?.managerId])).toEqual([
+        ['10', '12'], ['12', '14'], [undefined, undefined],
+      ]);
     });
 
     it('changes the manager with the permission and audits both managers', async () => {

@@ -32,6 +32,15 @@ describe('order snapshot writeAudit', () => {
     expect(params[9]).toBe(55);                       // related_client_id
   });
 
+  it('records the manager an import wrote as related_user_id (orders.manager.change)', async () => {
+    const captured: Array<{ text: string; params: readonly unknown[] }> = [];
+    await writeAudit(fakeTx(captured), 'orders.snapshot_import', actor, 88, 55,
+      { requestId: 'req_m', managerId: 12, managerAssignedByImport: true }, [], 12);
+    const [{ params }] = captured;
+    expect(params[13]).toBe(12); // related_user_id
+    expect(JSON.parse(String(params[22]))).toMatchObject({ managerId: 12, managerAssignedByImport: true });
+  });
+
   it('passes null related_client_id when clientId is null', async () => {
     const captured: Array<{ text: string; params: readonly unknown[] }> = [];
     await writeAudit(fakeTx(captured), 'orders.snapshot_import.noop', actor, 88, null, { requestId: 'req_n' });

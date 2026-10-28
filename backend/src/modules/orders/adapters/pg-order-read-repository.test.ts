@@ -291,6 +291,22 @@ describe('PgOrderReadRepository', () => {
     expect(listQuery?.params).toEqual(['%1258%', 10, 0]);
   });
 
+  it('returns the manager name with the order, for an inactive manager too (the form labels him with it)', async () => {
+    for (const managerName of ['Узакбай Жанара', 'Уволенный менеджер', null]) {
+      const database = createDatabase();
+      const original = database.service.query.bind(database.service);
+      (database.service as unknown as { query: typeof original }).query = (async (text: string, params?: unknown[]) => {
+        const result = await original(text as never, params as never);
+        if (String(text).includes('AS manager_name')) {
+          return { ...result, rows: result.rows.map((row: Record<string, unknown>) => ({ ...row, manager_id: 10, manager_name: managerName })) };
+        }
+        return result;
+      }) as typeof original;
+      const order = await new PgOrderReadRepository(database.service).getOrderById({ currentUser: currentUser('42'), orderId: 100 });
+      expect(order?.header).toMatchObject({ managerId: 10, managerName });
+    }
+  });
+
   it('loads full order aggregate from base tables', async () => {
     const repository = new PgOrderReadRepository(createDatabase().service);
 
