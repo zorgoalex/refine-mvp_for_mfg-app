@@ -30,6 +30,9 @@ export interface OrderRow {
   deleteFlag: boolean;
   orderKind?: 'draft' | 'crm_request' | 'production_order';
   sourceSystem?: 'erp' | 'bitrix24' | 'customer_portal';
+  /** ERP manager of the order and its author, as people see them (full name, else login). */
+  managerName?: string | null;
+  authorName?: string | null;
 }
 
 export interface PaymentRow {

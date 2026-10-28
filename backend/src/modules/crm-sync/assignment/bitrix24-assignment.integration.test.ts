@@ -129,7 +129,15 @@ describe.skipIf(!url)('Bitrix24 assignment channel / real PostgreSQL, rollback-o
     );
     await client.query('UPDATE orders SET manager_id=$2 WHERE order_id=$1', [orderId, userA]);
     // The client follows this order: make it the latest production order of the client.
-    await client.query(`UPDATE orders SET order_date='2099-01-01' WHERE order_id=$1`, [orderId]);
+    // Later dates of the order move with it (chk_orders_dates: none of them may precede order_date).
+    await client.query(
+      `UPDATE orders SET order_date='2099-01-01',
+              completion_date=CASE WHEN completion_date IS NULL THEN NULL ELSE DATE '2099-01-02' END,
+              planned_completion_date=CASE WHEN planned_completion_date IS NULL THEN NULL ELSE DATE '2099-01-02' END,
+              issue_date=CASE WHEN issue_date IS NULL THEN NULL ELSE DATE '2099-01-02' END
+        WHERE order_id=$1`,
+      [orderId],
+    );
     bitrix.items.set(`2:${dealId}`, 5);
     bitrix.items.set(`${clientObject === 'company' ? 4 : 3}:${clientBitrixId}`, 5);
   });
@@ -223,6 +231,35 @@ describe.skipIf(!url)('Bitrix24 assignment channel / real PostgreSQL, rollback-o
     await client.query(`SELECT bitrix24_assignment_touch(ARRAY['order'], ARRAY[$1::bigint], 'command', 'cohort', NULL, NULL)`, [orderId]);
     await run();
     expect(bitrix.items.get(`2:${dealId}`)).toBe(1);
+  });
+
+  it('uses the author only when the order has no manager: an ERP-only manager sends the deal to the release user', async () => {
+    const unmapped = await one<{ user_id: string }>(
+      `SELECT u.user_id FROM users u
+        WHERE u.is_active AND NOT u.is_service_account AND u.user_id <> ALL($1::bigint[])
+          AND NOT EXISTS (SELECT 1 FROM bitrix24_user_mapping m WHERE m.erp_user_id=u.user_id AND m.is_active)
+        ORDER BY u.user_id LIMIT 1`,
+      [[userA, userB]],
+    );
+    const clientKey = `${clientObject === 'company' ? 4 : 3}:${clientBitrixId}`;
+    await commands.enable(actor, '1');
+    await queueFixture();
+    await run();
+    expect(bitrix.items.get(`2:${dealId}`)).toBe(900001);
+    expect(bitrix.items.get(clientKey)).toBe(900001);
+    // Typed in by a mapped user (author B), handled by a manager who works only in ERP: not B's deal or client.
+    await client.query('UPDATE orders SET created_by=$2, manager_id=$3 WHERE order_id=$1', [orderId, userB, Number(unmapped.user_id)]);
+    const planWithManager = await commands.plan(new Set([String(userB)]));
+    await run();
+    expect(bitrix.items.get(`2:${dealId}`)).toBe(1);
+    expect(bitrix.items.get(clientKey)).toBe(1);
+    // No manager at all: the author is the one who handles it.
+    await client.query('UPDATE orders SET manager_id=NULL WHERE order_id=$1', [orderId]);
+    const planWithoutManager = await commands.plan(new Set([String(userB)]));
+    await run();
+    expect(bitrix.items.get(`2:${dealId}`)).toBe(900002);
+    expect(bitrix.items.get(clientKey)).toBe(900002);
+    expect((planWithoutManager.orders_created_by_in_cohort ?? 0) - (planWithManager.orders_created_by_in_cohort ?? 0)).toBe(1);
   });
 
   it('fans out a mapping change to the user’s orders and clients in batches', async () => {

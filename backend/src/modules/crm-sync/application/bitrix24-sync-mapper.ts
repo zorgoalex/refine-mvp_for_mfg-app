@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ClientRow, OrderRow, PaymentRow } from './crm-sync.types';
 import { clientNotesWithoutErpLines } from './bitrix24-client-notes';
+import { safeOutboundText } from './bitrix24-safe-text';
 
 export const BITRIX24_ENTITY_TYPE = {
   deal: 2,
@@ -91,6 +92,8 @@ export function mapOrder(
   const comments = [
     `ERP: ${erpUrl}`,
     `ERP ID заказа: ${order.orderId}`,
+    // Who handles the order in ERP: the responsible user in Bitrix24 may be a service account.
+    erpPersonLine(order),
     order.orderStatusName ? `Статус заказа: ${order.orderStatusName}` : null,
     order.paymentStatusName ? `Статус оплаты: ${order.paymentStatusName}` : null,
     `Оплачено: ${order.paidAmount ?? 0} ${options.currencyId}`,
@@ -125,6 +128,13 @@ export function mapOrder(
       },
     ],
   };
+}
+
+function erpPersonLine(order: OrderRow): string | null {
+  const manager = safeOutboundText(order.managerName);
+  if (manager) return `Менеджер ERP: ${manager}`;
+  const author = safeOutboundText(order.authorName);
+  return author ? `Создал в ERP: ${author}` : null;
 }
 
 export function mapPayment(
