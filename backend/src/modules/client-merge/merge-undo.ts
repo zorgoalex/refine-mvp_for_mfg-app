@@ -2,7 +2,7 @@ import type { DatabaseClient, TransactionClient } from '../../database/database.
 import type { CurrentUser } from '../../permissions/current-user';
 import type { ClientCounterpartyRepository } from '../party-contacts/client-counterparty.repository';
 import type { MergeContext, MergeItemKind } from './client-merge';
-import { auditMovedOrders, bumpContactVersions } from './merge-apply';
+import { auditMovedCards, auditMovedOrders, bumpContactVersions } from './merge-apply';
 import { fingerprint, readContacts, readOrders, readPhones, readProjects, type ContactState, type OrderState, type PhoneState, type ProjectState } from './merge-state';
 import { normalizedPhone } from '../onec-agent/domain/onec-matching-sql';
 
@@ -35,6 +35,18 @@ export interface UndoPlan {
   primaryContacts: number[];
   onecLink: string | null;
   repointed: number[];
+  /** Bazis project cards that go back with all their live orders and attached XML (migration 279). */
+  cardsBack: number[];
+  /** Cards whose orders or XML would be split between the clients: the undo is refused (UNDO_BAZIS_CARD_SPLIT). */
+  cardsSplit: number[];
+}
+
+/** A Bazis project card an undo may touch: its client, its live orders, the groups of its attached XML projects. */
+export interface CardState {
+  cardId: number;
+  clientId: number;
+  liveOrderIds: number[];
+  xmlGroupIds: number[];
 }
 
 export async function readMerge(db: DatabaseClient, mergeId: number, lock: boolean): Promise<MergeRow | null> {
@@ -86,6 +98,7 @@ export interface UndoState {
   aliasRequests: number;
   pendingOrderIds: number[];
   pendingPhoneIds: number[];
+  cards: CardState[];
 }
 
 /** Unfinished WhatsApp sends of what the undo returns (its orders, its moved-back phones). */
@@ -104,6 +117,22 @@ export async function readUndoState(db: DatabaseClient, merge: MergeRow, items: 
     await db.query('SELECT project_id FROM projects WHERE project_id = ANY($1::bigint[]) ORDER BY project_id FOR NO KEY UPDATE', [projects.map((p) => p.projectId)]);
   }
   const orders = await readOrders(db, { orderIds }, lock);
+  // Cards of the journal, of the orders an undo may touch and of the XML projects of its groups (after the orders, before
+  // the clients: lock hierarchy of the doweling commands).
+  const cards = (await db.query<{ doweling_order_id: string; client_id: string; live: string[]; groups: string[] }>(
+    `SELECT d.doweling_order_id, d.client_id,
+            ARRAY(SELECT l.order_id FROM order_doweling_links l JOIN orders o ON o.order_id = l.order_id AND NOT o.delete_flag
+                   WHERE l.doweling_order_id = d.doweling_order_id AND NOT l.delete_flag ORDER BY l.order_id) AS live,
+            ARRAY(SELECT bp.project_id FROM bazis_projects bp WHERE bp.doweling_order_id = d.doweling_order_id ORDER BY bp.project_id) AS groups
+       FROM doweling_orders d
+      WHERE d.doweling_order_id = ANY($1::bigint[])
+         OR EXISTS (SELECT 1 FROM order_doweling_links l WHERE l.doweling_order_id = d.doweling_order_id AND NOT l.delete_flag
+                     AND l.order_id = ANY($2::bigint[]))
+         OR EXISTS (SELECT 1 FROM bazis_projects bp WHERE bp.doweling_order_id = d.doweling_order_id AND bp.project_id = ANY($3::bigint[]))
+      ORDER BY d.doweling_order_id ${lock ? 'FOR UPDATE OF d' : ''}`,
+    [journalIds(items, 'bazis_card'), orderIds, projects.map((p) => p.projectId)])).rows
+    .map((r) => ({ cardId: Number(r.doweling_order_id), clientId: Number(r.client_id), liveOrderIds: r.live.map(Number), xmlGroupIds: r.groups.map(Number) }));
+  // Clients after the cards (a card command locks its card, then its client by the FK — R2 #4).
   if (lock) {
     await db.query('SELECT client_id FROM clients WHERE client_id = ANY($1::bigint[]) ORDER BY client_id FOR UPDATE', [[s, merge.mergedId]]);
   }
@@ -133,6 +162,7 @@ export async function readUndoState(db: DatabaseClient, merge: MergeRow, items: 
     survivorProfile: profile ? { sourceId: Number(profile.source_id), ref: profile.ref } : null,
     pendingOrderIds: [...new Set(pending.filter((r) => r.order_id !== null).map((r) => Number(r.order_id)))].sort((a, b) => a - b),
     pendingPhoneIds: [...new Set(pending.filter((r) => r.client_phone_id !== null).map((r) => Number(r.client_phone_id)))].sort((a, b) => a - b),
+    cards,
   };
 }
 
@@ -147,6 +177,7 @@ export function undoFingerprint(merge: MergeRow, state: UndoState): string {
     survivorProfile: state.survivorProfile ? [state.survivorProfile.sourceId, state.survivorProfile.ref] : null,
     redirects: state.redirects.map((r) => [r.mergedClientId, r.survivorId]),
     blockers: [state.aliasRequests, state.pendingOrderIds, state.pendingPhoneIds],
+    cards: state.cards.map((c) => [c.cardId, c.clientId, c.liveOrderIds, c.xmlGroupIds]),
   });
 }
 
@@ -160,6 +191,7 @@ export function planUndo(merge: MergeRow, items: readonly JournalItem[], state: 
   const plan: UndoPlan = {
     projects: [], looseOrderIds: [], orderIds: [], skipped, phonesBack: [], phonesRestore: [], keysBack: [], contactsBack: [],
     contactsRestore: [], copiesRestore: [], primaryPhone: null, primaryContacts: [], onecLink: null, repointed: [],
+    cardsBack: [], cardsSplit: [],
   };
   const ordersById = new Map(state.orders.map((o) => [o.orderId, o]));
   for (const item of items.filter((i) => i.kind === 'project')) {
@@ -185,6 +217,28 @@ export function planUndo(merge: MergeRow, items: readonly JournalItem[], state: 
     else skipped.push({ kind: 'order', rowId: item.rowId, reason: order && order.clientId === s ? 'order_moved' : 'client_changed' });
   }
   plan.orderIds.sort((a, b) => a - b);
+
+  // A card goes back only whole: all its live orders and the groups of its XML projects go back with it. A card of the
+  // journal without orders and XML goes back too; a split card refuses the undo (the invariant of migration 279).
+  const journalCards = new Set(journalIds(items, 'bazis_card'));
+  const groupsBack = new Set(plan.projects.map((p) => p.projectId));
+  for (const card of state.cards) {
+    if (card.clientId !== s) {
+      if (journalCards.has(card.cardId)) skipped.push({ kind: 'bazis_card', rowId: card.cardId, reason: 'client_changed' });
+      continue;
+    }
+    const total = card.liveOrderIds.length + card.xmlGroupIds.length;
+    const back = card.liveOrderIds.filter((id) => plan.orderIds.includes(id)).length
+      + card.xmlGroupIds.filter((id) => groupsBack.has(id)).length;
+    if (back === 0) {
+      if (total === 0 && journalCards.has(card.cardId)) plan.cardsBack.push(card.cardId);
+      else if (journalCards.has(card.cardId)) skipped.push({ kind: 'bazis_card', rowId: card.cardId, reason: 'orders_stay' });
+    } else if (back === total) {
+      plan.cardsBack.push(card.cardId);
+    } else {
+      plan.cardsSplit.push(card.cardId);
+    }
+  }
 
   const phone = (id: number) => state.phones.find((p) => p.phoneId === id);
   const mergedPhones = state.phones.filter((p) => p.clientId === m);
@@ -290,6 +344,10 @@ export async function applyUndo(
   if (plan.looseOrderIds.length) await tx.query('UPDATE orders SET client_id = $2 WHERE order_id = ANY($1::bigint[])', [plan.looseOrderIds, m]);
   if (plan.orderIds.length) await tx.query('UPDATE orders SET version = version + 1 WHERE order_id = ANY($1::bigint[])', [plan.orderIds]);
 
+  const cardsBack = plan.cardsBack.length === 0 ? [] : (await tx.query<{ doweling_order_id: string; version: number }>(
+    'UPDATE doweling_orders SET client_id = $2 WHERE doweling_order_id = ANY($1::bigint[]) AND client_id = $3 RETURNING doweling_order_id, version',
+    [plan.cardsBack, m, s])).rows.map((r) => ({ cardId: Number(r.doweling_order_id), version: Number(r.version) })).sort((a, b) => a.cardId - b.cardId);
+
   if (plan.phonesBack.length) await tx.query('UPDATE client_phones SET client_id = $2, is_primary = false WHERE phone_id = ANY($1::bigint[])', [plan.phonesBack, m]);
   const skipped = [...plan.skipped];
   // A 1C key that moved to the survivor's row goes back to the restored row; a key another row took meanwhile stays there.
@@ -374,6 +432,7 @@ export async function applyUndo(
       contactsMoved: plan.contactsBack.length, contactsRestored: plan.contactsRestore.length, onecCopiesRestored: plan.copiesRestore.length,
       onecLink: plan.onecLink ? 1 : 0,
       redirectsRestored: plan.repointed.length,
+      bazisCards: cardsBack.length,
     },
     skipped,
     orderIds: plan.orderIds,
@@ -383,5 +442,6 @@ export async function applyUndo(
     `UPDATE client_merges SET status = 'undone', undone_at = now(), undone_by = $2, undo_request_id = $3, undo_report = $4::jsonb WHERE merge_id = $1`,
     [merge.mergeId, actorId, ctx.requestId, JSON.stringify(report)]);
   await auditMovedOrders(tx, plan.orderIds, s, m, merge.mergeId, actor, ctx, 'client_merge_undo');
+  await auditMovedCards(tx, cardsBack, s, m, merge.mergeId, actor, ctx, 'client_merge_undo');
   return report;
 }

@@ -37,7 +37,7 @@ describe('dowelingApi', () => {
     expect(createDowelingIdempotencyKey('custom')).toBe('custom:uuid-1');
   });
 
-  it('create POSTs the request to /api/v1/doweling-orders', async () => {
+  it('create POSTs the Bazis project card to /api/v1/bazis/cards', async () => {
     const response = {
       dowelingOrder: { dowelingOrderId: 7, dowelingOrderName: 'Тест присадка', version: 0 },
       requestId: 'request-1',
@@ -53,7 +53,7 @@ describe('dowelingApi', () => {
       }),
     ).resolves.toEqual(response);
 
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/doweling-orders');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/bazis/cards');
     expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
     const body = String(fetchMock.mock.calls[0][1]?.body);
     expect(body).toContain('"designEngineerId":3');

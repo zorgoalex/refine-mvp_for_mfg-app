@@ -120,7 +120,7 @@ export const CLIENT_SCREEN_GROUPS: readonly ClientScreenGroup[] = [
       { code: 'basic.production_status', label: 'Статус производства' },
       { code: 'basic.manager', label: 'Менеджер' },
       { code: 'basic.priority', label: 'Приоритет' },
-      { code: 'basic.doweling', label: 'Присадки' },
+      { code: 'basic.doweling', label: 'Базис-проекты' },
       { code: 'basic.notes', label: 'Примечание' },
     ],
   },

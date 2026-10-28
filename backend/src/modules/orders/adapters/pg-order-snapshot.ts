@@ -14,7 +14,8 @@ import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import { markStageEventWriter } from '../../../shared/production-status/stage-event-writer';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { assertDowelingOrdersWritable } from '../../doweling/adapters/doweling-write-guard';
+import { assertDowelingOrdersWritable, defaultCardIds } from '../../doweling/adapters/doweling-write-guard';
+import { refineDefaultCardClients } from '../../doweling/adapters/doweling-sql';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import type {
   ExportedOrderSnapshotBatchFile,
@@ -1369,7 +1370,7 @@ async function importSnapshotInTransaction(
   // off while its details are written, otherwise details of earlier rounds would mark their stages in the
   // restored current round.
   if (restoresRounds) await markStageEventWriter(tx, 'historical_import');
-  await upsertOrderChildren(tx, snapshot, orderId, dowelingOrderIds, payloadHash, command);
+  await upsertOrderChildren(tx, snapshot, orderId, dowelingOrderIds, payloadHash, command, guardDowelingOrders);
   await upsertProductionEvents(tx, snapshot, orderId, payloadHash);
   await restoreSnapshotProductionRounds(
     tx, snapshot, orderId,
@@ -1415,7 +1416,9 @@ export async function upsertClient(
     const clientId = Number(mapped.local_entity_id);
     // A client merged into another one stays mapped (an undo of the merge needs it) but is never written again: the
     // order goes to the client it lives on in, which the snapshot does not describe.
-    const survivorId = await mergedInto(tx, clientId);
+    // The client merge key first (the one a merge and its undo take before their row locks): an import of an order of a
+    // client being merged waits for the merge instead of a client→card / card→client deadlock (R3 #2).
+    const survivorId = await takeSnapshotClientKeys(tx, clientId);
     if (survivorId !== null) return survivorId;
     // The link to a 1C counterparty (clients.ref_key_1c) is never written by an import: it is set, replaced and
     // removed only by the audited command of the client card; a snapshot key would silently bring an old link back.
@@ -1439,10 +1442,47 @@ export async function upsertClient(
 
   // An existing client is locked like in the mapped branch (its UPDATE): every writer of a client's phones takes the
   // client first, then the phones (the contacts screen, the card commands, the Bitrix24 reverse sync).
+  const byNameSurvivor = byName !== null ? await takeSnapshotClientKeys(tx, byName) : null;
   if (byName !== null) await tx.query('SELECT 1 FROM clients WHERE client_id = $1 FOR NO KEY UPDATE', [byName]);
   const clientId = byName ?? await insertClient(tx, client);
   await upsertMap(tx, { source, entityType: SNAPSHOT_ENTITY_TYPES.client, sourceId: client.sourceId, localId: String(clientId), localOrderId: null, payloadHash });
-  return (await mergedInto(tx, clientId)) ?? clientId;
+  return byNameSurvivor ?? clientId;
+}
+
+/**
+ * The merge keys of a snapshot's client and of the client it lives on in (R4 #2, R5 #1), taken in the order a merge and
+ * its undo take them (`advisoryKeys`: sorted key strings), so the import never holds one of them while waiting for the
+ * other against an undo that holds them the other way round. The redirect is read before the keys and again under them:
+ * with the key of the client and of its survivor held no merge or undo can move it. A redirect moved in between (a
+ * merge S→T finished first) needs one more key; it is taken waiting only when it sorts after every held key, otherwise
+ * without waiting, and a busy key refuses the import (the sender retries) instead of risking a deadlock.
+ * Returns the survivor or null. Exported for the lock-order integration test of the client merge.
+ */
+export async function takeSnapshotClientKeys(tx: TransactionClient, clientId: number): Promise<number | null> {
+  const held = new Set<string>();
+  const keyOf = (id: number) => `bitrix24-reverse:client:erp:${id}`;
+  const first = await mergedInto(tx, clientId);
+  for (const key of [...new Set([clientId, first].filter((id): id is number => id !== null).map(keyOf))].sort()) {
+    await tx.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))', [key]);
+    held.add(key);
+  }
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const survivor = await mergedInto(tx, clientId);
+    if (survivor === null || held.has(keyOf(survivor))) return survivor;
+    const key = keyOf(survivor);
+    if ([...held].every((h) => h < key)) {
+      await tx.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))', [key]);
+    } else {
+      const taken = (await tx.query<{ ok: boolean }>('SELECT pg_try_advisory_xact_lock_shared(hashtextextended($1, 0)) AS ok', [key])).rows[0]?.ok;
+      if (!taken) throw clientMergeBusy();
+    }
+    held.add(key);
+  }
+  throw clientMergeBusy();
+}
+
+function clientMergeBusy(): ApiError {
+  return new ApiError(409, 'CLIENT_MERGE_BUSY', 'Клиент заказа сейчас объединяется с другим; повторите импорт позже');
 }
 
 async function localOrderClient(tx: TransactionClient, orderId: number): Promise<number | null> {
@@ -1553,6 +1593,7 @@ async function upsertOrderChildren(
   dowelingOrderIds: Map<string, number>,
   payloadHash: string,
   command: ImportOrderSnapshotCommand,
+  guardDowelingOrders: (dowelingOrderIds: number[]) => Promise<void> = async () => undefined,
 ): Promise<void> {
   const source = snapshot.source.sourceInstanceId;
   const detailIds = await localIdsFor(tx, source, SNAPSHOT_ENTITY_TYPES.detail, snapshot.data.details);
@@ -1627,6 +1668,14 @@ async function upsertOrderChildren(
     await upsertMap(tx, { source, entityType: SNAPSHOT_ENTITY_TYPES.dowelingLink, sourceId, localId: String(id), localOrderId: orderId, payloadHash });
   }
   await deleteMissingImportedRows(tx, source, SNAPSHOT_ENTITY_TYPES.dowelingLink, orderId, savedLinks, 'order_doweling_links', 'order_doweling_link_id');
+  // A Bazis project card of an unknown client takes the client of the imported order (migration 279) — under the doweling
+  // rule of the card (R2 #1 of the code review).
+  await guardDowelingOrders(await defaultCardIds(tx, prepared.order.dowelingLinks.map((link) => link.dowelingOrderId)));
+  await refineDefaultCardClients(tx, prepared.order.dowelingLinks.map((link) => link.dowelingOrderId), {
+    currentUser: command.currentUser,
+    requestId: command.requestId ?? 'orders-snapshot-import',
+    source: 'backend-orders-snapshot',
+  });
 
   await recalcOrderProductionStatus(tx, orderId);
   const activeDetails = await tx.query<{ count: number }>('SELECT count(*)::int AS count FROM order_details WHERE order_id=$1 AND delete_flag=false', [orderId]);

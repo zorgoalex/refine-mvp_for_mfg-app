@@ -1,7 +1,6 @@
-// Standalone quick-create присадки modal. Creates ONE doweling order via the backend command
-// POST /api/v1/doweling-orders (audited/idempotent) — NOT a page-level Hasura write, and NOT linked to
-// any order (order_doweling_links stays in order-save). Distinct from the order-context
-// DowellingOrderQuickCreate modal (that one is create+link via Hasura inside the order form).
+// Quick-create of a Bazis project card (the former doweling order) from the list: the backend command
+// POST /api/v1/bazis/cards (audited/idempotent) with its client and, optionally, the order to link — NOT a page-level
+// Hasura write. The order list is limited to the chosen client (a card links orders of its own client only).
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Form, Input, Modal, Select, message } from 'antd';
@@ -11,7 +10,11 @@ import {
   buildCreateDowelingRequest,
   createDowelingIdempotencyKey,
   dowelingApi,
+  isOutdatedBackendError,
+  OUTDATED_BACKEND_MESSAGE,
 } from '../../api/dowelingApi';
+import { createBackendSelectProps, useOrderFormData } from '../../hooks/useOrderFormData';
+import { useBazisCardsCapability } from '../../hooks/useBazisCardsCapability';
 
 interface QuickCreateDowelingModalProps {
   open: boolean;
@@ -21,6 +24,8 @@ interface QuickCreateDowelingModalProps {
 
 interface QuickCreateFormValues {
   dowelingOrderName: string;
+  clientId: number;
+  orderId?: number;
   designEngineerId: number;
   paymentStatusId?: number;
 }
@@ -45,6 +50,7 @@ export const QuickCreateDowelingModal: React.FC<QuickCreateDowelingModalProps> =
 }) => {
   const [form] = Form.useForm<QuickCreateFormValues>();
   const [busy, setBusy] = useState(false);
+  const cardsSupported = useBazisCardsCapability();
   const idempotencyKeyRef = useRef<string>('');
   // Monotonic open-session token: bumped on each OPEN. A create that resolves after its session is no
   // longer current (modal was reopened) MUST NOT close/refetch — guards the stale-success race.
@@ -67,6 +73,28 @@ export const QuickCreateDowelingModal: React.FC<QuickCreateDowelingModalProps> =
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
   });
 
+  const orderFormData = useOrderFormData();
+  const useBackendReferences = orderFormData.enabled;
+  const { selectProps: legacyClientSelectProps } = useSelect({
+    resource: 'clients',
+    optionLabel: 'client_name',
+    optionValue: 'client_id',
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    queryOptions: { enabled: open && !useBackendReferences },
+  });
+  const clientSelectProps = useBackendReferences
+    ? createBackendSelectProps(orderFormData.references.clients, orderFormData.isLoading)
+    : legacyClientSelectProps;
+  const clientId = Form.useWatch('clientId', form);
+  const { selectProps: orderSelectProps } = useSelect({
+    resource: 'orders_view',
+    optionLabel: 'order_name',
+    optionValue: 'order_id',
+    filters: [{ field: 'client_id', operator: 'eq', value: clientId }],
+    sorters: [{ field: 'order_id', order: 'desc' }],
+    queryOptions: { enabled: open && Boolean(clientId) },
+  });
+
   const { canViewFinancials } = useOrderFinancialVisibility();
   const { selectProps: paymentStatusSelectProps } = useSelect({
     resource: 'payment_statuses',
@@ -79,6 +107,10 @@ export const QuickCreateDowelingModal: React.FC<QuickCreateDowelingModalProps> =
       return;
     }
 
+    if (!cardsSupported) {
+      message.error(OUTDATED_BACKEND_MESSAGE);
+      return;
+    }
     let values: QuickCreateFormValues;
     try {
       values = await form.validateFields();
@@ -93,6 +125,8 @@ export const QuickCreateDowelingModal: React.FC<QuickCreateDowelingModalProps> =
         buildCreateDowelingRequest({
           dowelingOrderName: values.dowelingOrderName,
           designEngineerId: values.designEngineerId,
+          clientId: values.clientId,
+          orderId: values.orderId ?? null,
           // Without the money right (or hidden by the settings) the server sets «Не оплачен».
           paymentStatusId: canViewFinancials ? values.paymentStatusId : undefined,
           idempotencyKey: idempotencyKeyRef.current,
@@ -102,13 +136,15 @@ export const QuickCreateDowelingModal: React.FC<QuickCreateDowelingModalProps> =
       if (session !== openSessionRef.current) {
         return;
       }
-      message.success('Присадка создана');
+      message.success('Базис-проект создан');
       form.resetFields();
       onCreated();
       onClose();
     } catch (error) {
       // Failure: keep the modal open and re-submittable; do NOT call onClose/onCreated.
-      message.error(extractErrorMessage(error, 'Не удалось создать присадку'));
+      message.error(isOutdatedBackendError(error)
+        ? OUTDATED_BACKEND_MESSAGE
+        : extractErrorMessage(error, 'Не удалось создать Базис-проект'));
     } finally {
       setBusy(false);
     }
@@ -116,7 +152,7 @@ export const QuickCreateDowelingModal: React.FC<QuickCreateDowelingModalProps> =
 
   return (
     <Modal
-      title="Быстрое создание присадки"
+      title="Быстрое создание Базис-проекта"
       open={open}
       onOk={handleOk}
       onCancel={() => {
@@ -138,7 +174,7 @@ export const QuickCreateDowelingModal: React.FC<QuickCreateDowelingModalProps> =
     >
       <Form form={form} layout="vertical">
         <Form.Item
-          label="Номер присадки"
+          label="Номер Базис-проекта"
           name="dowelingOrderName"
           rules={[
             { required: true, message: 'Обязательное поле' },
@@ -153,9 +189,30 @@ export const QuickCreateDowelingModal: React.FC<QuickCreateDowelingModalProps> =
               },
             },
           ]}
-          extra="Создаётся отдельно, без привязки к заказу"
         >
-          <Input placeholder="Введите номер присадки" maxLength={200} autoFocus />
+          <Input placeholder="Введите номер Базис-проекта" maxLength={200} autoFocus />
+        </Form.Item>
+
+        <Form.Item label="Клиент" name="clientId" rules={[{ required: true, message: 'Обязательное поле' }]}>
+          <Select
+            {...clientSelectProps}
+            placeholder="Выберите клиента"
+            showSearch
+            onChange={(value: unknown) => form.setFieldsValue({ clientId: Number(value), orderId: undefined })}
+            filterOption={(input, option) =>
+              (option?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())
+            }
+          />
+        </Form.Item>
+
+        <Form.Item label="Заказ" name="orderId" extra="Необязательно: заказ этого клиента, к которому относится Базис-проект">
+          <Select
+            {...orderSelectProps}
+            placeholder={clientId ? 'Выберите заказ' : 'Сначала выберите клиента'}
+            disabled={!clientId}
+            allowClear
+            showSearch
+          />
         </Form.Item>
 
         <Form.Item

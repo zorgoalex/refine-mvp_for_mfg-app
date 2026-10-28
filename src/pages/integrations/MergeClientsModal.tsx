@@ -269,6 +269,7 @@ export function MergeClientsModal({ open, card, onClose, onMerged, onCaseChanged
                   {preview.moves.ordersShown.length === 0 && preview.moves.ordersHidden && <div><Text type="secondary">+ скрытые заказы</Text></div>}
                 </Descriptions.Item>
                 <Descriptions.Item label="Связь с 1С">{preview.moves.onecLink ? 'перейдёт к остающемуся' : 'нет'}</Descriptions.Item>
+                {(preview.moves.bazisCards ?? 0) > 0 && <Descriptions.Item label="Базис-проекты">перейдут к остающемуся: {preview.moves.bazisCards}</Descriptions.Item>}
                 <Descriptions.Item label="Телефоны">
                   {preview.phones.moved.length === 0 && preview.phones.dropped.length === 0 && '—'}
                   {preview.phones.moved.map((phone) => (

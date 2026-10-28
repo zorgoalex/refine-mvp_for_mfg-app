@@ -15,4 +15,13 @@ export class HealthController {
   ready(): Promise<ReadyHealthResponse> {
     return this.healthService.ready();
   }
+
+  /**
+   * What this backend can do, for an open tab of a newer frontend (GET /api/v1/health/capabilities, no auth, no
+   * secrets): after a backend rollback the tab hides what the backend lacks instead of sending lost fields.
+   */
+  @Get('capabilities')
+  capabilities(): { bazisProjectCards: true } {
+    return { bazisProjectCards: true };
+  }
 }

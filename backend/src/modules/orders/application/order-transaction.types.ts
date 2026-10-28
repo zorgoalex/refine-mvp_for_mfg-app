@@ -459,6 +459,8 @@ export interface OrderWriteUnitOfWork {
   upsertDowelingLinks(
     orderId: number,
     links: readonly NormalizedSaveOrderDowelingLinkDto[],
+    /** Who links: a Bazis project card of an unknown client takes the order's client (migration 279). */
+    actor?: { currentUser: CurrentUser; requestId?: string },
   ): Promise<void>;
   deleteDowelingLinks(orderId: number, ids: readonly number[]): Promise<void>;
   /** Doweling rule for attach/detach/design-engineer changes; call before deleteDowelingLinks/upsertDowelingLinks. */

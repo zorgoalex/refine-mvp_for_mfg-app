@@ -34,6 +34,11 @@ export interface ImportRevisionCommand {
   xmlSha256: string;
   rawXmlGzip: Buffer;
   parsed: ParsedBazisRevision;
+  /**
+   * Route POST /bazis/cards/imports (plan v8 §0/§0a): the XML goes to a Bazis project card — the given one, the single
+   * candidate, or a new one. Absent (legacy POST /bazis/imports) — the import of the previous release, no card.
+   */
+  cards?: { dowelingOrderId: number | null; idempotencyKey: string };
 }
 
 export interface ImportXmlInput {
@@ -43,6 +48,8 @@ export interface ImportXmlInput {
   bazisProjectId: number | null;
   fileName: string;
   filePath: string;
+  /** Route /bazis/cards/imports: the XML goes to a Bazis project card (see ImportRevisionCommand.cards). */
+  cards?: { dowelingOrderId: number | null; idempotencyKey: string };
 }
 
 export interface CreateOrderFromRevisionCommand {
@@ -137,7 +144,7 @@ export interface BazisRepositoryPort {
     xmlSha256: string | null;
     errorMessage: string;
   }): Promise<void>;
-  listProjects(filter: { projectId?: number }): Promise<BazisProjectListItemDto[]>;
+  listProjects(filter: { projectId?: number; dowelingOrderId?: number }): Promise<BazisProjectListItemDto[]>;
   getProject(bazisProjectId: number): Promise<BazisProjectCardDto>;
   renameProject(input: RenameBazisProjectInput): Promise<BazisProjectNameDto>;
   setProjectDesignEngineer(

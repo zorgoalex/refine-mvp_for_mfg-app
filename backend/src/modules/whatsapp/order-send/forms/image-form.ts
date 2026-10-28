@@ -150,7 +150,7 @@ function header(data: OrderFormData, financial: boolean, top: number): { body: s
   body += cell(L, top, x(0.2) - L, r1) + cell(x(0.2), top, x(0.7) - x(0.2), r1) + cell(x(0.7), top, x(1) - x(0.7), r1);
   body += text(L + 3, top + 12, String(data.orderDate.getFullYear()).slice(-2), { size: 9 });
   body += text(L + 26, top + 33, data.orderName, { size: 21, bold: true });
-  body += text(x(0.115), top + 11, '№ присадки', { size: 7.5, fill: '#c00000' });
+  body += text(x(0.115), top + 11, '№ Базис-проекта', { size: 7.5, fill: '#c00000' });
   body += text(x(0.115), top + 33, data.prisadkaName ?? '', { size: 15, bold: true, fill: '#c00000' });
   body += text((x(0.2) + x(0.7)) / 2, top + 13, 'Заказчик', { size: 11.5, bold: true, anchor: 'middle' });
   body += text((x(0.2) + x(0.7)) / 2, top + 35, fitText(data.clientName ?? 'Не указан', x(0.5) - 10, 17), { size: 17, bold: true, anchor: 'middle' });

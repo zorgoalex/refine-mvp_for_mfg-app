@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { dowelingOrdersWritable } from '../doweling/adapters/doweling-write-guard';
 import { Inject, Injectable, Logger, Optional, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { auditService } from '../../common/audit/audit.service';
@@ -18,7 +19,7 @@ import {
 } from './client-merge';
 import { applyMerge, contactsOverLimit, planContacts, planPhones } from './merge-apply';
 import {
-  advisoryKeys, pairFingerprint, readBlockers, readClients, readContacts, readMappings, readOrders, readPair, readPhones, readProjects,
+  advisoryKeys, pairFingerprint, readBlockers, readClientCards, readClients, readContacts, readMappings, readOrders, readPair, readPhones, readProjects,
   takeAdvisoryKeys, type ClientState, type PairState,
 } from './merge-state';
 import {
@@ -122,9 +123,11 @@ export class ClientMergeService implements OnModuleInit, OnModuleDestroy {
         if (!before.get(s) || !before.get(m)) throw new ApiError(404, 'CLIENT_NOT_FOUND', 'Клиент не найден');
         const mappings = await readMappings(tx, [s, m]);
         await takeAdvisoryKeys(tx, advisoryKeys(s, m, before.get(m)!.ref, mappings).slice(1));
-        // Groups → orders → clients → phones/contacts (the order of the group and order commands, of WhatsApp, of the phone commands).
+        // Groups → orders → Bazis project cards → clients → phones/contacts (the order of the group and order commands, of
+        // the card commands — a card, then the FK lock of its client —, of WhatsApp, of the phone commands).
         const projects = await readProjects(tx, m, true);
         const orders = await readOrders(tx, { clientId: m }, true);
+        const cards = await readClientCards(tx, m, true);
         const clients = await readClients(tx, [s, m], true);
         const phones = await readPhones(tx, [s, m], true);
         const contacts = await readContacts(tx, [s, m], true);
@@ -139,6 +142,7 @@ export class ClientMergeService implements OnModuleInit, OnModuleDestroy {
           || !sameRows(phones.map((p) => p.phoneId), again.phones.map((p) => p.phoneId))
           || !sameRows(contacts.map((c) => c.contactId), again.contacts.map((c) => c.contactId))
           || JSON.stringify(mappings) !== JSON.stringify(again.mappings)
+          || !sameRows(cards, await readClientCards(tx, m, false))
           || clients.get(m)?.ref !== before.get(m)?.ref) {
           throw new LockedSetChanged();
         }
@@ -190,12 +194,20 @@ export class ClientMergeService implements OnModuleInit, OnModuleDestroy {
     if (state.standaloneDeadlines > 0) list.push('CLIENT_DEADLINES');
     if (contactsOverLimit(planContacts(state))) list.push('CONTACTS_LIMIT');
     if (state.orders.length > MAX_ORDERS) list.push('TOO_MANY_ROWS');
-    list.push(...this.permissionObstacles(user, state.orders, state.projects.length > 0));
+    list.push(...this.permissionObstacles(user, state.orders, state.projects.length > 0, state.bazisCards > 0));
+    // Every order of each card (active links ∪ legacy order_id — also deleted orders and orders of other clients a card of
+    // an unknown client may have), except the merged client's orders checked above: the doweling rule (R2 #2).
+    if (state.bazisCards > 0 && !list.includes('BAZIS_CARDS_NOT_PERMITTED') && !(await dowelingOrdersWritable({
+      tx: db, currentUser: user, dowelingOrderIds: await readClientCards(db, state.merged.clientId, false),
+      ownOrderIds: state.orders.map((o) => o.orderId),
+    }))) list.push('BAZIS_CARDS_NOT_PERMITTED');
     return list.map(obstacle);
   }
 
   /** The rights of every set a merge or an undo changes, by the current rights and owners (not by `clients.merge` alone). */
-  private permissionObstacles(user: CurrentUser, orders: ReadonlyArray<{ orderId: number; createdBy: string | null; managerId: string | null }>, projects: boolean): ObstacleCode[] {
+  private permissionObstacles(
+    user: CurrentUser, orders: ReadonlyArray<{ orderId: number; createdBy: string | null; managerId: string | null }>, projects: boolean, cards: boolean,
+  ): ObstacleCode[] {
     const list: ObstacleCode[] = [];
     // Changing an order needs to see it too (update and read grants are separate).
     if (orders.some((o) => {
@@ -204,6 +216,9 @@ export class ClientMergeService implements OnModuleInit, OnModuleDestroy {
     })) list.push('ORDERS_NOT_PERMITTED');
     if (projects && !user.permissions.includes('projects.manage')) list.push('PROJECTS_NOT_PERMITTED');
     if (!user.permissions.includes('clients.update')) list.push('CLIENTS_NOT_PERMITTED');
+    // Bazis project cards change their client with the orders (migration 279): the right of the card commands. Their
+    // orders are the client's orders (the invariant), so their scope is the order check above.
+    if (cards && !user.permissions.includes('doweling.update')) list.push('BAZIS_CARDS_NOT_PERMITTED');
     return list;
   }
 
@@ -310,6 +325,8 @@ export class ClientMergeService implements OnModuleInit, OnModuleDestroy {
         ordersShown: shown.map((o) => ({ orderId: o.orderId, name: o.name, deleted: o.deleted })),
         ordersHidden: state.orders.length - shown.length > 0,
         onecLink: state.merged.ref !== null,
+        // Bazis project cards of the merged client move with it (migration 279).
+        bazisCards: state.bazisCards,
       },
       phones: {
         moved: phones.move.map((p) => ({ phoneId: p.phoneId, number: phone(p.number) })),
@@ -437,8 +454,12 @@ export class ClientMergeService implements OnModuleInit, OnModuleDestroy {
     if (link) list.push(state.refs.get(merge.mergedId) ? 'UNDO_MERGED_LINKED' : 'UNDO_ONEC_LINK_CONFLICT');
     if (state.aliasRequests > 0) list.push('BITRIX_ALIAS_REQUESTS');
     if (undoSendsPending(state, plan)) list.push('WHATSAPP_PENDING');
+    if (plan.cardsSplit.length > 0) list.push('UNDO_BAZIS_CARD_SPLIT');
     const back = state.orders.filter((o) => plan.orderIds.includes(o.orderId));
-    list.push(...this.permissionObstacles(user, back, plan.projects.length > 0));
+    list.push(...this.permissionObstacles(user, back, plan.projects.length > 0, plan.cardsBack.length > 0));
+    if (plan.cardsBack.length > 0 && !list.includes('BAZIS_CARDS_NOT_PERMITTED') && !(await dowelingOrdersWritable({
+      tx: db, currentUser: user, dowelingOrderIds: plan.cardsBack, ownOrderIds: plan.orderIds,
+    }))) list.push('BAZIS_CARDS_NOT_PERMITTED');
     return list.map(obstacle);
   }
 

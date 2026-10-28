@@ -16,7 +16,7 @@ export class DowelingService {
 
   async createDowelingOrder(command: CreateDowelingOrderCommand) {
     if (!this.permissions.canUser(command.currentUser, 'doweling.create')) {
-      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для создания присадки', {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для создания Базис-проекта', {
         requiredPermissions: ['doweling.create'],
       });
     }
@@ -26,7 +26,7 @@ export class DowelingService {
 
   async updateDowelingOrder(command: UpdateDowelingOrderCommand) {
     if (!this.permissions.canUser(command.currentUser, 'doweling.update')) {
-      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для изменения присадки', {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для изменения Базис-проекта', {
         requiredPermissions: ['doweling.update'],
       });
     }

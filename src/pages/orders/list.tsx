@@ -1905,7 +1905,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                   </>
                 )}
                 <Col xs={24} sm={12} md={6} lg={4}>
-                  <Form.Item name="doweling_order_name" label="Присадка">
+                  <Form.Item name="doweling_order_name" label="Базис-проект">
                     <Select
                       {...dowelingSelectProps}
                       allowClear

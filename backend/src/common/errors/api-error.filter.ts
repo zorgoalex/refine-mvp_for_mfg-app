@@ -49,6 +49,12 @@ export class ApiErrorFilter implements ExceptionFilter {
       return;
     }
 
+    const bazisClient = bazisProjectClientError(exception);
+    if (bazisClient) {
+      response.status(bazisClient.statusCode).json(formatApiError(bazisClient, requestId));
+      return;
+    }
+
     const guard = mapDatabaseGuardError(exception);
     if (guard) {
       response.status(guard.statusCode).json(formatApiError(guard, requestId));
@@ -76,6 +82,22 @@ export function clientMergedError(exception: unknown): ApiError | null {
   return new ApiError(409, 'CLIENT_MERGED', 'Клиент объединён с другим клиентом; выберите остающегося клиента', {
     mergedClientId: merged ? Number(merged) : null, survivorId: survivor ? Number(survivor) : null,
   });
+}
+
+/**
+ * The read-only invariant triggers of migration 279 (a Bazis project card, its live orders and its attached XML share
+ * one client), from any write path that does not map it itself — order save, restore from the trash, snapshot import,
+ * order created from Bazis XML, group client change: a conflict naming the card.
+ */
+export function bazisProjectClientError(exception: unknown): ApiError | null {
+  const error = exception as { code?: unknown; constraint?: unknown; detail?: unknown } | null;
+  if (!error || error.code !== '23514' || error.constraint !== 'chk_bazis_project_client') return null;
+  const detail = typeof error.detail === 'string' ? error.detail : '';
+  const card = /dowelingOrderId=(\d+)/.exec(detail)?.[1];
+  return new ApiError(409, 'BAZIS_PROJECT_CLIENT_MISMATCH',
+    'Клиент Базис-проекта не совпадает с клиентом заказа. Отвяжите Базис-проект или выберите заказ того же клиента', {
+      dowelingOrderId: card ? Number(card) : null,
+    });
 }
 
 function describeException(exception: unknown): string {

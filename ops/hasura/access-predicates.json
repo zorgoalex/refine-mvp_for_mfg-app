@@ -131,12 +131,12 @@
       "doweling_orders": {
         "projection": "doweling_order_financials_view", "mapping": { "doweling_order_id": "doweling_order_id" },
         "financialColumns": ["payment_status_id", "total_amount", "final_amount", "discount", "surcharge", "paid_amount", "payment_date"],
-        "otherColumns": ["doweling_order_id", "doweling_order_name", "doweling_order_date", "order_id", "production_status_id", "issue_date", "parts_count", "link_cad_file", "link_pdf_file", "delete_flag", "version", "ref_key_1c", "created_by", "edited_by", "created_at", "updated_at", "design_engineer_id", "operator_id"]
+        "otherColumns": ["doweling_order_id", "doweling_order_name", "doweling_order_date", "order_id", "production_status_id", "issue_date", "parts_count", "link_cad_file", "link_pdf_file", "delete_flag", "version", "ref_key_1c", "created_by", "edited_by", "created_at", "updated_at", "design_engineer_id", "operator_id", "client_id", "client_source"]
       },
       "doweling_orders_view": {
         "projection": "doweling_order_financials_view", "mapping": { "doweling_order_id": "doweling_order_id" },
         "financialColumns": ["payment_status_name", "total_amount", "final_amount", "discount", "surcharge", "paid_amount", "payment_date"],
-        "otherColumns": ["doweling_order_id", "doweling_order_name", "order_id", "order_name", "client_id", "client_name", "doweling_order_date", "production_status_name", "issue_date", "parts_count", "milling_type_name", "edge_type_name", "material_name", "design_engineer_id", "design_engineer", "operator_id", "operator", "link_cad_file", "link_pdf_file", "version", "order_ref_key_1c", "client_ref_key_1c", "created_by", "edited_by", "created_at", "updated_at", "delete_flag"]
+        "otherColumns": ["doweling_order_id", "doweling_order_name", "order_id", "order_name", "client_id", "client_name", "doweling_order_date", "production_status_name", "issue_date", "parts_count", "milling_type_name", "edge_type_name", "material_name", "design_engineer_id", "design_engineer", "operator_id", "operator", "link_cad_file", "link_pdf_file", "version", "order_ref_key_1c", "client_ref_key_1c", "created_by", "edited_by", "created_at", "updated_at", "delete_flag", "client_source", "bazis_xml_count"]
       }
     }
   }

@@ -5,12 +5,13 @@ import { Table } from '../../../../ui/tooltipDelay';
 // Row 3: ERP project when enabled
 // Row 4: Doweling Orders Table (Name, Engineer)
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Popconfirm, notification } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { OrderLifecycleReadSurface, useSelect } from '../../../../query/orderLifecycleQueries';
 import { useDataProvider, useInvalidate } from '@refinedev/core';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
+import { useBazisCardsCapability } from '../../../../hooks/useBazisCardsCapability';
 import { numberParser } from '../../../../utils/numberFormat';
 import { optionalInputNumberFormatter } from '../../../../utils/inputNumberFormat';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
@@ -61,6 +62,14 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
     setInitializing,
     syncOriginals,
   } = useOrderFormStore();
+  // Номер Базис-проекта для быстрого создания: единственный номер проекта Базис в деталях (их заполняет импорт PDF).
+  const detailBasisProjects = useOrderFormStore((state) => state.details);
+  const suggestedBazisProjectName = useMemo(() => {
+    const names = [...new Set((detailBasisProjects ?? [])
+      .map((detail) => String(detail.basis_project ?? '').trim())
+      .filter((name) => name.length > 0))];
+    return names.length === 1 ? names[0] : null;
+  }, [detailBasisProjects]);
   const [clientModalOpen, setClientModalOpen] = useState(false);
   const [dowellingModalOpen, setDowellingModalOpen] = useState(false);
   const [selectedDowelingId, setSelectedDowelingId] = useState<number | undefined>(undefined);
@@ -278,10 +287,14 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
   ]);
 
   // Load existing doweling orders for selection
+  // Only Bazis projects of the order's client: a card links orders of its own client (migration 279).
+  const headerClientId = header.client_id ? Number(header.client_id) : null;
+  const cardsSupported = useBazisCardsCapability();
   const { selectProps: dowelingSelectProps, queryResult: dowelingQueryResult } = useSelect({
     resource: 'doweling_orders_view',
     optionLabel: 'doweling_order_name',
     optionValue: 'doweling_order_id',
+    filters: headerClientId ? [{ field: 'client_id', operator: 'eq', value: headerClientId }] : [],
     sorters: [{ field: 'doweling_order_id', order: 'desc' }],
     pagination: { pageSize: 50 },
     queryOptions: { enabled: !packerMode },
@@ -292,7 +305,8 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
 
   // Handle selection of existing doweling order
   const handleDowelingSelect = (dowelingOrderId: number) => {
-    if (!header.order_id) return;
+    // A new, unsaved order: the link is written by the order save (dowelingLinks).
+    if (!header.order_id && !headerClientId) return;
 
     // Check if already linked
     const alreadyLinked = dowelingLinks.some(l => l.doweling_order_id === dowelingOrderId);
@@ -303,7 +317,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
     if (!selectedDoweling) return;
 
     addDowelingLink({
-      order_id: header.order_id,
+      order_id: header.order_id ?? 0,
       doweling_order_id: dowelingOrderId,
       doweling_order: {
         doweling_order_id: dowelingOrderId,
@@ -326,7 +340,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
   // Колонки таблицы присадок
   const dowelingColumns = [
     {
-      title: 'Номер присадки',
+      title: 'Номер Базис-проекта',
       dataIndex: ['doweling_order', 'doweling_order_name'],
       key: 'name',
       render: (_: any, record: any) =>
@@ -367,7 +381,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
       width: 50,
       render: (_: any, record: any) => (
         <Popconfirm
-          title="Удалить связь с присадкой?"
+          title="Удалить связь с Базис-проектом?"
           onConfirm={() =>
             deleteDowelingLink(
               record.temp_id || record.order_doweling_link_id!,
@@ -567,8 +581,8 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
         <Row gutter={16} className="order-basic-form__doweling">
           <Col span={24}>
             <Form.Item
-              label="Присадки"
-              tooltip="Связанные заказы на присадку"
+              label="Базис-проекты"
+              tooltip="Связанные Базис-проекты"
             >
               <Space direction="vertical" style={{ width: '100%' }}>
                 {/* Таблица связанных присадок */}
@@ -609,8 +623,8 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
                     setSelectedDowelingId(undefined);
                     setDowelingSearchValue('');
                   }}
-                  placeholder="Выберите присадку или создайте новую"
-                  disabled={!header.order_id}
+                  placeholder="Выберите Базис-проект или создайте новый"
+                  disabled={!header.order_id && !headerClientId}
                   size="small"
                   style={{ width: 300 }}
                   showSearch
@@ -626,17 +640,19 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
                           type="text"
                           icon={<PlusOutlined />}
                           onClick={() => setDowellingModalOpen(true)}
+                          disabled={!cardsSupported}
+                          title={cardsSupported ? undefined : 'Версия сервера изменилась — обновите страницу'}
                           style={{ width: '100%', textAlign: 'left' }}
                         >
-                          Создать присадку
+                          Создать Базис-проект
                         </Button>
                       </div>
                     </>
                   )}
                 />
-                {!header.order_id && (
+                {!header.order_id && !headerClientId && (
                   <span style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
-                    Сначала сохраните заказ
+                    Сначала выберите клиента
                   </span>
                 )}
               </Space>
@@ -660,10 +676,13 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
           onClose={() => setDowellingModalOpen(false)}
           orderId={header.order_id}
           orderDate={typeof header.order_date === 'string' ? header.order_date : undefined}
+          clientId={typeof header.client_id === 'number' ? header.client_id : header.client_id ? Number(header.client_id) : null}
+          suggestedName={suggestedBazisProjectName}
           onSuccess={(dowellingOrderId, dowellingOrderName, designEngineerId, designEngineer, linkId) => {
             addDowelingLink({
               order_doweling_link_id: linkId,
-              order_id: header.order_id!,
+              // Новый заказ: связь без id пишется сохранением заказа (dowelingLinks).
+              order_id: header.order_id ?? 0,
               doweling_order_id: dowellingOrderId,
               doweling_order: {
                 doweling_order_id: dowellingOrderId,

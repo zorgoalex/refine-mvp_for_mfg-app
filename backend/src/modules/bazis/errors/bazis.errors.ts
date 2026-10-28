@@ -117,3 +117,34 @@ export class BazisAddToOrderConflictError extends ApiError {
     );
   }
 }
+
+/** Several cards (or one of another client) are candidates for an XML project without a card: resolve in the UI. */
+export class BazisProjectCardConflictError extends ApiError {
+  constructor(bazisProjectId: number, dowelingOrderIds: number[]) {
+    super(409, 'BAZIS_PROJECT_CARD_CONFLICT',
+      'У XML-проекта несколько возможных Базис-проектов (карточек). Оставьте одну карточку у его заказов и повторите', {
+        bazisProjectId,
+        dowelingOrderIds,
+      });
+  }
+}
+
+/** The card of the XML project changed between the read and the lock: repeat the action. */
+export class BazisProjectCardChangedError extends ApiError {
+  constructor(bazisProjectId: number) {
+    super(409, 'BAZIS_PROJECT_CARD_CHANGED', 'Карточку Базис-проекта только что изменили. Повторите действие', {
+      bazisProjectId,
+    });
+  }
+}
+
+/** The XML project already belongs to another card: a card is never replaced by an import. */
+export class BazisProjectCardMismatchError extends ApiError {
+  constructor(bazisProjectId: number, dowelingOrderId: number, requestedDowelingOrderId: number) {
+    super(409, 'BAZIS_PROJECT_CARD_MISMATCH', 'XML-проект уже прикреплён к другому Базис-проекту', {
+      bazisProjectId,
+      dowelingOrderId,
+      requestedDowelingOrderId,
+    });
+  }
+}

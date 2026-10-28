@@ -30,9 +30,13 @@ export interface BazisRevisionCutExportFile {
 }
 
 export const bazisApi = {
+  /**
+   * Import into a Bazis project card (`POST /bazis/cards/imports`): the given card, the single card of the XML project's
+   * orders, or a new one. The key makes a retry (lost answer) return the same XML project and card.
+   */
   import(
     file: File,
-    params: { projectId?: number; bazisProjectId?: number },
+    params: { projectId?: number; bazisProjectId?: number; dowelingOrderId?: number; idempotencyKey: string; legacy?: boolean },
   ): Promise<BazisImportResponse> {
     const formData = new FormData();
     formData.append('file', file);
@@ -41,7 +45,18 @@ export const bazisApi = {
     if (params.bazisProjectId != null) {
       formData.append('bazisProjectId', String(params.bazisProjectId));
     }
-    return httpClient.post<BazisImportResponse>(apiRoutes.bazis.imports, formData);
+    // An older backend (open tab after a rollback, capability false): the legacy import, without the card and key.
+    if (params.legacy) return httpClient.post<BazisImportResponse>(apiRoutes.bazis.imports, formData);
+    if (params.dowelingOrderId != null) formData.append('dowelingOrderId', String(params.dowelingOrderId));
+    formData.append('idempotencyKey', params.idempotencyKey);
+    return httpClient.post<BazisImportResponse>(apiRoutes.bazis.cardImports, formData);
+  },
+
+  /** XML projects of one Bazis project card. */
+  listCardProjects(dowelingOrderId: number): Promise<BazisProjectListItem[]> {
+    return httpClient.get<BazisProjectListItem[]>(
+      withQuery(apiRoutes.bazis.projects, { dowelingOrderId: validateId(dowelingOrderId, 'dowelingOrderId') }),
+    );
   },
 
   listProjects(projectId?: number): Promise<BazisProjectListItem[]> {

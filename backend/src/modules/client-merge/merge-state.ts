@@ -46,6 +46,8 @@ export interface PairState {
   whatsappPending: number;
   groupLinks: number;
   standaloneDeadlines: number;
+  /** Bazis project cards of the merged client: they follow it to the survivor (migration 279). */
+  bazisCards: number;
 }
 
 const toNum = (value: unknown): number => Number(value);
@@ -126,15 +128,16 @@ export async function readMappings(db: DatabaseClient, clientIds: number[]): Pro
 
 /** Counts that are obstacles of a merge: Bitrix requests, unfinished WhatsApp sends, links to access groups, deadlines without an order. */
 export async function readBlockers(db: DatabaseClient, mergedId: number, orderIds: number[], phoneIds: number[]) {
-  const row = (await db.query<{ requests: number; sends: number; links: number; deadlines: number }>(
+  const row = (await db.query<{ requests: number; sends: number; links: number; deadlines: number; cards: number }>(
     `SELECT (SELECT count(*)::int FROM bitrix24_incoming_request WHERE client_id = $1) AS requests,
             (SELECT count(*)::int FROM whatsapp_order_sends s
               WHERE s.state IN ('queued', 'sending', 'unknown')
                 AND (s.client_id = $1 OR s.order_id = ANY($2::bigint[]) OR s.client_phone_id = ANY($3::bigint[]))) AS sends,
             (SELECT count(*)::int FROM group_entity_links WHERE entity_type_code = 'client' AND entity_id_text = $1::text) AS links,
-            (SELECT count(*)::int FROM deadline_instances WHERE order_id IS NULL AND client_id = $1) AS deadlines`,
+            (SELECT count(*)::int FROM deadline_instances WHERE order_id IS NULL AND client_id = $1) AS deadlines,
+            (SELECT count(*)::int FROM doweling_orders WHERE client_id = $1) AS cards`,
     [mergedId, orderIds, phoneIds])).rows[0];
-  return { bitrixRequests: row.requests, whatsappPending: row.sends, groupLinks: row.links, standaloneDeadlines: row.deadlines };
+  return { bitrixRequests: row.requests, whatsappPending: row.sends, groupLinks: row.links, standaloneDeadlines: row.deadlines, bazisCards: row.cards };
 }
 
 export async function readPair(db: DatabaseClient, survivorId: number, mergedId: number): Promise<PairState | null> {
@@ -182,6 +185,13 @@ export function pairFingerprint(caseId: number, caseVersion: number, state: Pair
     phones: state.phones.map((p) => [p.phoneId, p.clientId, p.number, p.isPrimary, p.ref]),
     contacts: state.contacts.map((c) => [c.contactId, c.clientId, c.kind, c.valueNormalized, c.isPrimary, c.note]),
     mappings: state.mappings.map((m) => [m.clientId, m.bitrixObject, m.bitrixId, m.status]),
-    blockers: [state.bitrixRequests, state.whatsappPending, state.groupLinks, state.standaloneDeadlines],
+    blockers: [state.bitrixRequests, state.whatsappPending, state.groupLinks, state.standaloneDeadlines, state.bazisCards],
   });
+}
+
+/** Bazis project cards of a client (migration 279), in id order; locked after its orders, before the clients. */
+export async function readClientCards(db: DatabaseClient, clientId: number, lock: boolean): Promise<number[]> {
+  return (await db.query<{ doweling_order_id: string }>(
+    `SELECT doweling_order_id FROM doweling_orders WHERE client_id = $1 ORDER BY doweling_order_id ${lock ? 'FOR UPDATE' : ''}`,
+    [clientId])).rows.map((r) => Number(r.doweling_order_id));
 }

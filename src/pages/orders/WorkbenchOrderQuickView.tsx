@@ -63,7 +63,7 @@ export function orderQuickViewFacts(row: Row, showFinancials: boolean, now: Date
   push('Плёнка', text(row.film_name));
   push('Фрезеровка', text(row.milling_type_name));
   push('Обкат', text(row.edge_type_name));
-  push('Присадка', text(row.doweling_order_name));
+  push('Базис-проект', text(row.doweling_order_name));
   push('Примечание', text(row.notes));
   return facts;
 }

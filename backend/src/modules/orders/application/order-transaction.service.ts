@@ -1056,7 +1056,7 @@ export class OrderTransactionService {
       requestId,
     });
     await unitOfWork.deleteDowelingLinks(orderId, prepared.order.deleted.dowelingLinkIds);
-    await unitOfWork.upsertDowelingLinks(orderId, prepared.order.dowelingLinks);
+    await unitOfWork.upsertDowelingLinks(orderId, prepared.order.dowelingLinks, { currentUser, requestId });
     return new Map(
       prepared.details
         .filter((detail) => detail.clientKey && detail.id)

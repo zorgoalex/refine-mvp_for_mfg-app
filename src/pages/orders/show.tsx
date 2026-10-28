@@ -3449,7 +3449,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       return {
         key: `doweling-${link.order_doweling_link_id ?? index}`,
         icon: <AimOutlined />,
-        label: `Присадка ${name}`,
+        label: `Базис-проект ${name}`,
         to: getDowelingOrderShowPath(dowelingOrderId),
       };
     }),
@@ -4193,7 +4193,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       {/* Колонка 3 — Присадки + Раскрой (вертикально, разделены горизонтально) */}
                       <div style={{ borderLeft: '1px solid var(--app-border)', paddingLeft: 12 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#13c2c2', marginBottom: 3 }}>
-                          Присадки
+                          Базис-проекты
                         </div>
                         {dowelingLinks.length > 0 ? (
                           <Table
@@ -4213,7 +4213,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                             }}
                             columns={[
                               {
-                                title: 'Номер присадки',
+                                title: 'Номер Базис-проекта',
                                 key: 'name',
                                 render: (_, link: any) => {
                                   const dowelingOrderId =

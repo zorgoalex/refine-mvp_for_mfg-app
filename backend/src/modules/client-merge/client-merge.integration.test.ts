@@ -11,10 +11,13 @@ import { ClientCounterpartyRepository } from '../party-contacts/client-counterpa
 import { ClientMergeService } from './client-merge.service';
 import { alignDeadlines, purgeJournals } from './merge-maintenance';
 import { PgDeadlineRepository } from '../deadlines/adapters/pg-deadline-repository';
+import { takeSnapshotClientKeys } from '../orders/adapters/pg-order-snapshot';
+import type { TransactionClient } from '../../database/database.types';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const REF = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-const ALL = ['integrations.duplicates.view', 'clients.merge', 'clients.view', 'clients.update', 'projects.manage', 'orders.view', 'orders.update'];
+const ALL = ['integrations.duplicates.view', 'clients.merge', 'clients.view', 'clients.update', 'projects.manage', 'orders.view', 'orders.update',
+  'doweling.update'];
 const user = (permissions: string[] = ALL, scope: string[] = ['all']): CurrentUser => ({
   id: '11', username: 'merge-admin', role: 'admin', roleId: 1, permissions: permissions as CurrentUser['permissions'],
   policyScopeSets: scopeSetsFromRecord({ 'orders.view': scope, 'orders.update': scope }),
@@ -150,9 +153,23 @@ describe.skipIf(!databaseUrl)('merge of duplicate clients (PostgreSQL, isolated 
         created_by bigint, edited_by bigint, created_at timestamp DEFAULT now());
       CREATE TABLE onec_etl_entity_state(source_id bigint, entity_code text, snapshot_version timestamptz, revoked_at timestamptz, PRIMARY KEY (source_id, entity_code));
       CREATE TABLE onec_etl_mirror_rows(source_id bigint, entity_code text, source_key text, data jsonb, deleted boolean NOT NULL DEFAULT false,
-        missing_in_source_at timestamptz, PRIMARY KEY (source_id, entity_code, source_key));`);
+        missing_in_source_at timestamptz, PRIMARY KEY (source_id, entity_code, source_key));
+      CREATE TABLE doweling_orders(doweling_order_id bigserial PRIMARY KEY, doweling_order_name text NOT NULL, client_id bigint NOT NULL REFERENCES clients,
+        client_source text NOT NULL DEFAULT 'manual', delete_flag boolean NOT NULL DEFAULT false, version integer NOT NULL DEFAULT 0, order_id bigint);
+      CREATE TABLE order_doweling_links(order_doweling_link_id bigserial PRIMARY KEY, order_id bigint NOT NULL REFERENCES orders ON DELETE CASCADE,
+        doweling_order_id bigint NOT NULL REFERENCES doweling_orders, delete_flag boolean NOT NULL DEFAULT false, version integer NOT NULL DEFAULT 0);
+      CREATE TABLE bazis_projects(bazis_project_id bigserial PRIMARY KEY, project_id bigint NOT NULL REFERENCES projects, name text NOT NULL,
+        doweling_order_id bigint REFERENCES doweling_orders);`);
     await q(await migration('267_integration_duplicates'));
     await q(await migration('268_client_merges'));
+    // Migration 279: the merge journal knows Bazis project cards (the block of 279 that touches the merge tables).
+    const m279 = await migration('279_bazis_project_cards');
+    await q(m279.slice(m279.indexOf('-- Объединение клиентов (268'), m279.indexOf('-- ----', m279.indexOf('-- Объединение клиентов (268'))));
+    // The real version triggers (256) and the client invariant of 279 (its check functions and constraint triggers).
+    await q(await migration('256_doweling_order_version_triggers'));
+    await q(m279.slice(m279.indexOf('CREATE OR REPLACE FUNCTION bazis_card_client_violation'), m279.indexOf('-- Итоговая проверка переноса')));
+    await q(m279.slice(m279.indexOf('-- Проверочные триггеры'), m279.indexOf('-- Вставка без клиента')));
+    await q(m279.slice(m279.indexOf('-- Карточка не пишется на объединённого клиента'), m279.indexOf('-- ----', m279.indexOf('-- Карточка не пишется на объединённого клиента'))));
     // The invariant of migration 145 (its functions are replaced by 268).
     await q(`CREATE CONSTRAINT TRIGGER ctrg_bitrix24_request_link AFTER INSERT OR UPDATE ON bitrix24_incoming_request DEFERRABLE INITIALLY DEFERRED
                FOR EACH ROW EXECUTE FUNCTION validate_bitrix24_incoming_request_link();
@@ -194,6 +211,7 @@ describe.skipIf(!databaseUrl)('merge of duplicate clients (PostgreSQL, isolated 
     await q(`TRUNCATE client_merge_redirects, client_merge_items, client_merges, integration_duplicate_events, integration_duplicate_members,
              integration_duplicate_cases, integration_duplicate_check_requests, audit_log, audit_log_related_entity, outbox_events, crm_sync_outbox,
              command_idempotency_keys, whatsapp_order_sends, group_entity_links, deadline_events, deadline_instances, bitrix24_incoming_request,
+             bazis_projects, order_doweling_links, doweling_orders,
              orders, projects, client_contacts, client_phones, party_contact_versions, party_onec_profiles, crm_sync_mapping, clients RESTART IDENTITY CASCADE`);
   });
 
@@ -395,6 +413,262 @@ describe.skipIf(!databaseUrl)('merge of duplicate clients (PostgreSQL, isolated 
     expect((await q('SELECT 1 FROM integration_duplicate_members WHERE case_id = $1 AND left_at IS NULL', [caseId])).rows).toHaveLength(2);
     expect((await q('SELECT 1 FROM client_merge_redirects')).rows).toHaveLength(0);
     expect((await apiError(undo(mergeId))).code).toBe('CLIENT_MERGE_ALREADY_UNDONE');
+  });
+
+  it('Bazis project cards follow the merged client and come back whole with the undo (migration 279)', async () => {
+    const s = await newClient('Тест С-БП');
+    const m = await newClient('Тест М-БП');
+    const order = await newOrder(m);
+    const card = async (clientId: number, name: string) => Number((await one<{ doweling_order_id: string }>(
+      'INSERT INTO doweling_orders (doweling_order_name, client_id) VALUES ($1, $2) RETURNING doweling_order_id', [name, clientId])).doweling_order_id);
+    const linked = await card(m, 'Тест 1289');
+    const bare = await card(m, 'Тест без заказа');
+    const own = await card(s, 'Тест остающегося');
+    await q('INSERT INTO order_doweling_links (order_id, doweling_order_id) VALUES ($1, $2)', [order.orderId, linked]);
+    // An XML project without orders, in a group of the merged client, attached to the card without orders.
+    const xmlGroup = Number((await one<{ project_id: string }>(
+      `INSERT INTO projects (code, name, client_id, created_by) VALUES ('GXML1', 'g', $1, 12) RETURNING project_id`, [m])).project_id);
+    await q('INSERT INTO bazis_projects (project_id, name, doweling_order_id) VALUES ($1, $2, $3)', [xmlGroup, 'Тест XML', bare]);
+    await q('UPDATE doweling_orders SET version = 0');
+    const caseId = await newCase(s, m);
+    expect((await service.preview(user(), caseId, s, m)).moves).toMatchObject({ bazisCards: 2 });
+    const { mergeId } = await merge(caseId, s, m) as { mergeId: number };
+    // The version triggers of 256 bump the card version; the journal records the new one.
+    expect((await q("SELECT row_id, after->>'version' AS v FROM client_merge_items WHERE item_kind = 'bazis_card' ORDER BY row_id")).rows
+      .map((r) => Number(r.v))).toEqual([1, 1]);
+    const clientOf = async (cardId: number) => Number((await one<{ client_id: string }>('SELECT client_id FROM doweling_orders WHERE doweling_order_id = $1', [cardId])).client_id);
+    expect([await clientOf(linked), await clientOf(bare), await clientOf(own)]).toEqual([s, s, s]);
+    expect((await q("SELECT row_id FROM client_merge_items WHERE item_kind = 'bazis_card' ORDER BY row_id")).rows.map((r) => Number(r.row_id))).toEqual([linked, bare]);
+    expect((await q("SELECT 1 FROM audit_log WHERE event = 'doweling.updated' AND metadata_json->>'via' = 'client_merge'")).rows).toHaveLength(2);
+    expect((await q("SELECT 1 FROM outbox_events WHERE event_type = 'doweling_order.updated' AND idempotency_key LIKE 'client_merge-%'")).rows).toHaveLength(2);
+
+    const result = await undo(mergeId) as { report: { returned: Record<string, number> } };
+    expect(result.report.returned).toMatchObject({ orders: 1, bazisCards: 2 });
+    expect([await clientOf(linked), await clientOf(bare), await clientOf(own)]).toEqual([m, m, s]);
+    expect((await one<{ client_id: string }>('SELECT client_id FROM projects WHERE project_id = $1', [xmlGroup])).client_id).toBe(String(m));
+    const versions = (await q('SELECT version FROM doweling_orders WHERE doweling_order_id = ANY($1::bigint[]) ORDER BY doweling_order_id', [[linked, bare]])).rows;
+    expect(versions.map((r) => Number(r.version))).toEqual([2, 2]);
+    // One audit row and one event per card and direction.
+    expect((await q("SELECT 1 FROM audit_log WHERE event = 'doweling.updated' AND metadata_json->>'via' = 'client_merge_undo'")).rows).toHaveLength(2);
+    expect((await q("SELECT 1 FROM outbox_events WHERE event_type = 'doweling_order.updated'")).rows).toHaveLength(4);
+  });
+
+  it('a merge that moves Bazis project cards needs doweling.update; refused without changes', async () => {
+    const s = await newClient('Тест С-БП3');
+    const m = await newClient('Тест М-БП3');
+    const order = await newOrder(m);
+    const cardId = Number((await one<{ doweling_order_id: string }>(
+      'INSERT INTO doweling_orders (doweling_order_name, client_id) VALUES ($1, $2) RETURNING doweling_order_id', ['Тест права', m])).doweling_order_id);
+    await q('INSERT INTO order_doweling_links (order_id, doweling_order_id) VALUES ($1, $2)', [order.orderId, cardId]);
+    const caseId = await newCase(s, m);
+    const actor = user(ALL.filter((p) => p !== 'doweling.update'));
+    const preview = await service.preview(actor, caseId, s, m);
+    expect(preview.obstacles.map((o: { code: string }) => o.code)).toContain('BAZIS_CARDS_NOT_PERMITTED');
+    expect((await apiError(merge(caseId, s, m, actor))).statusCode).toBe(409);
+    expect((await one<{ client_id: string }>('SELECT client_id FROM doweling_orders WHERE doweling_order_id = $1', [cardId])).client_id).toBe(String(m));
+  });
+
+  it('a merge needs the scope of every order of the cards it moves (a deleted order of another client) — obstacle, nothing moved', async () => {
+    const s = await newClient('Тест С-БП5');
+    const m = await newClient('Тест М-БП5');
+    const other = await newClient('Тест чужой БП5');
+    const own = await newOrder(m, { createdBy: 11 });
+    const foreign = await newOrder(other, { createdBy: 13 });
+    const cardId = Number((await one<{ doweling_order_id: string }>(
+      "INSERT INTO doweling_orders (doweling_order_name, client_id, client_source) VALUES ($1, $2, 'default') RETURNING doweling_order_id",
+      ['Тест scope', m])).doweling_order_id);
+    await q('INSERT INTO order_doweling_links (order_id, doweling_order_id) VALUES ($1, $2), ($3, $2)', [own.orderId, cardId, foreign.orderId]);
+    await q('UPDATE orders SET delete_flag = true WHERE order_id = $1', [foreign.orderId]);
+    const caseId = await newCase(s, m);
+    const ownScope = user(ALL, ['own']);
+    const preview = await service.preview(ownScope, caseId, s, m);
+    expect(preview.obstacles.map((o: { code: string }) => o.code)).toContain('BAZIS_CARDS_NOT_PERMITTED');
+    expect((await one<{ client_id: string }>('SELECT client_id FROM doweling_orders WHERE doweling_order_id = $1', [cardId])).client_id).toBe(String(m));
+  });
+
+  it('a card is not written on a merged client (guard of 268 on doweling_orders)', async () => {
+    const s = await newClient('Тест С-БП6');
+    const m = await newClient('Тест М-БП6');
+    const caseId = await newCase(s, m);
+    await merge(caseId, s, m);
+    await expect(q('INSERT INTO doweling_orders (doweling_order_name, client_id) VALUES ($1, $2)', ['Тест после merge', m]))
+      .rejects.toMatchObject({ code: '23514', constraint: 'chk_client_not_merged' });
+  });
+
+  it('a card command holding its card and a merge of its client take their locks in one order (no deadlock)', async () => {
+    const s = await newClient('Тест С-БП7');
+    const m = await newClient('Тест М-БП7');
+    const cardId = Number((await one<{ doweling_order_id: string }>(
+      'INSERT INTO doweling_orders (doweling_order_name, client_id) VALUES ($1, $2) RETURNING doweling_order_id', ['Тест lock', m])).doweling_order_id);
+    const caseId = await newCase(s, m);
+    const preview = await service.preview(user(), caseId, s, m);
+    const card = await pool.connect();
+    try {
+      // The card command: its card first, then (by the FK of a new client) the client — like PATCH /doweling-orders/:id.
+      await card.query('BEGIN');
+      await card.query('SELECT 1 FROM doweling_orders WHERE doweling_order_id = $1 FOR UPDATE', [cardId]);
+      const merging = service.merge(user(), caseId, {
+        survivorId: s, mergedId: m, expectedCaseVersion: preview.caseVersion, previewToken: preview.previewToken, idempotencyKey: randomUUID(),
+      }, `req-${randomUUID()}`).then(() => 'merged', (error: unknown) => (error as { code?: string }).code ?? 'error');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await card.query('UPDATE doweling_orders SET client_id = $2 WHERE doweling_order_id = $1', [cardId, s]);
+      await card.query('COMMIT');
+      // The merge waited for the card (not the other way round) and finishes or starts over — never a deadlock.
+      expect(['merged', 'CLIENT_MERGE_PREVIEW_STALE', 'CLIENT_MERGE_BUSY']).toContain(await merging);
+    } finally {
+      card.release();
+    }
+  });
+
+  it('a snapshot import of the client (merge key, client, then its card) and a merge are serialized by the key (no deadlock)', async () => {
+    const snapshotSource = await readFile(new URL('../orders/adapters/pg-order-snapshot.ts', import.meta.url), 'utf8');
+    const upsert = snapshotSource.slice(snapshotSource.indexOf('export async function upsertClient('));
+    expect(upsert.indexOf('await takeSnapshotClientKeys(tx, byName)')).toBeLessThan(upsert.indexOf('FOR NO KEY UPDATE'));
+    const s = await newClient('Тест С-БП8');
+    const m = await newClient('Тест М-БП8');
+    const cardId = Number((await one<{ doweling_order_id: string }>(
+      'INSERT INTO doweling_orders (doweling_order_name, client_id) VALUES ($1, $2) RETURNING doweling_order_id', ['Тест снимок', m])).doweling_order_id);
+    const caseId = await newCase(s, m);
+    const preview = await service.preview(user(), caseId, s, m);
+    const importer = await pool.connect();
+    try {
+      // The snapshot import: the shared merge key of its client, the client row, then (later) its card.
+      await importer.query('BEGIN');
+      await importer.query("SET LOCAL lock_timeout = '3s'");
+      await importer.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))', [`bitrix24-reverse:client:erp:${m}`]);
+      await importer.query('SELECT 1 FROM clients WHERE client_id = $1 FOR NO KEY UPDATE', [m]);
+      const merging = service.merge(user(), caseId, {
+        survivorId: s, mergedId: m, expectedCaseVersion: preview.caseVersion, previewToken: preview.previewToken, idempotencyKey: randomUUID(),
+      }, `req-${randomUUID()}`).then(() => 'merged', (error: unknown) => (error as { code?: string }).code ?? 'error');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      // The merge waits for the key: the card is still free for the import.
+      await importer.query('SELECT 1 FROM doweling_orders WHERE doweling_order_id = $1 FOR UPDATE', [cardId]);
+      await importer.query('COMMIT');
+      expect(['merged', 'CLIENT_MERGE_BUSY']).toContain(await merging);
+    } finally {
+      importer.release();
+    }
+    // The work a merge starts after its commit (deadline alignment) may still hold locks on this schema: wait for it, so
+    // the next test can truncate.
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const held = await one<{ n: number }>(
+        `SELECT count(*)::int AS n FROM pg_locks l JOIN pg_class c ON c.oid = l.relation JOIN pg_namespace ns ON ns.oid = c.relnamespace
+          WHERE ns.nspname = $1 AND l.pid <> pg_backend_pid()`, [schema]);
+      if (held.n === 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  });
+
+  it('a snapshot of a merged client M (after M→S) and a merge S→T are serialized by the survivor key (no deadlock)', async () => {
+    const snapshotSource = await readFile(new URL('../orders/adapters/pg-order-snapshot.ts', import.meta.url), 'utf8');
+    expect(snapshotSource).toContain('const survivorId = await takeSnapshotClientKeys(tx, clientId);');
+    const m = await newClient('Тест М-БП9');
+    const s = await newClient('Тест С-БП9');
+    const tc = await newClient('Тест Т-БП9');
+    const cardId = Number((await one<{ doweling_order_id: string }>(
+      'INSERT INTO doweling_orders (doweling_order_name, client_id) VALUES ($1, $2) RETURNING doweling_order_id', ['Тест M→S', m])).doweling_order_id);
+    await merge(await newCase(s, m), s, m);
+    expect((await one<{ client_id: string }>('SELECT client_id FROM doweling_orders WHERE doweling_order_id = $1', [cardId])).client_id).toBe(String(s));
+    const caseId = await newCase(tc, s);
+    const preview = await service.preview(user(), caseId, tc, s);
+    const importer = await pool.connect();
+    try {
+      // The snapshot of M: its key, the redirect M→S, the key of S, a FK lock of S (a new group/order), then the card.
+      await importer.query('BEGIN');
+      await importer.query("SET LOCAL lock_timeout = '3s'");
+      await importer.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))', [`bitrix24-reverse:client:erp:${m}`]);
+      await importer.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))', [`bitrix24-reverse:client:erp:${s}`]);
+      await importer.query('SELECT 1 FROM clients WHERE client_id = $1 FOR KEY SHARE', [s]);
+      const merging = service.merge(user(), caseId, {
+        survivorId: tc, mergedId: s, expectedCaseVersion: preview.caseVersion, previewToken: preview.previewToken, idempotencyKey: randomUUID(),
+      }, `req-${randomUUID()}`).then(() => 'merged', (error: unknown) => (error as { code?: string }).code ?? 'error');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await importer.query('SELECT 1 FROM doweling_orders WHERE doweling_order_id = $1 FOR UPDATE', [cardId]);
+      await importer.query('COMMIT');
+      expect(['merged', 'CLIENT_MERGE_BUSY']).toContain(await merging);
+    } finally {
+      importer.release();
+    }
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const held = await one<{ n: number }>(
+        `SELECT count(*)::int AS n FROM pg_locks l JOIN pg_class c ON c.oid = l.relation JOIN pg_namespace ns ON ns.oid = c.relnamespace
+          WHERE ns.nspname = $1 AND l.pid <> pg_backend_pid()`, [schema]);
+      if (held.n === 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  });
+
+  it('a snapshot of a merged client takes the keys of the client and its survivor in the order of an undo (R5 #1, no deadlock)', async () => {
+    const a = await newClient('Тест А-БП10');
+    const b = await newClient('Тест Б-БП10');
+    const keyOf = (id: number) => `bitrix24-reverse:client:erp:${id}`;
+    // The survivor's key sorts first, the merged client's last: the order an undo takes them (advisoryKeys, sorted).
+    const [s, m] = keyOf(a) < keyOf(b) ? [a, b] : [b, a];
+    const { mergeId } = await merge(await newCase(s, m), s, m) as { mergeId: number };
+    const wrap = (connection: PoolClient): TransactionClient =>
+      ({ query: (text: string, params: readonly unknown[] = []) => connection.query(text, [...params]) }) as unknown as TransactionClient;
+    const undoing = await pool.connect();
+    const importer = await pool.connect();
+    const probe = await pool.connect();
+    try {
+      // An undo holds the key of S and is about to take the key of M.
+      await undoing.query('BEGIN');
+      await undoing.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [keyOf(s)]);
+      await importer.query('BEGIN');
+      await importer.query("SET LOCAL lock_timeout = '5s'");
+      const taking = takeSnapshotClientKeys(wrap(importer), m);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      // The import waits for S without holding M: the undo can take M.
+      await probe.query('BEGIN');
+      expect((await probe.query<{ ok: boolean }>('SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0)) AS ok', [keyOf(m)])).rows[0].ok).toBe(true);
+      await probe.query('ROLLBACK');
+      await undoing.query('COMMIT');
+      expect(await taking).toBe(s);
+      // With both keys held the real undo waits for the import, then finishes.
+      const undone = undo(mergeId).then(() => 'undone', (error: unknown) => (error as { code?: string }).code ?? 'error');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await importer.query('COMMIT');
+      expect(['undone', 'CLIENT_MERGE_BUSY']).toContain(await undone);
+    } finally {
+      undoing.release();
+      importer.release();
+      probe.release();
+    }
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const held = await one<{ n: number }>(
+        `SELECT count(*)::int AS n FROM pg_locks l JOIN pg_class c ON c.oid = l.relation JOIN pg_namespace ns ON ns.oid = c.relnamespace
+          WHERE ns.nspname = $1 AND l.pid <> pg_backend_pid()`, [schema]);
+      if (held.n === 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  });
+
+  it('the invariant triggers refuse a card left with the old client (a writer that moves only the orders)', async () => {
+    const s = await newClient('Тест С-БП4');
+    const m = await newClient('Тест М-БП4');
+    const order = await newOrder(m, { project: false });
+    const cardId = Number((await one<{ doweling_order_id: string }>(
+      'INSERT INTO doweling_orders (doweling_order_name, client_id) VALUES ($1, $2) RETURNING doweling_order_id', ['Тест инвариант', m])).doweling_order_id);
+    await q('INSERT INTO order_doweling_links (order_id, doweling_order_id) VALUES ($1, $2)', [order.orderId, cardId]);
+    await q('BEGIN');
+    await q('UPDATE orders SET client_id = $2 WHERE order_id = $1', [order.orderId, s]);
+    await expect(q('COMMIT')).rejects.toMatchObject({ code: '23514', constraint: 'chk_bazis_project_client' });
+  });
+
+  it('an undo that would split a Bazis project card between the clients is refused (UNDO_BAZIS_CARD_SPLIT)', async () => {
+    const s = await newClient('Тест С-БП2');
+    const m = await newClient('Тест М-БП2');
+    const order = await newOrder(m);
+    const cardId = Number((await one<{ doweling_order_id: string }>(
+      'INSERT INTO doweling_orders (doweling_order_name, client_id) VALUES ($1, $2) RETURNING doweling_order_id', ['Тест 1368', m])).doweling_order_id);
+    await q('INSERT INTO order_doweling_links (order_id, doweling_order_id) VALUES ($1, $2)', [order.orderId, cardId]);
+    const caseId = await newCase(s, m);
+    const { mergeId } = await merge(caseId, s, m) as { mergeId: number };
+    // After the merge the card also links an order of the survivor that stays with it.
+    const stays = await newOrder(s);
+    await q('INSERT INTO order_doweling_links (order_id, doweling_order_id) VALUES ($1, $2)', [stays.orderId, cardId]);
+    const preview = await service.undoPreview(user(), mergeId);
+    expect(preview.obstacles.map((o: { code: string }) => o.code)).toContain('UNDO_BAZIS_CARD_SPLIT');
   });
 
   it('undo restores a dropped duplicate phone, without its 1C key when another row took it; only the last merge of a chain is undone', async () => {

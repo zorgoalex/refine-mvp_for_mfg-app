@@ -143,6 +143,18 @@ export async function applyMerge(
       after: { clientId: s, version: order.version + 1, projectId: order.projectId } });
   }
 
+  // Bazis project cards of the merged client follow its orders and groups (migration 279: a card, its live orders and its
+  // attached XML share one client). Locked after the orders and groups (lock hierarchy of the doweling commands).
+  const cards = (await tx.query<{ doweling_order_id: string; client_source: string; version: number }>(
+    `UPDATE doweling_orders SET client_id = $2 WHERE client_id = $1
+     RETURNING doweling_order_id, client_source, version`, [m, s])).rows
+    .map((r) => ({ cardId: Number(r.doweling_order_id), clientSource: r.client_source, version: Number(r.version) }))
+    .sort((a, b) => a.cardId - b.cardId);
+  for (const card of cards) {
+    items.push({ kind: 'bazis_card', rowId: card.cardId, before: { clientId: m, clientSource: card.clientSource },
+      after: { clientId: s, version: card.version } });
+  }
+
   const phones = planPhones(state);
   for (const drop of phones.drop) {
     await tx.query('DELETE FROM client_phones WHERE phone_id = $1', [drop.phone.phoneId]);
@@ -188,6 +200,7 @@ export async function applyMerge(
     projects: state.projects.length, orders: state.orders.length, phonesMoved: phones.move.length, phonesDeleted: phones.drop.length,
     phoneKeysMoved: phones.drop.filter((d) => d.keyMoves).length, phoneKeysLost: phones.drop.filter((d) => d.keyLost).length,
     contactsMoved: contacts.move.length, contactsDeleted: contacts.drop.length, onecLink: state.merged.ref ? 1 : 0, redirectsRepointed: 0,
+    bazisCards: cards.length,
   };
 
   if (state.merged.ref) items.push({ kind: 'onec_link', rowId: m, before: { clientId: m, refKey1c: state.merged.ref }, after: { clientId: s, refKey1c: state.merged.ref } });
@@ -201,6 +214,7 @@ export async function applyMerge(
   await tx.query('UPDATE client_merges SET counts = $2::jsonb WHERE merge_id = $1', [mergeId, JSON.stringify(counts)]);
 
   await auditMovedOrders(tx, state.orders.map((o) => o.orderId), m, s, mergeId, actor, ctx, 'client_merge');
+  await auditMovedCards(tx, cards, m, s, mergeId, actor, ctx, 'client_merge');
   return { mergeId, movedOrderIds: orderIds, counts };
 }
 
@@ -239,5 +253,36 @@ export async function auditMovedOrders(
       before: { clientId: fromClientId }, after: { clientId: toClientId },
       metadata: { via, mergeId, correlationId: ctx.correlationId },
     });
+  }
+}
+
+/**
+ * A normalized audit row and the `doweling_order.updated` event for every Bazis project card whose client changed with
+ * a merge or its undo (one event per card and merge direction).
+ */
+export async function auditMovedCards(
+  tx: TransactionClient, cards: ReadonlyArray<{ cardId: number; version: number }>, fromClientId: number, toClientId: number,
+  mergeId: number, actor: CurrentUser, ctx: MergeContext, via: 'client_merge' | 'client_merge_undo',
+): Promise<void> {
+  for (const card of cards) {
+    const auditId = await auditService.record(tx, {
+      event: 'doweling.updated', entityType: 'doweling_order', entityId: card.cardId,
+      actorUserId: Number(actor.id), actorUsername: actor.username, actorRole: actor.role, requestId: ctx.requestId, source: SOURCE,
+      relatedClientId: toClientId,
+      relatedEntities: [{ entityType: 'doweling_order', entityId: card.cardId }, { entityType: 'client', entityId: fromClientId },
+        { entityType: 'client', entityId: toClientId }, { entityType: 'client_merge', entityId: mergeId }],
+      before: { clientId: fromClientId }, after: { clientId: toClientId },
+      diff: { clientId: { from: fromClientId, to: toClientId } },
+      metadata: { action: via, via, mergeId, correlationId: ctx.correlationId, dowelingOrderId: card.cardId },
+    });
+    const key = `${via}-${mergeId}-card-${card.cardId}`;
+    await tx.query(
+      `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+       VALUES ('doweling_order.updated', 'doweling_order', $1, $2::jsonb, $3) ON CONFLICT (idempotency_key) DO NOTHING`,
+      [String(card.cardId), JSON.stringify({
+        eventType: 'doweling_order.updated', dowelingOrderId: card.cardId, action: via, changedFields: ['clientId'],
+        fromClientId, toClientId, mergeId, version: card.version, auditId, actorUserId: actor.id, requestId: ctx.requestId,
+        idempotencyKey: key,
+      }), key]);
   }
 }

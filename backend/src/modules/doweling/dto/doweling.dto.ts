@@ -25,6 +25,11 @@ export interface CreateDowelingOrderRequestDto {
   linkPdfFile?: string | null;
   /** Link the new doweling order to this production order in the same transaction (quick-create from an order). */
   orderId?: number | null;
+  /**
+   * Client of the Bazis project. With `orderId` it must be the order's client (or absent: taken from the order).
+   * Absent without `orderId` (previous frontend, legacy route only) — the DB default «нд», client_source 'default'.
+   */
+  clientId?: number | null;
   idempotencyKey: string;
 }
 
@@ -34,7 +39,7 @@ export interface DowelingOrderLinkDto {
 }
 
 export interface CreateDowelingOrderResponseDto {
-  dowelingOrder: { dowelingOrderId: number; dowelingOrderName: string; version: number };
+  dowelingOrder: { dowelingOrderId: number; dowelingOrderName: string; version: number; clientId?: number | null };
   link?: DowelingOrderLinkDto | null;
   auditId?: string;
   requestId: string;
@@ -68,6 +73,8 @@ export interface UpdateDowelingOrderRequestDto {
   orderIds: number[];
   /** Orders the card showed (active links ∪ legacy order_id); must equal the current ones (409 otherwise). */
   baseOrderIds: number[];
+  /** Client of the Bazis project; absent = unchanged (a card of an unknown client takes the client of its orders). */
+  clientId?: number;
 }
 
 export interface UpdateDowelingOrderResponseDto {

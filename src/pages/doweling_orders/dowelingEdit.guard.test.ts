@@ -53,4 +53,14 @@ describe('doweling order full edit form', () => {
     expect(dowelingFields).toContain('"ref_key_1c"');
     expect(dowelingFields).toContain('"delete_flag"');
   });
+
+  it('reads the card client and never loses a chosen client when the backend no longer knows cards', () => {
+    const dowelingFields = dataProviderSource.slice(dataProviderSource.indexOf('doweling_orders: ['));
+    expect(dowelingFields.slice(0, dowelingFields.indexOf(']'))).toContain('"client_id"');
+    expect(editSource).toContain('const cardsSupported = useBazisCardsCapability();');
+    expect(editSource).toContain('if (!cardsSupported && chosenClient !== null && chosenClient !== storedClient) {');
+    expect(editSource).toContain('message.error(OUTDATED_BACKEND_MESSAGE);');
+    // a card of an unknown client: nothing is guessed, the field stays empty
+    expect(editSource).toContain('client_id: record.client_source === "default" ? undefined : record.client_id,');
+  });
 });

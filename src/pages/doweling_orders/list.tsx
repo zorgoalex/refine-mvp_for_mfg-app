@@ -9,6 +9,7 @@ import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
 import { can } from "../../utils/permissions";
 import { QuickCreateDowelingModal } from "./QuickCreateDowelingModal";
+import { useBazisCardsCapability } from "../../hooks/useBazisCardsCapability";
 import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
 
 export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
@@ -16,6 +17,8 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
   const [showInactive, setShowInactive] = useState(false);
   // Money columns only with the right and the settings matrix (Hasura answers money only with orders.view_financials).
   const { canViewFinancials } = useOrderFinancialVisibility();
+  // The quick-create of a card needs a backend that knows cards (an open tab after a backend rollback hides it).
+  const cardsSupported = useBazisCardsCapability();
   // Используем doweling_orders_view - одна строка = одна пара присадка-заказ (через order_doweling_links);
   // standalone присадки (без связи) показываются одной строкой с NULL order-колонками (LEFT JOIN).
   const { tableProps, tableQueryResult } = useTable({
@@ -67,7 +70,7 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <List
-      title="Присадка"
+      title="Базис-проекты"
       headerButtons={() => (
         <Space size={12} wrap>
           <Space size={8}>
@@ -78,13 +81,13 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
             />
             <span>Показывать неактивные</span>
           </Space>
-          {can("doweling.create") ? (
+          {can("doweling.create") && cardsSupported ? (
             <Button
               type="primary"
               icon={<PlusOutlined />}
               onClick={() => setQuickCreateOpen(true)}
             >
-              Быстрое создание присадки
+              Быстрое создание Базис-проекта
             </Button>
           ) : null}
         </Space>
@@ -128,10 +131,16 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
         />
         <Table.Column
           dataIndex="doweling_order_name"
-          title="Присадка"
+          title="Базис-проект"
           sorter
           width={100}
           render={(value) => <span style={{ color: '#DC2626', letterSpacing: '0.8px' }}>{value || "—"}</span>}
+        />
+        <Table.Column
+          dataIndex="bazis_xml_count"
+          title="XML Базиса"
+          width={90}
+          render={(value) => (Number(value) > 0 ? `есть (${value})` : "—")}
         />
         <Table.Column
           dataIndex="delete_flag"

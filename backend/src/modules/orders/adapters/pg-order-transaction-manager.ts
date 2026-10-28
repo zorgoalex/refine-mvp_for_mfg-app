@@ -10,7 +10,8 @@ import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { assertDowelingOrdersWritable } from '../../doweling/adapters/doweling-write-guard';
+import { assertDowelingOrdersWritable, defaultCardIds } from '../../doweling/adapters/doweling-write-guard';
+import { refineDefaultCardClients } from '../../doweling/adapters/doweling-sql';
 import { auditService } from '../../../common/audit/audit.service';
 import { computeDiff } from '../../../common/audit/audit-diff';
 import { PgOrderReadRepository } from './pg-order-read-repository';
@@ -1483,6 +1484,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
   async upsertDowelingLinks(
     orderId: number,
     links: readonly NormalizedSaveOrderDowelingLinkDto[],
+    actor?: { currentUser: CurrentUser; requestId?: string },
   ): Promise<void> {
     for (const link of links) {
       if (link.id) {
@@ -1497,7 +1499,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
           [link.id, orderId, link.dowelingOrderId, link.refKey1c],
         );
         if (kept.rowCount === 0) {
-          throw new ApiError(409, 'ORDER_DOWELING_LINK_STALE', 'Связь с присадкой уже снята. Обновите заказ и повторите', {
+          throw new ApiError(409, 'ORDER_DOWELING_LINK_STALE', 'Связь с Базис-проектом уже снята. Обновите заказ и повторите', {
             orderId,
             orderDowelingLinkId: link.id,
             dowelingOrderId: link.dowelingOrderId,
@@ -1553,6 +1555,14 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         }
       }
     }
+
+    if (actor) {
+      await refineDefaultCardClients(this.tx, links.map((link) => link.dowelingOrderId), {
+        currentUser: actor.currentUser,
+        requestId: actor.requestId && actor.requestId.length > 0 ? actor.requestId : 'order-save',
+        source: 'backend-orders-command',
+      });
+    }
   }
 
   /**
@@ -1568,6 +1578,10 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     requestId?: string;
   }): Promise<void> {
     const dowelingOrderIds = await changedDowelingOrderIds(this.tx, input.orderId, input.links, input.deletedLinkIds);
+    // A card of an unknown client gets the order's client by this save (refineDefaultCardClients): its rule too (R2 #1).
+    for (const cardId of await defaultCardIds(this.tx, input.links.map((link) => link.dowelingOrderId))) {
+      if (!dowelingOrderIds.includes(cardId)) dowelingOrderIds.push(cardId);
+    }
     await assertDowelingOrdersWritable({
       database: this.database,
       tx: this.tx,

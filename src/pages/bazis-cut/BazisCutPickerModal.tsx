@@ -315,7 +315,7 @@ export const BazisCutPickerModal: React.FC<BazisCutPickerModalProps> = ({
           onChange={(value) => changeFilter('bazisKeys', value)} />
         <PickerFilter label="Конструктор" disabled={filtersDisabled} value={filters.designEngineerIds}
           options={options(facets.designEngineers)} onChange={(value) => changeFilter('designEngineerIds', value)} />
-        <PickerFilter label="Присадка" disabled={filtersDisabled} value={filters.dowelingOrderIds}
+        <PickerFilter label="Базис-проект" disabled={filtersDisabled} value={filters.dowelingOrderIds}
           options={options(facets.dowelingOrders)} onChange={(value) => changeFilter('dowelingOrderIds', value)} />
       </Row>
 
@@ -397,7 +397,7 @@ function buildColumns(): ColumnsType<BazisCutPickerDetail> {
     { title: 'Фрезеровка', dataIndex: 'millingName', key: 'millingName', width: 160, ellipsis: true, render: empty },
     { title: 'Базис-проект / заказ', dataIndex: 'bazisLabel', key: 'bazisLabel', width: 220, ellipsis: true, render: empty },
     { title: 'Конструктор', dataIndex: 'designEngineerName', key: 'designEngineerName', width: 170, ellipsis: true, render: empty },
-    { title: 'Присадка', dataIndex: 'dowelingOrderName', key: 'dowelingOrderName', width: 170, ellipsis: true, render: empty },
+    { title: 'Базис-проект', dataIndex: 'dowelingOrderName', key: 'dowelingOrderName', width: 170, ellipsis: true, render: empty },
     { title: 'Базис-раскрой', key: 'bazisCutSets', width: 170,
       render: (_value, row) => row.bazisCutSets.length === 0 ? <Text type="secondary">—</Text>
         : <Space size={4} wrap>{row.bazisCutSets.map((set) => <Link key={set.bazisCutSetId}

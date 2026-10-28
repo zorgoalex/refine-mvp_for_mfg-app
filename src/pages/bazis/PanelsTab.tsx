@@ -1,5 +1,5 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
-// Главный экран Базис-проекта: панели ревизии (с любой глубины дерева).
+// Главный экран XML-проекта: панели ревизии (с любой глубины дерева).
 // По умолчанию сгруппированы по материалу и размерам (уникальные позиции);
 // чекбокс «Группировать» переключает на плоский список. Группа
 // разворачивается как Excel-группировка: вложенные панели рендерятся детьми
@@ -154,7 +154,7 @@ const PanelFilterDropdown: React.FC<FilterDropdownProps & { options: PanelFilter
 };
 
 // Per-user память чекбокса «Группировать» (localStorage, как detailGrouping
-// в заказах). Один флаг на пользователя — общий для всех Базис-проектов.
+// в заказах). Один флаг на пользователя — общий для всех XML-проектов.
 export function panelsGroupedKey(userId: string | number): string {
   return `bazis-panels:grouped:${userId}`;
 }

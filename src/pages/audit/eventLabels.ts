@@ -22,7 +22,7 @@ export const AUDIT_EVENT_TITLES: Record<string, string> = {
   'bitrix24_reverse.retry_failed': 'Повторная обработка ошибок синхронизации Bitrix24',
   'permissions.roles_matrix.reset': 'Сброшена матрица прав ролей',
   'permissions.roles_matrix.update': 'Изменена матрица прав ролей',
-  'doweling.created': 'Создано задание на присадку',
+  'doweling.created': 'Создан Базис-проект',
   'orders.status_board.read': 'Просмотрена доска статусов заказов',
   'vlm.analyze': 'Выполнен анализ документа',
   'vlm.upload': 'Загружен документ для распознавания',

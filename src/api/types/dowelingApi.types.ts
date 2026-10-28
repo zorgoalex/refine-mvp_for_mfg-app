@@ -13,6 +13,8 @@ export interface CreateDowelingOrderRequest {
   productionStatusId?: number | null;
   operatorId?: number | null;
   orderId?: number | null;
+  /** Client of the Bazis project: mandatory without `orderId`; with it — the order's client. */
+  clientId?: number | null;
   idempotencyKey: string;
 }
 
@@ -26,6 +28,7 @@ export interface CreateDowelingOrderResponse {
     dowelingOrderId: number;
     dowelingOrderName: string;
     version: number;
+    clientId?: number | null;
   };
   link?: DowelingOrderLink | null;
   auditId?: string;
@@ -56,6 +59,8 @@ export interface UpdateDowelingOrderRequest {
   orderIds: number[];
   /** Orders the card showed (active links ∪ legacy order_id); a mismatch is 409 DOWELING_LINKS_CONFLICT. */
   baseOrderIds: number[];
+  /** Client of the Bazis project; absent = unchanged. 409 BAZIS_PROJECT_CLIENT_MISMATCH for orders of another client. */
+  clientId?: number;
 }
 
 export interface UpdateDowelingOrderResponse {

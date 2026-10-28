@@ -254,7 +254,7 @@ function createDatabase(
         return { rows: [{ audit_id: `audit-id-${auditId}` }], rowCount: 1 };
       }
 
-      if (normalized.startsWith('SELECT order_id, created_by, manager_id, delete_flag, order_kind FROM orders')) {
+      if (normalized.startsWith('SELECT order_id, created_by, manager_id, delete_flag, order_kind, client_id FROM orders')) {
         const rows = (options.orders ?? []).filter((row) => (params[0] as number[]).includes(row.order_id));
         return { rows, rowCount: rows.length };
       }

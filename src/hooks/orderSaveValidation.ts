@@ -94,13 +94,13 @@ const FIELD_LABELS: Record<string, string> = {
   warehouseid: 'Склад',
   reservedat: 'Дата резервирования',
   consumedat: 'Дата списания',
-  dowelingorderid: 'Задание на присадку',
+  dowelingorderid: 'Базис-проект',
   designengineerid: 'Конструктор',
   detailids: 'Удалённые позиции',
   paymentids: 'Удалённые платежи',
   workshopids: 'Удалённые производства',
   requirementids: 'Удалённые материалы',
-  dowelinglinkids: 'Удалённые задания на присадку',
+  dowelinglinkids: 'Удалённые Базис-проекты',
   version: 'Версия заказа',
 };
 
@@ -237,7 +237,7 @@ function fieldScope(field: ParsedField, detailNumber: number | null): string {
   if (field.section === 'payments') return field.index === null ? 'Платежи' : `Платёж №${field.index + 1}`;
   if (field.section === 'workshops') return field.index === null ? 'Производство' : `Производство №${field.index + 1}`;
   if (field.section === 'requirements') return field.index === null ? 'Материалы' : `Материал №${field.index + 1}`;
-  if (field.section === 'dowelingLinks') return field.index === null ? 'Присадка' : `Присадка №${field.index + 1}`;
+  if (field.section === 'dowelingLinks') return field.index === null ? 'Базис-проект' : `Базис-проект №${field.index + 1}`;
   if (field.section === 'deleted') return 'Удалённые записи';
   return field.section ? 'Данные заказа' : '';
 }

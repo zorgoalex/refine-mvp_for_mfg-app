@@ -44,6 +44,20 @@ import {
   panelPreferredFilmName,
 } from './bazis-order-draft';
 import type { BazisDraftReferenceLookup } from './bazis-order-draft';
+import {
+  assertCardCreatable,
+  assertCardWritable,
+  attachXmlToCard,
+  createCardForXml,
+  detachXmlFromCard,
+  linkOrderToCard,
+  lockCard,
+  lockXmlProjectWithCard,
+  resolveCard,
+  type CardWriteContext,
+  type LockedCard,
+  type XmlProjectCardState,
+} from './bazis-project-card';
 import type {
   BazisAddToOrderResponseDto,
   BazisRevisionEstimateDto,
@@ -73,6 +87,7 @@ import {
   BazisIdempotencyKeyReusedError,
   BazisNodeNotFoundError,
   BazisNoPanelsSelectedError,
+  BazisProjectCardMismatchError,
   BazisProjectHasOrdersError,
   BazisProjectNotFoundError,
   BazisRevisionNotFoundError,
@@ -145,6 +160,9 @@ interface ProjectListRow {
   design_engineer_source: 'xml' | 'manual' | null;
   linked_order_ids: Array<number | string> | null;
   linked_orders?: Array<{ orderId: number | string; orderName: string | null; orderDeleted?: boolean | null }> | null;
+  doweling_order_id: number | string | null;
+  card_name: string | null;
+  card_order_ids: Array<number | string> | null;
 }
 
 interface ProjectRevisionRow {
@@ -380,6 +398,56 @@ export class PgBazisRepository implements BazisRepositoryPort {
         );
       }
 
+      // Route /bazis/cards/imports: idempotency first (a lost answer and a retry give the same XML project and card),
+      // then the locks group → card → XML project (plan v8 §0a). The legacy route keeps the previous behaviour.
+      const cardsRoute = command.cards ?? null;
+      const cardContext: CardWriteContext = { database: this.database, tx, currentUser: command.currentUser, requestId, source: SOURCE };
+      if (cardsRoute) {
+        const idempotency = await reconcileBazisIdempotency<BazisImportResponseDto>(tx, {
+          currentUser: command.currentUser,
+          idempotencyKey: cardsRoute.idempotencyKey,
+          commandName: 'bazis.import',
+          requestHash: createHash('sha256').update(JSON.stringify([
+            command.currentUser.id, command.xmlSha256, command.projectId, command.bazisProjectId, cardsRoute.dowelingOrderId,
+          ])).digest('hex'),
+          entityType: 'bazis_project',
+        });
+        if (idempotency.completedResponse) {
+          return idempotency.completedResponse;
+        }
+      }
+      let requestedCard: LockedCard | null = null;
+      let cardState: XmlProjectCardState | null = null;
+      const requestedCardId = cardsRoute?.dowelingOrderId ?? null;
+      if (command.bazisProjectId != null) {
+        // A new revision of an existing XML project, on both routes (R1 #1): group → every card involved (the current
+        // one, the candidates and the requested one, as one id-ordered set, R1 #4) → XML project.
+        cardState = await lockXmlProjectWithCard(tx, command.bazisProjectId, requestedCardId == null ? [] : [requestedCardId]);
+        if (requestedCardId != null) requestedCard = cardState.cards.get(requestedCardId) ?? null;
+        if (cardState.linkedCardId !== null) {
+          if (requestedCardId != null && requestedCardId !== cardState.linkedCardId) {
+            throw new BazisProjectCardMismatchError(command.bazisProjectId, cardState.linkedCardId, requestedCardId);
+          }
+          // The XML of a card changes the card: its right and scope, on the legacy route too.
+          await assertCardWritable(cardContext, cardState.linkedCardId);
+        }
+      } else if (requestedCardId != null) {
+        if (command.projectId == null) throw new BazisReferenceNotFoundError('projectId');
+        await tx.query('SELECT project_id FROM projects WHERE project_id = $1 FOR SHARE', [command.projectId]);
+        requestedCard = await lockCard(tx, requestedCardId);
+      }
+      if (requestedCardId != null) {
+        if (!requestedCard) {
+          throw new ApiError(404, 'BAZIS_PROJECT_CARD_NOT_FOUND', 'Базис-проект не найден', { dowelingOrderId: requestedCardId });
+        }
+        if (requestedCard.deleted) {
+          throw new ApiError(409, 'BAZIS_PROJECT_CARD_INACTIVE', 'Базис-проект неактивен: включите его или выберите другой', {
+            dowelingOrderId: requestedCard.cardId,
+          });
+        }
+        if (requestedCard.cardId !== cardState?.linkedCardId) await assertCardWritable(cardContext, requestedCard.cardId);
+      }
+
       let bazisProjectId = command.bazisProjectId;
       let projectId = command.projectId;
       let bazisProjectName: string;
@@ -481,6 +549,48 @@ export class PgBazisRepository implements BazisRepositoryPort {
             requestId,
           },
         });
+      }
+
+      // The card of the XML project (route /bazis/cards/imports only).
+      let cardId: number | null = cardState?.linkedCardId ?? null;
+      if (cardsRoute && cardId === null && bazisProjectId != null && projectId != null) {
+        const groupClientId = cardState?.groupClientId ?? Number((await tx.query<{ client_id: string | number }>(
+          'SELECT client_id FROM projects WHERE project_id = $1', [projectId])).rows[0].client_id);
+        const resolution = cardState ? resolveCard(cardState) : { kind: 'none' as const };
+        if (requestedCard) {
+          if (resolution.kind === 'adopt' && resolution.card.cardId !== requestedCard.cardId) {
+            throw new BazisProjectCardMismatchError(bazisProjectId, resolution.card.cardId, requestedCard.cardId);
+          }
+          if (requestedCard.clientId !== groupClientId) {
+            throw new ApiError(409, 'BAZIS_PROJECT_CLIENT_MISMATCH', 'Клиент Базис-проекта не совпадает с клиентом группы XML', {
+              dowelingOrderId: requestedCard.cardId, bazisProjectId,
+            });
+          }
+          await attachXmlToCard(cardContext, { bazisProjectId, projectId, card: requestedCard, origin: 'bazis_import' });
+          cardId = requestedCard.cardId;
+        } else if (resolution.kind === 'adopt') {
+          await assertCardWritable(cardContext, resolution.card.cardId);
+          await attachXmlToCard(cardContext, { bazisProjectId, projectId, card: resolution.card, origin: 'adopt' });
+          cardId = resolution.card.cardId;
+        } else if (effectiveDesignEngineerId != null && command.currentUser.permissions.includes('doweling.create')) {
+          const card = await createCardForXml(cardContext, {
+            bazisProjectId,
+            projectId,
+            groupClientId,
+            name: bazisProjectName,
+            designEngineerId: effectiveDesignEngineerId,
+            productionStatusId: null,
+            partsCount: 0,
+            origin: 'bazis_import',
+            clientSource: 'manual',
+            createdKey: `bazis-import-card-${bazisProjectId}`,
+          });
+          cardId = card.cardId;
+        } else {
+          warnings.push(effectiveDesignEngineerId == null
+            ? 'Карточка Базис-проекта не создана: не указан конструктор'
+            : 'Карточка Базис-проекта не создана: нет права на создание');
+        }
       }
 
       const dupSame = await tx.query<{ revision_no: number | string }>(
@@ -845,7 +955,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
         }
       }
 
-      return {
+      const response: BazisImportResponseDto = {
         bazisProject: {
           bazisProjectId,
           projectId: projectId ?? 0,
@@ -860,7 +970,12 @@ export class PgBazisRepository implements BazisRepositoryPort {
         unmappedMaterials,
         warnings,
         requestId,
+        ...(cardsRoute ? { dowelingOrderId: cardId } : {}),
       };
+      if (cardsRoute) {
+        await completeBazisIdempotency(tx, cardsRoute.idempotencyKey, response);
+      }
+      return response;
     });
   }
 
@@ -1081,6 +1196,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, input.currentUser.id);
       const requestId = requestIdOrFallback(input.requestId, 'bazis-set-design-engineer');
+      // Group → card → XML project (lock hierarchy of the Bazis project card, plan v8 §0a).
+      const cardState = await lockXmlProjectWithCard(tx, input.bazisProjectId);
       const existing = await tx.query<{
         project_id: number | string;
         design_engineer_id: number | string | null;
@@ -1196,6 +1313,33 @@ export class PgBazisRepository implements BazisRepositoryPort {
         designEngineerName = row.design_engineer_name;
       }
 
+      // An XML project without a card gets one once it has a design engineer (§0a): the single candidate of its client
+      // is adopted, otherwise a card is created — with doweling.create; without it the XML project stays without a card.
+      if (input.designEngineerId != null && cardState.linkedCardId === null) {
+        const cardContext: CardWriteContext = { database: this.database, tx, currentUser: input.currentUser, requestId, source: SOURCE };
+        const resolution = resolveCard(cardState);
+        if (resolution.kind === 'adopt') {
+          await assertCardWritable(cardContext, resolution.card.cardId);
+          await attachXmlToCard(cardContext, {
+            bazisProjectId: input.bazisProjectId, projectId: cardState.projectId, card: resolution.card, origin: 'adopt',
+          });
+        } else if (resolution.kind === 'none' && input.currentUser.permissions.includes('doweling.create')) {
+          const project = await tx.query<{ name: string }>('SELECT name FROM bazis_projects WHERE bazis_project_id = $1', [input.bazisProjectId]);
+          await createCardForXml(cardContext, {
+            bazisProjectId: input.bazisProjectId,
+            projectId: cardState.projectId,
+            groupClientId: cardState.groupClientId,
+            name: project.rows[0].name,
+            designEngineerId: input.designEngineerId,
+            productionStatusId: null,
+            partsCount: 0,
+            origin: 'bazis_design_engineer',
+            clientSource: 'manual',
+            createdKey: `bazis-engineer-card-${input.bazisProjectId}`,
+          });
+        }
+      }
+
       return {
         bazisProjectId: input.bazisProjectId,
         designEngineerId: input.designEngineerId,
@@ -1211,6 +1355,13 @@ export class PgBazisRepository implements BazisRepositoryPort {
       await setSessionUser(tx, input.currentUser.id);
       const requestId = requestIdOrFallback(input.requestId, 'bazis-delete');
       const bazisProjectId = input.bazisProjectId;
+      // Group → card → XML project; deleting an XML project of a card changes the card: its rights and scope (R3 #4).
+      const cardState = await lockXmlProjectWithCard(tx, bazisProjectId);
+      const cardContext: CardWriteContext = { database: this.database, tx, currentUser: input.currentUser, requestId, source: SOURCE };
+      const linkedCard = cardState.linkedCardId === null ? null : cardState.cards.get(cardState.linkedCardId) ?? null;
+      if (linkedCard) {
+        await assertCardWritable(cardContext, linkedCard.cardId);
+      }
 
       const existing = await tx.query<{ bazis_project_id: number | string; project_id: number | string; name: string }>(
         `
@@ -1253,6 +1404,9 @@ export class PgBazisRepository implements BazisRepositoryPort {
       const revisionsDeleted = Number(counts.rows[0]?.revisions_count ?? 0);
       const nodesDeleted = Number(counts.rows[0]?.nodes_count ?? 0);
 
+      if (linkedCard) {
+        await detachXmlFromCard(cardContext, { bazisProjectId, projectId, card: linkedCard });
+      }
       // bazis_import_runs.revision_id без CASCADE — снять до ревизий.
       await tx.query(
         `
@@ -1325,7 +1479,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
     });
   }
 
-  async listProjects(filter: { projectId?: number }): Promise<BazisProjectListItemDto[]> {
+  async listProjects(filter: { projectId?: number; dowelingOrderId?: number }): Promise<BazisProjectListItemDto[]> {
     const result = await this.database.query<ProjectListRow>(
       `
       SELECT bp.bazis_project_id,
@@ -1361,7 +1515,15 @@ export class PgBazisRepository implements BazisRepositoryPort {
                FROM bazis_order_links l
                JOIN orders o ON o.order_id = l.order_id
                WHERE l.bazis_project_id = bp.bazis_project_id
-             ), '[]'::jsonb) AS linked_orders
+             ), '[]'::jsonb) AS linked_orders,
+             bp.doweling_order_id,
+             (SELECT d.doweling_order_name FROM doweling_orders d WHERE d.doweling_order_id = bp.doweling_order_id) AS card_name,
+             ARRAY(SELECT odl.order_id FROM order_doweling_links odl
+                   WHERE odl.doweling_order_id = bp.doweling_order_id AND odl.delete_flag = false
+                   UNION
+                   SELECT d.order_id FROM doweling_orders d
+                   WHERE d.doweling_order_id = bp.doweling_order_id AND d.order_id IS NOT NULL
+                   ORDER BY 1) AS card_order_ids
       FROM bazis_projects bp
       JOIN projects erp_project ON erp_project.project_id = bp.project_id
       LEFT JOIN employees employee ON employee.employee_id = bp.design_engineer_id
@@ -1375,12 +1537,13 @@ export class PgBazisRepository implements BazisRepositoryPort {
       ) rev ON TRUE
       LEFT JOIN bazis_order_links bol ON bol.bazis_project_id = bp.bazis_project_id
       WHERE ($1::bigint IS NULL OR bp.project_id = $1)
+        AND ($2::bigint IS NULL OR bp.doweling_order_id = $2)
       GROUP BY bp.bazis_project_id, bp.project_id, erp_project.name, bp.name,
                bp.design_engineer_id, employee.full_name, bp.design_engineer_xml_name,
-               bp.design_engineer_source, rev.bazis_revision_id, rev.bazis_order_no
+               bp.design_engineer_source, rev.bazis_revision_id, rev.bazis_order_no, bp.doweling_order_id
       ORDER BY bp.bazis_project_id DESC
       `,
-      [filter.projectId ?? null],
+      [filter.projectId ?? null, filter.dowelingOrderId ?? null],
     );
     return result.rows.map(mapProjectListRow);
   }
@@ -1421,7 +1584,15 @@ export class PgBazisRepository implements BazisRepositoryPort {
                FROM bazis_order_links l
                JOIN orders o ON o.order_id = l.order_id
                WHERE l.bazis_project_id = bp.bazis_project_id
-             ), '[]'::jsonb) AS linked_orders
+             ), '[]'::jsonb) AS linked_orders,
+             bp.doweling_order_id,
+             (SELECT d.doweling_order_name FROM doweling_orders d WHERE d.doweling_order_id = bp.doweling_order_id) AS card_name,
+             ARRAY(SELECT odl.order_id FROM order_doweling_links odl
+                   WHERE odl.doweling_order_id = bp.doweling_order_id AND odl.delete_flag = false
+                   UNION
+                   SELECT d.order_id FROM doweling_orders d
+                   WHERE d.doweling_order_id = bp.doweling_order_id AND d.order_id IS NOT NULL
+                   ORDER BY 1) AS card_order_ids
       FROM bazis_projects bp
       JOIN projects erp_project ON erp_project.project_id = bp.project_id
       LEFT JOIN employees employee ON employee.employee_id = bp.design_engineer_id
@@ -1437,7 +1608,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
       WHERE bp.bazis_project_id = $1
       GROUP BY bp.bazis_project_id, bp.project_id, erp_project.name, bp.name,
                bp.design_engineer_id, employee.full_name, bp.design_engineer_xml_name,
-               bp.design_engineer_source, rev.bazis_revision_id, rev.bazis_order_no
+               bp.design_engineer_source, rev.bazis_revision_id, rev.bazis_order_no, bp.doweling_order_id
       `,
       [bazisProjectId],
     );
@@ -3073,6 +3244,23 @@ export class PgBazisRepository implements BazisRepositoryPort {
     metadataSource?: 'panels_draft';
     outboxIdempotencyKey?: string;
   }): Promise<CreateOrderFromRevisionResponseDto> {
+    // Карточка Базис-проекта (миграция 279, план v8 §0a): иерархия блокировок группа → карточка → XML-проект →
+    // ревизия. Группа уже заблокирована созданием заказа; карточка и XML-проект — до ревизии.
+    const cardContext: CardWriteContext = {
+      database: this.database,
+      tx: input.tx,
+      currentUser: input.command.currentUser,
+      requestId: input.requestId,
+      source: SOURCE,
+    };
+    const cardState = await lockXmlProjectWithCard(input.tx, input.revision.bazisProjectId);
+    const resolution = resolveCard(cardState);
+    if (resolution.kind === 'none') {
+      assertCardCreatable(input.command.currentUser);
+    } else {
+      await assertCardWritable(cardContext, resolution.card.cardId, input.created.orderId);
+    }
+
     // Единый порядок локов с retention-prune (revision → nodes): сначала
     // KEY SHARE на строку ревизии, потом FK-локи на nodes через map-инсерты.
     // Ревизия исчезла (конкурентный prune) → 404, а не FK-ошибка/deadlock.
@@ -3115,67 +3303,68 @@ export class PgBazisRepository implements BazisRepositoryPort {
       [input.revision.bazisProjectId, input.created.orderId, input.revision.revisionId],
     );
 
-    const statusDefaults = await input.tx.query<{
-      payment_status_id: number | string | null;
-      production_status_id: number | string | null;
-    }>(
-      `
-      SELECT
-        (SELECT payment_status_id
-         FROM payment_statuses
-         WHERE lower(btrim(payment_status_name)) = lower('Не оплачен')
-         ORDER BY payment_status_id
-         LIMIT 1) AS payment_status_id,
-        (SELECT production_status_id
-         FROM production_statuses
-         WHERE lower(btrim(production_status_code)) = 'drawn'
-         ORDER BY production_status_id
-         LIMIT 1) AS production_status_id
-      `,
-    );
-    const paymentStatusId = nullableNumber(statusDefaults.rows[0]?.payment_status_id);
-    if (paymentStatusId == null) {
-      throw new ApiError(
-        500,
-        'BAZIS_DOWELING_DEFAULT_STATUS_MISSING',
-        'Не найден статус оплаты «Не оплачен» для присадки Базис-проекта',
+    // Заказ — в карточку XML-проекта; поля карточки не меняются. Нет карточки — создаётся (как прежняя присадка).
+    let dowelingOrderId: number;
+    let dowelingOrderName: string;
+    if (resolution.kind === 'none') {
+      const productionStatus = await input.tx.query<{ production_status_id: number | string | null }>(
+        `
+        SELECT production_status_id
+        FROM production_statuses
+        WHERE lower(btrim(production_status_code)) = 'drawn'
+        ORDER BY production_status_id
+        LIMIT 1
+        `,
       );
-    }
-    const productionStatusId = nullableNumber(statusDefaults.rows[0]?.production_status_id);
-    if (productionStatusId == null) {
-      throw new ApiError(
-        500,
-        'BAZIS_DOWELING_DEFAULT_STATUS_MISSING',
-        'Не найден производственный статус «drawn» для присадки Базис-проекта',
-      );
-    }
-    const dowelingOrderName = input.revision.revisionBazisOrderNo?.trim()
-      || input.revision.bazisProjectName.trim();
-    const doweling = await input.tx.query<{ doweling_order_id: number | string }>(
-      `
-      INSERT INTO doweling_orders
-        (doweling_order_name, doweling_order_date, order_id, payment_status_id,
-         production_status_id, design_engineer_id, parts_count)
-      VALUES ($1, CURRENT_DATE, $2, $3, $4, $5, $6)
-      RETURNING doweling_order_id
-      `,
-      [
-        dowelingOrderName,
-        input.created.orderId,
-        paymentStatusId,
+      const productionStatusId = nullableNumber(productionStatus.rows[0]?.production_status_id);
+      if (productionStatusId == null) {
+        throw new ApiError(
+          500,
+          'BAZIS_DOWELING_DEFAULT_STATUS_MISSING',
+          'Не найден производственный статус «drawn» для Базис-проекта',
+        );
+      }
+      dowelingOrderName = input.revision.revisionBazisOrderNo?.trim() || input.revision.bazisProjectName.trim();
+      const card = await createCardForXml(cardContext, {
+        bazisProjectId: input.revision.bazisProjectId,
+        projectId: input.revision.projectId,
+        groupClientId: cardState.groupClientId,
+        name: dowelingOrderName,
+        designEngineerId: input.revision.designEngineerId,
         productionStatusId,
-        input.revision.designEngineerId,
-        input.detailsCreated,
-      ],
-    );
-    const dowelingOrderId = Number(doweling.rows[0].doweling_order_id);
-    await input.tx.query(
-      `
-      INSERT INTO order_doweling_links (order_id, doweling_order_id)
-      VALUES ($1, $2)
-      `,
-      [input.created.orderId, dowelingOrderId],
-    );
+        partsCount: input.detailsCreated,
+        origin: 'bazis_create_order',
+        clientSource: 'order',
+        createdKey: `bazis-doweling-created-${input.created.orderId}`,
+      });
+      dowelingOrderId = card.cardId;
+      // Прежние читатели legacy-колонки (отчёты): новая карточка помнит заказ, из которого создана.
+      await input.tx.query('UPDATE doweling_orders SET order_id = $2 WHERE doweling_order_id = $1', [
+        dowelingOrderId,
+        input.created.orderId,
+      ]);
+      await input.tx.query('INSERT INTO order_doweling_links (order_id, doweling_order_id) VALUES ($1, $2)', [
+        input.created.orderId,
+        dowelingOrderId,
+      ]);
+    } else {
+      if (resolution.kind === 'adopt') {
+        await attachXmlToCard(cardContext, {
+          bazisProjectId: input.revision.bazisProjectId,
+          projectId: input.revision.projectId,
+          card: resolution.card,
+          origin: 'adopt',
+        });
+      }
+      await linkOrderToCard(cardContext, {
+        card: resolution.card,
+        orderId: input.created.orderId,
+        bazisProjectId: input.revision.bazisProjectId,
+        revisionId: input.revision.revisionId,
+      });
+      dowelingOrderId = resolution.card.cardId;
+      dowelingOrderName = resolution.card.name;
+    }
 
     const mappedNodes = input.panels.filter((panel) =>
       input.created.detailIdsByClientKey.has(
@@ -3240,59 +3429,6 @@ export class PgBazisRepository implements BazisRepositoryPort {
           requestId: input.requestId,
         }),
         input.outboxIdempotencyKey ?? `bazis-order-created-${input.command.idempotencyKey}`,
-      ],
-    );
-
-    const dowelingAuditId = await auditService.record(input.tx, {
-      event: 'doweling.created',
-      entityType: 'doweling_order',
-      entityId: String(dowelingOrderId),
-      actorUserId: input.command.currentUser.id,
-      actorUsername: input.command.currentUser.username,
-      actorRole: input.command.currentUser.role,
-      requestId: input.requestId,
-      source: SOURCE,
-      relatedOrderId: input.created.orderId,
-      relatedEntities: [
-        { entityType: 'order', entityId: input.created.orderId },
-        { entityType: 'project', entityId: input.revision.projectId },
-        { entityType: 'bazis_project', entityId: input.revision.bazisProjectId },
-        { entityType: 'employee', entityId: input.revision.designEngineerId },
-        { entityType: 'doweling_order', entityId: dowelingOrderId },
-      ],
-      before: {},
-      after: {
-        dowelingOrderId,
-        dowelingOrderName,
-        orderId: input.created.orderId,
-        designEngineerId: input.revision.designEngineerId,
-        designEngineerName: input.revision.designEngineerName,
-        paymentStatusId,
-        productionStatusId,
-      },
-      metadata: { source: SOURCE, action: 'bazis_doweling_create', requestId: input.requestId },
-    });
-    await input.tx.query(
-      `
-      INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
-      VALUES ($1,$2,$3,$4::jsonb,$5)
-      ON CONFLICT (idempotency_key) DO NOTHING
-      `,
-      [
-        'doweling_order.created',
-        'doweling_order',
-        String(dowelingOrderId),
-        JSON.stringify({
-          eventType: 'doweling_order.created',
-          dowelingOrderId,
-          dowelingOrderName,
-          orderId: input.created.orderId,
-          bazisProjectId: input.revision.bazisProjectId,
-          designEngineerId: input.revision.designEngineerId,
-          actorUserId: input.command.currentUser.id,
-          requestId: input.requestId,
-        }),
-        `bazis-doweling-created-${input.created.orderId}-${dowelingAuditId}`,
       ],
     );
 
@@ -3475,6 +3611,13 @@ function mapProjectListRow(row: ProjectListRow): BazisProjectListItemDto {
     designEngineerSource: row.design_engineer_source,
     linkedOrderIds: (row.linked_order_ids ?? []).map((value) => Number(value)),
     linkedOrders,
+    card: row.doweling_order_id == null
+      ? null
+      : {
+          dowelingOrderId: Number(row.doweling_order_id),
+          name: row.card_name ?? '',
+          orderIds: (row.card_order_ids ?? []).map((value) => Number(value)),
+        },
   };
 }
 

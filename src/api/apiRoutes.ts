@@ -359,10 +359,14 @@ export const apiRoutes = {
   },
   dowelingOrders: {
     create: backendApiPath('/doweling-orders'),
+    /** Bazis project card quick-create with its client (new route: an older backend answers 404, not a lost client). */
+    createCard: backendApiPath('/bazis/cards'),
     update: (dowelingOrderId: number) => backendApiPath(`/doweling-orders/${dowelingOrderId}`),
   },
   bazis: {
     imports: backendApiPath('/bazis/imports'),
+    /** Import into a Bazis project card (new route: an older backend answers 404 instead of losing the card). */
+    cardImports: backendApiPath('/bazis/cards/imports'),
     projects: backendApiPath('/bazis/projects'),
     project: (id: number) => backendApiPath(`/bazis/projects/${id}`),
     projectDesignEngineer: (id: number) => backendApiPath(`/bazis/projects/${id}/design-engineer`),
