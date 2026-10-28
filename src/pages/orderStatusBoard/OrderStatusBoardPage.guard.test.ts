@@ -1421,6 +1421,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toMatch(
       /\.cnc-packet-card--other-material\s*\{[^}]*border-color: #8b5a2b;[^}]*box-shadow:/s,
     );
+    // thin outline: border + a 1px ring, no inset line
+    expect(css).toMatch(/\.cnc-packet-card--other-material\s*\{[^}]*box-shadow:\s*0 0 0 1px rgba\(139, 90, 43, 0\.34\),/s);
   });
 
   it('auto-expands only MDF machine maps while keeping non-MDF cards manually expandable', () => {

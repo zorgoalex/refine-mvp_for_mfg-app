@@ -1296,8 +1296,8 @@
     0 2px 8px rgba(250, 84, 28, 0.28);
 }
 
-/* Non-MDF machine files: cream fill and a double brown outline that stays the
-   same on hover, click (relation highlight), touch drag and deep link. */
+/* Non-MDF machine files: cream fill and a thin brown outline (1px border + 1px ring, a third of the former width —
+   the cream fill marks them) that stays the same on hover, click (relation highlight), touch drag and deep link. */
 .cnc-board-card-shell > .status-board-card.cnc-packet-card--other-material,
 .status-board-card.cnc-packet-card--other-material:hover,
 .status-board-card.cnc-packet-card--other-material {
@@ -1307,8 +1307,7 @@
   border-style: solid;
   background: color-mix(in srgb, #f3dfb8 42%, var(--app-surface));
   box-shadow:
-    inset 0 0 0 1px #8b5a2b,
-    0 0 0 4px rgba(139, 90, 43, 0.34),
+    0 0 0 1px rgba(139, 90, 43, 0.34),
     0 2px 8px var(--app-shadow);
 }
 
