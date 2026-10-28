@@ -10,6 +10,8 @@ export function mdfDeepLinkLookup(input: {
   active: boolean;
   /** the legacy data (`today`) loading */
   loading: boolean;
+  /** the last read failed: what is shown is older data, a card missing there is not known to be missing */
+  loadFailed: boolean;
   /** the order cards of the shown `today` still loading (a card filtered by its order, e.g. planned today) */
   ordersLoading: boolean;
   renderMode: 'loading' | 'unavailable' | 'published' | 'legacy';
@@ -22,7 +24,7 @@ export function mdfDeepLinkLookup(input: {
   todayFocusBathCardId: string | null;
 }): MdfDeepLinkLookup {
   if (!input.active || input.renderMode === 'unavailable' || input.engineViewShown) return 'skip';
-  if (input.loading || input.ordersLoading || input.renderMode === 'loading') return 'wait';
+  if (input.loading || input.loadFailed || input.ordersLoading || input.renderMode === 'loading') return 'wait';
   if (input.renderMode === 'published' && (input.publishedLoading || !input.publishedSettledForQuery)) return 'wait';
   if (input.kind === 'bath' && input.todayFocusBathCardId !== input.cardId) return 'wait';
   return 'look';

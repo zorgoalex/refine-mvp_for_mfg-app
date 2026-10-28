@@ -1941,6 +1941,11 @@ describe('MDF board card link (cardKind/cardId)', () => {
     expect(section).toContain('publishedSettledForQuery: mdfPublishedBoard.settledQueryKey === mdfPublishedQueryKey(');
     expect(section).toContain('todayFocusBathCardId: cncTodayFocusBathCardId,');
     expect(section).toContain("if (mdfDeepLinkState !== 'look') return undefined;");
+    expect(section).toContain('loadFailed: loadError !== null,');
+    // not while a read runs (background refresh on return): its end re-runs the lookup, even with the same data
+    expect(section).toContain('if (cncTodaySettledRevisionRef.current !== datasetRevisionRef.current) return undefined;');
+    expect(section).toContain('[cncShownDataColumns, cncTodaySettledRevision, isCncToday, mdfDeepLinkState,');
+    expect(page.split('setCncTodaySettledRevision(revision);').length - 1).toBe(3);
     // the engine view is the same condition the render uses for it
     expect(section).toContain('&& (!mdfHybridActive || (!cncToday && loadError !== null));');
     expect(page).toContain("&& (!mdfHybridActive || (!cncToday && loadError !== null)) ? (");

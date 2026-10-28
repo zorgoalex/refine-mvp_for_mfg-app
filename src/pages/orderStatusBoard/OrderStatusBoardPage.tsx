@@ -805,6 +805,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const [cncTodayFocusBathCardId, setCncTodayFocusBathCardId] = useState<string | null>(null);
   // the last dataset read that ended (shown or failed); another one is running while it lags `datasetRevisionRef`
   const cncTodaySettledRevisionRef = useRef(0);
+  // the same as state: a card link is looked for again whenever a read ends (even one returning the same data)
+  const [cncTodaySettledRevision, setCncTodaySettledRevision] = useState(0);
   const [stale, setStale] = useState(false);
   const [pendingOrders, setPendingOrders] = useState<Set<number>>(new Set());
   const pendingRef = useRef<Set<number>>(new Set());
@@ -1050,6 +1052,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 || cncAuxiliaryRefreshRevisionRef.current !== auxiliaryRevision
               ) return false;
               setCncOriginalBoard(response);
+              cncTodaySettledRevisionRef.current = revision;
+              setCncTodaySettledRevision(revision);
               cncTodayRef.current = null;
               cncOrderSearchTodayRef.current = null;
               setCncToday(null);
@@ -1131,6 +1135,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             setCncTodayFocusBathCardId(currentViewState.cncCardKind === 'bath' && currentViewState.cncCardId
               ? currentViewState.cncCardId : null);
             cncTodaySettledRevisionRef.current = revision;
+            setCncTodaySettledRevision(revision);
             setCncOrderSearchToday(response);
             setCncOriginalBoard(null);
             // unchanged moves keep their object (every card depends on them)
@@ -1238,6 +1243,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       } catch (error) {
         if (datasetRevisionRef.current !== revision) return false;
         cncTodaySettledRevisionRef.current = revision;
+        setCncTodaySettledRevision(revision);
         const text = errorMessage(error, 'Не удалось загрузить доску статусов.');
         setLoadError(text);
         setLoading(false);
@@ -1868,6 +1874,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const mdfDeepLinkState = viewState.cncCardKind && viewState.cncCardId ? mdfDeepLinkLookup({
     active,
     loading,
+    loadFailed: loadError !== null,
     ordersLoading: cncOrderBoardLoading,
     renderMode: mdfBoardRenderMode,
     engineViewShown: mdfEngineViewShown,
@@ -1904,6 +1911,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     }
     // hidden board / engine view: not looked for here; data of another query: not yet
     if (mdfDeepLinkState !== 'look') return undefined;
+    // a read is running (a background refresh, the one started on return to the board): the shown data may lack the
+    // card; looked for again when it ends
+    if (cncTodaySettledRevisionRef.current !== datasetRevisionRef.current) return undefined;
     const key = `${kind}:${cardId}`;
     const root = boardViewportRef.current;
     const target = root
@@ -1931,7 +1941,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       if (frame !== null) window.cancelAnimationFrame(frame);
       target.classList.remove('cnc-board-card-shell--deep-linked');
     };
-  }, [cncShownDataColumns, isCncToday, mdfDeepLinkState, viewState.cncCardId, viewState.cncCardKind]);
+  }, [cncShownDataColumns, cncTodaySettledRevision, isCncToday, mdfDeepLinkState, viewState.cncCardId,
+    viewState.cncCardKind]);
   const cncMutedOrderIds = useMemo(
     () => new Set(
       cncDisplayOrderStatusCards

@@ -4,6 +4,7 @@ import { mdfDeepLinkLookup } from './mdfDeepLink';
 const shownHybrid = {
   active: true,
   loading: false,
+  loadFailed: false,
   ordersLoading: false,
   renderMode: 'published' as const,
   engineViewShown: false,
@@ -34,6 +35,9 @@ describe('mdfDeepLinkLookup', () => {
     expect(mdfDeepLinkLookup({ ...shownHybrid, loading: true })).toBe('wait');
     // today shown, its order cards (planned-today filter) still loading
     expect(mdfDeepLinkLookup({ ...shownHybrid, ordersLoading: true })).toBe('wait');
+    // the background read on return failed: older data is shown — no "not found" until a read succeeds
+    expect(mdfDeepLinkLookup({ ...shownHybrid, loadFailed: true })).toBe('wait');
+    expect(mdfDeepLinkLookup({ ...shownHybrid, renderMode: 'legacy', loadFailed: true })).toBe('wait');
   });
 
   it('a linked bath waits for today read with it as its focus, on the legacy board too', () => {
