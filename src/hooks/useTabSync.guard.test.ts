@@ -11,6 +11,9 @@ describe('useTabSync guards', () => {
   it('preserves query in the stored path', () => {
     expect(src).toContain('location.search');
   });
+  it('a one-time card link is not kept in the stored path', () => {
+    expect(src).toContain('path: workspaceTabPath(location.pathname, location.search),');
+  });
   it('rehydrates the authenticated user before opening the current route', () => {
     expect(src.indexOf('syncWorkspaceTabsForCurrentUser();')).toBeGreaterThan(-1);
     expect(src.indexOf('syncWorkspaceTabsForCurrentUser();')).toBeLessThan(src.indexOf('openTab({'));
