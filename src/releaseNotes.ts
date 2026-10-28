@@ -39,6 +39,13 @@ export const releaseNotes: ReleaseNoteEntry[] = [
     ],
   },
   {
+    version: APP_VERSION, date: "2026-10-28", title: "NewLine: МДФ-доска в прежних цветах",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "В NewLine МДФ-доска снова цветная, как в прежнем виде: цветные колонки и полосы сверху, счётчики, полоса загрузки, рамки карточек, метки файлов станка и ванн, полосы «распилено / закатано». От NewLine осталась только раскладка: доска на весь экран и заголовок.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-28", title: "МДФ-доска: шапки колонок всегда на экране",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

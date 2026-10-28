@@ -345,18 +345,8 @@
   text-transform: none;
 }
 
-/* ---------- ход производства: приглушён, чтобы не перетягивать взгляд ---------- */
-:root[data-ui-variant="workbench"] .cnc-order-card__progress {
-  background: var(--wb-progress-track);
-}
-
-:root[data-ui-variant="workbench"] .cnc-order-card__progress-segment--cut {
-  background: var(--wb-progress-start);
-}
-
-:root[data-ui-variant="workbench"] .cnc-order-card__progress-segment--rolled {
-  background: var(--wb-progress-done);
-}
+/* ---------- ход производства ---------- */
+/* полосы «распилено / закатано» в карточках заказов МДФ-доски — прежних цветов (28.10) */
 
 :root[data-ui-variant="workbench"] .production-stages__stage--passed {
   color: var(--evo-success) !important;

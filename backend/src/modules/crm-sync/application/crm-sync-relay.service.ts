@@ -39,6 +39,10 @@ interface CrmSyncRelayServiceDeps {
   paymentNotifications?: {
     runDue(requestGuard: () => Promise<void>): Promise<{ processed: number }>;
   };
+  /** Bitrix24 responsible user decided by ERP (Bitrix24AssignmentWorker.runDue, migration 270). */
+  assignments?: {
+    runDue(requestGuard: () => Promise<void>): Promise<{ processed: number }>;
+  };
   outboxRepo: PgCrmSyncOutboxRepository;
   consumer: Bitrix24SyncConsumer;
   dryRunConsumer: Bitrix24SyncConsumer;
@@ -62,6 +66,7 @@ export class CrmSyncRelayService {
   private readonly stageLane: CrmSyncRelayServiceDeps['stageLane'];
   private readonly paidPaymentRecovery: CrmSyncRelayServiceDeps['paidPaymentRecovery'];
   private readonly paymentNotifications: CrmSyncRelayServiceDeps['paymentNotifications'];
+  private readonly assignments: CrmSyncRelayServiceDeps['assignments'];
   private readonly outboxRepo: PgCrmSyncOutboxRepository;
   private readonly consumer: Bitrix24SyncConsumer;
   private readonly dryRunConsumer: Bitrix24SyncConsumer;
@@ -75,6 +80,7 @@ export class CrmSyncRelayService {
     this.stageLane = deps.stageLane;
     this.paidPaymentRecovery = deps.paidPaymentRecovery;
     this.paymentNotifications = deps.paymentNotifications;
+    this.assignments = deps.assignments;
     this.outboxRepo = deps.outboxRepo;
     this.consumer = deps.consumer;
     this.dryRunConsumer = deps.dryRunConsumer;
@@ -412,6 +418,23 @@ export class CrmSyncRelayService {
           }
         } catch (error) {
           this.logger.error(redactLogFields({ event: 'crm_sync_payment_notifications_failed', errorMessage: error instanceof Error ? error.message : String(error) }));
+        }
+      }
+      // Assignments go last: the deals and contacts they need are created by the batch above.
+      if (!writerOwnershipLost) {
+        try {
+          const assigned = await this.assignments?.runDue(async () => {
+            await assertAdvisoryOwned();
+            if (writerOwnershipLost || !await this.outboxRepo.heartbeatWriterLock(this.db, writerToken)) {
+              writerOwnershipLost = true;
+              throw new OwnershipLost();
+            }
+          });
+          if (assigned && assigned.processed > 0) {
+            this.logger.log(redactLogFields({ event: 'crm_sync_assignments', ...assigned }));
+          }
+        } catch (error) {
+          this.logger.error(redactLogFields({ event: 'crm_sync_assignments_failed', errorMessage: error instanceof Error ? error.message : String(error) }));
         }
       }
     } finally {

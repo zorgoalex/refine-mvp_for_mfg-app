@@ -70,6 +70,7 @@ describe('Bitrix24ReverseProcessorService', () => {
       heartbeatEvent: vi.fn().mockResolvedValue(true),
       upsertClient: vi.fn().mockResolvedValue(17),
       markEventProcessed: vi.fn().mockResolvedValue(true),
+      touchAssignment: vi.fn().mockResolvedValue(undefined),
       markEventFailed: vi.fn(),
     };
     const bitrix = {
@@ -99,6 +100,8 @@ describe('Bitrix24ReverseProcessorService', () => {
       failed: 0,
     });
     expect(repository.heartbeatEvent).toHaveBeenCalledTimes(3);
+    // The assignment channel re-checks an object it owns after every processed inbound change.
+    expect(repository.touchAssignment).toHaveBeenCalledWith('contact', '42', event.inboundEventId);
     expect(repository.upsertClient).toHaveBeenCalledWith(
       expect.objectContaining({
         objectType: 'contact',
@@ -118,6 +121,7 @@ describe('Bitrix24ReverseProcessorService', () => {
       heartbeatEvent: vi.fn().mockResolvedValue(true),
       upsertClient: vi.fn().mockResolvedValue(17),
       markEventProcessed: vi.fn().mockResolvedValue(false),
+      touchAssignment: vi.fn().mockResolvedValue(undefined),
       markEventFailed: vi.fn(),
     };
     const bitrix = {
@@ -189,6 +193,7 @@ describe('Bitrix24ReverseProcessorService', () => {
       upsertDeal: vi.fn().mockResolvedValue({ requestId: 12, erpOrderId: null }),
       replaceRequestPaymentSnapshots: vi.fn(),
       markEventProcessed: vi.fn().mockResolvedValue(true),
+      touchAssignment: vi.fn().mockResolvedValue(undefined),
       markEventFailed: vi.fn(),
     };
     const bitrix = {

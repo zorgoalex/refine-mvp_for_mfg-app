@@ -85,6 +85,8 @@ export class Bitrix24ReverseProcessorService {
           proveOwnership,
           () => this.processEvent(event, flags.portalDomain),
         );
+        // A manual reassignment in Bitrix24 of an object ERP owns is reverted by the assignment channel.
+        await this.repository.touchAssignment(event.objectType, event.bitrixId, event.inboundEventId);
         await heartbeat();
         if (ownershipLost) continue;
         if (await this.repository.markEventProcessed(event)) {
