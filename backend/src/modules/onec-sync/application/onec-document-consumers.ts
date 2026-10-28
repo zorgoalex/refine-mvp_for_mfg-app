@@ -43,6 +43,9 @@ export interface DocumentLineChange {
 export interface LoadedDocumentView {
   documentId: number;
   sourceId: number;
+  /** Request/correlation of the load (the same as in its audit and `onec.document_changed`), for consumers' events. */
+  requestId: string;
+  correlationId: string | null;
   docKind: OnecDocKind;
   onecRefKey: string;
   docDate: string;

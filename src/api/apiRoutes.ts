@@ -160,6 +160,12 @@ export const apiRoutes = {
   paymentsOnec: {
     receipts: backendApiPath('/payments/onec-receipts'),
     receipt: (lineId: number) => backendApiPath(`/payments/onec-receipts/${lineId}`),
+    receiptMatch: (lineId: number) => backendApiPath(`/payments/onec-receipts/${lineId}/match`),
+    receiptUnmatch: (lineId: number) => backendApiPath(`/payments/onec-receipts/${lineId}/unmatch`),
+    receiptDismiss: (lineId: number) => backendApiPath(`/payments/onec-receipts/${lineId}/dismiss`),
+    receiptOrderLink: (lineId: number) => backendApiPath(`/payments/onec-receipts/${lineId}/order-link`),
+    receiptOrderUnlink: (lineId: number) => backendApiPath(`/payments/onec-receipts/${lineId}/order-unlink`),
+    autoMatch: backendApiPath('/payments/onec-receipts/auto-match'),
   },
   onecDocuments: {
     list: backendApiPath('/procurement/onec-documents'),

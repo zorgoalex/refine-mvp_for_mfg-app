@@ -10,6 +10,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { detectOnecMatchTransitions, releaseOnecMatchesBeforePaymentDelete } from '../../payments-onec/application/onec-match-transitions';
 import { assertDowelingOrdersWritable, defaultCardIds } from '../../doweling/adapters/doweling-write-guard';
 import { refineDefaultCardClients } from '../../doweling/adapters/doweling-sql';
 import { auditService } from '../../../common/audit/audit.service';
@@ -1354,6 +1355,14 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
 
   async deletePayments(orderId: number, ids: readonly number[]): Promise<void> {
     await deleteByIds(this.tx, 'payments', 'payment_id', orderId, ids);
+  }
+
+  releaseOnecMatchesBeforePaymentDelete(ids: readonly number[], currentUser: CurrentUser, requestId: string): Promise<void> {
+    return releaseOnecMatchesBeforePaymentDelete(this.tx, ids, { requestId, actorUserId: currentUser.id, writer: 'order_form' });
+  }
+
+  async detectOnecMatchTransitions(orderId: number, currentUser: CurrentUser, requestId: string): Promise<void> {
+    await detectOnecMatchTransitions(this.tx, { orderIds: [orderId] }, { requestId, actorUserId: currentUser.id, writer: 'order_form' });
   }
 
   async upsertWorkshops(

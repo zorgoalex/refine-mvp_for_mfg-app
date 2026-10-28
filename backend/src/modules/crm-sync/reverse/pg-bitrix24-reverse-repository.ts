@@ -34,6 +34,7 @@ import type {
   Bitrix24RefreshLease,
   Bitrix24ReverseObjectType,
 } from './bitrix24-reverse.types';
+import { detectOnecMatchTransitions } from '../../payments-onec/application/onec-match-transitions';
 
 export interface ReverseMappingRow {
   entityType: 'client' | 'order' | 'payment';
@@ -3438,7 +3439,7 @@ export class PgBitrix24ReverseRepository {
         );
       }
       await beginPaymentAuditCapture(tx);
-      const deleted = await tx.query(
+      const deleted = await tx.query<{ payment_id: string }>(
         `UPDATE payments erp
             SET delete_flag=true, updated_at=now()
            FROM bitrix24_incoming_request_payment remote
@@ -3446,7 +3447,8 @@ export class PgBitrix24ReverseRepository {
             AND remote.bitrix_payment_id=ANY($2::text[])
             AND (remote.state='deleted' OR remote.paid=false)
             AND remote.erp_payment_id=erp.payment_id
-            AND erp.delete_flag=false`,
+            AND erp.delete_flag=false
+          RETURNING erp.payment_id`,
         [input.requestId, input.bitrixPaymentIds],
       );
       const activePaymentIds = await selectActivePaymentIds(
@@ -3463,6 +3465,12 @@ export class PgBitrix24ReverseRepository {
       );
       const deletedCount = deleted.rowCount ?? 0;
       if (count > 0 || deletedCount > 0) await recalculatePaymentState(tx, orderId);
+      // Changed or soft-deleted payments of active 1C receipt matches → review (the match itself stays: `changed`).
+      if (count > 0 || deletedCount > 0) {
+        // Soft-deleted payments by id: one moved to another order is not found through this order (code review R1-5).
+        await detectOnecMatchTransitions(tx, { orderIds: [orderId], paymentIds: deleted.rows.map((row) => Number(row.payment_id)) },
+          { requestId: input.auditRequestId, actorUserId: input.actorUserId, writer: 'bitrix24_reverse' });
+      }
       // Always finish the capture (no change → no event).
       await recordCapturedPaymentChanges(tx, {
         actor: { id: input.actorUserId, username: null, role: null },
@@ -3682,7 +3690,7 @@ export class PgBitrix24ReverseRepository {
       }
       const paymentOwner = await resolveMappedPaymentOwner(tx, input.orderId, discovered.bitrix_deal_id, true);
       await beginPaymentAuditCapture(tx);
-      const deleted = await tx.query(
+      const deleted = await tx.query<{ payment_id: string }>(
         `UPDATE payments erp
             SET delete_flag=true, updated_at=now()
            FROM bitrix24_incoming_request_payment remote
@@ -3691,7 +3699,8 @@ export class PgBitrix24ReverseRepository {
             AND remote.bitrix_payment_id=ANY($2::text[])
             AND (remote.state='deleted' OR remote.paid=false)
             AND remote.erp_payment_id=erp.payment_id
-            AND erp.delete_flag=false`,
+            AND erp.delete_flag=false
+          RETURNING erp.payment_id`,
         [paymentOwner.orderId, input.bitrixPaymentIds, paymentOwner.requestId],
       );
       const activePaymentIds = await selectActivePaymentIds(
@@ -3704,6 +3713,11 @@ export class PgBitrix24ReverseRepository {
         : await materializeActivePayments(tx, paymentOwner.requestId, input.orderId, activePaymentIds);
       deletedPaymentCount = deleted.rowCount ?? 0;
       if (changedPaymentCount > 0 || deletedPaymentCount > 0) await recalculatePaymentState(tx, input.orderId);
+      // Changed or soft-deleted payments of active 1C receipt matches → review (the match itself stays: `changed`).
+      if (changedPaymentCount > 0 || deletedPaymentCount > 0) {
+        await detectOnecMatchTransitions(tx, { orderIds: [input.orderId], paymentIds: deleted.rows.map((row) => Number(row.payment_id)) },
+          { requestId: input.auditRequestId, actorUserId: input.actorUserId, writer: 'bitrix24_reverse' });
+      }
       // Always finish the capture (no change → no event).
       await recordCapturedPaymentChanges(tx, {
         actor: { id: input.actorUserId, username: null, role: null },

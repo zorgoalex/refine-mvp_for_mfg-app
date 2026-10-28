@@ -205,6 +205,11 @@ function createDatabase(options: DatabaseOptions = {}) {
   ): Promise<QueryResult<QueryResultRow>> => {
     const normalized = normalizeSql(text);
 
+    // Lock order orders → payment: the payment's order is read first, without a lock.
+    if (normalized.startsWith('SELECT order_id FROM payments WHERE payment_id = $1')) {
+      return result([{ order_id: options.paymentOrderId ?? 15 }]);
+    }
+
     if (normalized.startsWith('SELECT payment_id, order_id, type_paid_id, amount, payment_date')) {
       return result([paymentRow({ order_id: options.paymentOrderId ?? 15 })]);
     }

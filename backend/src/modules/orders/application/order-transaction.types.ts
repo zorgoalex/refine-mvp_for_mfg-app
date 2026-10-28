@@ -446,6 +446,13 @@ export interface OrderWriteUnitOfWork {
   /** Finishes the capture: one `payments.*` audit event per payment this transaction changed. */
   recordCapturedPaymentChanges(input: CapturedPaymentChangesInput): Promise<number>;
   deletePayments(orderId: number, ids: readonly number[]): Promise<void>;
+  /**
+   * Before deleting payments: an active 1C receipt match holds its payment — 409 `PAYMENT_HAS_ONEC_MATCH` (matching
+   * commands on) or the match is removed with the delete (commands off). Plan 2026-10-04-onec-incoming-payments §6.
+   */
+  releaseOnecMatchesBeforePaymentDelete(ids: readonly number[], currentUser: CurrentUser, requestId: string): Promise<void>;
+  /** After the order's payments, number, date or deletion changed: re-check its active 1C receipt matches (§7). */
+  detectOnecMatchTransitions(orderId: number, currentUser: CurrentUser, requestId: string): Promise<void>;
   upsertWorkshops(
     orderId: number,
     workshops: readonly NormalizedSaveOrderWorkshopDto[],
