@@ -20,10 +20,11 @@ function rolesSelectPermissions(): SelectPermission[] {
 }
 
 // A minimal Hasura metadata API: export_metadata v2 and bulk with resource_version checks.
-function fakeHasura(initial: SelectPermission[], options: { bumpAfterExport?: boolean } = {}) {
+function fakeHasura(initial: SelectPermission[], options: { bumpAfterExport?: boolean; extraTables?: Record<string, SelectPermission[]>; paddingTables?: number } = {}) {
   const state = {
     version: 7,
     roles: JSON.parse(JSON.stringify(initial)) as SelectPermission[],
+    extra: JSON.parse(JSON.stringify(options.extraTables ?? {})) as Record<string, SelectPermission[]>,
     other: { role: 'viewer', permission: { columns: ['id'], filter: { id: { _eq: 1 } } } },
     bulkRequests: 0,
   };
@@ -43,6 +44,12 @@ function fakeHasura(initial: SelectPermission[], options: { bumpAfterExport?: bo
           metadata: { version: 3, sources: [{ name: 'default', tables: [
             { table: { schema: 'public', name: 'roles' }, select_permissions: state.roles },
             { table: { schema: 'public', name: 'other' }, select_permissions: [state.other] },
+            ...Object.entries(state.extra).map(([name, permissions]) => ({ table: { schema: 'public', name }, select_permissions: permissions })),
+            // A live export is ~300 KB: padding makes the export larger than one environment string may be (128 KB).
+            ...Array.from({ length: options.paddingTables ?? 0 }, (_, index) => ({
+              table: { schema: 'public', name: `padding_${index}` },
+              select_permissions: [{ role: 'manager', permission: { columns: Array.from({ length: 20 }, (__, c) => `column_number_${c}`), filter: {} } }],
+            })),
           ] }] },
         };
         // Someone edits metadata right after our read.
@@ -52,15 +59,19 @@ function fakeHasura(initial: SelectPermission[], options: { bumpAfterExport?: bo
       if (payload.type === 'bulk') {
         state.bulkRequests += 1;
         if (payload.resource_version !== state.version) return reply(409, { error: 'conflict', code: 'conflict' });
-        const next = JSON.parse(JSON.stringify(state.roles)) as SelectPermission[];
+        const tables: Record<string, SelectPermission[]> = JSON.parse(JSON.stringify({ roles: state.roles, ...state.extra }));
         for (const action of payload.args) {
-          expect(action.args.table).toEqual({ schema: 'public', name: 'roles' });
+          expect(action.args.table.schema).toBe('public');
+          const next = tables[action.args.table.name];
+          expect(next, action.args.table.name).toBeDefined();
           const index = next.findIndex((entry) => entry.role === action.args.role);
           if (action.type === 'pg_drop_select_permission') next.splice(index, 1);
           else if (action.type === 'pg_create_select_permission') next.push({ role: action.args.role, permission: action.args.permission });
           else throw new Error(`unexpected ${action.type}`);
         }
-        state.roles = next;
+        const { roles, ...extra } = tables;
+        state.roles = roles;
+        state.extra = extra;
         state.version += 1;
         return reply(200, payload.args.map(() => ({ message: 'success' })));
       }
@@ -151,5 +162,45 @@ describe('roles select aggregations', () => {
     const byRole = Object.fromEntries(revert.state.roles.map((entry) => [entry.role, entry.permission]));
     expect(byRole.manager).toEqual({ columns: ['role_id', 'role_name'], filter: {}, allow_aggregations: false });
     expect(byRole.viewer).toEqual({ columns: ['role_id'], filter: { is_active: { _eq: true } }, allow_aggregations: false });
+  });
+
+  it('the reference lists that count rows can be counted by every role that reads them (28.10)', () => {
+    const root = metadataSnapshot.metadata ?? metadataSnapshot;
+    const tables = root.sources.flatMap((source: { tables: Array<{ table: { name: string }; select_permissions?: SelectPermission[] }> }) => source.tables);
+    for (const name of ['movements_statuses', 'material_transaction_types', 'transaction_direction']) {
+      const permissions = tables.find((entry: { table: { name: string } }) => entry.table.name === name)?.select_permissions ?? [];
+      expect(permissions.length, name).toBeGreaterThan(0);
+      for (const permission of permissions) expect(permission.permission.allow_aggregations, `${name}/${permission.role}`).toBe(true);
+    }
+  });
+
+  it('--tables: refuses a table that is not tracked and a malformed list, changing nothing', async () => {
+    const missing = fakeHasura(live);
+    const missingResult = await runScript(missing.server, ['--tables', 'roles,no_such_table']);
+    expect(missingResult.code).not.toBe(0);
+    expect(missingResult.output).toContain('not tracked: public.no_such_table');
+    expect(missing.state.bulkRequests).toBe(0);
+    await new Promise<void>((done) => missing.server.close(() => done()));
+    running = undefined;
+
+    const malformed = fakeHasura(live);
+    const malformedResult = await runScript(malformed.server, ['--tables', 'roles;drop']);
+    expect(malformedResult.code).toBe(2);
+    expect(malformed.state.bulkRequests).toBe(0);
+  });
+
+  it('reads a live-size export (larger than one environment string) and changes several tables in one bulk request', async () => {
+    const reference = [{ role: 'manager', permission: { columns: ['direction_id'], filter: { _and: [{}, { user: 'predicate' }] } } }];
+    const { server, state } = fakeHasura(live, {
+      extraTables: { transaction_direction: reference, movements_statuses: reference },
+      paddingTables: 1200,
+    });
+    const result = await runScript(server, ['--tables', 'transaction_direction,movements_statuses']);
+    expect(result.code, result.output).toBe(0);
+    expect(state.bulkRequests).toBe(1);
+    for (const name of ['transaction_direction', 'movements_statuses']) {
+      expect(state.extra[name], name).toEqual([{ role: 'manager', permission: { ...reference[0].permission, allow_aggregations: true } }]);
+    }
+    expect(state.roles).toEqual(live);
   });
 });

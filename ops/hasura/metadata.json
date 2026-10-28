@@ -11363,6 +11363,7 @@
                         {
                             "role": "manager",
                             "permission": {
+                                "allow_aggregations": true,
                                 "columns": [
                                     "created_by",
                                     "edited_by",
@@ -11411,6 +11412,7 @@
                         {
                             "role": "operator",
                             "permission": {
+                                "allow_aggregations": true,
                                 "columns": [
                                     "created_by",
                                     "edited_by",
@@ -11459,6 +11461,7 @@
                         {
                             "role": "superadmin",
                             "permission": {
+                                "allow_aggregations": true,
                                 "columns": [
                                     "created_by",
                                     "edited_by",
@@ -11507,6 +11510,7 @@
                         {
                             "role": "top_manager",
                             "permission": {
+                                "allow_aggregations": true,
                                 "columns": [
                                     "created_by",
                                     "edited_by",
@@ -11555,6 +11559,7 @@
                         {
                             "role": "viewer",
                             "permission": {
+                                "allow_aggregations": true,
                                 "columns": [
                                     "created_by",
                                     "edited_by",
@@ -11603,6 +11608,7 @@
                         {
                             "role": "erp_admin",
                             "permission": {
+                                "allow_aggregations": true,
                                 "columns": [
                                     "created_by",
                                     "edited_by",
@@ -14967,6 +14973,7 @@
                         {
                             "role": "manager",
                             "permission": {
+                                "allow_aggregations": true,
                                 "columns": [
                                     "created_by",
                                     "edited_by",
@@ -15013,6 +15020,7 @@
                         {
                             "role": "operator",
                             "permission": {
+                                "allow_aggregations": true,
                                 "columns": [
                                     "created_by",
                                     "edited_by",
@@ -15059,6 +15067,7 @@
                         {
                             "role": "superadmin",
                             "permission": {
+                                "allow_aggregations": true,
                                 "columns": [
                                     "created_by",
                                     "edited_by",
@@ -15105,6 +15114,7 @@
                         {
                             "role": "top_manager",
                             "permission": {
+                                "allow_aggregations": true,
                                 "columns": [
                                     "created_by",
                                     "edited_by",
@@ -15151,6 +15161,7 @@
                         {
                             "role": "erp_admin",
                             "permission": {
+                                "allow_aggregations": true,
                                 "columns": [
                                     "created_by",
                                     "edited_by",
@@ -30007,6 +30018,7 @@
                         {
                             "role": "manager",
                             "permission": {
+                                "allow_aggregations": true,
                                 "columns": [
                                     "created_by",
                                     "edited_by",
@@ -30053,6 +30065,7 @@
                         {
                             "role": "operator",
                             "permission": {
+                                "allow_aggregations": true,
                                 "columns": [
                                     "created_by",
                                     "edited_by",
@@ -30099,6 +30112,7 @@
                         {
                             "role": "superadmin",
                             "permission": {
+                                "allow_aggregations": true,
                                 "columns": [
                                     "created_by",
                                     "edited_by",
@@ -30145,6 +30159,7 @@
                         {
                             "role": "top_manager",
                             "permission": {
+                                "allow_aggregations": true,
                                 "columns": [
                                     "created_by",
                                     "edited_by",
@@ -30191,6 +30206,7 @@
                         {
                             "role": "erp_admin",
                             "permission": {
+                                "allow_aggregations": true,
                                 "columns": [
                                     "created_by",
                                     "edited_by",

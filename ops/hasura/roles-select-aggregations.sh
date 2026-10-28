@@ -7,20 +7,29 @@
 # metadata resource_version that was read: if anyone changed metadata in between,
 # Hasura answers 409 and nothing is applied (re-run to read the fresh permissions).
 #
-# Usage: roles-select-aggregations.sh [--dry-run] [--revert]
+# Usage: roles-select-aggregations.sh [--dry-run] [--revert] [--tables a,b,c]
 #   --revert  sets allow_aggregations back to false (rollback), same safety rules.
+#   --tables  the tables to change (default: roles). 28.10: also the reference lists
+#             movements_statuses, material_transaction_types, transaction_direction — their
+#             lists failed for every role with "<table>_aggregate not found".
 
 set -euo pipefail
 
 DRY_RUN=false
 TARGET=true
-for arg in "$@"; do
-  case "$arg" in
+TABLES=roles
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --dry-run) DRY_RUN=true ;;
     --revert) TARGET=false ;;
-    *) printf 'unknown argument: %s\n' "$arg" >&2; exit 2 ;;
+    --tables)
+      [[ $# -ge 2 && -n "$2" ]] || { printf 'missing value for --tables\n' >&2; exit 2; }
+      TABLES="$2"; shift ;;
+    *) printf 'unknown argument: %s\n' "$1" >&2; exit 2 ;;
   esac
+  shift
 done
+[[ "$TABLES" =~ ^[a-z_][a-z0-9_]*(,[a-z_][a-z0-9_]*)*$ ]] || { printf 'invalid --tables: %s\n' "$TABLES" >&2; exit 2; }
 
 log() {
   printf '[%s] %s\n' "$(date +'%F %T')" "$*"
@@ -55,22 +64,25 @@ hasura_api() {
 }
 
 log "Fetching current Hasura metadata (with resource_version)..."
-METADATA_JSON="$(hasura_api '{"type":"export_metadata","version":2,"args":{}}')"
-
+# The export (~300 KB) goes through a private temp file, not an environment variable: one environment string is
+# limited to 128 KB on Linux ("Argument list too long" before anything is read).
+METADATA_FILE="$(mktemp /tmp/roles-aggregations-metadata-XXXXXX.json)"
 BULK_FILE="$(mktemp /tmp/roles-aggregations-bulk-XXXXXX.json)"
-trap 'rm -f "$BULK_FILE"' EXIT
-
-export _ROLES_METADATA="$METADATA_JSON"
+trap 'rm -f "$METADATA_FILE" "$BULK_FILE"' EXIT
+chmod 600 "$METADATA_FILE" "$BULK_FILE"
+hasura_api '{"type":"export_metadata","version":2,"args":{}}' > "$METADATA_FILE"
 export _ROLES_TARGET="$TARGET"
-python3 - "$BULK_FILE" <<'PY'
+export _ROLES_TABLES="$TABLES"
+python3 - "$BULK_FILE" "$METADATA_FILE" <<'PY'
 import json
 import os
 import sys
 
 bulk_path = sys.argv[1]
-raw = os.environ.get("_ROLES_METADATA", "")
+with open(sys.argv[2]) as metadata_file:
+    raw = metadata_file.read()
 if not raw:
-    print("ERROR: _ROLES_METADATA is empty", file=sys.stderr)
+    print("ERROR: the metadata export is empty", file=sys.stderr)
     sys.exit(1)
 
 exported = json.loads(raw)
@@ -81,16 +93,17 @@ if not isinstance(resource_version, int) or not isinstance(metadata, dict):
     sys.exit(1)
 target = os.environ.get("_ROLES_TARGET") == "true"
 
-target_table = "roles"
+target_tables = os.environ.get("_ROLES_TABLES", "roles").split(",")
 args = []
-found = False
+found = set()
 for source in metadata.get("sources", []):
     source_name = source.get("name", "default")
     for table in source.get("tables", []):
         table_ref = table.get("table", {})
-        if table_ref.get("name") != target_table or table_ref.get("schema", "public") != "public":
+        target_table = table_ref.get("name")
+        if target_table not in target_tables or table_ref.get("schema", "public") != "public":
             continue
-        found = True
+        found.add(target_table)
         hasura_table = {"schema": "public", "name": target_table}
         for perm in table.get("select_permissions", []):
             role = perm["role"]
@@ -106,15 +119,16 @@ for source in metadata.get("sources", []):
                          "args": {"source": source_name, "table": hasura_table, "role": role,
                                   "permission": permission}})
 
-if not found:
-    print("ERROR: table public.roles is not tracked", file=sys.stderr)
+missing = [name for name in target_tables if name not in found]
+if missing:
+    print(f"ERROR: table(s) not tracked: {', '.join('public.' + name for name in missing)}", file=sys.stderr)
     sys.exit(1)
 
 with open(bulk_path, "w") as f:
     json.dump({"type": "bulk", "resource_version": resource_version, "args": args}, f)
 print(f"Permissions to update: {len(args) // 2}", file=sys.stderr)
 PY
-unset _ROLES_METADATA _ROLES_TARGET
+unset _ROLES_TARGET _ROLES_TABLES
 
 COUNT="$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))['args']) // 2)" "$BULK_FILE")"
 if [[ "$COUNT" == "0" ]]; then
@@ -128,14 +142,14 @@ fi
 
 log "Applying ${COUNT} permission update(s) in one bulk request..."
 RESPONSE_FILE="$(mktemp /tmp/roles-aggregations-response-XXXXXX.json)"
-trap 'rm -f "$BULK_FILE" "$RESPONSE_FILE"' EXIT
+trap 'rm -f "$METADATA_FILE" "$BULK_FILE" "$RESPONSE_FILE"' EXIT
 HTTP_CODE="$(curl -sS -o "$RESPONSE_FILE" -w '%{http_code}' \
   -H "Content-Type: application/json" \
   -H "x-hasura-admin-secret: ${ADMIN_SECRET}" \
   -d @"$BULK_FILE" \
   "${METADATA_URL}")"
 case "$HTTP_CODE" in
-  200) log "roles SELECT allow_aggregations=${TARGET} applied." ;;
+  200) log "${TABLES} SELECT allow_aggregations=${TARGET} applied." ;;
   409) fail "Hasura metadata changed after it was read (409 conflict); nothing applied. Re-run the script." ;;
   *) fail "Hasura metadata API answered HTTP ${HTTP_CODE}: $(head -c 300 "$RESPONSE_FILE")" ;;
 esac
