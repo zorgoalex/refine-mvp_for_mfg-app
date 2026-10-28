@@ -716,9 +716,10 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
     expect((await finals(imported.orderId)).filter((row) => row.metadata_json?.reworkRoundNo === 2).every((row) => row.status === 'cancelled')).toBe(true);
   });
 
-  async function importCopy(orderId: number, label: string): Promise<number> {
+  async function importCopy(orderId: number, label: string, edit?: (snapshot: OrderSnapshotDto) => void): Promise<number> {
     const snapshots = new PgOrderSnapshot(database());
     const exported = JSON.parse((await snapshots.exportOrderSnapshot({ orderId, currentUser: admin, requestId: key() })).content) as OrderSnapshotDto;
+    edit?.(exported);
     exported.source.sourceInstanceId = `${importSource}-${randomUUID()}`;
     exported.source.payloadHash = '';
     exported.data.order.orderName = `E2E-Тест срок переделки ${tag} ${label}`;
@@ -755,8 +756,8 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
     expect((await roundRow(copy, 2)).mark).toBeNull();
   });
 
-  for (const outcome of ['expired', 'completed'] as const) {
-    it(`R5.1 (port review): an import after «Это не переделка» whose restored deadline is ${outcome} restores nothing again`, async () => {
+  for (const [outcome, legacy] of [['expired', false], ['completed', false], ['expired', true], ['completed', true]] as const) {
+    it(`R5.1/R6.1 (port review): an import after «Это не переделка» whose restored deadline is ${outcome}${legacy ? ' (snapshot from before the restore mark)' : ''} restores nothing again`, async () => {
       const order = await orderWithDeadline('legacy_6', false); // active D0
       await start(order.orderId, order.detailIds[0], addDays(today, 7));
       await falsePositive(order.orderId, 2); // D0′ restored, marked as the restore of round 2
@@ -768,7 +769,16 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
         await pool.query('UPDATE orders SET completion_date = $2::date WHERE order_id = $1', [order.orderId, addDays(today, -1)]);
         await reconcile(order.orderId);
       }
-      const copy = await importCopy(order.orderId, `импорт-${outcome}`);
+      // A snapshot exported before the mark existed: the restore is known only by its source idempotency key.
+      const copy = await importCopy(order.orderId, `импорт-${outcome}${legacy ? '-старый' : ''}`, legacy ? (snapshot) => {
+        for (const row of snapshot.data.deadlineInstances) {
+          const metadata = row.metadata_json as Record<string, unknown> | null;
+          if (metadata && 'reworkRestoreOfRound' in metadata) {
+            expect(String(row.idempotency_key)).toMatch(/:rework-round:2:fp-restore$/);
+            delete metadata.reworkRestoreOfRound;
+          }
+        }
+      } : undefined);
       const instancesBefore = (await finals(copy)).length;
       const events = async () => Number((await pool.query('SELECT count(*)::int AS n FROM deadline_events WHERE order_id = $1', [copy])).rows[0].n);
       const eventsBefore = await events();

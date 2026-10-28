@@ -3216,6 +3216,17 @@ async function upsertDeadlines(
   // «Это не переделка»). Imported instances get local ids, so the reference follows the mapping (null outside the snapshot).
   for (const raw of snapshot.data.deadlineInstances) {
     const metadata = raw.metadata_json as Record<string, unknown> | null | undefined;
+    // A false-positive restore made before it was marked `reworkRestoreOfRound` is known by its source idempotency key
+    // (`order:<source order>:rework-round:<N>:fp-restore`, dropped on import): the mark keeps it from being repeated.
+    const restoreKey = typeof raw.idempotency_key === 'string' ? /^order:\d+:rework-round:(\d+):fp-restore$/.exec(raw.idempotency_key) : null;
+    if (restoreKey && metadata?.reworkRestoreOfRound === undefined) {
+      await tx.query(
+        `UPDATE deadline_instances
+            SET metadata_json = COALESCE(metadata_json, '{}'::jsonb) || jsonb_build_object('reworkRestoreOfRound', $2::int)
+          WHERE deadline_id = $1::uuid`,
+        [requiredString(deadlineIds.get(requiredString(raw.deadline_id, 'deadline_id')), 'deadline mapping'), Number(restoreKey[1])],
+      );
+    }
     const previous = metadata?.previousDeadlineId;
     if (typeof previous !== 'string') continue;
     await tx.query(
