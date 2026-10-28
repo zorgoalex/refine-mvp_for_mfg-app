@@ -239,8 +239,10 @@ export class PgBitrix24AssignmentRepository {
   }
 
   /**
-   * ERP's choice: the Bitrix24 user mapped to the order's manager, else to its author. A client follows its latest
-   * production order, else its author. Only active, non-service ERP users with an active mapping count.
+   * ERP's choice: the Bitrix24 user mapped to the order's manager; the author only when the order has no manager (an
+   * order of a manager who works only in ERP stays with the release user, not with whoever typed it in). A client
+   * follows its latest production order, else its author. Only active, non-service ERP users with an active mapping
+   * count.
    */
   async desired(entityType: AssignmentEntityType, erpId: string): Promise<DesiredAssignment | null> {
     const orderId = entityType === 'order' ? erpId : await this.latestOrderOfClient(erpId);
@@ -270,7 +272,7 @@ export class PgBitrix24AssignmentRepository {
           orderId: entityType === 'client' ? orderId : null,
         };
       }
-      if (row?.author_bitrix && row.created_by) {
+      if (row?.manager_id === null && row.author_bitrix && row.created_by) {
         return {
           bitrixUserId: row.author_bitrix,
           erpUserId: row.created_by,
