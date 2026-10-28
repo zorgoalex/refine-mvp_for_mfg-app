@@ -7,6 +7,7 @@ import { SSO_LOGOUT_WARNING_KEY } from "../../authProvider";
 import { resolvePostLoginTarget } from "./postLoginTarget";
 import { useWorkosSso } from "./useWorkosSso";
 import { useOptionalUiVariant } from "../../ui-variant/UiVariantProvider";
+import { consumeSessionExpiredNotice } from "../../components/AuthSessionExpiryBridge";
 
 const LoginWorkbench = React.lazy(() => import("./LoginWorkbench"));
 
@@ -48,6 +49,7 @@ export const LoginPage: React.FC = () => {
     },
   });
   const [ssoLogoutWarning] = React.useState(consumeSsoLogoutWarning);
+  const [sessionExpired] = React.useState(() => consumeSessionExpiredNotice());
   const invitationLinked =
     new URLSearchParams(window.location.search).get("sso") === "invitation-linked";
 
@@ -68,6 +70,7 @@ export const LoginPage: React.FC = () => {
           isLoading={isLoading}
           loginError={loginError}
           ssoLogoutWarning={ssoLogoutWarning}
+          sessionExpired={sessionExpired}
           invitationLinked={invitationLinked}
         />
       </React.Suspense>
@@ -100,6 +103,15 @@ export const LoginPage: React.FC = () => {
           </Text>
         </div>
 
+        {sessionExpired && !loginError && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="Сессия истекла"
+            description="Войдите снова — открытые вкладки сохранятся."
+          />
+        )}
         {ssoLogoutWarning && (
           <Alert
             type="warning"

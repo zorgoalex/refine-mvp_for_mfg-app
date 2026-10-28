@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Drawer, Empty, Input, List, Modal, Space, Tag, Typography } from 'antd';
-import { EditOutlined, PictureOutlined, SettingOutlined } from '@ant-design/icons';
+import { BulbFilled, BulbOutlined, EditOutlined, PictureOutlined, SettingOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { decodeQrFromFile, startQrScanner } from './qrScanner';
 import { getScanAction, setScanAction } from './scanPrefs';
@@ -11,6 +11,7 @@ import type { ScanCandidate, ScanResolveResult } from '../../api/types/labelsApi
 import { authSession } from '../../api/authSession';
 import { useOptionalUiVariant } from '../../ui-variant/UiVariantProvider';
 import { loadScanRecent, rememberScan } from './scanRecent';
+import { setTorch, torchSupported } from './cameraTorch';
 
 const { Text, Title } = Typography;
 
@@ -78,6 +79,9 @@ export const ScanPage: React.FC = () => {
   const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
   const manualInputRef = useRef<HTMLDivElement | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
+  // Фонарик: дорожка камеры, если она умеет torch; null — кнопки нет.
+  const [torchTrack, setTorchTrack] = useState<MediaStreamTrack | null>(null);
+  const [torchOn, setTorchOn] = useState(false);
   const [recent, setRecent] = useState<ScanCandidate[]>(() => loadScanRecent(userId));
 
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -190,15 +194,17 @@ export const ScanPage: React.FC = () => {
     (async () => {
       if (!videoRef.current) return;
       try {
+        let track: MediaStreamTrack | null = null;
         const stop = await startQrScanner(videoRef.current, (text) => {
           void resolvePayload(text, 'qr');
-        });
+        }, (videoTrack) => { track = videoTrack; });
         if (cancelled) {
           stop();
           return;
         }
         stopScannerRef.current = stop;
         setCameraActive(true);
+        if (torchSupported(track)) setTorchTrack(track);
       } catch (err) {
         const name = (err as { name?: string } | null)?.name;
         if (name === 'NotAllowedError') {
@@ -213,10 +219,18 @@ export const ScanPage: React.FC = () => {
     return () => {
       cancelled = true;
       setCameraActive(false);
+      setTorchTrack(null);
+      setTorchOn(false);
       stopScannerRef.current?.();
       stopScannerRef.current = null;
     };
   }, [resolvePayload]);
+
+  const toggleTorch = async () => {
+    if (!torchTrack) return;
+    const next = !torchOn;
+    if (await setTorch(torchTrack, next)) setTorchOn(next);
+  };
 
   const handleManualSearch = (value: string) => {
     const trimmed = value.trim();
@@ -354,6 +368,20 @@ export const ScanPage: React.FC = () => {
         <video ref={videoRef} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         {isWorkbench ? (
           <div className="wb-scan__aim" aria-hidden="true"><i /><i /><i /><i /></div>
+        ) : null}
+        {torchTrack ? (
+          <Button
+            className="scan-torch"
+            shape="circle"
+            size="large"
+            type={torchOn ? 'primary' : 'default'}
+            icon={torchOn ? <BulbFilled /> : <BulbOutlined />}
+            aria-label={torchOn ? 'Выключить фонарик' : 'Включить фонарик'}
+            aria-pressed={torchOn}
+            title={torchOn ? 'Выключить фонарик' : 'Фонарик'}
+            onClick={() => void toggleTorch()}
+            style={{ position: 'absolute', top: 10, right: 10, zIndex: 2 }}
+          />
         ) : null}
         {!cameraError && (
           <div

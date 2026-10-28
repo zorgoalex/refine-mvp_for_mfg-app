@@ -82,7 +82,7 @@ export function KindSummaryCell({ lines, kind }: { lines: ResourceDemandLine[]; 
   return (
     <Space direction="vertical" size={0} style={{ minWidth: 0 }}>
       <Space size={6} align="baseline">
-        <Typography.Text strong style={{ ...numericStyle, color: colorOf(kind), fontSize: 15 }}>
+        <Typography.Text strong className="rr-kind-total" style={{ ...numericStyle, color: colorOf(kind), fontSize: 15 }}>
           {formatKindTotal(total, kind)}
         </Typography.Text>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>

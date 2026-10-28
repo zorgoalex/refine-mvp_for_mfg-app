@@ -278,3 +278,11 @@
 :root[data-ui-variant="workbench"] .wb-refs .films-list .ant-table-wrapper table {
   min-width: 1120px;
 }
+
+/* справочник — панель на высоту окна (мокап 14): короткий список не обрывает панель посреди экрана;
+   длинный по-прежнему прокручивает страницу */
+@media (min-width: 861px) {
+  :root[data-ui-variant="workbench"] .evolution-shell__content:has(> .wb-refs-rail) .wb-list.wb-refs > .ant-page-header {
+    min-height: calc(100vh - var(--wb-chrome-height, 84px) - 40px);
+  }
+}

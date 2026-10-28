@@ -241,3 +241,10 @@
   /* !important: общая «зебра» таблиц задаёт фон строки под курсором с !important */
   background: var(--rr-row-picked, #bae0ff) !important;
 }
+
+/* вид «Сводка»: итог по типу — крупная цифра, как в мокапе (размер в разметке перекрывается) */
+:root[data-ui-variant="workbench"] .rr-screen .ant-typography.rr-kind-total {
+  font-size: 18px !important;
+  line-height: 24px;
+  letter-spacing: -0.01em;
+}

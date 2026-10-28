@@ -23,6 +23,8 @@ async function loadReader() {
 export async function startQrScanner(
   video: HTMLVideoElement,
   onResult: (text: string) => void,
+  // Видеодорожка запущенной камеры (для фонарика); после stop() она завершена.
+  onTrack?: (track: MediaStreamTrack) => void,
 ): Promise<() => void> {
   const { readBarcodes } = await loadReader();
   const stream = await navigator.mediaDevices.getUserMedia({
@@ -31,6 +33,8 @@ export async function startQrScanner(
   });
   video.srcObject = stream;
   await video.play();
+  const [track] = stream.getVideoTracks();
+  if (track) onTrack?.(track);
 
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');

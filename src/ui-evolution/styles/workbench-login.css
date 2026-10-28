@@ -224,6 +224,14 @@
   color: var(--evo-success);
 }
 
+:root[data-ui-variant="workbench"] .wb-login__notice[data-tone="info"] {
+  background: color-mix(in srgb, var(--evo-primary) 10%, var(--evo-surface));
+}
+
+:root[data-ui-variant="workbench"] .wb-login__notice[data-tone="info"] > .anticon {
+  color: var(--evo-primary);
+}
+
 :root[data-ui-variant="workbench"] .wb-login__sso .ant-btn,
 :root[data-ui-variant="workbench"] .wb-login__submit.ant-btn {
   height: 44px;

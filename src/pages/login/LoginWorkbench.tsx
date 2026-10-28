@@ -2,6 +2,7 @@ import React from "react";
 import { Button, Form, Input } from "antd";
 import {
   CheckCircleOutlined,
+  ClockCircleOutlined,
   ExclamationCircleOutlined,
   MoonOutlined,
   SafetyOutlined,
@@ -21,6 +22,8 @@ export interface LoginWorkbenchProps {
   isLoading: boolean;
   loginError: string | null;
   ssoLogoutWarning: boolean;
+  /** Вход после истечения сессии (не после выхода). */
+  sessionExpired?: boolean;
   invitationLinked: boolean;
 }
 
@@ -33,6 +36,7 @@ const LoginWorkbench: React.FC<LoginWorkbenchProps> = ({
   isLoading,
   loginError,
   ssoLogoutWarning,
+  sessionExpired = false,
   invitationLinked,
 }) => {
   const { mode, toggleMode } = useAppTheme();
@@ -71,6 +75,14 @@ const LoginWorkbench: React.FC<LoginWorkbenchProps> = ({
             <p className="wb-login__lead">Рабочее место Жиһаз ERP</p>
           </div>
 
+          {sessionExpired && !loginError && (
+            <div className="wb-login__notice" data-tone="info" role="status">
+              <ClockCircleOutlined />
+              <div>
+                <b>Сессия истекла.</b> Войдите снова — открытые вкладки сохранятся.
+              </div>
+            </div>
+          )}
           {ssoLogoutWarning && (
             <div className="wb-login__notice" data-tone="warn" role="status">
               <ExclamationCircleOutlined />

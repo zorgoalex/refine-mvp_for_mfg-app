@@ -29,6 +29,17 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-28", title: "Фонарик в сканере, «Сессия истекла» на входе",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "Сканер бирок: кнопка фонарика в углу видоискателя — на телефонах, камера которых умеет подсветку (обычно Chrome на Android).",
+      "Если сессия истекла, страница входа так и говорит: «Сессия истекла. Войдите снова — открытые вкладки сохранятся». После обычного выхода уведомления нет.",
+    ],
+    changed: [
+      "NewLine: в «Потребностях заказов» на виде «Сводка» итоги по типам крупнее; панель справочника тянется до низа окна.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-28", title: "Поступления 1С: сверка с платежами и автосверка",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
