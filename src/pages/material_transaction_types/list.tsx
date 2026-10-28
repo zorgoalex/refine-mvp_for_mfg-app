@@ -2,12 +2,25 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Tag, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
 
+const MATERIAL_TRANSACTION_TYPES_FILTERS: ReferenceFilterConfig = {
+  search: { field: "transaction_type_name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "select", field: "direction_type_id", label: "Направление", resource: "transaction_direction", optionLabel: "direction_name", optionValue: "direction_type_id" },
+    { kind: "boolean", field: "affects_stock", label: "Влияет на остаток", yes: "Да", no: "Нет" },
+    { kind: "boolean", field: "requires_document", label: "Требует документ", yes: "Да", no: "Нет" },
+    { kind: "text", field: "description", label: "Описание" },
+  ],
+};
+
 export const MaterialTransactionTypeList: React.FC<IResourceComponentsProps> =
   () => {
-    const { tableProps } = useTable({
+    const { tableProps, filters, setFilters, setCurrent } = useTable({
       syncWithLocation: true,
       sorters: {
         initial: [{ field: "sort_order", order: "asc" }, { field: "transaction_type_id", order: "asc" }],
@@ -17,6 +30,7 @@ export const MaterialTransactionTypeList: React.FC<IResourceComponentsProps> =
 
     return (
       <LocalizedList title="Типы операций с материалами">
+        <ReferenceFilterBar storageKey="material_transaction_types" config={MATERIAL_TRANSACTION_TYPES_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
         <Table
           {...tableProps}
           rowKey="transaction_type_id"
@@ -70,10 +84,6 @@ export const MaterialTransactionTypeList: React.FC<IResourceComponentsProps> =
                 text={value ? "Активен" : "Неактивен"}
               />
             )}
-            filters={[
-              { text: "Активен", value: true },
-              { text: "Неактивен", value: false },
-            ]}
           />
           <Table.Column
             title="Действия"

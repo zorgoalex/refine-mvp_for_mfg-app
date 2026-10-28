@@ -170,6 +170,10 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
         >
           {filtersVisible ? "Скрыть фильтры" : hasFieldFilters ? "Фильтры активны" : "Фильтры"}
         </Button>
+        {/* сброс снаружи спойлера: не нужно открывать фильтры, чтобы их снять */}
+        {hasFieldFilters || appliedFilters.film_name || search ? (
+          <Button icon={<ClearOutlined aria-hidden />} onClick={resetFilters}>Сбросить</Button>
+        ) : null}
       </Space>
       {filtersVisible && (
         <section id="films-filters" aria-label="Фильтры плёнок">

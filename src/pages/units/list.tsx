@@ -2,12 +2,23 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
 import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 
+const UNITS_FILTERS: ReferenceFilterConfig = {
+  search: { field: "unit_name", placeholder: "Поиск по названию" },
+  fields: [
+    { kind: "text", field: "unit_code", label: "Код единицы" },
+    { kind: "text", field: "unit_symbol", label: "Обозначение" },
+    { kind: "text", field: "ref_key_1c", label: "Ключ 1С" },
+  ],
+};
+
 export const UnitList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const { tableProps, filters, setFilters, setCurrent } = useTable({
     syncWithLocation: true,
     sorters: { initial: [{ field: "sort_order", order: "asc" }, { field: "unit_id", order: "asc" }] },
   });
@@ -15,6 +26,7 @@ export const UnitList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <LocalizedList title="Единицы измерения">
+      <ReferenceFilterBar storageKey="units" config={UNITS_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         rowKey="unit_id"

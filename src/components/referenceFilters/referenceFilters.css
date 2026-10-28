@@ -1,0 +1,86 @@
+/* Фильтры справочников: строка (поиск, «неактивные», «Фильтры», «Сбросить») и спойлер с полями. */
+.ref-filters {
+  margin-bottom: 12px;
+}
+
+.ref-filters__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.ref-filters__search {
+  width: 280px;
+  max-width: 100%;
+}
+
+.ref-filters__count {
+  margin-left: 6px;
+}
+
+.ref-filters__chevron {
+  margin-left: 6px;
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+
+.ref-filters__chevron[data-open] {
+  transform: rotate(180deg);
+}
+
+.ref-filters__panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px 16px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid rgba(5, 5, 5, 0.08);
+  border-radius: 8px;
+}
+
+.ref-filters__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ref-filters__field .ant-select {
+  width: 100%;
+}
+
+.ref-filters__label {
+  color: rgba(0, 0, 0, 0.55);
+  font-size: 12px;
+}
+
+.ref-filters__range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ref-filters__range .ant-input-number {
+  flex: 1;
+  min-width: 0;
+}
+
+/* «NewLine» */
+:root[data-ui-variant="workbench"] .ref-filters__panel {
+  border-color: var(--evo-border);
+  background: var(--evo-surface-muted);
+}
+
+:root[data-ui-variant="workbench"] .ref-filters__label {
+  color: var(--evo-text-secondary);
+}
+
+/* тёмная тема прежних вариантов */
+[data-theme="dark"] .ref-filters__label {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+[data-theme="dark"] .ref-filters__panel {
+  border-color: rgba(255, 255, 255, 0.12);
+}

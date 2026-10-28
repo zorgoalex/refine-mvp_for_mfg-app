@@ -2,14 +2,25 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
 import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 
+const TRANSACTION_DIRECTION_FILTERS: ReferenceFilterConfig = {
+  search: { field: "direction_name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "text", field: "direction_code", label: "Код направления" },
+    { kind: "text", field: "description", label: "Описание" },
+  ],
+};
+
 export const TransactionDirectionList: React.FC<
   IResourceComponentsProps
 > = () => {
-  const { tableProps } = useTable({
+  const { tableProps, filters, setFilters, setCurrent } = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "direction_type_id", order: "asc" }],
@@ -19,6 +30,7 @@ export const TransactionDirectionList: React.FC<
 
   return (
     <LocalizedList title="Направления движения">
+      <ReferenceFilterBar storageKey="transaction_direction" config={TRANSACTION_DIRECTION_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         rowKey="direction_type_id"
@@ -43,10 +55,6 @@ export const TransactionDirectionList: React.FC<
               text={value ? "Активен" : "Неактивен"}
             />
           )}
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
         />
         <Table.Column
           title="Действия"

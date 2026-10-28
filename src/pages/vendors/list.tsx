@@ -2,6 +2,8 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
 import { useMemo } from "react";
@@ -10,8 +12,18 @@ import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 import { PrimaryContactsCell, usePrimaryContacts } from "../../components/contacts/usePrimaryContacts";
 import { can } from "../../utils/permissions";
 
+const VENDORS_FILTERS: ReferenceFilterConfig = {
+  search: { field: "vendor_name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "select", field: "material_type_id", label: "Тип материала", resource: "material_types", optionLabel: "material_type_name", optionValue: "material_type_id" },
+    { kind: "text", field: "contact_info", label: "Контакты" },
+    { kind: "text", field: "ref_key_1c", label: "Ключ 1С" },
+  ],
+};
+
 export const VendorList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const { tableProps, filters, setFilters, setCurrent } = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "vendor_id", order: "asc" }],
@@ -54,6 +66,7 @@ export const VendorList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <LocalizedList title="Производители">
+      <ReferenceFilterBar storageKey="vendors" config={VENDORS_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         {...highlightProps}
@@ -91,10 +104,6 @@ export const VendorList: React.FC<IResourceComponentsProps> = () => {
           dataIndex="is_active"
           title="Активен"
           sorter
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
           render={(value: boolean) => (
             <Badge
               status={value ? "success" : "default"}

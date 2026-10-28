@@ -1207,6 +1207,27 @@ const buildOrderBy = (resource: string, sorters?: any[]) => {
   return `, order_by: [${parts.join(", ")}]`;
 };
 
+/** Reference lists whose URL-synced filters are typed back (see `referenceUrlScalar`). */
+const REFERENCE_URL_SCALAR_RESOURCES: ReadonlySet<string> = new Set([
+  'materials', 'sheet_material_types', 'film_types', 'material_types', 'edge_types', 'milling_types',
+  'extra_resources', 'vendors', 'film_vendors', 'units', 'catalog_items', 'workshops', 'work_centers',
+  'order_workshops', 'production_statuses', 'order_statuses', 'payment_statuses', 'requisition_statuses',
+  'resource_requirements_statuses', 'movements_statuses', 'material_transaction_types', 'transaction_direction',
+  'payment_types', 'employees', 'suppliers',
+]);
+
+/** Boolean columns of the reference lists whose names do not start with `is_` (filters «Да / Нет»). */
+const REFERENCE_BOOLEAN_FIELDS: ReadonlySet<string> = new Set(['affects_stock', 'requires_document']);
+
+/** `is_*` and the boolean columns above → boolean; `*_id`, `sort_order` and range bounds → number, when the string is exactly that. */
+export function referenceUrlScalar(field: unknown, operator: unknown, value: unknown): unknown {
+  if (typeof value !== 'string' || typeof field !== 'string') return value;
+  if (field.startsWith('is_') || REFERENCE_BOOLEAN_FIELDS.has(field)) return value === 'true' ? true : value === 'false' ? false : value;
+  const numeric = value.trim() !== '' && Number.isFinite(Number(value));
+  if (numeric && (field.endsWith('_id') || field === 'sort_order' || operator === 'gte' || operator === 'lte')) return Number(value);
+  return value;
+}
+
 const mapOperator = (op: string) => {
   switch (op) {
     case "eq":
@@ -1256,6 +1277,12 @@ const buildWhere = (resource: string, filters?: any[]) => {
         return value;
       };
       val = Array.isArray(val) ? val.map(scalar) : scalar(val);
+    } else if (REFERENCE_URL_SCALAR_RESOURCES.has(resource)) {
+      // Reference list filters (search, «Показывать неактивные», the «Фильтры» spoiler) are synced with the URL
+      // and come back as strings after a reload: booleans and numbers get their GraphQL types again.
+      val = Array.isArray(val)
+        ? val.map((item: unknown) => referenceUrlScalar(f.field, f.operator, item))
+        : referenceUrlScalar(f.field, f.operator, val);
     }
     // Drop null/undefined from `_in` arrays — Hasura rejects `_in: [null]` for
     // non-null typed columns ("unexpected null value for type 'smallint'").

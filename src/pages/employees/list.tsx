@@ -2,6 +2,8 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
 import { useEffect, useMemo, useState } from "react";
@@ -10,8 +12,18 @@ import type { EmployeeContact } from "../../api/employeeContactsApiTypes";
 import { can } from "../../utils/permissions";
 import { EMPLOYEE_CONTACT_KIND_LABELS, formatContact, isContactsApiMissing, sortContacts } from "./employeeContactsModel";
 
+const EMPLOYEES_FILTERS: ReferenceFilterConfig = {
+  search: { field: "full_name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "text", field: "position", label: "Должность" },
+    { kind: "text", field: "note", label: "Примечание" },
+    { kind: "text", field: "ref_key_1c", label: "Ключ 1С" },
+  ],
+};
+
 export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const { tableProps, filters, setFilters, setCurrent } = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "employee_id", order: "desc" }],
@@ -40,6 +52,7 @@ export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <LocalizedList title="Сотрудники">
+      <ReferenceFilterBar storageKey="employees" config={EMPLOYEES_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         rowKey="employee_id"
@@ -62,10 +75,6 @@ export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
               text={value ? "Активен" : "Неактивен"}
             />
           )}
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
         />
         {canViewContacts ? (
           <Table.Column

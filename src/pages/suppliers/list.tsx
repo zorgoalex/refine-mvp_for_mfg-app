@@ -2,6 +2,8 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
@@ -9,8 +11,19 @@ import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 import { PrimaryContactsCell, usePrimaryContacts } from "../../components/contacts/usePrimaryContacts";
 import { can } from "../../utils/permissions";
 
+const SUPPLIERS_FILTERS: ReferenceFilterConfig = {
+  search: { field: "supplier_name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "text", field: "address", label: "Адрес" },
+    { kind: "text", field: "contact_person", label: "Контактное лицо" },
+    { kind: "text", field: "phone", label: "Телефон" },
+    { kind: "text", field: "ref_key_1c", label: "Ключ 1С" },
+  ],
+};
+
 export const SupplierList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const { tableProps, filters, setFilters, setCurrent } = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "supplier_id", order: "asc" }],
@@ -26,6 +39,7 @@ export const SupplierList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <LocalizedList title="Поставщики">
+      <ReferenceFilterBar storageKey="suppliers" config={SUPPLIERS_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         {...highlightProps}
@@ -60,11 +74,6 @@ export const SupplierList: React.FC<IResourceComponentsProps> = () => {
               text={value ? "Активен" : "Неактивен"}
             />
           )}
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
-          onFilter={(value, record: any) => record.is_active === value}
         />
         <Table.Column
           title="Действия"

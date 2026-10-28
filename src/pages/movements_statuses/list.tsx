@@ -2,12 +2,23 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 
+const MOVEMENTS_STATUSES_FILTERS: ReferenceFilterConfig = {
+  search: { field: "movement_status_name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "text", field: "movement_status_code", label: "Код статуса" },
+    { kind: "text", field: "description", label: "Описание" },
+  ],
+};
+
 export const MovementStatusList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const { tableProps, filters, setFilters, setCurrent } = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "movement_status_id", order: "asc" }],
@@ -18,6 +29,7 @@ export const MovementStatusList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <LocalizedList title="Статусы перемещений">
+      <ReferenceFilterBar storageKey="movements_statuses" config={MOVEMENTS_STATUSES_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         {...highlightProps}
@@ -42,10 +54,6 @@ export const MovementStatusList: React.FC<IResourceComponentsProps> = () => {
               text={value ? "Активен" : "Неактивен"}
             />
           )}
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
         />
         <Table.Column dataIndex="description" title="Описание" />
         <Table.Column

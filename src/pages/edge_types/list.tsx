@@ -5,9 +5,19 @@ import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
+
+const EDGE_TYPE_FILTERS: ReferenceFilterConfig = {
+  search: { field: "edge_type_name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "text", field: "ref_key_1c", label: "Ключ 1С" },
+  ],
+};
 
 export const EdgeTypeList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const { tableProps, filters, setFilters, setCurrent } = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "edge_type_id", order: "asc" }],
@@ -22,6 +32,7 @@ export const EdgeTypeList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <LocalizedList title="Типы обката">
+      <ReferenceFilterBar storageKey="edge_types" config={EDGE_TYPE_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         {...highlightProps}
@@ -49,10 +60,6 @@ export const EdgeTypeList: React.FC<IResourceComponentsProps> = () => {
               text={value ? "Активен" : "Неактивен"}
             />
           )}
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
         />
         <Table.Column dataIndex="ref_key_1c" title="1C-key" />
         <Table.Column

@@ -2,14 +2,28 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
 import { useMemo } from "react";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
 import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 
+const MATERIALS_FILTERS: ReferenceFilterConfig = {
+  search: { field: "material_name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "select", field: "material_type_id", label: "Тип материала", resource: "material_types", optionLabel: "material_type_name", optionValue: "material_type_id" },
+    { kind: "select", field: "unit_id", label: "Единица", resource: "units", optionLabel: "unit_name", optionValue: "unit_id" },
+    { kind: "select", field: "vendor_id", label: "Производитель", resource: "vendors", optionLabel: "vendor_name", optionValue: "vendor_id" },
+    { kind: "select", field: "default_supplier_id", label: "Поставщик", resource: "suppliers", optionLabel: "supplier_name", optionValue: "supplier_id" },
+    { kind: "text", field: "ref_key_1c", label: "Ключ 1С" },
+  ],
+};
+
 export const MaterialList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const { tableProps, filters, setFilters, setCurrent } = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "material_id", order: "asc" }],
@@ -128,6 +142,7 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <LocalizedList title="Материалы">
+      <ReferenceFilterBar storageKey="materials" config={MATERIALS_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         {...highlightProps}
@@ -181,10 +196,6 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
               text={value ? "Активен" : "Неактивен"}
             />
           )}
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
         />
         <Table.Column dataIndex="ref_key_1c" title="1C-key" />
         <Table.Column

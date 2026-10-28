@@ -3,6 +3,8 @@ import React, { useMemo } from 'react';
 import { IResourceComponentsProps, useMany, useNavigation } from '@refinedev/core';
 import { ShowButton, EditButton, CreateButton } from '@refinedev/antd';
 import { usePersistentTable as useTable } from '../../hooks/usePersistentTable';
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge, Tag, Button } from 'antd';
 import { useHighlightRow } from '../../hooks/useHighlightRow';
 import { LocalizedList } from '../../components/LocalizedList';
@@ -10,9 +12,21 @@ import { can } from '../../utils/permissions';
 import { CategoryCell, NoteCell } from '../../components/NomenclatureFields';
 import { useSheetMaterialNomenclature } from './useSheetMaterialNomenclature';
 
+const SHEET_MATERIAL_TYPES_FILTERS: ReferenceFilterConfig = {
+  search: { field: "name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "boolean", field: "is_cuttable", label: "Раскраивается", yes: "Да", no: "Нет" },
+    { kind: "select", field: "material_type_id", label: "Тип материала", resource: "material_types", optionLabel: "material_type_name", optionValue: "material_type_id" },
+    { kind: "select", field: "vendor_id", label: "Производитель", resource: "vendors", optionLabel: "vendor_name", optionValue: "vendor_id" },
+    { kind: "range", field: "thickness_mm", label: "Толщина, мм" },
+    { kind: "text", field: "supplier_article", label: "Артикул" },
+  ],
+};
+
 export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
   const canManage = can('sheet_materials.manage');
-  const { tableProps } = useTable({
+  const { tableProps, filters, setFilters, setCurrent } = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [
@@ -73,6 +87,7 @@ export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
       title="Листовые материалы"
       headerButtons={canManage ? <CreateButton resource="sheet_material_types" /> : undefined}
     >
+      <ReferenceFilterBar storageKey="sheet_material_types" config={SHEET_MATERIAL_TYPES_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         {...highlightProps}
@@ -128,7 +143,6 @@ export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
           render={(value: boolean | null | undefined) => (
             value === null || value === undefined ? '—' : value ? <Tag color="green">Да</Tag> : <Tag color="red">Нет</Tag>
           )}
-          filters={[{ text: 'Да', value: true }, { text: 'Нет', value: false }]}
         />
         <Table.Column dataIndex="color" title="Цвет" render={(v) => v ?? '—'} />
         <Table.Column title="Тип номенклатуры" key="nomenclatureType" ellipsis render={(_, record: any) => nomenclature.byId.get(Number(record.sheet_material_type_id))?.nomenclatureType || '—'} />
@@ -139,7 +153,6 @@ export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
           title="Активен"
           sorter
           render={(value: boolean) => <Badge status={value ? 'success' : 'default'} text={value ? 'Активен' : 'Неактивен'} />}
-          filters={[{ text: 'Активен', value: true }, { text: 'Неактивен', value: false }]}
         />
         <Table.Column
           title="Действия"

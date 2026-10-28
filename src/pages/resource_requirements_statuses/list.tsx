@@ -2,12 +2,23 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
 
+const RESOURCE_REQUIREMENTS_STATUSES_FILTERS: ReferenceFilterConfig = {
+  search: { field: "requirement_status_name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "text", field: "requirement_status_code", label: "Код статуса" },
+    { kind: "text", field: "ref_key_1c", label: "Ключ 1С" },
+  ],
+};
+
 export const ResourceRequirementStatusList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const { tableProps, filters, setFilters, setCurrent } = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "requirement_status_id", order: "asc" }],
@@ -18,6 +29,7 @@ export const ResourceRequirementStatusList: React.FC<IResourceComponentsProps> =
 
   return (
     <LocalizedList title="Статусы потребности в ресурсах">
+      <ReferenceFilterBar storageKey="resource_requirements_statuses" config={RESOURCE_REQUIREMENTS_STATUSES_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         {...highlightProps}
@@ -54,10 +66,6 @@ export const ResourceRequirementStatusList: React.FC<IResourceComponentsProps> =
               text={value ? "Активен" : "Неактивен"}
             />
           )}
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
         />
         <Table.Column dataIndex="ref_key_1c" title="1C-key" />
         <Table.Column
