@@ -90,6 +90,8 @@ function harness(input?: {
   guards?: PaymentCreateGuardRow[];
   hasOrders?: boolean;
   paidPayments?: Bitrix24PaidPaymentGuard;
+  /** Entities whose `assignedById` the assignment channel owns. */
+  owned?: string[];
 }) {
   const mappings = input?.mappings ?? [];
   const guards = new Map(
@@ -157,6 +159,9 @@ function harness(input?: {
     options,
     durablePaymentCreates: true,
     paidPayments: input?.paidPayments,
+    assignment: input?.owned
+      ? { ownsAssignment: vi.fn(async (entityType: string, erpId: string) => input.owned!.includes(`${entityType}:${erpId}`)) }
+      : undefined,
   });
   return { consumer, source, bitrix, calls, guards, mapping };
 }
@@ -192,6 +197,19 @@ describe('Bitrix24SyncConsumer', () => {
     const intents = await second.consumer.sync(event('client', '1', 'upsert'));
     expect(second.calls).toEqual(['update:3:100']);
     expect(intents[0]?.mapping.bitrixId).toBe('100');
+  });
+
+  it('leaves assignedById to the assignment channel for the objects it owns', async () => {
+    const owned = harness({ owned: ['client:1', 'order:2'] });
+    await owned.consumer.sync(event('order', '2', 'upsert'));
+    for (const call of owned.bitrix.createCrmItem.mock.calls) {
+      expect(call[1]).not.toHaveProperty('assignedById');
+    }
+    const plain = harness({ owned: [] });
+    await plain.consumer.sync(event('order', '2', 'upsert'));
+    for (const call of plain.bitrix.createCrmItem.mock.calls) {
+      expect(call[1]).toHaveProperty('assignedById', 1);
+    }
   });
 
   it('updates a Bitrix-owned client without claiming ERP provenance', async () => {

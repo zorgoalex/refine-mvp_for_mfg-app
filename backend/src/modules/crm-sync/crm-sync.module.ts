@@ -16,6 +16,8 @@ import { Bitrix24SyncConsumer } from './application/bitrix24-sync-consumer';
 import { Bitrix24PaidPaymentGuard } from './application/bitrix24-paid-payment-guard';
 import { Bitrix24PaymentNotificationWorker } from './application/bitrix24-payment-notification-worker';
 import { PgCrmSyncPaymentNotificationRepository } from './adapters/pg-crm-sync-payment-notification-repository';
+import { Bitrix24AssignmentWorker } from './assignment/bitrix24-assignment-worker';
+import { PgBitrix24AssignmentRepository, assignmentOwnership } from './assignment/pg-bitrix24-assignment-repository';
 import { PgCrmSyncPaidPaymentOperationRepository } from './adapters/pg-crm-sync-paid-payment-operation-repository';
 import { CrmSyncRelayService } from './application/crm-sync-relay.service';
 import { CrmSyncRelaySchedulerService } from './application/crm-sync-relay-scheduler.service';
@@ -363,6 +365,7 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
           options,
           durablePaymentCreates: true,
           paidPayments,
+          assignment: database.isConfigured ? assignmentOwnership(database) : undefined,
         });
 
         const dryRunConsumer = new Bitrix24SyncConsumer({
@@ -384,10 +387,19 @@ const BITRIX24_REVERSE_API_PORT = Symbol('BITRIX24_REVERSE_API_PORT');
           })
           : undefined;
 
+        const assignments = database.isConfigured
+          ? new Bitrix24AssignmentWorker({
+            bitrix: realBitrix,
+            store: new PgBitrix24AssignmentRepository(database, audit),
+            policy: () => config.getAssignment(),
+          })
+          : undefined;
+
         return new CrmSyncRelayService({
           stageLane,
           paidPaymentRecovery: paidPayments,
           paymentNotifications,
+          assignments,
           outboxRepo,
           consumer,
           dryRunConsumer,

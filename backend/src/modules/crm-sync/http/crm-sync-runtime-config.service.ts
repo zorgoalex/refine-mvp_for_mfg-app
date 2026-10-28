@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { BackendEnv } from '../../../config/env.validation';
+import { assignmentPolicy } from '../assignment/assignment-policy';
 
 @Injectable()
 export class CrmSyncRuntimeConfigService {
@@ -129,6 +130,15 @@ export class CrmSyncRuntimeConfigService {
       enabled: this.config.get('BACKEND_BITRIX24_PAYMENT_NOTIFICATIONS', { infer: true }) ?? false,
       orderIds: new Set(raw.split(',').map((id) => id.trim()).filter(Boolean)),
     };
+  }
+
+  /** Assignment channel worker (migration 270): runs when on; the mode itself is in the database. */
+  getAssignment(): ReturnType<typeof assignmentPolicy> {
+    return assignmentPolicy(
+      this.config.get('BACKEND_BITRIX24_ASSIGNMENT', { infer: true }) ?? false,
+      this.config.get('BACKEND_BITRIX24_ASSIGNMENT_ERP_USER_IDS', { infer: true }) ?? '',
+      this.config.get('BITRIX24_ASSIGNED_BY_ID', { infer: true }) ?? null,
+    );
   }
 
   isProductionInitializationReady(): boolean {

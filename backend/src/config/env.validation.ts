@@ -570,6 +570,18 @@ export const envSchema = z
     ),
     // ERP → Bitrix24: комментарий в сделке и уведомление ответственному об изменениях оплат из ERP
     // (миграция 260). Строки пишутся всегда; доставка — только при флаге. Список заказов — канарейка (пусто = все).
+        // ERP → Bitrix24: ответственный сделки/клиента = менеджер ERP (migr 270). Флаг запускает воркер; режим канала
+    // (off/on/restore) — в БД, меняется командами. Когорта — ERP-пользователи, чьи записи канал берёт под управление:
+    // '*' = все, пусто = никто (только release уже управляемых).
+    BACKEND_BITRIX24_ASSIGNMENT: booleanFromEnv.default(false),
+    BACKEND_BITRIX24_ASSIGNMENT_ERP_USER_IDS: z.string().trim().default('').refine(
+      (value) => {
+        if (value === '*' || value === '') return true;
+        const ids = value.split(',').map((id) => id.trim()).filter(Boolean);
+        return new Set(ids).size === ids.length && ids.length <= 200 && ids.every((id) => /^[1-9][0-9]{0,17}$/.test(id));
+      },
+      "BACKEND_BITRIX24_ASSIGNMENT_ERP_USER_IDS: '*' or up to 200 distinct positive ERP user ids, comma-separated",
+    ),
     BACKEND_BITRIX24_PAYMENT_NOTIFICATIONS: booleanFromEnv.default(false),
     BACKEND_BITRIX24_PAYMENT_NOTIFICATIONS_ORDER_IDS: z.string().trim().default('').refine(
       (value) => {

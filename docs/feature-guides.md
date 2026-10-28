@@ -443,6 +443,29 @@ Bitrix24 показывает с тегом ERP (`MEBELKZ_ERP_PAYMENT_<id>`); о
 включение для отдельных заказов. Итог — аудит
 `crm_sync.payment_notification_sent | _failed | _skipped`.
 
+Ответственный сделки и клиента = менеджер ERP (миграция
+`270_bitrix24_assignment_channel.sql`, до backend). Нужен для роли CRM «Свои»
+в Bitrix24: менеджер видит только записи, где он ответственный. Ответственный
+производственной сделки — пользователь Bitrix24, сопоставленный с менеджером
+заказа, иначе с автором; клиента — по его последнему производственному заказу,
+иначе по автору клиента. Одному пользователю ERP — не больше одного активного
+сопоставления (409 `BITRIX24_MAPPING_ERP_USER_TAKEN`). Заявки из Bitrix24 до
+перевода в заказ не трогаются. Отдельный канал: триггеры только дописывают
+причины в `bitrix24_assignment_cause`, relay в конце тика читает объект
+(`crm.item.get`) и пишет `assignedById` (`crm.item.update`); начало записи
+сохраняется до вызова, потерянный ответ подтверждается чтением. Ручная смена
+ответственного в Bitrix24 возвращается; запись, потерявшая менеджера, отдаётся
+пользователю `BITRIX24_ASSIGNED_BY_ID`. Обычная синхронизация не пишет
+`assignedById` объектов канала. Режим канала (off/on/restore) — в БД, меняется
+командами `node dist/modules/crm-sync/assignment/bitrix24-assignment-cli.js
+status | plan | enable | enqueue | set-release | restore [--dry-run] |
+resolve <object:id> keep|apply | complete`; `BACKEND_BITRIX24_ASSIGNMENT=true`
+запускает обработчик, `BACKEND_BITRIX24_ASSIGNMENT_ERP_USER_IDS` — когорта
+(`*` = все). Откат (`restore` → `complete`) возвращает объекты ERP к
+`BITRIX24_ASSIGNED_BY_ID`, объекты Bitrix24 — к ответственному до канала;
+ручные правки показываются и решаются `resolve`. Итог — аудит
+`bitrix24.assignment.changed` и журнал `bitrix24_assignment_change`.
+
 Кнопка «Повторить отправку в Bitrix» в настройках интеграции
 (`POST /api/v1/bitrix24/sync-health/retry-failed-outbound`, право
 `bitrix24.integration.manage`) возвращает в очередь последнее событие каждого

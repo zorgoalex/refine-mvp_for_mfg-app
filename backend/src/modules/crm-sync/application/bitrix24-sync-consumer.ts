@@ -64,6 +64,8 @@ interface Bitrix24SyncConsumerDeps {
   durablePaymentCreates?: boolean;
   /** Changes/deletes paid ERP payments in Bitrix24; absent = plain calls (dry-run, legacy). */
   paidPayments?: Bitrix24PaidPaymentGuard;
+  /** Assignment channel (migration 270): it alone writes `assignedById` of the objects it owns. */
+  assignment?: { ownsAssignment(entityType: 'order' | 'client', erpId: string): Promise<boolean> };
 }
 
 export class Bitrix24SyncConsumer {
@@ -117,6 +119,17 @@ export class Bitrix24SyncConsumer {
       : this.syncOrder(id, op, event);
   }
 
+  private async withoutOwnedAssignment(
+    entityType: 'order' | 'client',
+    erpId: string,
+    fields: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    if (!('assignedById' in fields) || !this.deps.assignment) return fields;
+    return await this.deps.assignment.ownsAssignment(entityType, erpId)
+      ? omitFields(fields, ['assignedById'])
+      : fields;
+  }
+
   private async syncClient(
     erpId: string,
     op: 'upsert' | 'delete',
@@ -149,7 +162,7 @@ export class Bitrix24SyncConsumer {
     }
     const fields = bitrixOwned
       ? omitFields(payload.fields, ['originatorId', 'originId', 'assignedById'])
-      : payload.fields;
+      : await this.withoutOwnedAssignment('client', row.clientId, payload.fields);
     const nextHash = hash({ object: payload.object, fields });
     const usableId =
       mapping?.status === 'active' && sameObject ? mapping.bitrixId : null;
@@ -323,7 +336,9 @@ export class Bitrix24SyncConsumer {
 
     const payload = mapOrder(order, counterparty, this.deps.options);
     const bitrixOwned = mapping?.sourceSystem === 'bitrix24';
-    const fields = bitrixOwned ? bitrixOwnedProductionFields(payload.fields) : payload.fields;
+    const fields = bitrixOwned
+      ? bitrixOwnedProductionFields(payload.fields)
+      : await this.withoutOwnedAssignment('order', erpId, payload.fields);
     const nextHash = hash({ fields, productRows: payload.productRows });
     // A failed attempt keeps the last known Deal ID (markFailed never clears it). Dropping it would
     // send every retry to the portal-wide originId lookup, and a Bitrix-owned order could never recover.
