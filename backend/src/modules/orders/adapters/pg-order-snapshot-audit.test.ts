@@ -1,8 +1,11 @@
 import type { QueryResult, QueryResultRow } from 'pg';
-import { describe, expect, it } from 'vitest';
+import JSZip from 'jszip';
+import { describe, expect, it, vi } from 'vitest';
+import type { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { snapshotImportManagerAudit, writeAudit } from './pg-order-snapshot';
+import type { ImportOrderSnapshotCommand, OrderSnapshotDto } from '../dto/order-snapshot.dto';
+import { PgOrderSnapshot, snapshotImportManagerAudit, writeAudit, writeSnapshotImportResultAudit } from './pg-order-snapshot';
 
 function fakeTx(captured: Array<{ text: string; params: readonly unknown[] }>): TransactionClient {
   return {
@@ -61,6 +64,46 @@ describe('order snapshot writeAudit', () => {
     const noop = managerTx(12);
     expect(await snapshotImportManagerAudit(noop as never, { status: 'noop', orderId: 88 }, actor)).toEqual({ relatedUserId: null, metadata: {} });
     expect(noop.queries).toHaveLength(0);
+  });
+
+  it('the import audit row carries the manager the import wrote (the call importOrderSnapshot makes)', async () => {
+    const captured: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      raw: undefined as never,
+      async query<T extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []): Promise<QueryResult<T>> {
+        captured.push({ text, params: [...params] });
+        const row = /SELECT manager_id FROM orders/.test(text) ? { manager_id: '12' }
+          : /SELECT client_id FROM orders/.test(text) ? { client_id: '55' } : { audit_id: 'aud-i' };
+        return { rows: [row as unknown as T], rowCount: 1, command: 'SELECT', oid: 0, fields: [] };
+      },
+    } as TransactionClient;
+    const snapshot = { formatVersion: '1.0.0', exporterService: { version: '2.0.0' }, data: { order: {}, details: [] } } as unknown as OrderSnapshotDto;
+    await writeSnapshotImportResultAudit(tx, {
+      command: { currentUser: actor, requestId: 'req_i' } as ImportOrderSnapshotCommand,
+      snapshot, remappedSnapshot: snapshot, payloadHash: 'hash', runId: 'run-1',
+      result: { status: 'created', orderId: 88 },
+    });
+    const insert = captured.find((query) => /INSERT INTO audit_log\b/i.test(query.text) && !/audit_log_related_entity/i.test(query.text))!;
+    expect(insert.params[0]).toBe('orders.snapshot_import');
+    expect(insert.params[8]).toBe(88);  // related_order_id
+    expect(insert.params[9]).toBe(55);  // related_client_id
+    expect(insert.params[13]).toBe(12); // related_user_id = the written manager
+    expect(JSON.parse(String(insert.params[22]))).toMatchObject({
+      requestId: 'req_i', importRunId: 'run-1', status: 'created', managerId: 12, managerAssignedByImport: true,
+    });
+  });
+
+  it('a batch import runs every file through the single import (same manager contract and audit)', async () => {
+    const zip = new JSZip();
+    zip.file('a.json', JSON.stringify({ identity: { order: { sourceId: 'a' } } }));
+    zip.file('b.json', JSON.stringify({ identity: { order: { sourceId: 'b' } } }));
+    const adapter = new PgOrderSnapshot({} as DatabaseService);
+    const single = vi.spyOn(adapter, 'importOrderSnapshot').mockResolvedValue({ status: 'created', orderId: 1 } as never);
+    const zipBase64 = (await zip.generateAsync({ type: 'nodebuffer' })).toString('base64');
+    await adapter.importOrderSnapshotBatch({ currentUser: actor, requestId: 'req_b', zipBase64 } as never);
+    expect(single).toHaveBeenCalledTimes(2);
+    expect(single.mock.calls.map(([command]) => [command.currentUser, (command.snapshot as OrderSnapshotDto).identity.order.sourceId]))
+      .toEqual([[actor, 'a'], [actor, 'b']]);
   });
 
   it('passes null related_client_id when clientId is null', async () => {

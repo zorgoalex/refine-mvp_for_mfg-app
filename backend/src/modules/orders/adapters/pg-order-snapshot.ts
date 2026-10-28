@@ -476,28 +476,7 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
           requestRef: { importRunId: runId },
         });
         await finishImportRun(tx, runId, result.status, result.orderId, result.summary);
-        const managerAudit = await snapshotImportManagerAudit(tx, result, command.currentUser);
-        await writeAudit(
-          tx,
-          snapshotImportAuditEvent(result.status),
-          command.currentUser,
-          result.orderId,
-          // The local client of the imported order (after a merge of clients, the survivor).
-          result.orderId ? await localOrderClient(tx, result.orderId) : null,
-          {
-            requestId: command.requestId,
-            payloadHash,
-            importRunId: runId,
-            status: result.status,
-            formatVersion: snapshot.formatVersion,
-            serviceVersion: snapshot.exporterService.version,
-            // «Переделка»: restored production rounds (history; no rework events are re-emitted).
-            productionRoundNos: remappedSnapshot.data.productionRounds?.rounds.map((round) => round.roundNo) ?? [],
-            ...managerAudit.metadata,
-          },
-          collectSnapshotSheetIds(remappedSnapshot),
-          managerAudit.relatedUserId,
-        );
+        await writeSnapshotImportResultAudit(tx, { command, snapshot, remappedSnapshot, payloadHash, runId, result });
         if (result.status === 'created' || result.status === 'updated') {
           await evaluateProductionCompositionAutomation(tx, {
             orderId: result.orderId, actor: command.currentUser,
@@ -3623,6 +3602,43 @@ export async function writeAudit(
     metadata,
     relatedEntities: sheetIds.map((entityId) => ({ entityType: 'sheet_material_type', entityId })),
   });
+}
+
+/** Audit row of an import that wrote the order (created / updated), with the manager it wrote. */
+export async function writeSnapshotImportResultAudit(
+  tx: TransactionClient,
+  input: {
+    command: ImportOrderSnapshotCommand;
+    snapshot: OrderSnapshotDto;
+    remappedSnapshot: OrderSnapshotDto;
+    payloadHash: string;
+    runId: string;
+    result: { status: ImportStatus; orderId: number };
+  },
+): Promise<void> {
+  const { command, snapshot, remappedSnapshot, payloadHash, runId, result } = input;
+  const managerAudit = await snapshotImportManagerAudit(tx, result, command.currentUser);
+  await writeAudit(
+    tx,
+    snapshotImportAuditEvent(result.status),
+    command.currentUser,
+    result.orderId,
+    // The local client of the imported order (after a merge of clients, the survivor).
+    result.orderId ? await localOrderClient(tx, result.orderId) : null,
+    {
+      requestId: command.requestId,
+      payloadHash,
+      importRunId: runId,
+      status: result.status,
+      formatVersion: snapshot.formatVersion,
+      serviceVersion: snapshot.exporterService.version,
+      // «Переделка»: restored production rounds (history; no rework events are re-emitted).
+      productionRoundNos: remappedSnapshot.data.productionRounds?.rounds.map((round) => round.roundNo) ?? [],
+      ...managerAudit.metadata,
+    },
+    collectSnapshotSheetIds(remappedSnapshot),
+    managerAudit.relatedUserId,
+  );
 }
 
 /**
