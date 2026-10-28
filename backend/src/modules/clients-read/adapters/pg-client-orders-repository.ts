@@ -41,23 +41,36 @@ export class PgClientOrdersRepository {
     const params: unknown[] = [clientId];
     const visible = appendOrderReadVisibilitySql(params, scope.viewer);
     const where = `o.client_id = $1 AND o.delete_flag = false AND ${ORDER_ROWS} AND ${visible}`;
-    const totals = (await this.database.query<{ total: string | number; final_amount: string | number; paid_amount: string | number }>(
-      `SELECT count(*) AS total, COALESCE(sum(o.final_amount), 0) AS final_amount, COALESCE(sum(o.paid_amount), 0) AS paid_amount
-         FROM orders o WHERE ${where}`, params)).rows[0];
-    const rows = (await this.database.query<ClientOrderRow>(
-      `SELECT o.order_id, o.order_name::text AS order_name,
-              CASE WHEN mp.code IS NULL THEN NULL ELSE mp.code || '-' || o.order_name END AS full_number,
-              to_char(o.order_date, 'YYYY-MM-DD') AS order_date,
-              os.order_status_name, prod_s.production_status_name, pay_s.payment_status_name,
-              o.final_amount, o.paid_amount
-         FROM orders o
-         LEFT JOIN projects mp ON mp.project_id = o.project_id
-         LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
-         LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id
-         LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
-        WHERE ${where}
-        ORDER BY o.order_date DESC NULLS LAST, o.order_id DESC
-        LIMIT $${params.push(pageSize)} OFFSET $${params.push((page - 1) * pageSize)}`, params)).rows;
-    return { rows, total: Number(totals?.total ?? 0), finalAmount: Number(totals?.final_amount ?? 0), paidAmount: Number(totals?.paid_amount ?? 0) };
+    const limit = params.push(pageSize);
+    const offset = params.push((page - 1) * pageSize);
+    // One statement, one snapshot: the count, the sums and the page always describe the same set of orders.
+    const result = (await this.database.query<ClientOrderRow & { total: string | number; sum_final: string | number; sum_paid: string | number }>(
+      `WITH visible AS (
+         SELECT o.order_id, o.order_name, o.project_id, o.order_date, o.order_status_id, o.production_status_id,
+                o.payment_status_id, o.final_amount, o.paid_amount
+           FROM orders o WHERE ${where}
+       ), totals AS (
+         SELECT count(*) AS total, COALESCE(sum(final_amount), 0) AS sum_final, COALESCE(sum(paid_amount), 0) AS sum_paid FROM visible
+       )
+       SELECT totals.total, totals.sum_final, totals.sum_paid, page_rows.*
+         FROM totals
+         LEFT JOIN LATERAL (
+           SELECT v.order_id, v.order_name::text AS order_name,
+                  CASE WHEN mp.code IS NULL THEN NULL ELSE mp.code || '-' || v.order_name END AS full_number,
+                  to_char(v.order_date, 'YYYY-MM-DD') AS order_date,
+                  os.order_status_name, prod_s.production_status_name, pay_s.payment_status_name,
+                  v.final_amount, v.paid_amount, v.order_date AS sort_date
+             FROM visible v
+             LEFT JOIN projects mp ON mp.project_id = v.project_id
+             LEFT JOIN order_statuses os ON os.order_status_id = v.order_status_id
+             LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = v.production_status_id
+             LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = v.payment_status_id
+            ORDER BY v.order_date DESC NULLS LAST, v.order_id DESC
+            LIMIT $${limit} OFFSET $${offset}
+         ) page_rows ON true
+        ORDER BY page_rows.sort_date DESC NULLS LAST, page_rows.order_id DESC NULLS LAST`, params)).rows;
+    const first = result[0];
+    const rows = result.filter((row) => row.order_id !== null);
+    return { rows, total: Number(first?.total ?? 0), finalAmount: Number(first?.sum_final ?? 0), paidAmount: Number(first?.sum_paid ?? 0) };
   }
 }
