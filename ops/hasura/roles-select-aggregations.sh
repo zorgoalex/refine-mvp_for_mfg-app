@@ -245,6 +245,12 @@ for source in pre["metadata"].get("sources", []):
     for table in source.get("tables", []):
         for perm in table.get("select_permissions") or []:
             before_flags[(table["table"]["name"], perm["role"])] = perm["permission"].get("allow_aggregations")
+# Our bulk is one metadata change: the version right after it is the read version + 1. A higher version means someone
+# else changed metadata in between (even back to the same content, e.g. a pair dropped and re-created): no manifest.
+if post["resource_version"] != pre["resource_version"] + 1:
+    print(f"ERROR: Hasura metadata version {post['resource_version']} is not the one right after the fix"
+          f" ({pre['resource_version'] + 1}): someone else changed metadata; no rollback manifest", file=sys.stderr)
+    sys.exit(4)
 if normalized(pre["metadata"]) != normalized(post["metadata"], before_flags):
     print("ERROR: something else changed in Hasura metadata between the fix and its check; no rollback manifest", file=sys.stderr)
     sys.exit(4)

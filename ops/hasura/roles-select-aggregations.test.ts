@@ -300,4 +300,21 @@ describe('roles select aggregations', () => {
     expect(result.output).toContain('no rollback manifest');
     expect(existsSync(manifest)).toBe(false);
   });
+
+  it('--manifest-out writes no manifest when the same pair was re-created (same content) between the fix and the check', async () => {
+    const manifest = manifestPath();
+    const { server } = fakeHasura(live, {
+      extraTables: { transaction_direction: refPermissions() },
+      afterBulk: (state) => {
+        // dropped and re-created with the very same permission: content equal, version moved on
+        const recreated = state.extra.transaction_direction.find((entry) => entry.role === 'manager');
+        state.extra.transaction_direction = [...state.extra.transaction_direction.filter((entry) => entry.role !== 'manager'), recreated!];
+        state.version += 2;
+      },
+    });
+    const result = await runScript(server, ['--tables', 'transaction_direction', '--manifest-out', manifest]);
+    expect(result.code).not.toBe(0);
+    expect(result.output).toContain('is not the one right after the fix');
+    expect(existsSync(manifest)).toBe(false);
+  });
 });
