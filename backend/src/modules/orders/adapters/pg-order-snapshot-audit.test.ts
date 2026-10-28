@@ -2,7 +2,7 @@ import type { QueryResult, QueryResultRow } from 'pg';
 import { describe, expect, it } from 'vitest';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { writeAudit } from './pg-order-snapshot';
+import { snapshotImportManagerAudit, writeAudit } from './pg-order-snapshot';
 
 function fakeTx(captured: Array<{ text: string; params: readonly unknown[] }>): TransactionClient {
   return {
@@ -39,6 +39,28 @@ describe('order snapshot writeAudit', () => {
     const [{ params }] = captured;
     expect(params[13]).toBe(12); // related_user_id
     expect(JSON.parse(String(params[22]))).toMatchObject({ managerId: 12, managerAssignedByImport: true });
+  });
+
+  it('the import reads back the manager it wrote and audits it (created only; single and batch share this path)', async () => {
+    const managerTx = (managerId: number | null) => ({
+      raw: undefined as never,
+      queries: [] as Array<{ text: string; params: readonly unknown[] }>,
+      async query<T extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []): Promise<QueryResult<T>> {
+        this.queries.push({ text, params: [...params] });
+        return { rows: [{ manager_id: managerId } as unknown as T], rowCount: 1, command: 'SELECT', oid: 0, fields: [] };
+      },
+    });
+    const other = managerTx(12);
+    expect(await snapshotImportManagerAudit(other as never, { status: 'created', orderId: 88 }, actor))
+      .toEqual({ relatedUserId: 12, metadata: { managerId: 12, managerAssignedByImport: true } });
+    expect(other.queries[0]).toEqual({ text: 'SELECT manager_id FROM orders WHERE order_id = $1', params: [88] });
+    expect((await snapshotImportManagerAudit(managerTx(9) as never, { status: 'created', orderId: 88 }, actor)).metadata)
+      .toEqual({ managerId: 9, managerAssignedByImport: false });
+    expect(await snapshotImportManagerAudit(managerTx(null) as never, { status: 'created', orderId: 88 }, actor))
+      .toEqual({ relatedUserId: null, metadata: {} });
+    const noop = managerTx(12);
+    expect(await snapshotImportManagerAudit(noop as never, { status: 'noop', orderId: 88 }, actor)).toEqual({ relatedUserId: null, metadata: {} });
+    expect(noop.queries).toHaveLength(0);
   });
 
   it('passes null related_client_id when clientId is null', async () => {

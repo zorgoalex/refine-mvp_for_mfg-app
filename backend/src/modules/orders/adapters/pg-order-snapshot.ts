@@ -475,9 +475,7 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
           requestRef: { importRunId: runId },
         });
         await finishImportRun(tx, runId, result.status, result.orderId, result.summary);
-        const importedManagerId = result.status === 'created' && result.orderId
-          ? await importedOrderManager(tx, result.orderId)
-          : null;
+        const managerAudit = await snapshotImportManagerAudit(tx, result, command.currentUser);
         await writeAudit(
           tx,
           snapshotImportAuditEvent(result.status),
@@ -494,12 +492,10 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
             serviceVersion: snapshot.exporterService.version,
             // «Переделка»: restored production rounds (history; no rework events are re-emitted).
             productionRoundNos: remappedSnapshot.data.productionRounds?.rounds.map((round) => round.roundNo) ?? [],
-            ...(importedManagerId !== null
-              ? { managerId: importedManagerId, managerAssignedByImport: String(importedManagerId) !== String(command.currentUser.id) }
-              : {}),
+            ...managerAudit.metadata,
           },
           collectSnapshotSheetIds(remappedSnapshot),
-          importedManagerId,
+          managerAudit.relatedUserId,
         );
         if (result.status === 'created' || result.status === 'updated') {
           await evaluateProductionCompositionAutomation(tx, {
@@ -3573,10 +3569,23 @@ export async function writeAudit(
   });
 }
 
-/** The manager an import wrote (orders.manager_id) — audited with the import (orders.manager.change, migration 283). */
-async function importedOrderManager(tx: TransactionClient, orderId: number): Promise<number | null> {
-  const row = (await tx.query<{ manager_id: string | number | null }>('SELECT manager_id FROM orders WHERE order_id = $1', [orderId])).rows[0];
-  return row?.manager_id === null || row?.manager_id === undefined ? null : Number(row.manager_id);
+/**
+ * The manager a created import wrote (orders.manager_id, read back in the import transaction) for its audit row:
+ * related_user_id + metadata (orders.manager.change, migration 283). Other statuses wrote no manager.
+ */
+export async function snapshotImportManagerAudit(
+  tx: TransactionClient,
+  result: { status: string; orderId: number | null },
+  currentUser: CurrentUser,
+): Promise<{ relatedUserId: number | null; metadata: Record<string, unknown> }> {
+  if (result.status !== 'created' || !result.orderId) return { relatedUserId: null, metadata: {} };
+  const row = (await tx.query<{ manager_id: string | number | null }>('SELECT manager_id FROM orders WHERE order_id = $1', [result.orderId])).rows[0];
+  if (row?.manager_id === null || row?.manager_id === undefined) return { relatedUserId: null, metadata: {} };
+  const managerId = Number(row.manager_id);
+  return {
+    relatedUserId: managerId,
+    metadata: { managerId, managerAssignedByImport: String(managerId) !== String(currentUser.id) },
+  };
 }
 
 function validateDateOnly(value: string, field: string): void {
