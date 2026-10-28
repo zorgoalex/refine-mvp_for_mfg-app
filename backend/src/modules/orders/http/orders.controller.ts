@@ -93,7 +93,8 @@ export const saveOrderHeaderSwaggerSchema = {
     clientId: { type: 'integer' },
     orderDate: dateOnlySwaggerSchema,
     priority: { type: 'integer' },
-    managerId: nullableIntegerSwaggerSchema,
+    managerId: { ...nullableIntegerSwaggerSchema, deprecated: true, description: 'Прежнее поле: только «без изменений», иначе 409 ORDER_FORM_OUTDATED' },
+    managerUserId: { ...nullableIntegerSwaggerSchema, description: 'Менеджер — пользователь ERP; другой — право orders.manager.change (403), неактивный — 422' },
     orderStatusId: { type: 'integer' },
     paymentStatusId: nullableIntegerSwaggerSchema,
     productionStatusId: nullableIntegerSwaggerSchema,
@@ -535,6 +536,7 @@ export const orderHeaderResponseSwaggerSchema = {
     orderDate: dateOnlySwaggerSchema,
     priority: { type: 'integer' },
     managerId: nullableIntegerSwaggerSchema,
+    managerName: { ...nullableStringSwaggerSchema, readOnly: true, description: 'Имя менеджера (сотрудник, иначе пользователь), в т.ч. неактивного' },
     orderStatusId: { type: 'integer' },
     orderStatusName: { type: 'string' },
     paymentStatusId: { type: 'integer' },
@@ -881,6 +883,7 @@ const orderFormDataResponseSwaggerSchema = {
     productionStatuses: { type: 'array', items: statusLookupSwaggerSchema },
     workshops: { type: 'array', items: lookupSwaggerSchema },
     employees: { type: 'array', items: { type: 'object', required: ['id', 'fullName'], properties: { id: { type: 'integer' }, fullName: { type: 'string' } } } },
+    managers: { type: 'array', items: { type: 'object', required: ['id', 'fullName'], properties: { id: { type: 'integer' }, fullName: { type: 'string' } } } },
     units: { type: 'array', items: { type: 'object', required: ['id', 'code', 'name', 'sortOrder'], properties: { id: { type: 'integer' }, code: { type: 'string' }, name: { type: 'string' }, symbol: { type: 'string' }, sortOrder: { type: 'integer' } } } },
     // SP3: optional — omitted entirely for callers without sheet_materials.view.
     sheetMaterialTypes: { type: 'array', items: sheetMaterialTypeLookupSwaggerSchema },
@@ -1152,7 +1155,17 @@ export class OrdersController {
     return this.orderQueries.getFormData({ currentUser });
   }
 
-  @ApiResponse({ status: 200, description: 'Who may be chosen as the manager of an order' })
+  @ApiResponse({
+    status: 200,
+    description: 'Who may be chosen as the manager of an order',
+    schema: {
+      type: 'object',
+      required: ['managers'],
+      properties: {
+        managers: { type: 'array', items: { type: 'object', required: ['id', 'fullName'], properties: { id: { type: 'integer' }, fullName: { type: 'string' } } } },
+      },
+    },
+  })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @ApiResponse({ status: 503, description: 'Orders API is disabled' })

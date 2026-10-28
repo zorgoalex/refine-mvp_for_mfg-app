@@ -1666,6 +1666,7 @@ function mapOrderDto(
       orderDate: toDateOnly(row.order_date) ?? '',
       priority: toNumber(row.priority),
       managerId: toNullableNumber(row.manager_id),
+      managerName: row.manager_name ?? null,
       orderStatusId: toNumber(row.order_status_id),
       orderStatusName: row.order_status_name ?? '',
       paymentStatusId: toNumber(row.payment_status_id),
@@ -1778,7 +1779,6 @@ function mapListItem(row: OrderHeaderRow, includeDeleted: boolean = false): Orde
     partsCount: toNumber(row.parts_count),
     totalArea: toNumber(row.total_area),
     managerId: toNullableNumber(row.manager_id),
-    managerName: row.manager_name ?? null,
     notes: row.notes,
     // Variant B: materialIds is empty (material_id is NULL post-034); sheetMaterialTypeIds is authoritative.
     materialIds: toNumberArray(row.material_ids),

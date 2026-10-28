@@ -735,6 +735,20 @@ describe('PgOrderTransactionManager', () => {
     expect(audit!.params).toContain(555);
   });
 
+  it('persists the new manager as related_user_id and both managers in metadata (orders.manager.change)', async () => {
+    const { queries, service } = createDatabase();
+    const manager = new PgOrderTransactionManager(service);
+    await manager.runInTransaction(async (uow) => {
+      await uow.writeAuditEvent({
+        action: 'orders.update', orderId: 77, actorUserId: '1', clientId: 555, requestId: 'req_mc',
+        managerChange: { previousManagerId: '10', managerId: '12' },
+      });
+    });
+    const audit = queries.find((q) => /INSERT INTO audit_log/i.test(q.text));
+    expect(audit!.params[13]).toBe(12); // related_user_id
+    expect(JSON.parse(String(audit!.params[22]))).toMatchObject({ managerChange: { previousManagerId: '10', managerId: '12' } });
+  });
+
   it('writes query-ready status audit rows and status outbox events', async () => {
     const { queries, service } = createDatabase();
     const manager = new PgOrderTransactionManager(service);

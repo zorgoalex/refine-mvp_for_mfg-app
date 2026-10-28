@@ -6717,6 +6717,42 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/orders/manager-options:
+    get:
+      tags:
+        - Orders
+      operationId: listOrderManagerOptions
+      summary: Кого можно выбрать менеджером заказа
+      description: |
+        Активные не служебные пользователи ERP (id = orders.manager_id) с именем как на МДФ-доске. Нужен форме, когда
+        справочники читаются через Hasura (пользователи там не открыты). Упаковщику — пустой список.
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      responses:
+        '200':
+          description: Кандидаты в менеджеры
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - managers
+                properties:
+                  managers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EmployeeLookup'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/orders/{orderId}:
     parameters:
       - $ref: '#/components/parameters/OrderId'
@@ -28009,6 +28045,10 @@ components:
           type: integer
           format: int64
           nullable: true
+        managerName:
+          type: string
+          nullable: true
+          description: Имя менеджера (сотрудник через users.employee_id, иначе пользователь), в т.ч. неактивного.
         priority:
           type: integer
           nullable: true
@@ -28580,6 +28620,18 @@ components:
           type: integer
           format: int64
           nullable: true
+          deprecated: true
+          description: |
+            Прежнее поле (форма показывала сотрудников). Принимается только как «без изменений»: на правке — равно
+            текущему менеджеру заказа, на создании — не задано. Другое значение → 409 ORDER_FORM_OUTDATED.
+        managerUserId:
+          type: integer
+          format: int64
+          nullable: true
+          description: |
+            Менеджер заказа — пользователь ERP (orders.manager_id). Не задан/null: при создании — текущий пользователь,
+            при правке — менеджер не меняется. Другой пользователь → нужно право orders.manager.change (иначе 403
+            ORDER_MANAGER_CHANGE_FORBIDDEN); неактивный или служебный → 422 ORDER_MANAGER_INVALID.
         priority:
           type: integer
           nullable: true
@@ -29978,6 +30030,11 @@ components:
             $ref: '#/components/schemas/IdNameLookup'
         employees:
           type: array
+          items:
+            $ref: '#/components/schemas/EmployeeLookup'
+        managers:
+          type: array
+          description: Кого можно выбрать менеджером заказа (активные не служебные пользователи ERP; id = orders.manager_id).
           items:
             $ref: '#/components/schemas/EmployeeLookup'
         units:
