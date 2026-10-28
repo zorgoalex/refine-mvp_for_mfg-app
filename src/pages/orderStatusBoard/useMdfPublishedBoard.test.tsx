@@ -17,7 +17,8 @@ vi.mock('../../api/cncTelegramApi', () => ({
   cncTelegramApi: { searchMdfBoardHistoryOrders: api.searchMdfBoardHistoryOrders },
 }));
 
-import { currentSessionSnapshot, useMdfPublishedBoard, type UseMdfPublishedBoardResult } from './useMdfPublishedBoard';
+import { currentSessionSnapshot, mdfPublishedQueryKey, useMdfPublishedBoard, type UseMdfPublishedBoardResult } from './useMdfPublishedBoard';
+import { prefetchMdfBoardOpen, takePrefetchedMdfEngineMode, takePrefetchedMdfSnapshot } from '../../api/mdfBoardOpenPrefetch';
 
 function snapshot(overrides: Partial<MdfPublishedSnapshot> = {}): MdfPublishedSnapshot {
   return {
@@ -343,6 +344,46 @@ describe('useMdfPublishedBoard: snapshot requested beside the engine mode', () =
   });
 });
 
+describe('useMdfPublishedBoard: the query the shown board was resolved for', () => {
+  let renderer: ReactTestRenderer;
+
+  beforeEach(() => {
+    current = null;
+    api.sessionGeneration = 1;
+    api.getEngineMode.mockReset();
+    api.publishedGet.mockReset();
+    vi.stubGlobal('window', { setInterval: vi.fn(() => 0), clearInterval: vi.fn() });
+    vi.stubGlobal('document', { addEventListener: vi.fn(), removeEventListener: vi.fn(), visibilityState: 'visible' });
+  });
+
+  afterEach(() => {
+    act(() => renderer?.unmount());
+    vi.unstubAllGlobals();
+  });
+
+  it('names a newly focused card only once the snapshot read for it is shown', async () => {
+    api.getEngineMode.mockResolvedValue({ mode: 'active', publishedReads: true });
+    api.publishedGet.mockResolvedValueOnce({ sessionGeneration: 1, snapshot: snapshot() } satisfies MdfSessionSnapshot);
+    act(() => {
+      renderer = create(<Harness workday="2026-09-27" period="1m" focusKind={null} focusId={null} />);
+    });
+    expect(current?.settledQueryKey).toBeNull();
+    await vi.waitFor(() => expect(current?.settledQueryKey).toBe(mdfPublishedQueryKey('2026-09-27', '1m', null, null)));
+
+    let settleFocused!: (value: MdfSessionSnapshot) => void;
+    api.publishedGet.mockReturnValueOnce(new Promise(resolve => { settleFocused = resolve; }));
+    act(() => {
+      renderer.update(<Harness workday="2026-09-27" period="1m" focusKind="bath" focusId="b-7" />);
+    });
+    await vi.waitFor(() => expect(api.publishedGet).toHaveBeenCalledTimes(2));
+    // the shown board is still the one read without the focused card
+    expect(current?.settledQueryKey).toBe(mdfPublishedQueryKey('2026-09-27', '1m', null, null));
+    await act(async () => { settleFocused({ sessionGeneration: 1, snapshot: snapshot({ revision: 'focused' }) }); });
+    await vi.waitFor(() => expect(current?.settledQueryKey).toBe(mdfPublishedQueryKey('2026-09-27', '1m', 'bath', 'b-7')));
+    expect(current?.session?.snapshot.revision).toBe('focused');
+  });
+});
+
 describe('currentSessionSnapshot', () => {
   it('keeps a current-session snapshot and rereads a stale one', async () => {
     const read = vi.fn(async () => ({ sessionGeneration: 3, snapshot: snapshot({ revision: 'reread' }) }));
@@ -451,5 +492,74 @@ describe('useMdfPublishedBoard: a hidden board keeps what it shows', () => {
     await act(async () => { renderer.update(<Toggle enabled workday="2026-10-27" />); });
     expect(current!.session).toBe(first);
     expect(current!.mode).toBe('published');
+  });
+});
+
+describe('useMdfPublishedBoard: a hidden board warmed after sign-in is rendered before it is shown', () => {
+  let renderer: ReactTestRenderer;
+  function Hidden(props: { enabled: boolean; warmHidden: boolean }) {
+    current = useMdfPublishedBoard({ enabled: props.enabled, workday: '2026-10-28', period: '1m',
+      focusKind: null, focusId: null, warmHidden: props.warmHidden });
+    return null;
+  }
+  // displayFrom of '1m' for 2026-10-28 (31 days)
+  const query = { dateTo: '2026-10-28', displayFrom: '2026-09-28' };
+
+  beforeEach(() => {
+    current = null;
+    takePrefetchedMdfSnapshot(query); takePrefetchedMdfEngineMode(); takePrefetchedMdfEngineMode();
+    api.getEngineMode.mockReset().mockResolvedValue({ mode: 'active', publishedReads: true });
+    api.publishedGet.mockReset().mockImplementation(async (q: { dateTo: string }) => ({
+      sessionGeneration: api.sessionGeneration, snapshot: snapshot({ dateTo: q.dateTo }),
+    }));
+    vi.stubGlobal('window', { setInterval: vi.fn(() => 0), clearInterval: vi.fn() });
+    vi.stubGlobal('document', { addEventListener: vi.fn(), removeEventListener: vi.fn(), visibilityState: 'visible' });
+  });
+  afterEach(() => {
+    act(() => renderer?.unmount());
+    vi.unstubAllGlobals();
+  });
+
+  it('applies the warmed mode and snapshot once while hidden, without reads of its own and without polling', async () => {
+    prefetchMdfBoardOpen(query);
+    expect(api.getEngineMode).toHaveBeenCalledTimes(1);
+    expect(api.publishedGet).toHaveBeenCalledTimes(1);
+    await act(async () => { renderer = create(<Hidden enabled={false} warmHidden />); });
+    expect(current!.mode).toBe('published');
+    expect(current!.session?.snapshot.dateTo).toBe('2026-10-28');
+    expect(api.getEngineMode).toHaveBeenCalledTimes(1); // only the warm-up reads
+    expect(api.publishedGet).toHaveBeenCalledTimes(1);
+    expect((window.setInterval as unknown as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+  });
+
+  it('does nothing while hidden without a warm-up', async () => {
+    await act(async () => { renderer = create(<Hidden enabled={false} warmHidden />); });
+    expect(current!.mode).toBeNull();
+    expect(api.getEngineMode).not.toHaveBeenCalled();
+    expect(api.publishedGet).not.toHaveBeenCalled();
+  });
+
+  it('a failed warm-up read is not read again while hidden', async () => {
+    api.getEngineMode.mockRejectedValueOnce(new Error('offline'));
+    api.publishedGet.mockRejectedValueOnce(new Error('offline'));
+    prefetchMdfBoardOpen(query);
+    await act(async () => { renderer = create(<Hidden enabled={false} warmHidden />); });
+    expect(current!.mode).toBeNull();
+    expect(current!.session).toBeNull();
+    expect(api.getEngineMode).toHaveBeenCalledTimes(1);
+    expect(api.publishedGet).toHaveBeenCalledTimes(1);
+  });
+
+  it('a warm-up read under an auth session that changed meanwhile is not shown, nor read again, while hidden', async () => {
+    let settleSnapshot!: (value: MdfSessionSnapshot) => void;
+    api.publishedGet.mockReturnValueOnce(new Promise(resolve => { settleSnapshot = resolve; }));
+    prefetchMdfBoardOpen(query);
+    await act(async () => { renderer = create(<Hidden enabled={false} warmHidden />); });
+    api.sessionGeneration = 2; // re-login while the warm-up snapshot is in flight
+    await act(async () => { settleSnapshot({ sessionGeneration: 1, snapshot: snapshot() }); });
+    expect(current!.session).toBeNull();
+    expect(api.getEngineMode).toHaveBeenCalledTimes(1);
+    expect(api.publishedGet).toHaveBeenCalledTimes(1);
+    api.sessionGeneration = 1;
   });
 });

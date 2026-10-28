@@ -42,11 +42,15 @@ export function mdfBoardOpenPrefetchFresh(now = Date.now()): boolean {
   return [engineMode, published].every((entry) => !entry || now - entry.createdAt <= FRESH_MS);
 }
 
+/** A hidden board's warm render takes the prefetches as they are (`networkFallback: false`): a failed one is not read
+ * again then, it rejects. */
+export interface TakePrefetchOptions { networkFallback?: boolean }
+
 /** The prefetched engine mode; a failed prefetch is read again. Taken for good together with the snapshot: while the
  * snapshot is still waiting for its own query (the board's first cycle may run on a default period before the page
  * restores the user's one), one cycle may use the mode without consuming it. */
 let modePeeked = false;
-export function takePrefetchedMdfEngineMode(): Promise<MdfEngineModeDto> | null {
+export function takePrefetchedMdfEngineMode(options: TakePrefetchOptions = {}): Promise<MdfEngineModeDto> | null {
   if (!fresh(engineMode, 'mode')) return null;
   const { promise } = engineMode;
   const snapshotWaiting = published !== null && fresh(published, published.key);
@@ -56,13 +60,14 @@ export function takePrefetchedMdfEngineMode(): Promise<MdfEngineModeDto> | null 
     engineMode = null;
     modePeeked = false;
   }
-  return promise.catch(() => mdfCorrectionApi.getEngineMode());
+  return options.networkFallback === false ? promise : promise.catch(() => mdfCorrectionApi.getEngineMode());
 }
 
 /** The prefetched snapshot of exactly this default query (no focus, no extra orders), once. */
-export function takePrefetchedMdfSnapshot(query: { dateTo: string; displayFrom: string }): Promise<MdfSessionSnapshot> | null {
+export function takePrefetchedMdfSnapshot(query: { dateTo: string; displayFrom: string },
+  options: TakePrefetchOptions = {}): Promise<MdfSessionSnapshot> | null {
   if (!fresh(published, publishedKey(query.dateTo, query.displayFrom))) return null;
   const { promise } = published;
   published = null;
-  return promise.catch(() => mdfPublishedApi.get(query));
+  return options.networkFallback === false ? promise : promise.catch(() => mdfPublishedApi.get(query));
 }

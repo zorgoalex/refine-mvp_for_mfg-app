@@ -33,7 +33,8 @@ import {
   reuseUnchangedOrderEntries,
 } from './stableBoardData';
 import { useSessionGenerationReset } from './useSessionGenerationReset';
-import { useMdfPublishedBoard } from './useMdfPublishedBoard';
+import { mdfPublishedQueryKey, useMdfPublishedBoard } from './useMdfPublishedBoard';
+import { mdfDeepLinkLookup } from './mdfDeepLink';
 import React, {
   lazy,
   memo,
@@ -143,6 +144,7 @@ import {
 } from './interaction';
 import {
   buildCncOrderSearchDateRange,
+  mdfBoardQueryPeriod,
   mdfOpeningPeriod,
   buildCncOrderFilterOptions,
   buildOrderStatusBoardDatasetKey,
@@ -686,13 +688,35 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const mdfFocusId = mdfFocusKind ? viewState.cncCardId ?? null : null;
   // Hybrid board: orders with MDF demand that own no engine card — their positions are requested by id.
   const [mdfHybridExtraOrderIds, setMdfHybridExtraOrderIds] = useState<number[]>([]);
+  const [initialMdfSnapshot] = useState(() => {
+    if (fixedView !== 'cnc_today' || viewState.cncOrderFilters.length > 0
+      || (viewState.cncWorkday ?? todayCncWorkday) !== todayCncWorkday) return null;
+    const snapshot = readMdfInitialSnapshot();
+    // the range the opening will settle on (the period the user left wins over the URL's, as in the opening sync)
+    const openingPeriod = mdfOpeningPeriod(readMdfBoardPeriod(currentUser?.id), viewState.cncOrderSearchPeriod,
+      viewState.cncPlannedTodayOnly);
+    return snapshot?.dateFrom === buildCncOrderSearchDateRange(todayCncWorkday, openingPeriod).dateFrom
+      ? snapshot : null;
+  });
+  const hasExplicitMdfCardDeepLink = Boolean(
+    viewState.cncCardKind && viewState.cncCardId && viewState.cncWorkday,
+  );
+  const mdfQueryPeriod = mdfBoardQueryPeriod({
+    mdfBoardRoute: fixedView === 'cnc_today',
+    shownAndSynced: active && mdfWorkdayOpenSyncedRef.current,
+    cardLink: hasExplicitMdfCardDeepLink,
+    stored: readMdfBoardPeriod(currentUser?.id),
+    current: viewState.cncOrderSearchPeriod,
+    plannedTodayOnly: viewState.cncPlannedTodayOnly,
+  });
   const mdfPublishedBoard = useMdfPublishedBoard({
     enabled: active && isCncToday,
     workday: viewState.cncWorkday ?? todayCncWorkday,
-    period: viewState.cncOrderSearchPeriod,
+    period: mdfQueryPeriod,
     focusKind: mdfFocusKind,
     focusId: mdfFocusId,
     orderIds: mdfHybridExtraOrderIds,
+    warmHidden: !active && isCncToday && Boolean(initialMdfSnapshot),
   });
   // §5.6 finding 5: what the board actually renders — legacy is reached ONLY on an explicit
   // `legacy` mode result; `mode === null` (still resolving) always renders a loading state.
@@ -704,9 +728,6 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     orderStatuses: cncOrderStatuses,
     isLoading: cncOrderStatusesLoading,
   } = useOrderStatuses({ loadPaymentAndProduction: false });
-  const hasExplicitMdfCardDeepLink = Boolean(
-    viewState.cncCardKind && viewState.cncCardId && viewState.cncWorkday,
-  );
   const [cncPlacementMode] = useState<CncBoardPlacementMode>('current');
   // Engine active/read_only: the legacy screen on the engine's data (rollback: runtime flag or `?mdfView=engine`).
   const mdfHybridActive = mdfBoardRenderMode === 'published'
@@ -752,16 +773,6 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     viewState.cncWorkday,
     viewState.view,
   ]);
-  const [initialMdfSnapshot] = useState(() => {
-    if (fixedView !== 'cnc_today' || viewState.cncOrderFilters.length > 0
-      || (viewState.cncWorkday ?? todayCncWorkday) !== todayCncWorkday) return null;
-    const snapshot = readMdfInitialSnapshot();
-    // the range the opening will settle on (the period the user left wins over the URL's, as in the opening sync)
-    const openingPeriod = mdfOpeningPeriod(readMdfBoardPeriod(currentUser?.id), viewState.cncOrderSearchPeriod,
-      viewState.cncPlannedTodayOnly);
-    return snapshot?.dateFrom === buildCncOrderSearchDateRange(todayCncWorkday, openingPeriod).dateFrom
-      ? snapshot : null;
-  });
   const preserveInitialMdfSnapshotRef = useRef(Boolean(initialMdfSnapshot));
   const preserveInitialMdfOrderBoardRef = useRef(Boolean(initialMdfSnapshot?.orderBoard));
   const preserveInitialMdfManualMovesRef = useRef(Boolean(initialMdfSnapshot));
@@ -790,6 +801,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const [cncOrderBoardLoading, setCncOrderBoardLoading] = useState(false);
   const [loading, setLoading] = useState(!initialMdfSnapshot);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // the bath the shown `today` was read with as its focus (a linked bath outside the display period comes only so)
+  const [cncTodayFocusBathCardId, setCncTodayFocusBathCardId] = useState<string | null>(null);
+  // the last dataset read that ended (shown or failed); another one is running while it lags `datasetRevisionRef`
+  const cncTodaySettledRevisionRef = useRef(0);
   const [stale, setStale] = useState(false);
   const [pendingOrders, setPendingOrders] = useState<Set<number>>(new Set());
   const pendingRef = useRef<Set<number>>(new Set());
@@ -1020,6 +1035,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
           const currentViewState = viewStateRef.current;
           const auxiliaryRevision = ++cncAuxiliaryRefreshRevisionRef.current;
           cncStrongRefreshInFlightRef.current = true;
+          let orderBoardApplied = false;
           if (cncPlacementModeRef.current === 'original') {
             try {
               const [response, manualMoves] = await Promise.all([
@@ -1112,6 +1128,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             cncTodayRef.current = response;
             cncOrderSearchTodayRef.current = response;
             setCncToday(response);
+            setCncTodayFocusBathCardId(currentViewState.cncCardKind === 'bath' && currentViewState.cncCardId
+              ? currentViewState.cncCardId : null);
+            cncTodaySettledRevisionRef.current = revision;
             setCncOrderSearchToday(response);
             setCncOriginalBoard(null);
             // unchanged moves keep their object (every card depends on them)
@@ -1152,12 +1171,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               false,
             );
             rememberCncOrderBoardKey(orderBoardResponse, cncOrderBoardRequestKeyRef.current);
-            startTransition(() => setCncOrderBoard(orderBoardResponse));
+            // the orders stop "loading" in the same (deferred) render that shows them
+            startTransition(() => {
+              setCncOrderBoard(orderBoardResponse);
+              setCncOrderBoardLoading(false);
+            });
+            orderBoardApplied = true;
             return true;
           } finally {
             if (cncAuxiliaryRefreshRevisionRef.current === auxiliaryRevision) {
               cncStrongRefreshInFlightRef.current = false;
-              setCncOrderBoardLoading(false);
+              if (!orderBoardApplied) setCncOrderBoardLoading(false);
             }
           }
         }
@@ -1213,6 +1237,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         return true;
       } catch (error) {
         if (datasetRevisionRef.current !== revision) return false;
+        cncTodaySettledRevisionRef.current = revision;
         const text = errorMessage(error, 'Не удалось загрузить доску статусов.');
         setLoadError(text);
         setLoading(false);
@@ -1838,6 +1863,38 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     [cncPlannedDateColumns, cncBoardManualMoves, cncOriginalView, cncSearchActive, cncTerminalColumnsVisible],
   );
   const cncShownDataColumns = cncTerminalSearchVisibility.columns;
+  const mdfEngineViewShown = mdfBoardRenderMode === 'published' && Boolean(mdfPublishedBoard.session)
+    && (!mdfHybridActive || (!cncToday && loadError !== null));
+  const mdfDeepLinkState = viewState.cncCardKind && viewState.cncCardId ? mdfDeepLinkLookup({
+    active,
+    loading,
+    ordersLoading: cncOrderBoardLoading,
+    renderMode: mdfBoardRenderMode,
+    engineViewShown: mdfEngineViewShown,
+    publishedLoading: mdfPublishedBoard.loading,
+    publishedSettledForQuery: mdfPublishedBoard.settledQueryKey === mdfPublishedQueryKey(
+      viewState.cncWorkday ?? todayCncWorkday, mdfQueryPeriod, mdfFocusKind, mdfFocusId),
+    kind: viewState.cncCardKind,
+    cardId: viewState.cncCardId,
+    todayFocusBathCardId: cncTodayFocusBathCardId,
+  }) : 'skip';
+  // A bath linked while the board is open (history, `/cut`) does not change the data set: `today` is read again with
+  // it as its focus, so a bath outside the display period comes too.
+  const mdfDeepLinkBathRefreshRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (viewState.cncCardKind !== 'bath' || !viewState.cncCardId) {
+      mdfDeepLinkBathRefreshRef.current = null;
+      return;
+    }
+    if (!active || loading) return;
+    if (!cncToday || cncTodayFocusBathCardId === viewState.cncCardId) return;
+    if (mdfDeepLinkBathRefreshRef.current === viewState.cncCardId) return;
+    // a read already running (e.g. the one started on return to the board) is made with the current link
+    if (cncTodaySettledRevisionRef.current !== datasetRevisionRef.current) return;
+    mdfDeepLinkBathRefreshRef.current = viewState.cncCardId;
+    void fetchInitial({ preserveLoading: true });
+  }, [active, cncToday, cncTodayFocusBathCardId, fetchInitial, loadError, loading, viewState.cncCardId,
+    viewState.cncCardKind]);
   useEffect(() => {
     const kind = viewState.cncCardKind;
     const cardId = viewState.cncCardId;
@@ -1845,7 +1902,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       deepLinkFocusAppliedRef.current = null;
       return undefined;
     }
-    if (loading) return undefined;
+    // hidden board / engine view: not looked for here; data of another query: not yet
+    if (mdfDeepLinkState !== 'look') return undefined;
     const key = `${kind}:${cardId}`;
     const root = boardViewportRef.current;
     const target = root
@@ -1873,7 +1931,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       if (frame !== null) window.cancelAnimationFrame(frame);
       target.classList.remove('cnc-board-card-shell--deep-linked');
     };
-  }, [cncShownDataColumns, isCncToday, loading, viewState.cncCardId, viewState.cncCardKind]);
+  }, [cncShownDataColumns, isCncToday, mdfDeepLinkState, viewState.cncCardId, viewState.cncCardKind]);
   const cncMutedOrderIds = useMemo(
     () => new Set(
       cncDisplayOrderStatusCards

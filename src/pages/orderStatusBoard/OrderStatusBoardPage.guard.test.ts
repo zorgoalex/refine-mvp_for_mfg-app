@@ -1933,6 +1933,42 @@ describe('OrderStatusBoardPage UX guards', () => {
   });
 });
 
+describe('MDF board card link (cardKind/cardId)', () => {
+  const section = page.slice(page.indexOf('const mdfEngineViewShown'), page.indexOf('const cncMutedOrderIds'));
+
+  it('looks for the card only when mdfDeepLinkLookup says the shown data were read for the link', () => {
+    expect(section).toContain('mdfDeepLinkLookup({');
+    expect(section).toContain('publishedSettledForQuery: mdfPublishedBoard.settledQueryKey === mdfPublishedQueryKey(');
+    expect(section).toContain('todayFocusBathCardId: cncTodayFocusBathCardId,');
+    expect(section).toContain("if (mdfDeepLinkState !== 'look') return undefined;");
+    // the engine view is the same condition the render uses for it
+    expect(section).toContain('&& (!mdfHybridActive || (!cncToday && loadError !== null));');
+    expect(page).toContain("&& (!mdfHybridActive || (!cncToday && loadError !== null)) ? (");
+  });
+
+  it('a bath linked on an open board reads today again with it as its focus, once', () => {
+    expect(section).toContain('if (!cncToday || cncTodayFocusBathCardId === viewState.cncCardId) return;');
+    expect(section).toContain('mdfDeepLinkBathRefreshRef.current = viewState.cncCardId;');
+    expect(page).toContain("setCncTodayFocusBathCardId(currentViewState.cncCardKind === 'bath' && currentViewState.cncCardId");
+  });
+
+  it('keeps the link of a card not found (it may be hidden by a filter or a terminal column): a warning only', () => {
+    const warning = section.indexOf("message.warning('Карточка не найдена в выбранном периоде МДФ-доски.')");
+    expect(warning).toBeGreaterThan(0);
+    expect(section).not.toContain("delete('cardKind')");
+    expect(section).toContain('ordersLoading: cncOrderBoardLoading,');
+  });
+
+  it('a bath read on return is not started twice, and orders stop loading in the render that shows them', () => {
+    expect(section).toContain('if (cncTodaySettledRevisionRef.current !== datasetRevisionRef.current) return;');
+    expect(page).toContain(`startTransition(() => {
+              setCncOrderBoard(orderBoardResponse);
+              setCncOrderBoardLoading(false);
+            });`);
+    expect(page).toContain('if (!orderBoardApplied) setCncOrderBoardLoading(false);');
+  });
+});
+
 describe('hybrid MDF board wiring (engine active/read_only)', () => {
   const hook = readFileSync('src/pages/orderStatusBoard/useMdfPublishedBoard.ts', 'utf8');
   const slice = (start: string, end: string) => page.slice(page.indexOf(start), page.indexOf(end, page.indexOf(start)));

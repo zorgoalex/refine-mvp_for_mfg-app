@@ -39,6 +39,7 @@ import { authSession } from '../../api/authSession';
 import { mdfBoardPeriodDays } from '../../utils/mdfBoardDailyPeriod';
 import {
   applyMdfBoardHiddenCardRulesToColumns,
+  mdfBoardQueryPeriod,
   mdfOpeningPeriod,
   applyMdfHiddenRulesToReadinessSources,
   buildCncOrderSearchDateRange,
@@ -2531,3 +2532,23 @@ function cncBazisCutSet(
     })),
   };
 }
+
+describe('mdfBoardQueryPeriod', () => {
+  const base = { mdfBoardRoute: true, shownAndSynced: false, cardLink: false, stored: '1w' as const,
+    current: '1m' as const, plannedTodayOnly: false };
+
+  it('the MDF board route, hidden or not yet synced, reads the period it opens with (the saved one)', () => {
+    expect(mdfBoardQueryPeriod(base)).toBe('1w');
+  });
+
+  it('a synced board, a card link and any other route read the URL period', () => {
+    expect(mdfBoardQueryPeriod({ ...base, shownAndSynced: true })).toBe('1m');
+    expect(mdfBoardQueryPeriod({ ...base, cardLink: true })).toBe('1m');
+    // /order-status-board?flow=cnc&period=1m has no opening sync: the selected month stays
+    expect(mdfBoardQueryPeriod({ ...base, mdfBoardRoute: false })).toBe('1m');
+  });
+
+  it('planned-today keeps the URL period, as the opening does', () => {
+    expect(mdfBoardQueryPeriod({ ...base, plannedTodayOnly: true })).toBe('1m');
+  });
+});

@@ -1061,6 +1061,23 @@ export function mdfOpeningPeriod(
   return plannedTodayOnly ? current : stored ?? current;
 }
 
+/** The period the engine snapshot is read for. On the MDF board route (`fixedView === 'cnc_today'`), while it is
+ * hidden or shown before its opening sync has put the period into the URL (and no card link pins the URL), the period
+ * it opens with (the one App's warm-up read); otherwise — and always on other routes, which have no opening sync —
+ * the URL's. */
+export function mdfBoardQueryPeriod(input: {
+  mdfBoardRoute: boolean;
+  shownAndSynced: boolean;
+  cardLink: boolean;
+  stored: CncOrderSearchPeriod | null;
+  current: CncOrderSearchPeriod | undefined;
+  plannedTodayOnly: boolean;
+}): CncOrderSearchPeriod | undefined {
+  return input.mdfBoardRoute && !input.shownAndSynced && !input.cardLink
+    ? mdfOpeningPeriod(input.stored, input.current, input.plannedTodayOnly)
+    : input.current;
+}
+
 export function cncOrderSearchPeriodDays(
   period: CncOrderSearchPeriod | undefined,
 ): number {

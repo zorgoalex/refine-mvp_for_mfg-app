@@ -35,6 +35,9 @@ export interface UseMdfPublishedBoardParams {
   /** Hybrid board: orders with MDF demand whose positions the snapshot would not otherwise carry (no engine card
    * of theirs in the window). At most 100 — the endpoint's bound. */
   orderIds?: readonly number[];
+  /** A hidden board mounted on a warmed-up first view (sign-in / menu warm-up): it applies the warmed engine mode and
+   * snapshot once, without any network read or polling, so it is fully rendered before it is shown. */
+  warmHidden?: boolean;
 }
 
 export interface UseMdfPublishedBoardResult {
@@ -42,6 +45,9 @@ export interface UseMdfPublishedBoardResult {
   mode: MdfBoardMode | null;
   session: MdfSessionSnapshot | null;
   loading: boolean;
+  /** `mdfPublishedQueryKey` of the query the shown mode/session were resolved for; null before the first. A page
+   * looking for a card in what is shown waits until this matches its current query. */
+  settledQueryKey: string | null;
   searchOrderIds: number[];
   searchResolving: boolean;
   refresh: () => void;
@@ -59,6 +65,11 @@ export async function currentSessionSnapshot(early: Promise<MdfSessionSnapshot> 
   return snapshot.sessionGeneration === currentGeneration() ? snapshot : read();
 }
 
+export function mdfPublishedQueryKey(workday: string, period: CncOrderSearchPeriod | undefined,
+  focusKind: MdfSourceKind | null, focusId: string | null): string {
+  return [workday, period ?? '', focusKind && focusId ? `${focusKind}:${focusId}` : ''].join('|');
+}
+
 export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdfPublishedBoardResult {
   const { enabled, workday, period, focusKind, focusId } = params;
   const orderIdsKey = (params.orderIds ?? []).slice(0, 100).join(',');
@@ -67,6 +78,7 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
   modeRef.current = mode;
   const [session, setSession] = useState<MdfSessionSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
+  const [settledQueryKey, setSettledQueryKey] = useState<string | null>(null);
   const [searchOrderIds, setSearchOrderIds] = useState<number[]>([]);
   const [searchResolving, setSearchResolving] = useState(false);
 
@@ -100,8 +112,9 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     return requestGeneration;
   }, []);
 
-  const runCycle = useCallback(async (requestGeneration: number) => {
-    setLoading(true);
+  const runCycle = useCallback(async (requestGeneration: number, warmOnly = false) => {
+    if (!warmOnly) setLoading(true);
+    const startSessionGeneration = authSession.getSessionGeneration();
     // Legacy-parity display cut: the same `dateFrom` the legacy board computes for this
     // workday+period via `buildCncOrderSearchDateRange` (default period `1w` → workday − 6 days).
     // Search/focus reach older cards regardless — this only trims the default payload.
@@ -120,8 +133,12 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     // a prefetch older than its fresh window is shown at once and read again right after
     const prefetchStale = !mdfBoardOpenPrefetchFresh();
     const prefetchedSnapshot = modeRef.current === 'legacy' || !plainQuery ? null
-      : takePrefetchedMdfSnapshot({ dateTo: workday, displayFrom });
-    const prefetchedMode = takePrefetchedMdfEngineMode();
+      : takePrefetchedMdfSnapshot({ dateTo: workday, displayFrom }, { networkFallback: !warmOnly });
+    // warm-only (hidden board): only the warmed reads of exactly this query, never the network — a failed one, or one
+    // of another auth session, ends the warm render (the board reads when it is shown)
+    if (warmOnly && !prefetchedSnapshot) return;
+    const prefetchedMode = takePrefetchedMdfEngineMode({ networkFallback: !warmOnly });
+    if (warmOnly && !prefetchedMode) return;
     const usedStalePrefetch = prefetchStale && Boolean(prefetchedSnapshot || prefetchedMode);
     const earlyRead = modeRef.current === 'legacy' ? null : prefetchedSnapshot ?? readPublished();
     earlyRead?.catch(() => undefined);
@@ -130,9 +147,11 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
       const engineMode = await (prefetchedMode ?? mdfCorrectionApi.getEngineMode());
       engineModeFetch = { kind: 'ok', engineMode };
     } catch (error) {
+      if (warmOnly) return;
       engineModeFetch = isMdfEngineModeEndpointMissing(error) ? { kind: 'endpointMissing' } : { kind: 'error' };
     }
-    if (!isMdfBoardGenerationCurrent(generationRef.current, requestGeneration) || !enabledRef.current) return;
+    if (!isMdfBoardGenerationCurrent(generationRef.current, requestGeneration) || (!warmOnly && !enabledRef.current)) return;
+    if (warmOnly && authSession.getSessionGeneration() !== startSessionGeneration) return;
 
     const needsPublishedFetch = engineModeFetch.kind === 'ok'
       && (engineModeFetch.engineMode.mode === 'active' || engineModeFetch.engineMode.mode === 'read_only')
@@ -142,24 +161,32 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
       shownWorkdayRef.current = workday;
       setMode(resolvedMode);
       setSession(null);
+      setSettledQueryKey(mdfPublishedQueryKey(workday, period, focusKind, focusId));
       setLoading(false);
-      if (usedStalePrefetch) refreshAfterStalePrefetchRef.current();
+      if (usedStalePrefetch && !warmOnly) refreshAfterStalePrefetchRef.current();
       return;
     }
     let publishedReadsFailed = false;
     let nextSession: MdfSessionSnapshot | null = null;
     try {
-      nextSession = await currentSessionSnapshot(earlyRead, readPublished, () => authSession.getSessionGeneration());
+      if (warmOnly) {
+        nextSession = await earlyRead;
+        if (nextSession?.sessionGeneration !== authSession.getSessionGeneration()) return;
+      } else {
+        nextSession = await currentSessionSnapshot(earlyRead, readPublished, () => authSession.getSessionGeneration());
+      }
     } catch {
+      if (warmOnly) return;
       publishedReadsFailed = true;
     }
-    if (!isMdfBoardGenerationCurrent(generationRef.current, requestGeneration) || !enabledRef.current) return;
+    if (!isMdfBoardGenerationCurrent(generationRef.current, requestGeneration) || (!warmOnly && !enabledRef.current)) return;
     const resolvedMode = selectMdfBoardMode({ engineModeFetch, publishedReadsFailed });
     shownWorkdayRef.current = workday;
     setMode(resolvedMode);
     setSession(resolvedMode === 'published' ? nextSession : null);
+    setSettledQueryKey(mdfPublishedQueryKey(workday, period, focusKind, focusId));
     setLoading(false);
-    if (usedStalePrefetch) refreshAfterStalePrefetchRef.current();
+    if (usedStalePrefetch && !warmOnly) refreshAfterStalePrefetchRef.current();
   }, [workday, period, focusKind, focusId]);
 
   const refresh = useCallback(() => {
@@ -179,16 +206,18 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     const requestGeneration = bump();
     if (!enabled) {
       setLoading(false);
+      if (params.warmHidden && modeRef.current === null) void runCycle(requestGeneration, true);
       return;
     }
     if (shownWorkdayRef.current !== null && shownWorkdayRef.current !== workday) {
       setMode(null);
       setSession(null);
+      setSettledQueryKey(null);
       shownWorkdayRef.current = null;
     }
     void runCycle(requestGeneration);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, workday, period, focusKind, focusId, searchOrderIds.join(','), orderIdsKey]);
+  }, [enabled, params.warmHidden, workday, period, focusKind, focusId, searchOrderIds.join(','), orderIdsKey]);
 
   // Refresh every 15s and on tab visibility, like the legacy board.
   useEffect(() => {
@@ -261,5 +290,5 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
 
   // Kept while hidden, but never across a re-login or a permission/scope change: such data is dropped at once.
   const shownSession = session && session.sessionGeneration === authSession.getSessionGeneration() ? session : null;
-  return { mode, session: shownSession, loading, searchOrderIds, searchResolving, refresh, requestSearchOrderNames };
+  return { mode, session: shownSession, loading, settledQueryKey, searchOrderIds, searchResolving, refresh, requestSearchOrderNames };
 }
