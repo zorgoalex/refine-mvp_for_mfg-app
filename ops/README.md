@@ -316,6 +316,19 @@ After 275 do not roll the backend back below migration A: the old
 `276_order_rework_round_closure` (closes an open round when the order reaches
 «Готов к выдаче»/«Выдан»/«Завершен») goes with 274/275, before the rework flag is enabled.
 
+`281_order_rework_round_deadline` (round deadline, additive) is read by the new backend (round history, order JSON
+snapshot), so it must exist **before** that backend starts. Release order on a database at the previous main:
+
+1. backup; with the old backend running apply only the old-backend-safe files 274, 276 and 281 — run the runner
+   with `--dir` pointing at a directory that holds just those three files (copied from `backend/db/migrations`;
+   the ledger records them with their real checksums);
+2. deploy the new backend on every instance (`BACKEND_ORDER_REWORK_ENABLED` stays `false`), frontend with
+   `backendProductionActions: true`;
+3. apply the rest normally (`apply` → 275);
+4. Hasura: `ops/hasura/production-status-events-current-round.sh --dry-run`, then without `--dry-run` — every role
+   reads an order's stage marks of its current production round only (rollback: `--revert`). Without it the screens
+   fall back to the client-side round filter (exact unless the current round has no order marks yet).
+
 274 also replaces `apply_detail_stage_mark` (order stage marks from detail
 statuses, migration 266): marks are written to and cleared from the order's
 current round only, as a backend stage-event writer; marks of earlier rounds
