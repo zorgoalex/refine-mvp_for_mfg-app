@@ -100,6 +100,19 @@ describe('Bitrix24 sync mapper', () => {
     expect(result.productRows[0]).toMatchObject({ price: 90000, quantity: 1 });
   });
 
+  it('names the ERP manager of the order, else its author', () => {
+    const withManager = mapOrder(order({ managerName: 'Жанара', authorName: 'Дос' }), { object: 'contact', id: '77' }, options);
+    expect(withManager.fields.comments).toContain('Менеджер ERP: Жанара');
+    expect(withManager.fields.comments).not.toContain('Создал в ERP');
+    const authorOnly = mapOrder(order({ managerName: null, authorName: 'Дос' }), { object: 'contact', id: '77' }, options);
+    expect(authorOnly.fields.comments).toContain('Создал в ERP: Дос');
+    const nobody = mapOrder(order({ managerName: null, authorName: null }), { object: 'contact', id: '77' }, options);
+    expect(nobody.fields.comments).not.toMatch(/Менеджер ERP|Создал в ERP/);
+    const unsafe = mapOrder(order({ managerName: 'Иван https://evil.example/x' }), { object: 'contact', id: '77' }, options);
+    expect(unsafe.fields.comments).toContain('Менеджер ERP: Иван …');
+    expect(unsafe.fields.comments).not.toContain('evil.example');
+  });
+
   it('falls back to total amount when a legacy order has no final amount', () => {
     const result = mapOrder(
       order({ finalAmount: null, totalAmount: 125000 }),
