@@ -532,6 +532,7 @@ describe('OrderQueryService', () => {
       productionStatuses: [],
       workshops: [],
       employees: [],
+      managers: [],
       units: [],
     });
   });
@@ -677,6 +678,7 @@ function createOrderFormDataResponse(): OrderFormDataResponseDto {
     productionStatuses: [{ id: 9, name: 'Cut', code: 'cut', color: '#00ff00' }],
     workshops: [{ id: 10, name: 'Workshop' }],
     employees: [{ id: 11, fullName: 'Employee' }],
+    managers: [{ id: 3, fullName: 'Manager' }],
     units: [{ id: 12, code: 'pcs', name: 'Pieces', symbol: 'pcs' }],
     sheetMaterialTypes: [
       { id: 20, name: 'МДФ 16 мм', widthMm: 2800, heightMm: 2070, isActive: true },

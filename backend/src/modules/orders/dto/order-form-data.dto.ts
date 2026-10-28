@@ -60,6 +60,8 @@ export interface OrderFormDataResponseDto {
   productionStatuses: StatusLookupDto[];
   workshops: IdNameLookupDto[];
   employees: EmployeeLookupDto[];
+  /** Who may be chosen as the manager of an order (ERP users; id = orders.manager_id). */
+  managers: EmployeeLookupDto[];
   units: UnitLookupDto[];
   // SP3: present ONLY when the caller has sheet_materials.view (service-masked).
   sheetMaterialTypes?: SheetMaterialTypeLookupDto[];

@@ -25,6 +25,10 @@ export class UnavailableOrderReadRepository implements OrderReadRepositoryPort {
   async getOrderFormData(_command: GetOrderFormDataCommand): Promise<OrderFormDataResponseDto> {
     throw unavailableReadAdapterError();
   }
+
+  async listOrderManagerOptions(): Promise<Array<{ id: number; fullName: string }>> {
+    throw unavailableReadAdapterError();
+  }
 }
 
 function unavailableReadAdapterError(): ApiError {

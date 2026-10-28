@@ -31,7 +31,10 @@ export interface SaveOrderHeaderDto {
   clientId: number;
   orderDate: string;
   priority?: number;
+  /** Former field (the form listed employees): accepted only as «no change»; see order-manager-assignment.ts. */
   managerId?: number | null;
+  /** Manager of the order: an ERP user id (orders.manager_id). Choosing another one needs orders.manager.change. */
+  managerUserId?: number | null;
   orderStatusId: number;
   paymentStatusId?: number | null;
   productionStatusId?: number | null;
