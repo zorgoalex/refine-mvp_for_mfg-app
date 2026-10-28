@@ -74,6 +74,11 @@ describe.skipIf(!databaseUrl)('orders of a client for the client card (PostgreSQ
     const second = await service.list(user(11, 'admin'), 1, 2, 20, 'req-all-2');
     expect(second.data).toHaveLength(9);
     expect(second.summary).toEqual(first.summary);
+    // Count, sums and page come from one statement: a page past the end still has the totals.
+    const past = await service.list(user(11, 'admin'), 1, 9, 20, 'req-all-past');
+    expect(past.data).toEqual([]);
+    expect(past.pagination.total).toBe(29);
+    expect(past.summary).toEqual(first.summary);
   });
 
   it('a manager limited to his own orders never gets another manager\'s order or its money — on any page', async () => {
