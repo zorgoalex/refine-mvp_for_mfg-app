@@ -229,6 +229,8 @@ export interface OrderSaveAuditEvent {
   after?: Record<string, unknown> | null;
   metadata?: OrderSaveAuditMetadata;
   relatedSheetMaterialTypeIds?: number[];
+  /** Set when the command changed the manager: the new manager (audit_log.related_user_id). */
+  managerChange?: { previousManagerId: string | null; managerId: string | null };
 }
 
 export interface OrderStatusAuditEvent {
@@ -419,6 +421,8 @@ export interface OrderWriteUnitOfWork {
     currentUser: CurrentUser,
     requestId?: string,
   ): Promise<void>;
+  /** An active ERP user that is not a service account (who may manage an order). */
+  isActiveOrderManager(userId: string): Promise<boolean>;
   updateOrderHeader(input: {
     orderId: number;
     header: NormalizedSaveOrderHeaderDto;

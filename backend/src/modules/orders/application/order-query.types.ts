@@ -99,4 +99,6 @@ export interface OrderReadRepositoryPort {
   getOrderById(command: GetOrderByIdCommand): Promise<OrderDto | null>;
   getOrderAudit(command: GetOrderAuditCommand): Promise<OrderAuditListResponseDto>;
   getOrderFormData(command: GetOrderFormDataCommand): Promise<OrderFormDataResponseDto>;
+  /** Who may be chosen as the manager of an order (active, non-service ERP users). */
+  listOrderManagerOptions(): Promise<Array<{ id: number; fullName: string }>>;
 }

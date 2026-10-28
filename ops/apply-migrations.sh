@@ -2793,6 +2793,10 @@ probe_file() {
       "SELECT EXISTS (SELECT 1 FROM permissions_catalog WHERE permission_name = 'references.quick_create' AND is_active);" \
       "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'manager' AND rp.permission_name = 'references.quick_create');" \
       "$(q_col permissions_state hasura_access_predicates)" ;;
+    # 283: orders.manager.change — catalog row and the default grants of superadmin and admin.
+    283_orders_manager_change_permission*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM permissions_catalog WHERE permission_name = 'orders.manager.change' AND is_active);" \
+      "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'admin' AND rp.permission_name = 'orders.manager.change');" ;;
     249_role_checks_to_permissions*) probe_all \
       "SELECT (SELECT count(*) FROM permissions_catalog WHERE permission_name IN ('bitrix24.requests.view_all','bitrix24.requests.view_assigned','groups.batch_link') AND is_active) = 3;" \
       "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'top_manager' AND rp.permission_name = 'groups.batch_link');" ;;
@@ -3422,6 +3426,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     282_order_stage_letters*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    283_orders_manager_change_permission*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

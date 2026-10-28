@@ -28,6 +28,7 @@ import type { DeleteOrderResponseDto, OrderDto, RestoreOrderResponseDto } from '
 import type {
   CalculatedOrderDetailDto,
   NormalizedSaveOrderDto,
+  NormalizedSaveOrderHeaderDto,
   PreparedOrderSave,
 } from '../dto/save-order.dto';
 import type { CurrentUser } from '../../../permissions/current-user';
@@ -41,6 +42,11 @@ import {
 } from '../errors/order.errors';
 import { prepareOrderSave } from '../domain/order-save-preparer';
 import { assertOrderHasPositions, catalogPlanInputs } from '../domain/order-catalog-lines';
+import {
+  invalidOrderManagerError,
+  resolveOrderManagerAssignment,
+  type OrderManagerAssignment,
+} from '../domain/order-manager-assignment';
 import { ProjectClientMismatchError } from '../../projects/errors/projects.errors';
 import {
   addCalendarDays,
@@ -250,11 +256,10 @@ export class OrderTransactionService {
       const requestedProjectId = normalizeProjectIdInput(
         command.dto.header.projectId,
       );
+      const managerAssignment = await this.assignOrderManager(unitOfWork, command, prepared.order.header, null, 'create');
       this.requireFinancePermissionForPaymentMutations(command, prepared.order, {
         createdByUserId: command.currentUser.id,
-        managerUserId: prepared.order.header.managerId === undefined || prepared.order.header.managerId === null
-          ? null
-          : String(prepared.order.header.managerId),
+        managerUserId: managerAssignment.managerId,
       });
 
       // Уникальность номера заказа среди живых заказов — жёсткий блок (409 с
@@ -320,6 +325,9 @@ export class OrderTransactionService {
       await unitOfWork.writeAuditEvent({
         action: 'orders.create',
         orderId,
+        ...(managerAssignment.changed
+          ? { managerChange: { previousManagerId: null, managerId: managerAssignment.managerId } }
+          : {}),
         actorUserId: command.currentUser.id,
         actorUsername: command.currentUser.username,
         actorRole: command.currentUser.role,
@@ -543,6 +551,9 @@ export class OrderTransactionService {
         createdByUserId: lockedOrder.createdByUserId,
         managerUserId: lockedOrder.managerUserId,
       });
+      const managerAssignment = await this.assignOrderManager(
+        unitOfWork, command, prepared.order.header, lockedOrder.managerUserId, 'update',
+      );
 
       // Переименование в занятый номер — блок; без смены имени проверка не
       // выполняется (легаси-дубли остаются редактируемыми).
@@ -664,6 +675,9 @@ export class OrderTransactionService {
       await unitOfWork.writeAuditEvent({
         action: 'orders.update',
         orderId: command.orderId,
+        ...(managerAssignment.changed
+          ? { managerChange: { previousManagerId: managerAssignment.previousManagerId, managerId: managerAssignment.managerId } }
+          : {}),
         actorUserId: command.currentUser.id,
         actorUsername: command.currentUser.username,
         actorRole: command.currentUser.role,
@@ -755,6 +769,9 @@ export class OrderTransactionService {
         payload: {
           previousVersion: lockedOrder.version,
           version,
+          ...(managerAssignment.changed
+            ? { previousManagerId: managerAssignment.previousManagerId, managerId: managerAssignment.managerId }
+            : {}),
         },
       });
       if (command.postPersistHook) {
@@ -1456,6 +1473,33 @@ export class OrderTransactionService {
     }
 
     return Number(version);
+  }
+
+  /**
+   * Applies the manager rule (order-manager-assignment.ts) to the header that will be written: header.managerId
+   * becomes the resolved manager and the former/new protocol fields are no longer read below.
+   */
+  private async assignOrderManager(
+    unitOfWork: OrderWriteUnitOfWork,
+    command: Pick<CreateOrderCommand | UpdateOrderCommand, 'currentUser'>,
+    header: NormalizedSaveOrderHeaderDto,
+    storedManagerId: string | null,
+    mode: 'create' | 'update',
+  ): Promise<OrderManagerAssignment> {
+    const assignment = resolveOrderManagerAssignment({
+      mode,
+      currentUserId: String(command.currentUser.id),
+      storedManagerId,
+      managerUserId: header.managerUserId,
+      legacyManagerId: header.managerId,
+      canChangeManager: this.permissions.canUser(command.currentUser, 'orders.manager.change'),
+    });
+    if (assignment.changed && assignment.managerId !== null && !(await unitOfWork.isActiveOrderManager(assignment.managerId))) {
+      throw invalidOrderManagerError(assignment.managerId);
+    }
+    header.managerId = assignment.managerId === null ? null : Number(assignment.managerId);
+    header.managerUserId = undefined;
+    return assignment;
   }
 
   private requirePermission(

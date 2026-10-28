@@ -236,6 +236,11 @@ export const PERMISSIONS = [
   // admin, top manager). Appended.
   /** Merge two clients of a case of the journal (orders, groups, phones, contacts, the 1C link move) and undo a merge. */
   'clients.merge',
+
+  // Change the manager of an order (user decision 2026-10-28: administrators by default, configurable in the roles
+  // matrix; migration 283). The manager owns the order's «own» visibility and its Bitrix24 responsible user. Appended.
+  /** Choose another ERP user as the manager of an order (save-order, snapshot import). */
+  'orders.manager.change',
 ] as const;
 
 export type PermissionName = (typeof PERMISSIONS)[number];
