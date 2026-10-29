@@ -573,6 +573,8 @@ export interface OrderFormDataResponse {
   productionStatuses: StatusLookup[];
   workshops: IdNameLookup[];
   employees: EmployeeLookup[];
+  /** ERP users that may manage an order (older backends omit it). */
+  managers?: EmployeeLookup[];
   units: UnitLookup[];
   // SP3: optional — omitted when the caller lacks sheet_materials.view.
   sheetMaterialTypes?: SheetMaterialTypeLookup[];
@@ -602,7 +604,10 @@ export interface SaveOrderHeaderDto {
   discount: number;
   surcharge: number;
 
+  /** Former field: the backend accepts it only as «no change»; the form sends managerUserId. */
   managerId?: number | null;
+  /** Manager of the order: an ERP user id (orders.manager_id). */
+  managerUserId?: number | null;
 
   /** @deprecated Variant B: always null; sheet_material_type_id is the authoritative order-material reference */
   materialId?: number | null;
@@ -772,6 +777,8 @@ export interface OrderHeaderDto {
   projectCode?: string | null;
   orderDate: DateOnlyString;
   managerId?: number | null;
+  /** The manager's name as the order read returns it (employee name, else the user). */
+  managerName?: string | null;
   priority?: number | null;
   orderStatusId: number;
   orderStatusName?: string | null;

@@ -103,7 +103,8 @@ export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDt
       discount: normalizeNumber(header.discount, 0),
       surcharge: normalizeNumber(header.surcharge, 0),
 
-      managerId: optionalNumber(header.manager_id),
+      // The manager travels as an ERP user id; the former managerId is no longer sent (orders.manager.change).
+      managerUserId: optionalNumber(header.manager_id),
 
       // Variant B: header materialId is sunsetted; always emit null.
       // The legacy header material picker is removed in Task 9.
@@ -230,6 +231,7 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
     surcharge: normalizeNumber(order.header.surcharge, 0),
 
     manager_id: optionalNumber(order.header.managerId),
+    manager_name: order.header.managerName ?? null,
 
     material_id: optionalNumber(order.header.materialId),
     sheet_material_type_id: optionalNumber(order.header.sheetMaterialTypeId),

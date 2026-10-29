@@ -58,6 +58,7 @@ export const apiRoutes = {
   orders: {
     list: backendApiPath('/orders'),
     formData: backendApiPath('/orders/form-data'),
+    managerOptions: backendApiPath('/orders/manager-options'),
     resourceDemands: backendApiPath('/orders/resource-demands'),
     resourceDemandsByMaterial: backendApiPath('/orders/resource-demands/by-material'),
     resourceDemandsOnecDocuments: backendApiPath('/orders/resource-demands/onec-documents'),
