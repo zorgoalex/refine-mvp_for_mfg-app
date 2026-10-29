@@ -205,3 +205,38 @@
 :root[data-ui-variant="workbench"] .evolution-shell__content:has(.status-board-page) {
   min-height: 0;
 }
+
+/* ---------- сводка под заголовком и итоги колонок (мокап 07) ---------- */
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .wb-board-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 0 0 10px;
+  color: var(--evo-text-secondary);
+  font-size: 13px;
+}
+
+:root[data-ui-variant="workbench"] .wb-board-summary__item b {
+  color: var(--evo-text);
+  font-size: 15px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-ui-variant="workbench"] .wb-board-summary__item[data-tone="danger"] b {
+  color: var(--evo-danger);
+}
+
+:root[data-ui-variant="workbench"] .wb-board-summary__item[data-tone="success"] b {
+  color: var(--evo-success);
+}
+
+:root[data-ui-variant="workbench"] .status-board-page:not(.status-board-page--cnc) .wb-board-column-totals {
+  padding: 0 12px 6px;
+  overflow: hidden;
+  color: var(--evo-text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

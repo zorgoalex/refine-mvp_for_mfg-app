@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-29", title: "Доски статусов: сводка и итоги колонок (NewLine)",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "NewLine: под заголовком досок статусов — «в работе», «просрочено», «готовы к выдаче»; под заголовком колонки — площадь и сумма её заказов (сумма — только с правом на финансы). Если колонка загружена не целиком, итог подписан «24 из 61».",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-29", title: "Потребности заказов: фильтр по оплате и колонка «Поставщик»",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

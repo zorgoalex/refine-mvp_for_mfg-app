@@ -2,6 +2,7 @@ import { Popover, Tooltip } from '../../ui/tooltipDelay';
 import { MdfPrintDialog } from './mdfPrint/MdfPrintDialog';
 import { chosenMdfPrintColumns, mdfPrint, useMdfPrintState } from './mdfPrint/mdfPrintStore';
 import { useOptionalUiVariant } from '../../ui-variant/UiVariantProvider';
+import { WorkbenchBoardSummary, WorkbenchColumnTotals } from './workbenchBoardSummary';
 import { MdfProductionReturnDialog, isMdfBackwardMove, type MdfReturnIntent } from './MdfProductionReturnDialog';
 import { toMdfReturnBoardWindow } from '../../api/mdfProductionReturnApi';
 import { mdfCorrectionApi, type MdfEngineModeDto } from '../../api/mdfCorrectionApi';
@@ -3664,6 +3665,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               }
             />
           ) : (
+            <>
+            <WorkbenchBoardSummary board={activeBoard} columns={columns} />
             <div
               className={[
                 'status-board-columns',
@@ -3695,6 +3698,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 />
               ))}
             </div>
+            </>
           )}
         </section>
         {isCncToday && cncHistoryOpen && (
@@ -8546,6 +8550,7 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
           color={column.status.color ?? '#8c8c8c'}
         />
       </header>
+      <WorkbenchColumnTotals column={column} showFinancials={showFinancials} />
 
       <div
         ref={cardsRef}
