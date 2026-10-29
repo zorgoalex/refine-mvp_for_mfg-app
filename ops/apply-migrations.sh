@@ -3036,6 +3036,9 @@ probe_file() {
       "$(q_trg trg_doweling_orders_default_client)" \
       "SELECT position('order_doweling_links' IN pg_get_viewdef('public.orders_view'::regclass, true)) > 0;" \
       ;;
+    284_stage_letters_cut_ready_saw*) probe_all \
+      "SELECT to_regprocedure('public.reconcile_saw_detail_statuses(timestamptz,text)') IS NOT NULL;" \
+      "SELECT NOT EXISTS (SELECT 1 FROM cut_settings WHERE key='eligibility.statuses' AND jsonb_typeof(value->'codes')='array' AND (value->'codes') ? 'drawn' AND NOT (value->'codes') ? 'saw');" ;;
     282_order_stage_letters*) probe_all \
       "$(q_tbl order_stage_auto_state)" \
       "$(q_tbl order_stage_letter_overrides)" \
@@ -3169,6 +3172,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     282_order_stage_letters*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    284_stage_letters_cut_ready_saw*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     204_procurement_workspace*)
