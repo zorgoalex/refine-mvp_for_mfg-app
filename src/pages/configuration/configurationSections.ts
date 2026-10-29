@@ -47,6 +47,7 @@ export const CONFIGURATION_SECTION_LABELS: Record<string, string> = {
   'table-visibility': 'Видимость экранов',
   'roles-permissions': 'Права ролей',
   vlm: 'Анализ фото',
+  'rework-reasons': 'Причины переделки',
 };
 
 /** Одна строка под заголовком раздела. */
@@ -126,4 +127,28 @@ export function filterConfigurationNav(groups: readonly ConfigurationNavGroup[],
       return { ...group, items: group.items.filter((item) => (item.label ?? item.key).toLocaleLowerCase('ru').includes(needle)) };
     })
     .filter((group) => group.items.length > 0);
+}
+
+/**
+ * Видимость отдельных вкладок по ролям и пользователям: вкладка — строка «Конфигурация → …» в той же настройке, что
+ * «Видимость экранов» (ресурс `configuration:<ключ>`). Только показ: данные вкладки по-прежнему закрывают права.
+ * «Видимость экранов» не скрывается — иначе администратор может закрыть себе саму настройку.
+ */
+export const CONFIGURATION_TAB_RESOURCE_PREFIX = 'configuration:';
+export const CONFIGURATION_TABS_ALWAYS_SHOWN: readonly string[] = ['table-visibility'];
+
+export const configurationTabResource = (key: string): string => `${CONFIGURATION_TAB_RESOURCE_PREFIX}${key}`;
+
+export function configurationTabVisibilityResources(): Array<{ name: string; label: string; route: string }> {
+  return Object.entries(CONFIGURATION_SECTION_LABELS)
+    .filter(([key]) => !CONFIGURATION_TABS_ALWAYS_SHOWN.includes(key))
+    .map(([key, label]) => ({ name: configurationTabResource(key), label: `Конфигурация → ${label}`, route: `/configuration · ${label}` }));
+}
+
+/** Оставляет вкладки, которые пользователь может видеть по настройке видимости (поверх прав и флагов экрана). */
+export function filterConfigurationTabsByVisibility<T extends { key: string }>(
+  items: T[],
+  canView: (resourceName: string) => boolean,
+): T[] {
+  return items.filter((item) => CONFIGURATION_TABS_ALWAYS_SHOWN.includes(item.key) || canView(configurationTabResource(item.key)));
 }
