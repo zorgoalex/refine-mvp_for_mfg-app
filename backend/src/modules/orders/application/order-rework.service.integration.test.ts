@@ -177,6 +177,11 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
         await pool.query('DELETE FROM audit_log_related_entity WHERE audit_id IN (SELECT audit_id FROM audit_log WHERE related_order_id = $1)', [orderId]);
         await pool.query('DELETE FROM audit_log WHERE related_order_id = $1', [orderId]);
         await pool.query("DELETE FROM outbox_events WHERE aggregate_type = 'order' AND aggregate_id = $1", [String(orderId)]);
+        // Deadline events announce themselves per deadline (aggregate `deadline`); the deadlines go with the order.
+        await pool.query(
+          "DELETE FROM outbox_events WHERE aggregate_type = 'deadline' AND aggregate_id IN (SELECT deadline_id::text FROM deadline_instances WHERE order_id = $1)",
+          [orderId],
+        );
         await pool.query("DELETE FROM command_idempotency_keys WHERE entity_type = 'order' AND entity_id = $1", [String(orderId)]);
         await pool.query('DELETE FROM realtime_event_log WHERE order_id = $1', [orderId]);
         // Status changes are recorded in the append-only MDF board history by a DB trigger:

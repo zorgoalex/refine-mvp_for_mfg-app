@@ -260,6 +260,11 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
             await client.query('DELETE FROM audit_log_related_entity WHERE audit_id IN (SELECT audit_id FROM audit_log WHERE related_order_id = $1)', [orderId]);
             await client.query('DELETE FROM audit_log WHERE related_order_id = $1', [orderId]);
             await client.query("DELETE FROM outbox_events WHERE aggregate_type = 'order' AND aggregate_id = $1", [String(orderId)]);
+            // Deadline events announce themselves per deadline (aggregate `deadline`); the deadlines go with the order.
+            await client.query(
+              "DELETE FROM outbox_events WHERE aggregate_type = 'deadline' AND aggregate_id IN (SELECT deadline_id::text FROM deadline_instances WHERE order_id = $1)",
+              [orderId],
+            );
             await client.query("DELETE FROM command_idempotency_keys WHERE entity_type = 'order' AND entity_id = $1", [String(orderId)]);
             await client.query('DELETE FROM realtime_event_log WHERE order_id = $1', [orderId]);
             await client.query('DELETE FROM order_workshops WHERE order_id = $1', [orderId]);
@@ -878,6 +883,22 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
        FROM orders o JOIN order_statuses s ON s.order_status_id = o.order_status_id WHERE o.order_id = $1`, [orderId],
   )).rows[0];
 
+  /** Deadline events of the order and their announcements (`deadline.event.created`, aggregate `deadline`) by event id. */
+  const deadlineOutbox = async (orderId: number) => {
+    const events = (await pool.query('SELECT deadline_event_id::text AS id FROM deadline_events WHERE order_id = $1 ORDER BY 1', [orderId]))
+      .rows.map((row) => row.id as string);
+    const rows = (await pool.query(
+      `SELECT o.payload_json->>'deadlineEventId' AS id, count(*)::int AS n FROM outbox_events o
+        WHERE o.aggregate_type = 'deadline' AND o.event_type = 'deadline.event.created'
+          AND o.aggregate_id IN (SELECT deadline_id::text FROM deadline_instances WHERE order_id = $1)
+        GROUP BY 1 ORDER BY 1`, [orderId],
+    )).rows;
+    return { events, announced: Object.fromEntries(rows.map((row) => [row.id as string, Number(row.n)])) as Record<string, number> };
+  };
+  /** Every given deadline event is announced exactly once. */
+  const announcedOnce = (facts: Awaited<ReturnType<typeof deadlineOutbox>>, ids: string[]) =>
+    expect(Object.fromEntries(ids.map((id) => [id, facts.announced[id] ?? 0]))).toEqual(Object.fromEntries(ids.map((id) => [id, 1])));
+
   it('R8.1 (port review): a merge of the client while the round deadline waits for its reconciliation — rounds kept, deadlines on the survivor, no duplicates', async () => {
     const pair = await mergePair('сверка');
     await start(pair.orderId, pair.detailIds[0], addDays(today, 8), bare); // the mark is set; the reconciliation has not run
@@ -893,14 +914,17 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
     expect(await active(pair.orderId)).toEqual([expect.objectContaining({ at: addDays(today, 8), metadata_json: expect.objectContaining({ reworkRoundNo: 2 }) })]);
     expect((await roundRow(pair.orderId, 2)).mark).toBeNull();
     expect(await deadlineClients(pair.orderId)).toEqual([pair.survivor]);
+    const afterSweep = await deadlineOutbox(pair.orderId);
+    announcedOnce(afterSweep, afterSweep.events); // D0 and the round deadline: every deadline event announced once
 
-    // Repeats add nothing: no instance, no deadline event, no outbox row.
+    // Repeats add nothing: no instance, no deadline event, no outbox row (order or deadline).
     const counts = async () => ({
       instances: (await finals(pair.orderId)).length,
       events: Number((await pool.query('SELECT count(*)::int AS n FROM deadline_events WHERE order_id = $1', [pair.orderId])).rows[0].n),
       outbox: (await pool.query(
         "SELECT event_type FROM outbox_events WHERE aggregate_type = 'order' AND aggregate_id = $1 ORDER BY created_at, event_type", [String(pair.orderId)],
       )).rows.map((row) => row.event_type as string),
+      deadlines: await deadlineOutbox(pair.orderId),
     });
     const settled = await counts();
     await sweeperFor().sweep(new Date(Date.now() + 120_000));
@@ -915,6 +939,9 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
     await falsePositive(pair.orderId, 2);
     expect(await active(pair.orderId)).toEqual([expect.objectContaining({ at: addDays(today, -10) })]);
     expect(await deadlineClients(pair.orderId)).toEqual([pair.survivor]);
+    const afterCancel = await deadlineOutbox(pair.orderId);
+    expect(afterCancel.events.length).toBeGreaterThan(afterSweep.events.length);
+    announcedOnce(afterCancel, afterCancel.events);
   });
 
   it('R8.2 (port review): an import of a snapshot with an open round whose client was merged afterwards — on the survivor, rounds and round deadline kept', async () => {
@@ -929,19 +956,41 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
 
     // The snapshot names the merged client (matched by name): the copy lives on the survivor, phones are not rewritten.
     const copy = await importCopy(pair.orderId, 'импорт-объединённого', (snapshot) => {
-      snapshot.data.client = exported.data.client;
+      // The snapshot exported before the merge, whole (importCopy then sets only the source, the hash and the name).
+      Object.assign(snapshot, structuredClone(exported));
       snapshot.data.clientPhones = [{ sourceId: `e2e-phone-${tag}`, phoneNumber: '+7 700 000 00 99', phoneType: 'mobile', isPrimary: true, refKey1c: null }];
     });
     expect(await orderClient(copy)).toBe(pair.survivor);
     expect(await phones()).toBe(phonesBefore);
     expect(await roundState(copy)).toEqual(source);
 
+    // Imported deadlines and events are a copy of history: on the survivor, not announced again.
+    const imported = await deadlineOutbox(copy);
+    expect(imported.events.length).toBeGreaterThan(0);
+    expect(imported.announced).toEqual({});
+    expect(await deadlineClients(copy)).toEqual([pair.survivor]);
+    const newEvents = (facts: Awaited<ReturnType<typeof deadlineOutbox>>) => facts.events.filter((id) => !imported.events.includes(id));
+
     await sweeperFor().sweep(new Date(Date.now() + 60_000)); // the import asked for a reconciliation
     expect(await active(copy)).toEqual([expect.objectContaining({ at: addDays(today, 6), metadata_json: expect.objectContaining({ reworkRoundNo: 2 }) })]);
     expect(await deadlineClients(copy)).toEqual([pair.survivor]);
+    const reconciled = await deadlineOutbox(copy);
+    announcedOnce(reconciled, newEvents(reconciled));
+    expect(Object.keys(reconciled.announced).sort()).toEqual(newEvents(reconciled).sort());
+
+    // Repeats add nothing.
+    const instances = (await finals(copy)).length;
+    await sweeperFor().sweep(new Date(Date.now() + 120_000));
+    await sync().reconcileOrderFinalDeadline({ orderId: copy, currentUser: { id: ORDER_FINAL_DEADLINE_SYSTEM_ACTOR }, requestId: key() });
+    expect(await deadlineOutbox(copy)).toEqual(reconciled);
+    expect((await finals(copy)).length).toBe(instances);
 
     await falsePositive(copy, 2);
     expect(await active(copy)).toEqual([expect.objectContaining({ at: addDays(today, -10) })]);
     expect(await deadlineClients(copy)).toEqual([pair.survivor]);
+    const cancelled = await deadlineOutbox(copy);
+    expect(newEvents(cancelled).length).toBeGreaterThan(newEvents(reconciled).length);
+    announcedOnce(cancelled, newEvents(cancelled));
+    expect(Object.keys(cancelled.announced).sort()).toEqual(newEvents(cancelled).sort());
   });
 });
