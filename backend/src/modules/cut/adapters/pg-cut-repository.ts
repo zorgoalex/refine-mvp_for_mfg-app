@@ -841,6 +841,9 @@ export class PgCutRepository implements CutRepositoryPort {
       const cutJobId = toNum(inserted.rows[0].cut_job_id);
 
       const readyStatusIds = await this.resolveReadyStatusIds();
+      // The orders of every reserved detail in one sorted lock before the reservations (their order FK takes them one by
+      // one in the request's order otherwise) — the «Базис раскрой» commands lock owners in the same id order (282).
+      await lockReservedOrders(tx, command.dto.detailIds ?? [], command.dto.hdfDetailIds ?? []);
       const reservedOrderIds: number[] = [];
       const reservedSheetTypeIds: number[] = [];
       let insertedCount = 0;
@@ -889,6 +892,8 @@ export class PgCutRepository implements CutRepositoryPort {
       assertMutable(job);
 
       const readyStatusIds = await this.resolveReadyStatusIds();
+      // Job first (above), then the orders of every reserved detail in one sorted lock (see createJob).
+      await lockReservedOrders(tx, command.dto.detailIds ?? [], command.dto.hdfDetailIds ?? []);
       const reservedOrderIds: number[] = [];
       const reservedSheetTypeIds: number[] = [];
       const insertedDetailIds: number[] = [];
@@ -8032,5 +8037,17 @@ function withRouteWarnings(job: CutJobDto, warnings: readonly SawSyncWarning[]):
   return warnings.length === 0 ? job : { ...job, warnings: warnings.map((warning) => ({
     code: 'DETAIL_ALSO_IN_BAZIS' as const, detailId: warning.detailId, orderId: warning.orderId,
     bazisCutSetIds: warning.bazisCutSetIds })) };
+}
+
+/** The orders of the details / HDF details a CNC command reserves, in one id-ordered KEY SHARE lock (what their FK takes). */
+async function lockReservedOrders(tx: TransactionClient, detailIds: readonly number[], hdfDetailIds: readonly number[]): Promise<void> {
+  if (detailIds.length === 0 && hdfDetailIds.length === 0) return;
+  await tx.query(
+    `SELECT 1 FROM orders o
+      WHERE o.order_id IN (SELECT od.order_id FROM order_details od WHERE od.detail_id = ANY($1::bigint[])
+                           UNION SELECT hd.order_id FROM order_hdf_details hd WHERE hd.order_hdf_detail_id = ANY($2::bigint[]))
+      ORDER BY o.order_id FOR KEY SHARE`,
+    [[...detailIds], [...hdfDetailIds]],
+  );
 }
 
