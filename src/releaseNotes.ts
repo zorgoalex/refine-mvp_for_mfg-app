@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-29", title: "Потребности заказов: сортировка по всем страницам",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Сортировка колонок «Заказ», «Дата заказа», «Листовые материалы», «Плёнка» в списке потребностей упорядочивает все заказы, а не только открытую страницу. Заказы без материала — в конце при любом направлении.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-29", title: "Потребности заказов: фильтр по оплате и колонка «Поставщик»",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

@@ -196,6 +196,9 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
   // Все фильтры считает сервер (по всем страницам): панель + заголовки колонок. Прежний backend (без
   // capabilities.serverFilters) их не знает — тогда эти фильтры не показываются и не передаются.
   const [serverFilters, setServerFilters] = useState(false);
+  // Сортировку колонок считает сервер по всем страницам; прежний backend (без capabilities.serverSort) —
+  // сортировка только текущей страницы.
+  const [serverSort, setServerSort] = useState(false);
   const panelFilters = useMemo<OrderResourceDemandFilterOptionsQuery>(() => ({
     ...(deferredSearch ? { search: deferredSearch } : {}),
     ...(dateRange?.[0] ? { dateFrom: dateRange[0].format('YYYY-MM-DD') } : {}),
@@ -232,13 +235,18 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
     ...panelFilters,
     ...headerQuery.filters,
     ...(onecDocumentFilter ? { onecDocumentId: onecDocumentFilter.documentId } : {}),
-  }), [headerQuery, onecDocumentFilter, page, pageSize, panelFilters]);
+    ...(serverSort && sortState.columnKey && sortState.order
+      ? { sort: sortState.columnKey, sortOrder: sortState.order === 'descend' ? 'desc' as const : 'asc' as const }
+      : {}),
+  }), [headerQuery, onecDocumentFilter, page, pageSize, panelFilters, serverSort, sortState]);
   // «Отключить все» в заголовке — заказов нет, сервер не спрашиваем.
   const { response, loading, error } = useLiveOrderResourceDemands(query, refreshRevision, !active || listSuppressed);
   const rows = listSuppressed ? EMPTY_RESOURCE_DEMAND_ROWS : response?.data ?? EMPTY_RESOURCE_DEMAND_ROWS;
   const capabilities = useMemo(() => resolveResourceCapabilities(response?.capabilities), [response]);
   useEffect(() => {
-    if (response) setServerFilters(response.capabilities?.serverFilters === true);
+    if (!response) return;
+    setServerFilters(response.capabilities?.serverFilters === true);
+    setServerSort(response.capabilities?.serverSort === true);
   }, [response]);
   const triggerRefresh = useCallback(() => setRefreshRevision((value) => value + 1), []);
   const todayKey = dayjs().format('YYYY-MM-DD');
@@ -277,8 +285,10 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
     [onecDocumentOptionsState.documents],
   );
   const onecDocumentTruncatedHint = onecDocumentFilterTruncatedHint(onecDocumentOptionsState.truncated);
-  // Сортировка колонок — по текущей странице (порядок страниц задаёт сервер: дата заказа, новые сверху).
-  const tableRows = useMemo(() => sortResourceDemandRows(rows, sortState), [rows, sortState]);
+  const tableRows = useMemo(
+    () => (serverSort ? rows : sortResourceDemandRows(rows, sortState)),
+    [rows, serverSort, sortState],
+  );
   // Карточка берёт свежую строку из live-обновлений, а если заказ ушёл со страницы — последний снимок.
   const drawerRow = useMemo(
     () => (drawerSnapshot == null

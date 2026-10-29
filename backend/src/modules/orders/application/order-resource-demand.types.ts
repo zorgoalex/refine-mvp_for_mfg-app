@@ -34,6 +34,15 @@ export interface OrderResourceDemandQuery {
   readyCutsOnly?: boolean;
   /** Оплата: `any_paid` — частично или полностью оплачен, `fully_paid` — только полностью. */
   payment?: OrderResourcePaymentFilter;
+  /** Сортировка списка по всем страницам; без неё — дата заказа, новые сверху. */
+  sort?: OrderResourceDemandSort;
+}
+
+export type OrderResourceDemandSortKey = 'order' | 'date' | 'sheetMaterials' | 'films';
+
+export interface OrderResourceDemandSort {
+  key: OrderResourceDemandSortKey;
+  direction: 'asc' | 'desc';
 }
 
 export interface ResourceDemandValueFilter<T> {
@@ -155,6 +164,8 @@ export interface OrderResourceCapabilitiesDto {
    * Без признака (прежний backend) интерфейс эти фильтры не показывает: их параметры были бы молча проигнорированы.
    */
   serverFilters: boolean;
+  /** Сервер сортирует список по `sort`/`sortOrder` (по всем страницам). */
+  serverSort: boolean;
 }
 
 export interface OrderResourceDemandDto {

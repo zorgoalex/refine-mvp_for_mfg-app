@@ -64,7 +64,19 @@ describe('parseOrderResourceDemandQuery', () => {
     expect(() => parseOrderResourceDemandQuery({ orderIds: '!5' })).toThrow(ApiError);
   });
 
+  it('parses the sort over all pages (direction asc by default)', () => {
+    expect(parseOrderResourceDemandQuery({ sort: 'films', sortOrder: 'desc' })).toEqual({
+      page: 1, pageSize: 20, sort: { key: 'films', direction: 'desc' },
+    });
+    expect(parseOrderResourceDemandQuery({ sort: 'order' })).toEqual({
+      page: 1, pageSize: 20, sort: { key: 'order', direction: 'asc' },
+    });
+  });
+
   it.each([
+    [{ sort: 'clientName' }, 'sort'],
+    [{ sort: 'date', sortOrder: 'down' }, 'sortOrder'],
+    [{ sortOrder: 'asc' }, 'sortOrder'],
     [{ orderIds: '1,x' }, 'orderIds'],
     [{ orderIds: '1,,2' }, 'orderIds'],
     [{ orderDates: '2026-02-30' }, 'orderDates'],

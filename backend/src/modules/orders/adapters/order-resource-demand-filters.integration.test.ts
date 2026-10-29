@@ -150,6 +150,55 @@ describe.skipIf(!databaseUrl)('resource demand header filters, supplier and paym
     expect(page.pagination.total).toBe(2);
   });
 
+  it('sorts all pages on the server; empty keys last; the supplier filter sorts by the kept materials', async () => {
+    const ordered = async (over: Partial<OrderResourceDemandQuery>) => (await list(over)).map((row) => row.orderId);
+    expect(await ordered({ sort: { key: 'order', direction: 'asc' } })).toEqual([ids.paid, ids.partial, ids.unpaid]);
+    expect(await ordered({ sort: { key: 'order', direction: 'desc' } })).toEqual([ids.unpaid, ids.partial, ids.paid]);
+    // Equal dates keep the default order (newest id first).
+    expect(await ordered({ sort: { key: 'date', direction: 'asc' } })).toEqual([ids.paid, ids.unpaid, ids.partial]);
+    expect(await ordered({ sort: { key: 'date', direction: 'desc' } })).toEqual([ids.unpaid, ids.partial, ids.paid]);
+    // The order without film is last in both directions; the two with films swap.
+    const filmsAsc = await ordered({ sort: { key: 'films', direction: 'asc' } });
+    const filmsDesc = await ordered({ sort: { key: 'films', direction: 'desc' } });
+    expect(filmsAsc[2]).toBe(ids.unpaid);
+    expect(filmsDesc[2]).toBe(ids.unpaid);
+    expect(filmsDesc.slice(0, 2)).toEqual(filmsAsc.slice(0, 2).reverse());
+    // Supplier A keeps no film of the paid order (its film is supplier B's): both rows have no film key → default order.
+    expect(await ordered({ supplierKeys: [`s:${ids.supplierA}`], sort: { key: 'films', direction: 'asc' } })).toEqual([ids.unpaid, ids.paid]);
+    // The legacy supplierId filter keeps whole details (sheet of supplier A with film B): the paid film stays in the key.
+    expect(await ordered({ supplierId: ids.supplierA, sort: { key: 'films', direction: 'asc' } })).toEqual([ids.paid, ids.unpaid]);
+    await q('SAVEPOINT sort_hdf');
+    try {
+      // HDF positions (current revision): one repeats the detail's sheet with another snapshot name (the detail name wins),
+      // one adds an HDF-only sheet (its snapshot name counts).
+      const revision = Number((await q('SELECT revision FROM hdf_calculation_config_state WHERE id = 1')).rows[0].revision);
+      const hdf = (orderId: number, sheet: number, name: string) => q(
+        `INSERT INTO order_hdf_details (order_id, source_order_detail_id_snapshot, status, source_snapshot_hash, source_snapshot_json,
+            config_revision, hdf_sheet_material_type_id, hdf_sheet_material_name, edge_mm, threshold_mm, hdf_height_mm, hdf_width_mm, quantity)
+         VALUES ($1, 0, 'ok', 'e2e', '{}'::jsonb, $2, $3, $4, 10, 10, 700, 380, 1)`,
+        [orderId, revision, sheet, name],
+      );
+      await hdf(ids.unpaid, ids.sheet, 'ААА ' + tag);
+      await hdf(ids.partial, ids.bathSheet, 'Яя ' + tag);
+      // Paid and unpaid show the same sheet (the unpaid HDF snapshot name does not replace the detail's): equal keys → date desc.
+      const unpaidRow = (await list({ orderIds: [ids.unpaid] }))[0];
+      expect(unpaidRow.sheetMaterials.map((row) => row.name)).not.toContain('ААА ' + tag);
+      for (const direction of ['asc', 'desc'] as const) {
+        const sheets = await ordered({ sort: { key: 'sheetMaterials', direction } });
+        expect(sheets.indexOf(ids.paid) - sheets.indexOf(ids.unpaid)).toBe(1);
+      }
+      const partialRow = (await list({ orderIds: [ids.partial] }))[0];
+      expect(partialRow.sheetMaterials.map((row) => row.name)).toContain('Яя ' + tag);
+    } finally {
+      await q('ROLLBACK TO SAVEPOINT sort_hdf');
+    }
+    // The sort applies before paging.
+    const second = await repository.list(
+      { currentUser: admin, query: { page: 2, pageSize: 1, search: tag, sort: { key: 'order', direction: 'asc' } } }, options,
+    );
+    expect(second.data.map((row) => row.orderId)).toEqual([ids.partial]);
+  });
+
   it('header filters: orders, dates, sheet materials, films (and «without»)', async () => {
     expect(await listed({ orderIds: [ids.partial] })).toEqual([ids.partial]);
     expect(await listed({ orderDates: { values: ['2026-01-12'], includeEmpty: false } })).toEqual([ids.partial, ids.unpaid].sort((a, b) => a - b));

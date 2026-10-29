@@ -17,6 +17,7 @@ import {
   type OrderResourceByMaterialResponseDto,
   type OrderResourceDemandQuery,
   type OrderResourceDemandResponseDto,
+  type OrderResourceDemandSortKey,
   type OrderResourceReadOptions,
   type ResourceDemandValueFilter,
 } from '../application/order-resource-demand.types';
@@ -51,6 +52,8 @@ export class OrderResourceDemandController {
   @ApiQuery({ name: 'supplierKeys', required: false, type: String, description: 'Comma-separated main supplier keys (s:<id>, c:<1C key>, n:<hash>, none); only their materials are returned; a leading "!" means "all except"' })
   @ApiQuery({ name: 'readyCutsOnly', required: false, type: Boolean })
   @ApiQuery({ name: 'payment', required: false, enum: ['any_paid', 'fully_paid'] })
+  @ApiQuery({ name: 'sort', required: false, enum: ['order', 'date', 'sheetMaterials', 'films'], description: 'Sort over all pages; default — order date, newest first' })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'], description: 'Sort direction (default asc); only with sort' })
   @ApiResponse({ status: 200, description: 'Live order resource demand projection' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -208,6 +211,7 @@ export function parseOrderResourceDemandQuery(raw: Record<string, unknown>): Ord
     ...optionalSupplierKeys(raw.supplierKeys),
     ...optionalBoolean(raw.readyCutsOnly, 'readyCutsOnly'),
     ...optionalPayment(raw.payment),
+    ...optionalSort(raw.sort, raw.sortOrder),
   };
 }
 
@@ -283,6 +287,22 @@ function optionalPayment(value: unknown): Partial<OrderResourceDemandQuery> {
   if (raw === undefined || raw.trim() === '') return {};
   if (raw !== 'any_paid' && raw !== 'fully_paid') throw invalidQuery('payment', 'payment must be any_paid or fully_paid');
   return { payment: raw };
+}
+
+const SORT_KEYS: readonly OrderResourceDemandSortKey[] = ['order', 'date', 'sheetMaterials', 'films'];
+
+function optionalSort(value: unknown, orderValue: unknown): Partial<OrderResourceDemandQuery> {
+  const key = single(value, 'sort')?.trim();
+  const direction = single(orderValue, 'sortOrder')?.trim();
+  if (!key) {
+    if (direction) throw invalidQuery('sortOrder', 'sortOrder requires sort');
+    return {};
+  }
+  if (!SORT_KEYS.includes(key as OrderResourceDemandSortKey)) {
+    throw invalidQuery('sort', 'sort must be order, date, sheetMaterials or films');
+  }
+  if (direction && direction !== 'asc' && direction !== 'desc') throw invalidQuery('sortOrder', 'sortOrder must be asc or desc');
+  return { sort: { key: key as OrderResourceDemandSortKey, direction: direction === 'desc' ? 'desc' : 'asc' } };
 }
 
 function optionalBoolean(value: unknown, field: 'unpurchasedOnly' | 'readyCutsOnly'): Partial<OrderResourceDemandQuery> {
