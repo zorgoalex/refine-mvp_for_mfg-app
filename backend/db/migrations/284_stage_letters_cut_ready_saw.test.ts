@@ -21,6 +21,10 @@ describe('migration 284: «Базис» in the CNC ready statuses; reconcile aft
     expect(code).toContain("'saw_reconcile'");
     // cards created before the rollback window are never converted (a separate decision)
     expect(code).toContain('b.created_at >= p_since');
+    // routes of details that went past the step during the rollback are restored; outbox + correlation as a command
+    expect(code).toContain('INSERT INTO public.order_detail_stage_routes (detail_id, round_no, request_id)');
+    expect(code).toContain("set_config('erp.request_id', p_request_id, true)");
+    expect(code).toContain("'saw-reconcile:' || p_request_id || ':' || v_order");
     expect(code).toContain('c.order_detail_id = od.detail_id AND c.is_active');
   });
 

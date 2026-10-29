@@ -18,8 +18,17 @@ describe('CNC job commands lock the job first (no early order lock)', () => {
   it('addItems: the job lock is the first lock; no lockOrdersOfDetails anywhere', () => {
     const fn = body('addItems');
     expect(fn.indexOf('loadJobForUpdate(tx, command.cutJobId)')).toBeGreaterThan(0);
-    expect(fn).not.toMatch(/FOR UPDATE|FOR NO KEY UPDATE|lockOrders/);
+    // after the job: the reserved orders in one sorted lock, before any reservation (review R2 #1)
+    expect(fn.indexOf('lockReservedOrders(tx,')).toBeGreaterThan(fn.indexOf('loadJobForUpdate(tx, command.cutJobId)'));
+    expect(fn.indexOf('lockReservedOrders(tx,')).toBeLessThan(fn.indexOf('this.reserveDetail('));
     expect(source).not.toContain('lockOrdersOfDetails');
+  });
+
+  it('createJob locks the reserved orders sorted before reserving', () => {
+    const fn = body('createJob');
+    expect(fn.indexOf('lockReservedOrders(tx,')).toBeGreaterThan(0);
+    expect(fn.indexOf('lockReservedOrders(tx,')).toBeLessThan(fn.indexOf('this.reserveDetail('));
+    expect(source).toContain('ORDER BY o.order_id FOR KEY SHARE');
   });
 
   it('createJob and addItems still report «Базис» conflicts', () => {
