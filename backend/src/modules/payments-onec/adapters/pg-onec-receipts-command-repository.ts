@@ -83,6 +83,12 @@ export class PgOnecReceiptsCommandRepository {
       await this.lockLineDocuments(tx, before);
       const active = await this.lockMatches(tx, lineId, input.paymentId);
       const row = await this.loadLine(tx, lineId);
+      // Scope FIRST, before any answer that tells the state of the line or the payment (code review B-main R1-2):
+      // the line's ERP order («no order» — only scope «all») and the payment's own order.
+      await checkScope([
+        row.erp_order_id === null ? null : orders.get(Number(row.erp_order_id)) ?? null,
+        ...(paymentOrder === null ? [] : [orders.get(paymentOrder) ?? null]),
+      ]);
 
       // Repeat of the same match: the record already exists → no change (plan §6 «Идемпотентность»).
       const own = active.find((m) => Number(m.onec_document_line_id) === lineId);
@@ -104,7 +110,6 @@ export class PgOnecReceiptsCommandRepository {
       if (token !== input.expectedPaymentToken) throw stateChanged({ paymentId: input.paymentId });
       // Only an eligible receipt line with payments of its order and no record is matched by hand (states §5).
       if (row.state !== 'review') throw new ApiError(409, 'ONEC_RECEIPT_NOT_ELIGIBLE', 'Поступление сейчас нельзя сверить', { state: row.state, reason: row.reason });
-      await checkScope([orders.get(Number(row.erp_order_id)) ?? null]);
       const amountDiffers = Number(payment.amount) !== Number(row.line_amount);
       const note = amountDiffers
         ? requireNote(input.note, 'ONEC_MATCH_NOTE_REQUIRED', 'Суммы различаются: укажите комментарий')
@@ -148,12 +153,13 @@ export class PgOnecReceiptsCommandRepository {
       await this.lockLineDocuments(tx, before);
       const active = await this.lockMatches(tx, lineId, null);
       const row = await this.loadLine(tx, lineId);
+      // Scope first (B-main R1-2). Without an ERP order the line is visible only with the scope «all» — the same for
+      // the decision on it.
+      await checkScope([row.erp_order_id === null ? null : orders.get(Number(row.erp_order_id)) ?? null]);
       const own = active.find((m) => Number(m.onec_document_line_id) === lineId);
       if (own && own.kind === 'dismissed') return { changed: false, matchId: Number(own.match_id) };
       if (own) throw new ApiError(409, 'ONEC_RECEIPT_ALREADY_MATCHED', 'У поступления уже есть сверка', { matchId: Number(own.match_id) });
       this.assertToken(row, before, orders, input.expectedStateToken);
-      // Without an ERP order the line is visible only with the scope «all» — the same for the decision on it.
-      await checkScope([row.erp_order_id === null ? null : orders.get(Number(row.erp_order_id)) ?? null]);
       const note = requireNote(input.note, 'ONEC_DISMISS_NOTE_REQUIRED', 'Укажите, почему поступление разобрано без сверки');
       const { rows: [inserted] } = await tx.query<{ match_id: string }>(
         `INSERT INTO payment_onec_matches (onec_document_line_id, kind, origin, order_id_at_match, source_id, onec_order_ref_key,
@@ -192,10 +198,16 @@ export class PgOnecReceiptsCommandRepository {
       if (!record || Number(record.line_id) !== lineId) throw stateChanged({ matchId: input.expectedMatchId });
       const paymentOrder = record.payment_id === null ? null : await this.paymentOrderId(tx, Number(record.payment_id));
       const orders = await this.lockOrders(tx, [num(record.order_id_at_match), paymentOrder, num(before.erp_order_id)]);
-      if (record.payment_id !== null) await this.lockPayment(tx, Number(record.payment_id));
+      const lockedPayment = record.payment_id === null ? null : await this.lockPayment(tx, Number(record.payment_id));
       await this.lockLineDocuments(tx, before);
       const active = await this.lockMatches(tx, lineId, null);
       const row = await this.loadLine(tx, lineId);
+      // Scope first, from the record itself (B-main R1-2): the order at match time and the current order of its payment
+      // (R1-3); a «разобрано» without an order — «all».
+      // The payment's order as locked now: one moved meanwhile to an order not locked here maps to «no order» → «all».
+      await checkScope(record.payment_id !== null
+        ? [num(record.order_id_at_match), num(lockedPayment?.order_id ?? null)].map((id) => (id === null ? null : orders.get(id) ?? null))
+        : [record.order_id_at_match === null ? null : orders.get(Number(record.order_id_at_match)) ?? null]);
       const own = active.find((m) => Number(m.onec_document_line_id) === lineId);
       // Already removed (a repeat) → no change; another record is active now → stale.
       if (!own) {
@@ -203,11 +215,6 @@ export class PgOnecReceiptsCommandRepository {
         throw stateChanged({ matchId: input.expectedMatchId });
       }
       if (Number(own.match_id) !== input.expectedMatchId) throw stateChanged({ matchId: Number(own.match_id) });
-      // Scope: the order at match time and the current order of the payment (R1-3); a «разобрано» without an order — «all».
-      const scopeOrders = own.kind === 'matched'
-        ? [num(own.order_id_at_match), num(own.payment_current_order_id)].map((id) => (id === null ? null : orders.get(id) ?? null))
-        : [own.order_id_at_match === null ? null : orders.get(Number(own.order_id_at_match)) ?? null];
-      await checkScope(scopeOrders);
       const reason = optionalNote(input.reason);
       await tx.query(
         `UPDATE payment_onec_matches SET removed_at = now(), removed_by = $2, removed_reason = 'manual' WHERE match_id = $1`,
@@ -256,6 +263,12 @@ export class PgOnecReceiptsCommandRepository {
         [before.source_id, before.order_ref, input.remove ? null : input.orderId],
       );
       const row = await this.loadLine(tx, lineId);
+      // Scope first (B-main R1-2): the ERP order before and the one after the change — on unlink the order the rule
+      // resolves (R1-3); «no order» on either side needs the scope «all».
+      await checkScope([
+        row.erp_order_id === null ? null : orders.get(Number(row.erp_order_id)) ?? null,
+        afterOrder === null ? null : orders.get(afterOrder) ?? null,
+      ]);
       this.assertToken(row, before, orders, input.expectedStateToken);
       const current = links.find((l) => Number(l.link_id) === num(row.link_id)) ?? null;
       if (input.remove && current === null) return { changed: false, matchId: null };
@@ -269,11 +282,6 @@ export class PgOnecReceiptsCommandRepository {
           throw new ApiError(409, 'ONEC_LINK_ORDER_TAKEN', 'Этот заказ ERP уже связан с другим заказом 1С');
         }
       }
-      // The ERP order before and after the change; «no order» on either side needs the scope «all».
-      await checkScope([
-        row.erp_order_id === null ? null : orders.get(Number(row.erp_order_id)) ?? null,
-        input.remove || input.orderId === null ? null : orders.get(input.orderId) ?? null,
-      ]);
       const note = optionalNote(input.note);
       // The match rows the detection below re-checks are locked BEFORE the advisory locks — the loader locks its match
       // rows first too, so a sibling receipt of the same 1C order cannot deadlock the two (code review R3-2).
