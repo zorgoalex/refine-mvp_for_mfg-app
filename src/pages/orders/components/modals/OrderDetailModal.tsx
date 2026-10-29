@@ -36,6 +36,8 @@ interface OrderDetailModalProps {
   mode: 'create' | 'edit';
   detail?: OrderDetail;
   defaultSheetMaterialTypeId?: number;
+  /** «Параметры деталей по умолчанию» of the form for a new detail (fill only the create form) */
+  createDefaults?: Partial<Omit<OrderDetail, 'temp_id'>>;
   onSave: (detail: Omit<OrderDetail, 'temp_id'>) => void;
   onCancel: () => void;
 }
@@ -45,10 +47,14 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   mode,
   detail,
   defaultSheetMaterialTypeId,
+  createDefaults,
   onSave,
   onCancel,
 }) => {
   const [form] = Form.useForm();
+  // read when the create form opens; later changes of the defaults do not reset an open form
+  const createDefaultsRef = useRef(createDefaults);
+  createDefaultsRef.current = createDefaults;
   const { tabKey } = useKeepAlive();
   const workspaceKey = tabKey || '/orders/create';
   const restored = useRef(
@@ -176,6 +182,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         milling_type_id: 1, // Модерн
         hdf_parameter_override_mm: null,
         edge_type_id: 1, // р-1
+        ...(createDefaultsRef.current ?? {}),
       });
       setCalculatedArea(0);
       setCalculatedCost(0);

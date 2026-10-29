@@ -68,7 +68,9 @@ import {
   prepareOrderDetailsForSave,
   recentOrderDetailReferenceIds,
   isOrderDetailPlaceholder,
+  isPristineOrderDetailPlaceholder,
 } from '../../../../utils/orderDetailRows';
+import { newDetailDefaults, type DetailDefaults } from '../../detailDefaults';
 import { OrderDetailsToolbar } from '../OrderDetailsToolbar';
 import type { CutDetailLastReadyJobRef } from '../../../../api/types/cutApi.types';
 import { CutJobVersionLines } from '../../CutJobVersionLines';
@@ -116,6 +118,8 @@ interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
   onDelete: (tempId: number, detailId?: number) => void;
   onQuickAdd?: (skipCurrentSave?: boolean) => boolean | Promise<boolean>;
+  /** «Параметры деталей по умолчанию»: put into an untouched prepared row when it is opened for editing */
+  newRowDefaults?: DetailDefaults;
   onInsertAfter?: (detail: OrderDetail) => void;
   onCopyRow?: (detail: OrderDetail) => void;
   onTransferRows?: (rowKeys: React.Key[]) => void;
@@ -810,6 +814,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   onEdit,
   onDelete,
   onQuickAdd,
+  newRowDefaults,
   onInsertAfter,
   onCopyRow,
   onTransferRows,
@@ -1554,6 +1559,16 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       production_status_id: record.production_status_id ?? null,
       detail_name: record.detail_name ?? '',
     };
+    // an untouched prepared row starts from the form's defaults (values, not a background sync of the grid); the
+    // price carries its marker in the form, so an unfilled row stays an empty tail (orderDetailRows)
+    if (newRowDefaults && isPristineOrderDetailPlaceholder(record)) {
+      const rule = initialFormValues.sheet_material_type_id;
+      const defaults = newDetailDefaults(newRowDefaults, typeof rule === 'number' ? rule : undefined);
+      Object.assign(initialFormValues, defaults);
+      if (defaults.milling_cost_per_sqm != null) {
+        fieldValuesRef.current.milling_cost_per_sqm = defaults.milling_cost_per_sqm;
+      }
+    }
     if (initialValue !== undefined) {
       initialFormValues[String(nextEditingField)] = initialValue;
       if (

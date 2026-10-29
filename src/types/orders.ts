@@ -217,6 +217,8 @@ export interface OrderDetail {
   temp_id?: number;
   /** UI-only empty grid row; never persisted or included in business totals. */
   is_placeholder?: boolean;
+  /** UI-only: the «Цена за м²» the form put in by default (not a user entry while unchanged). */
+  prefilled_milling_cost_per_sqm?: number | null;
 }
 
 // ============================================================================

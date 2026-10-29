@@ -29,7 +29,14 @@ export function businessOrderDetails(details: readonly OrderDetail[]): OrderDeta
  * Unknown nonempty fields fail closed, including links, references and provenance.
  */
 export function getOrderImportPlaceholderIds(details: readonly OrderDetail[]): number[] {
-  return details.filter(detail => detail.is_placeholder === true
+  return details.filter(isPristineOrderDetailPlaceholder)
+    .sort((left, right) => (left.detail_number ?? 0) - (right.detail_number ?? 0))
+    .map(detail => detail.temp_id!);
+}
+
+/** A prepared empty grid row nobody has touched (the same rule an import uses to reuse rows). */
+export function isPristineOrderDetailPlaceholder(detail: OrderDetail): boolean {
+  return detail.is_placeholder === true
     && detail.detail_id == null && detail.delete_flag !== true
     && Number.isSafeInteger(detail.temp_id) && Number(detail.temp_id) > 0
     && Object.entries(detail).every(([key, value]) => {
@@ -38,9 +45,7 @@ export function getOrderImportPlaceholderIds(details: readonly OrderDetail[]): n
       if (key === 'milling_type_id' && value === 1) return true;
       if (key === 'edge_type_id' && value === 1) return true;
       return value == null || value === '' || value === 0 || value === false;
-    }))
-    .sort((left, right) => (left.detail_number ?? 0) - (right.detail_number ?? 0))
-    .map(detail => detail.temp_id!);
+    });
 }
 
 export function recentOrderDetailReferenceIds(
@@ -103,6 +108,8 @@ const DETAIL_FIELDS_CLEARED_FOR_EMPTY_TAIL: Partial<Record<keyof OrderDetail, nu
   edge_type_id: null,
   film_id: null,
   milling_cost_per_sqm: null,
+  // the default-price marker goes with the price: a cleared row is a pristine grid row again
+  prefilled_milling_cost_per_sqm: null,
   detail_cost: null,
   note: null,
   basis_project: null,
@@ -246,12 +253,15 @@ export function countOrderDetailsWithRequiredEntryValues(details: readonly Order
 }
 
 function hasOrderDetailTailEntryValues(
-  detail: Pick<OrderDetail, 'height' | 'width' | 'quantity' | 'milling_cost_per_sqm' | 'detail_cost'>,
+  detail: Pick<OrderDetail, 'height' | 'width' | 'quantity' | 'milling_cost_per_sqm' | 'detail_cost' | 'prefilled_milling_cost_per_sqm'>,
 ): boolean {
+  // a price the form put in by default («Параметры деталей по умолчанию») is not an entry while unchanged
+  const prefilledPrice = detail.prefilled_milling_cost_per_sqm != null
+    && Number(detail.milling_cost_per_sqm) === Number(detail.prefilled_milling_cost_per_sqm);
   return (
     isPositiveNumber(detail.height) ||
     isPositiveNumber(detail.width) ||
-    isPositiveNumber(detail.milling_cost_per_sqm) ||
+    (!prefilledPrice && isPositiveNumber(detail.milling_cost_per_sqm)) ||
     isPositiveNumber(detail.detail_cost) ||
     isUserEnteredQuantity(detail.quantity)
   );

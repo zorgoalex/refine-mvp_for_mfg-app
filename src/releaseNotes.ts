@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-30", title: "Форма заказа: параметры деталей по умолчанию (NewLine)",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "NewLine: над таблицей деталей — «Параметры деталей по умолчанию»: материал, плёнка, фрезеровка, обкат и цена за м² подставляются в новые строки (быстрое добавление, «вставить строку», «Добавить деталь») и в пустую строку при её заполнении; в каждой строке их можно изменить. «Как обычно» возвращает прежние значения.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-29", title: "Потребности заказов: сортировка по всем страницам",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

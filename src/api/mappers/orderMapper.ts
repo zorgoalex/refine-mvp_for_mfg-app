@@ -70,6 +70,7 @@ const FRONTEND_ONLY_FIELDS = new Set([
   'parts_count',
   'total_area',
   'is_placeholder',
+  'prefilled_milling_cost_per_sqm',
 ]);
 
 export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDto {

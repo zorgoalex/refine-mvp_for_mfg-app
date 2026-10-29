@@ -20,6 +20,14 @@ import {
 } from '@ant-design/icons';
 import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTable';
 import { OrderDetailModal } from '../modals/OrderDetailModal';
+import { DetailDefaultsBar } from './DetailDefaultsBar';
+import {
+  INITIAL_DETAIL_DEFAULTS,
+  newDetailDefaults,
+  readDetailDefaults,
+  type DetailDefaults,
+} from '../../detailDefaults';
+import { useOptionalUiVariant } from '../../../../ui-variant/UiVariantProvider';
 import { BulkEditModal } from '../modals/BulkEditModal';
 import { ImportDropdownButton } from '../import';
 import { useOrderFormStore, useOrderDraftStoreApi } from '../../../../stores/orderFormStore';
@@ -159,14 +167,23 @@ export const OrderDetailsTab = forwardRef<
     [defaultSheetMaterialTypeId, details],
   );
 
+  // «Параметры деталей по умолчанию» (NewLine): untouched they give the long-standing defaults
+  const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
+  // kept in the tab checkpoint: a tab restored after eviction keeps the chosen defaults
+  const [detailDefaults, setDetailDefaults] = useState<DetailDefaults>(
+    () => readDetailDefaults(restored?.detailDefaults) ?? INITIAL_DETAIL_DEFAULTS,
+  );
+  const nextDetailDefaults = React.useMemo(
+    () => newDetailDefaults(detailDefaults, nextDetailSheetMaterialTypeId),
+    [detailDefaults, nextDetailSheetMaterialTypeId],
+  );
+
   const QUICK_ADD_DEFAULTS = React.useMemo(
     () => ({
       ...QUICK_ADD_DEFAULTS_BASE,
-      ...(nextDetailSheetMaterialTypeId != null
-        ? { sheet_material_type_id: nextDetailSheetMaterialTypeId }
-        : {}),
+      ...nextDetailDefaults,
     }),
-    [nextDetailSheetMaterialTypeId],
+    [nextDetailDefaults],
   );
 
   const restoredModalOpen = restored?.detailModalOpen === true;
@@ -315,8 +332,10 @@ export const OrderDetailsTab = forwardRef<
       addToCutOpen,
       addToBazisCutOpen,
       transferOpen,
+      detailDefaults,
     }),
   });
+
   const embeddedCutJobMaps = useMemo(() => buildCutJobLinkMapsFromDetails(details), [details]);
   const fetchedCutJobMaps = useCutDetailLastReady({
     enabled: cutColumnEnabled,
@@ -666,9 +685,7 @@ export const OrderDetailsTab = forwardRef<
     );
     insertDetailAfter(afterTempId, {
       ...QUICK_ADD_DEFAULTS_BASE,
-      ...(insertedMaterialTypeId != null
-        ? { sheet_material_type_id: insertedMaterialTypeId }
-        : {}),
+      ...newDetailDefaults(detailDefaults, insertedMaterialTypeId),
     } as Omit<OrderDetail, 'temp_id'>);
 
     // Get the newly inserted detail and start editing it
@@ -912,12 +929,21 @@ export const OrderDetailsTab = forwardRef<
           />
         )}
 
+        {isWorkbench ? (
+          <DetailDefaultsBar
+            value={detailDefaults}
+            onChange={setDetailDefaults}
+            ruleMaterialId={nextDetailSheetMaterialTypeId}
+          />
+        ) : null}
+
         {/* Table — grouping controls are rendered inline on the gear row (right-aligned) */}
         <OrderDetailTable
           ref={tableRef}
           onEdit={handleEdit}
           onDelete={handleDelete}
           onQuickAdd={handleQuickAdd}
+          newRowDefaults={detailDefaults}
           onInsertAfter={handleInsertAfter}
           onCopyRow={handleCopyRow}
           onTransferRows={handleTransferRows}
@@ -1082,7 +1108,8 @@ export const OrderDetailsTab = forwardRef<
             open={modalOpen}
             mode={modalMode}
             detail={editingDetail}
-            defaultSheetMaterialTypeId={nextDetailSheetMaterialTypeId}
+            defaultSheetMaterialTypeId={nextDetailDefaults.sheet_material_type_id ?? undefined}
+            createDefaults={nextDetailDefaults}
             onSave={handleSave}
             onCancel={() => {
               cancelDeferredDetailRestore();
