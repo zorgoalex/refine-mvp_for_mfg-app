@@ -45,6 +45,7 @@
 }
 
 .wb-cal-print__week caption {
+  caption-side: top;
   padding: 0 0 1mm 1.2mm;
   color: #5b6474;
   font-size: 8pt;
