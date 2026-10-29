@@ -14,6 +14,8 @@ import { PgOrderSnapshot } from '../adapters/pg-order-snapshot';
 import type { OrderSnapshotDto } from '../dto/order-snapshot.dto';
 import { OrderReworkDeadlineSweeper } from './order-rework-deadline-sweeper.service';
 import { ORDER_FINAL_DEADLINE_SYSTEM_ACTOR } from '../../deadlines/domain/order-final-deadline';
+import { ClientMergeService } from '../../client-merge/client-merge.service';
+import { ClientCounterpartyRepository } from '../../party-contacts/client-counterparty.repository';
 
 // «Переделка» 1.1 — round deadline and final-deadline reconciliation on real PostgreSQL (plan
 // 2026-10-27-order-rework-deadlines-plan v7, §9). Gated on REWORK_INTEGRATION_DATABASE_URL (scratch copy of the stage
@@ -37,6 +39,8 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
   const tag = randomUUID().slice(0, 8);
   const orderIds: number[] = [];
   const importProjectIds: number[] = [];
+  const mergeClientIds: number[] = [];
+  const mergeCaseIds: number[] = [];
   const importSource = `e2e-rework-deadline-${tag}`;
   const status: Record<string, number> = {};
   const stage: Record<string, number> = {};
@@ -110,7 +114,10 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
        FROM order_production_rounds WHERE order_id = $1 AND round_no = $2`, [orderId, roundNo],
   )).rows[0];
 
-  async function createOrder(statusCode: string, detailStage: string, planned: string | null, detailCount = 2): Promise<{ orderId: number; detailIds: number[] }> {
+  async function createOrder(
+    statusCode: string, detailStage: string, planned: string | null, detailCount = 2,
+    owner: { clientId: number; projectId: number } = { clientId, projectId },
+  ): Promise<{ orderId: number; detailIds: number[] }> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -122,7 +129,7 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
       const orderId = Number((await client.query(
         `INSERT INTO orders (order_name, client_id, project_id, order_status_id, payment_status_id, created_by, manager_id, planned_completion_date, order_date)
          VALUES ($1, $2, $3, $4, $5, $6, $6, $7::date, $8::date) RETURNING order_id`,
-        [`E2E-Тест срок переделки ${tag} ${orderIds.length}`, clientId, projectId, status[statusCode], refs.payment, userId, planned, addDays(today, -30)],
+        [`E2E-Тест срок переделки ${tag} ${orderIds.length}`, owner.clientId, owner.projectId, status[statusCode], refs.payment, userId, planned, addDays(today, -30)],
       )).rows[0].order_id);
       const detailIds: number[] = [];
       for (let n = 1; n <= detailCount; n += 1) {
@@ -281,6 +288,28 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
           await pool.query('DELETE FROM projects WHERE project_id = $1', [importProject]);
         });
       }
+      if (mergeCaseIds.length) {
+        await step(async () => {
+          const merges = (await pool.query('SELECT merge_id FROM client_merges WHERE case_id = ANY($1::bigint[])', [mergeCaseIds])).rows.map((row) => String(row.merge_id));
+          await pool.query('DELETE FROM client_merge_redirects WHERE merge_id = ANY($1::bigint[])', [merges]);
+          await pool.query('DELETE FROM client_merge_items WHERE merge_id = ANY($1::bigint[])', [merges]);
+          await pool.query('DELETE FROM client_merges WHERE merge_id = ANY($1::bigint[])', [merges]);
+          const cases = mergeCaseIds.map(String);
+          const clients = mergeClientIds.map(String);
+          for (const [type, ids] of [['client_merge', merges], ['integration_duplicate_case', cases], ['client', clients]] as const) {
+            await pool.query('DELETE FROM audit_log_related_entity WHERE audit_id IN (SELECT audit_id FROM audit_log WHERE entity_type = $1 AND entity_id = ANY($2::text[]))', [type, ids]);
+            await pool.query('DELETE FROM audit_log WHERE entity_type = $1 AND entity_id = ANY($2::text[])', [type, ids]);
+            await pool.query('DELETE FROM outbox_events WHERE aggregate_type = $1 AND aggregate_id = ANY($2::text[])', [type, ids]);
+          }
+          await pool.query("DELETE FROM command_idempotency_keys WHERE entity_type = 'client' AND entity_id = ANY($1::text[])", [clients]);
+          await pool.query("DELETE FROM party_contact_versions WHERE party_kind = 'client' AND party_id = ANY($1::bigint[])", [mergeClientIds]);
+          await pool.query('DELETE FROM integration_duplicate_events WHERE case_id = ANY($1::bigint[])', [mergeCaseIds]);
+          await pool.query('DELETE FROM integration_duplicate_case_sources WHERE case_id = ANY($1::bigint[])', [mergeCaseIds]);
+          await pool.query('DELETE FROM integration_duplicate_members WHERE case_id = ANY($1::bigint[])', [mergeCaseIds]);
+          await pool.query('DELETE FROM integration_duplicate_cases WHERE case_id = ANY($1::bigint[])', [mergeCaseIds]);
+        });
+      }
+      if (mergeClientIds.length) await step(() => pool.query('DELETE FROM clients WHERE client_id = ANY($1::bigint[])', [mergeClientIds]));
       if (projectId) await step(() => pool.query('DELETE FROM projects WHERE project_id = $1', [projectId]));
       if (clientId) await step(() => pool.query('DELETE FROM clients WHERE client_id = $1', [clientId]));
       for (const id of [userId, otherUserId]) {
@@ -292,6 +321,8 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
       }
       const residue = await pool.query('SELECT count(*)::int AS n FROM orders WHERE order_name LIKE $1', [`E2E-Тест срок переделки ${tag}%`]);
       expect(residue.rows[0].n).toBe(0);
+      const clientResidue = await pool.query('SELECT count(*)::int AS n FROM clients WHERE client_name LIKE $1', [`E2E-Тест клиент срок ${tag}%`]);
+      expect(clientResidue.rows[0].n).toBe(0);
       if (savedSchedule) {
         const durations = await pool.query('SELECT count(*)::int AS n FROM deadline_default_stage_durations');
         expect(durations.rows[0].n).toBe(savedSchedule.durations.length);
@@ -789,4 +820,128 @@ describe.skipIf(!databaseUrl)('«Переделка» 1.1 — round deadline (re
       expect(await active(copy)).toEqual([]);
     });
   }
+
+  // R8 (port review): «Переделка» with the merge of clients (#182, migration 268) — the real merge command.
+  const merges = () => new ClientMergeService(
+    { get: (name: string) => name === 'BACKEND_CLIENT_MERGE' } as never, database(), new ClientCounterpartyRepository(database()),
+  );
+
+  /** A duplicate pair: the merged client has its own group, an order there with an active D0 deadline. */
+  async function mergePair(label: string) {
+    const makeClient = async (suffix: string) => {
+      const id = Number((await pool.query('INSERT INTO clients (client_name, created_by) VALUES ($1, $2) RETURNING client_id',
+        [`E2E-Тест клиент срок ${tag} ${label} ${suffix}`, userId])).rows[0].client_id);
+      mergeClientIds.push(id);
+      return id;
+    };
+    const survivor = await makeClient('основной');
+    const merged = await makeClient('дубль');
+    const group = Number((await pool.query(
+      'INSERT INTO projects (code, name, client_id, created_by) VALUES ($1, $2, $3, $4) RETURNING project_id',
+      [`E2E-M-${tag}-${mergeClientIds.length}`, `E2E-Тест группа срок ${tag} ${label}`, merged, userId],
+    )).rows[0].project_id);
+    importProjectIds.push(group);
+    const order = await createOrder('legacy_6', 'packed', addDays(today, -10), 2, { clientId: merged, projectId: group });
+    await reconcile(order.orderId); // active D0, client = merged
+    return { survivor, merged, ...order };
+  }
+
+  async function mergeClients(survivorId: number, mergedId: number): Promise<number> {
+    const caseId = Number((await pool.query(
+      `INSERT INTO integration_duplicate_cases (rule_code, entity_kind, key_version, key_hash, key_mask, strength, detected_via)
+       VALUES ('client.phone', 'client', 1, gen_random_bytes(32), '+7 *** *** ** 01', 'exact', 'scan') RETURNING case_id`)).rows[0].case_id);
+    mergeCaseIds.push(caseId);
+    for (const id of [survivorId, mergedId]) {
+      await pool.query(
+        `INSERT INTO integration_duplicate_members (case_id, system, entity_kind, record_key, erp_entity_id, record_via)
+         VALUES ($1, 'erp', 'client', $2, $3, 'scan')`, [caseId, String(id), id]);
+    }
+    const service = merges();
+    const preview = await service.preview(admin, caseId, survivorId, mergedId);
+    expect(preview.obstacles ?? []).toEqual([]);
+    const result = await service.merge(admin, caseId, {
+      survivorId, mergedId, expectedCaseVersion: preview.caseVersion, previewToken: preview.previewToken, idempotencyKey: key(),
+    }, key());
+    return Number(result.mergeId);
+  }
+
+  const orderClient = async (orderId: number) => Number((await pool.query('SELECT client_id FROM orders WHERE order_id = $1', [orderId])).rows[0].client_id);
+  const deadlineClients = async (orderId: number) => (await pool.query(
+    `SELECT DISTINCT client_id::text AS client FROM (
+       SELECT client_id FROM deadline_instances WHERE order_id = $1
+       UNION ALL SELECT client_id FROM deadline_events WHERE order_id = $1) d ORDER BY 1`, [orderId],
+  )).rows.map((row) => Number(row.client));
+  const roundState = async (orderId: number) => (await pool.query(
+    `SELECT o.production_round AS round, o.last_round_no AS last, s.order_status_code AS status,
+            (SELECT count(*)::int FROM order_production_rounds r WHERE r.order_id = o.order_id) AS rounds,
+            (SELECT count(*)::int FROM order_details d WHERE d.order_id = o.order_id AND d.production_round = 2) AS round2_details
+       FROM orders o JOIN order_statuses s ON s.order_status_id = o.order_status_id WHERE o.order_id = $1`, [orderId],
+  )).rows[0];
+
+  it('R8.1 (port review): a merge of the client while the round deadline waits for its reconciliation — rounds kept, deadlines on the survivor, no duplicates', async () => {
+    const pair = await mergePair('сверка');
+    await start(pair.orderId, pair.detailIds[0], addDays(today, 8), bare); // the mark is set; the reconciliation has not run
+    expect((await roundRow(pair.orderId, 2)).mark).not.toBeNull();
+    const before = await roundState(pair.orderId);
+
+    await mergeClients(pair.survivor, pair.merged);
+    expect(await orderClient(pair.orderId)).toBe(pair.survivor);
+    expect(await roundState(pair.orderId)).toEqual(before); // the merge changes the client only
+    expect((await roundRow(pair.orderId, 2)).mark).not.toBeNull(); // the pending reconciliation survives the merge
+
+    await sweeperFor().sweep(new Date(Date.now() + 60_000));
+    expect(await active(pair.orderId)).toEqual([expect.objectContaining({ at: addDays(today, 8), metadata_json: expect.objectContaining({ reworkRoundNo: 2 }) })]);
+    expect((await roundRow(pair.orderId, 2)).mark).toBeNull();
+    expect(await deadlineClients(pair.orderId)).toEqual([pair.survivor]);
+
+    // Repeats add nothing: no instance, no deadline event, no outbox row.
+    const counts = async () => ({
+      instances: (await finals(pair.orderId)).length,
+      events: Number((await pool.query('SELECT count(*)::int AS n FROM deadline_events WHERE order_id = $1', [pair.orderId])).rows[0].n),
+      outbox: (await pool.query(
+        "SELECT event_type FROM outbox_events WHERE aggregate_type = 'order' AND aggregate_id = $1 ORDER BY created_at, event_type", [String(pair.orderId)],
+      )).rows.map((row) => row.event_type as string),
+    });
+    const settled = await counts();
+    await sweeperFor().sweep(new Date(Date.now() + 120_000));
+    await sync().reconcileOrderFinalDeadline({ orderId: pair.orderId, currentUser: { id: ORDER_FINAL_DEADLINE_SYSTEM_ACTOR }, requestId: key() });
+    expect(await counts()).toEqual(settled);
+    // An order save announces itself (ORDER_UPDATED) and changes no deadline.
+    await reconcile(pair.orderId);
+    expect(await counts()).toEqual({ ...settled, outbox: [...settled.outbox, 'ORDER_UPDATED'] });
+    expect(await deadlineClients(pair.orderId)).toEqual([pair.survivor]);
+
+    // «Это не переделка» after the merge restores D0 on the survivor.
+    await falsePositive(pair.orderId, 2);
+    expect(await active(pair.orderId)).toEqual([expect.objectContaining({ at: addDays(today, -10) })]);
+    expect(await deadlineClients(pair.orderId)).toEqual([pair.survivor]);
+  });
+
+  it('R8.2 (port review): an import of a snapshot with an open round whose client was merged afterwards — on the survivor, rounds and round deadline kept', async () => {
+    const pair = await mergePair('импорт');
+    await start(pair.orderId, pair.detailIds[0], addDays(today, 6)); // round 2 open, its deadline active
+    const source = await roundState(pair.orderId);
+    expect(source).toMatchObject({ round: 2, last: 2, status: 'rework', round2_details: 1 });
+    const exported = JSON.parse((await new PgOrderSnapshot(database()).exportOrderSnapshot({ orderId: pair.orderId, currentUser: admin, requestId: key() })).content) as OrderSnapshotDto;
+    await mergeClients(pair.survivor, pair.merged);
+    const phones = async () => Number((await pool.query('SELECT count(*)::int AS n FROM client_phones WHERE client_id = ANY($1::bigint[])', [[pair.survivor, pair.merged]])).rows[0].n);
+    const phonesBefore = await phones();
+
+    // The snapshot names the merged client (matched by name): the copy lives on the survivor, phones are not rewritten.
+    const copy = await importCopy(pair.orderId, 'импорт-объединённого', (snapshot) => {
+      snapshot.data.client = exported.data.client;
+      snapshot.data.clientPhones = [{ sourceId: `e2e-phone-${tag}`, phoneNumber: '+7 700 000 00 99', phoneType: 'mobile', isPrimary: true, refKey1c: null }];
+    });
+    expect(await orderClient(copy)).toBe(pair.survivor);
+    expect(await phones()).toBe(phonesBefore);
+    expect(await roundState(copy)).toEqual(source);
+
+    await sweeperFor().sweep(new Date(Date.now() + 60_000)); // the import asked for a reconciliation
+    expect(await active(copy)).toEqual([expect.objectContaining({ at: addDays(today, 6), metadata_json: expect.objectContaining({ reworkRoundNo: 2 }) })]);
+    expect(await deadlineClients(copy)).toEqual([pair.survivor]);
+
+    await falsePositive(copy, 2);
+    expect(await active(copy)).toEqual([expect.objectContaining({ at: addDays(today, -10) })]);
+    expect(await deadlineClients(copy)).toEqual([pair.survivor]);
+  });
 });
