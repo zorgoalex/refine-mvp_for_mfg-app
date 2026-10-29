@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { getMaterialsForCard, hasDrawnProductionStatus, areAllProductionStagesReady } from './statusColors';
+import { getMaterialsForCard, hasDrawnProductionStatus, areAllProductionStagesReady, MANUAL_STAGE_LETTER_COLOR } from './statusColors';
 
 describe('all production ready uses ordinary detail composition', () => {
   it('does not trust a packed header, ignore nulls or accept an empty order', () => {
@@ -80,24 +80,46 @@ describe('calendar material card tags', () => {
 });
 
 describe('calendar drawn production indicator', () => {
-  it('uses the production stage event code for the pencil indicator', () => {
+  it('shows the pencil only when the projection contains drawn', () => {
     expect(hasDrawnProductionStatus({ passedProductionCodes: ['drawn'] })).toBe(true);
     expect(hasDrawnProductionStatus({ passedProductionCodes: ['cut', 'paint'] })).toBe(false);
+    expect(hasDrawnProductionStatus({})).toBe(false);
   });
 
-  it('uses order and detail production status names as fallbacks', () => {
-    expect(hasDrawnProductionStatus({ production_status_name: ' Отрисован ' })).toBe(true);
+  it('ignores order and detail status names', () => {
     expect(hasDrawnProductionStatus({
+      production_status_name: ' Отрисован ',
       order_details: [{ production_status_name: 'Отрисован' }],
-    })).toBe(true);
+      passedProductionCodes: [],
+    } as never)).toBe(false);
+  });
+});
+
+describe('manual stage letter colour', () => {
+  it('is a distinct token', () => {
+    expect(MANUAL_STAGE_LETTER_COLOR).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(MANUAL_STAGE_LETTER_COLOR).not.toBe('#fa8c16');
+    expect(MANUAL_STAGE_LETTER_COLOR).not.toBe('#d46b08');
+    expect(MANUAL_STAGE_LETTER_COLOR).not.toBe('#52c41a');
+  });
+});
+
+describe('manual stage letters and the saw status', () => {
+  it('renders manual letters with the manual colour in every letters renderer', () => {
+    const display = readFileSync(resolve(__dirname, '../../../components/ProductionStagesDisplay.tsx'), 'utf8');
+    expect(display).toContain('manualSet.has(stage.code) ? manualColor : passedColor');
+    for (const file of ['OrderCard.tsx', 'OrderCardCompact.tsx', 'DayColumnBrief.tsx']) {
+      expect(readFileSync(resolve(__dirname, '../components', file), 'utf8')).toContain('manualCodes=');
+    }
+    for (const file of ['../../orders/list.tsx', '../../orders/mobile/OrderCardList.tsx', '../../orders/components/sections/OrderShowHeader.tsx', '../../orders/components/sections/OrderHeaderSummary.tsx']) {
+      expect(readFileSync(resolve(__dirname, file), 'utf8')).toContain('manualCodes=');
+    }
   });
 
-  it('does not use the renamed order status for the pencil indicator', () => {
-    const order = {
-      order_status_name: 'Отрисован',
-      production_status_name: 'В производстве',
-    };
-
-    expect(hasDrawnProductionStatus(order)).toBe(false);
+  it('maps saw to the letter Б right after drawn', async () => {
+    const { PRODUCTION_STATUS_CODE_LETTERS, PRODUCTION_STATUS_DISPLAY_ORDER } = await import('../../../types/orders');
+    expect(PRODUCTION_STATUS_CODE_LETTERS.saw).toBe('Б');
+    expect(PRODUCTION_STATUS_CODE_LETTERS.film_purchase).toBe('П');
+    expect(PRODUCTION_STATUS_DISPLAY_ORDER.indexOf('saw')).toBe(PRODUCTION_STATUS_DISPLAY_ORDER.indexOf('drawn') + 1);
   });
 });

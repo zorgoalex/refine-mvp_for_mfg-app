@@ -114,6 +114,15 @@ describe('DailyDigestRenderer', () => {
     expect(pages.reduce((total, page) => total + page.png.byteLength, 0)).toBeLessThanOrEqual(DAILY_DIGEST_MAX_RUN_BYTES);
   }, 30_000);
 
+  it('renders letters set by hand (another colour) next to automatic ones', async () => {
+    const [page] = await renderer.render(makeSnapshot([makeOrder(1, {
+      passedProductionCodes: ['custom', 'cut'],
+      manualProductionCodes: ['cut'],
+    })]));
+    expect(page?.png.byteLength).toBeGreaterThan(1000);
+    expect(page?.orderIds).toEqual([1]);
+  });
+
   it('escapes XML content, wraps long fields, and uses frozen workflow letters', async () => {
     const [page] = await renderer.render(makeSnapshot([makeOrder(1, {
       orderName: 'Заказ & <премиум> "А"',

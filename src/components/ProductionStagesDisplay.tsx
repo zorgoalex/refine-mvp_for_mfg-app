@@ -5,12 +5,14 @@ import { Tooltip } from '../ui/tooltipDelay';
 
 import React from 'react';
 
+import { MANUAL_STAGE_LETTER_COLOR } from '../pages/calendar/utils/statusColors';
 import { PRODUCTION_STATUS_CODE_LETTERS, PRODUCTION_STATUS_DISPLAY_ORDER } from '../types/orders';
 
 // Full mapping with names for tooltips
 const PRODUCTION_STATUS_NAMES: Record<string, string> = {
   new: 'Новый',
   drawn: 'Отрисован',
+  saw: 'Базис',
   film_purchase: 'Закуп пленки',
   cut: 'Распилен',
   drilled: 'Присажен',
@@ -24,6 +26,10 @@ const PRODUCTION_STATUS_NAMES: Record<string, string> = {
 interface ProductionStagesDisplayProps {
   /** Array of production_status_code values that have been passed */
   passedCodes?: string[];
+  /** Subset of passedCodes set by hand: drawn in manualColor */
+  manualCodes?: readonly string[];
+  /** Colour of manual letters (default: MANUAL_STAGE_LETTER_COLOR) */
+  manualColor?: string;
   /** Current production_status_id (alternative to passedCodes - shows stages up to current) */
   currentStatusId?: number | null;
   /** Map of status_id to status_code (required if using currentStatusId) */
@@ -68,6 +74,8 @@ interface ProductionStagesDisplayProps {
  */
 export const ProductionStagesDisplay: React.FC<ProductionStagesDisplayProps> = ({
   passedCodes,
+  manualCodes,
+  manualColor = MANUAL_STAGE_LETTER_COLOR,
   currentStatusId,
   statusIdToCode,
   statusIdToSortOrder,
@@ -84,6 +92,8 @@ export const ProductionStagesDisplay: React.FC<ProductionStagesDisplayProps> = (
   showAll = false,
   maxWidth,
 }) => {
+  const manualSet = new Set(manualCodes ?? []);
+
   // Determine which codes are passed
   let passedSet: Set<string>;
 
@@ -159,8 +169,9 @@ export const ProductionStagesDisplay: React.FC<ProductionStagesDisplayProps> = (
         <React.Fragment key={stage.code}>
           <span
             className={stage.isPassed ? 'production-stages__stage--passed' : 'production-stages__stage--pending'}
+            data-manual={stage.isPassed && manualSet.has(stage.code) ? 'true' : undefined}
             style={{
-              color: stage.isPassed ? passedColor : notPassedColor,
+              color: stage.isPassed ? (manualSet.has(stage.code) ? manualColor : passedColor) : notPassedColor,
               fontWeight: stage.isPassed ? 600 : 400,
               whiteSpace: 'nowrap',
             }}
@@ -201,6 +212,7 @@ export const getStatusLetterFromName = (statusName: string): string | null => {
   const nameToCode: Record<string, string> = {
     'новый': 'new',
     'отрисован': 'drawn',
+    'базис': 'saw',
     'закуп': 'film_purchase',
     'распил': 'cut',
     'присаж': 'drilled',
@@ -235,6 +247,7 @@ export const getPassedCodesFromStatusName = (statusName: string): string[] => {
   const nameToCode: Record<string, string> = {
     'новый': 'new',
     'отрисован': 'drawn',
+    'базис': 'saw',
     'закуп': 'film_purchase',
     'распил': 'cut',
     'присаж': 'drilled',

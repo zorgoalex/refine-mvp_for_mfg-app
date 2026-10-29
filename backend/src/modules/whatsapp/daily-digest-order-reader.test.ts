@@ -41,7 +41,7 @@ function makeReader(input: { orderRows?: unknown[]; detailRows?: unknown[] } = {
     if (sql.includes('FROM order_doweling_links odl')) {
       return { rows: [{ order_id: '12', doweling_order_link_id: '7', doweling_order_name: 'Дюбель-заказ' }] as QueryResultRow[] };
     }
-    if (sql.includes('FROM production_status_events pse')) {
+    if (sql.includes('order_stage_letters_effective')) {
       return { rows: [{ order_id: '12', production_status_id: '1' }] as QueryResultRow[] };
     }
     if (sql.includes('FROM production_statuses')) return { rows: statuses as QueryResultRow[] };

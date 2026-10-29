@@ -84,6 +84,7 @@ describe('dataProvider backend orders read routing', () => {
           dowelingOrderName: '1368',
           designEngineerId: 40,
           passedProductionStatusCodes: ['cut', 'paint'],
+          manualProductionStatusCodes: ['paint'],
           primaryGroup: {
             id: '11111111-1111-4111-8111-111111111111',
             code: 'PRJ-001',
@@ -154,6 +155,7 @@ describe('dataProvider backend orders read routing', () => {
           doweling_order_name: '1368',
           design_engineer_id: 40,
           passed_production_status_codes: ['cut', 'paint'],
+          manual_production_status_codes: ['paint'],
           primary_group: {
             id: '11111111-1111-4111-8111-111111111111',
             code: 'PRJ-001',

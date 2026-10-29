@@ -18,6 +18,7 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { cncRouteConflicts, lockOrdersOfDetails, type SawSyncWarning } from '../../../shared/production-status/saw-status-sync';
 import {
   type PieceLabelSnapshot,
   type AutoPieceSpec,
@@ -820,6 +821,9 @@ export class PgCutRepository implements CutRepositoryPort {
       // Snapshot the freecut params at creation (config-as-data, plan §4a): a
       // config edit after the draft exists must NOT retro-mutate this job. The
       // snapshot is the authoritative payload at calculate time.
+      // Orders of the details first (order → job rows): the «Базис раскрой» side checks a CNC reservation under the
+      // same order lock, so a detail added to both at once is seen by the second command (migration 282).
+      await lockOrdersOfDetails(tx, command.dto.detailIds ?? []);
       const paramsSnapshot = await this.config.getDefaultParams();
       const inserted = await tx.query<{ cut_job_id: string | number }>(
         `
@@ -840,12 +844,14 @@ export class PgCutRepository implements CutRepositoryPort {
       const reservedOrderIds: number[] = [];
       const reservedSheetTypeIds: number[] = [];
       let insertedCount = 0;
+      const insertedDetailIds: number[] = [];
       for (const detailId of command.dto.detailIds ?? []) {
         const { orderId, sheetMaterialTypeId, inserted } = await this.reserveDetail(tx, cutJobId, detailId, readyStatusIds);
         if (inserted) {
           reservedOrderIds.push(orderId);
           if (sheetMaterialTypeId !== null) reservedSheetTypeIds.push(sheetMaterialTypeId);
           insertedCount += 1;
+          insertedDetailIds.push(detailId);
         }
       }
       let insertedHdfCount = 0;
@@ -866,13 +872,15 @@ export class PgCutRepository implements CutRepositoryPort {
         metadata: { detailCount: insertedCount, hdfDetailCount: insertedHdfCount },
       });
 
-      return loadJob(tx, cutJobId);
+      const warnings = await this.routeConflicts(tx, command.currentUser, command.requestId, cutJobId, insertedDetailIds);
+      return withRouteWarnings(await loadJob(tx, cutJobId), warnings);
     });
   }
 
   addItems(command: AddCutItemsCommand): Promise<CutJobDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
+      await lockOrdersOfDetails(tx, command.dto.detailIds ?? []);
       const job = await loadJobForUpdate(tx, command.cutJobId);
       assertVersion(job, command.version);
       assertMutable(job);
@@ -916,7 +924,8 @@ export class PgCutRepository implements CutRepositoryPort {
         metadata: { detailIds: insertedDetailIds, hdfDetailIds: insertedHdfDetailIds },
       });
 
-      return loadJob(tx, command.cutJobId);
+      const warnings = await this.routeConflicts(tx, command.currentUser, command.requestId, command.cutJobId, insertedDetailIds);
+      return withRouteWarnings(await loadJob(tx, command.cutJobId), warnings);
     });
   }
 
@@ -4426,6 +4435,14 @@ export class PgCutRepository implements CutRepositoryPort {
     return 'none';
   }
 
+  private routeConflicts(tx: TransactionClient, user: CurrentUser, requestId: string | undefined, cutJobId: number,
+    detailIds: readonly number[]): Promise<SawSyncWarning[]> {
+    return cncRouteConflicts(tx, detailIds, {
+      actorUserId: numOrNull(user.id), actorUsername: user.username, actorRole: user.role,
+      requestId: requestId ?? `cut-job-${cutJobId}`, idempotencyKey: `cut-job-${cutJobId}`, cutJobId,
+    });
+  }
+
   private async reserveDetail(
     tx: TransactionClient,
     cutJobId: number,
@@ -7870,3 +7887,10 @@ function dateOnly(value: string | Date | null | undefined): string | null {
   const text = String(value).trim();
   return text ? text.slice(0, 10) : null;
 }
+
+function withRouteWarnings(job: CutJobDto, warnings: readonly SawSyncWarning[]): CutJobDto {
+  return warnings.length === 0 ? job : { ...job, warnings: warnings.map((warning) => ({
+    code: 'DETAIL_ALSO_IN_BAZIS' as const, detailId: warning.detailId, orderId: warning.orderId,
+    bazisCutSetIds: warning.bazisCutSetIds })) };
+}
+

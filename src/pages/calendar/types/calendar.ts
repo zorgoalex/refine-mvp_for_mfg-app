@@ -74,9 +74,13 @@ export interface CalendarOrder {
   basis_projects?: string[];
   basis_project_display?: string;
 
-  // Пройденные этапы производства (коды из production_status_events)
+  // Letters shown on the card: the backend projection of passed stages
   passed_production_status_codes?: string[];
   passedProductionCodes?: string[];
+  // Subset of the letters set by hand (shown in another colour)
+  manual_production_status_codes?: string[];
+  stage_production_status_codes?: string[];
+  manualProductionCodes?: string[];
 
   // Дополнительные поля
   cad_files_status?: string;
@@ -236,6 +240,8 @@ export type CalendarError = Pick<Error, 'message'>;
  */
 export interface CalendarDataResult {
   ordersByDate: OrdersByDate;
+  /** When the orders (and their stage-letter projection) were last read. */
+  ordersUpdatedAt?: number;
   isLoading: boolean;
   refetch: () => void;
   productionWorkflowDisplay?: ProductionWorkflowDisplay;

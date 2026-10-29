@@ -23,7 +23,6 @@ export interface OrderCardListProps {
   showFinancials?: boolean;
   statusColors?: Partial<OrderCardStatusColorMaps>;
   /** Order-level stage marks by order id (legacy Hasura read path); backend rows carry their own. */
-  passedCodesByOrderId?: Readonly<Record<number, string[]>>;
   productionWorkflowDisplay?: {
     displayOrderCodes?: string[];
     codeToLetter?: Record<string, string>;
@@ -67,7 +66,7 @@ export const buildOrderCardPagination = (
 
 export const OrderCardList: React.FC<OrderCardListProps> = ({
   rows, loading, pagination, onPaginationChange, onOpen, showFinancials = true, statusColors,
-  passedCodesByOrderId, productionWorkflowDisplay,
+  productionWorkflowDisplay,
 }) => {
   const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
   return (
@@ -81,7 +80,8 @@ export const OrderCardList: React.FC<OrderCardListProps> = ({
       const m = buildOrderCardModel(row, { showFinancials, statusColors });
       const stages = (
         <ProductionStagesDisplay
-          passedCodes={resolveOrderStageCodes(row.passed_production_status_codes, passedCodesByOrderId?.[Number(row.order_id)])}
+          passedCodes={resolveOrderStageCodes(row.passed_production_status_codes)}
+          manualCodes={resolveOrderStageCodes(row.manual_production_status_codes)}
           displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
           codeToLetter={productionWorkflowDisplay?.codeToLetter}
           codeToName={productionWorkflowDisplay?.codeToName}

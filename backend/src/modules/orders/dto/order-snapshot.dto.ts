@@ -99,6 +99,8 @@ export interface OrderSnapshotDto {
     deadlineEvents: Record<string, unknown>[];
     /** Format 1.1.0 only: production rounds of the order («Переделка»). */
     productionRounds?: OrderSnapshotProductionRoundsDto;
+    /** «Базис» routes of the details by their round (migration 282); absent when none — older files stay identical. */
+    stageRoutes?: Array<{ detailSourceId: string; roundNo: number }>;
   };
   references: OrderSnapshotReferencesDto;
 }

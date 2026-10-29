@@ -44,9 +44,11 @@ describe('resolveOrderStageCodes', () => {
     expect(resolveOrderStageCodes('cut')).toEqual([]);
   });
 
-  it('prefers loaded event codes, including an explicit empty set', () => {
-    expect(resolveOrderStageCodes(['cut'], ['drawn'])).toEqual(['drawn']);
-    expect(resolveOrderStageCodes(['cut'], [])).toEqual([]);
+  it('takes letters only from the backend projection (saw is a normal code)', () => {
+    expect(resolveOrderStageCodes(['saw', 'drawn'])).toEqual(['saw', 'drawn']);
+    // Extra arguments (legacy event codes) are ignored.
+    expect((resolveOrderStageCodes as (...args: unknown[]) => string[])(['cut'], ['drawn'])).toEqual(['cut']);
+    expect((resolveOrderStageCodes as (...args: unknown[]) => string[])(undefined, ['drawn'])).toEqual([]);
   });
 });
 
