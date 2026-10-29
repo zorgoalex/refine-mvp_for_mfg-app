@@ -22,18 +22,24 @@ describe('order resource requirements list guards', () => {
     expect(source).not.toContain('filterResourceDemandRows');
     expect(source).toContain('...headerQuery.filters');
     expect(source).toContain('ordersApi.listResourceDemandFilterOptions(query)');
-    expect(source).toContain('const tableRows = useMemo(() => sortResourceDemandRows(rows, sortState), [rows, sortState]);');
     expect(source).toContain('!active || listSuppressed');
     expect(source).toContain("const optionsCurrent = filterOptionsState.queryKey === JSON.stringify(filterOptionsQuery);");
     expect(source).toContain('optionsCurrent ? knownHeaderFilterValues(filterOptions, filterOptionsResponse) : undefined');
   });
 
   it('без capabilities.serverFilters (прежний backend) серверные фильтры не показываются и не передаются', () => {
-    expect(source).toContain("if (response) setServerFilters(response.capabilities?.serverFilters === true);");
+    expect(source).toContain('setServerFilters(response.capabilities?.serverFilters === true);');
     expect(source).toContain("...(serverFilters && readyCutsOnly ? { readyCutsOnly: true } : {})");
     expect(source).toContain("...(serverFilters && paymentFilter !== 'all' ? { payment: paymentFilter } : {})");
     expect(source).toContain('const filterProps = (field: HeaderFilterField, options: HeaderFilterOption[]) => (!serverFilters ? {} : {');
     expect(source).toContain(': { filters: {}, nothingSelected: false, usesExclusion: false, tooMany: null }');
+  });
+
+  it('сортировку считает сервер по всем страницам (capabilities.serverSort), прежний backend — сортировка страницы', () => {
+    expect(source).toContain('setServerSort(response.capabilities?.serverSort === true);');
+    expect(source).toContain("? { sort: sortState.columnKey, sortOrder: sortState.order === 'descend' ? 'desc' as const : 'asc' as const }");
+    expect(source).toContain('() => (serverSort ? rows : sortResourceDemandRows(rows, sortState)),');
+    expect(source).not.toContain('Сортировка колонок — по текущей странице');
   });
 
   it('фильтр «Оплата» (все / есть оплата / оплачено полностью) и колонка «Поставщик» с мультиселектом', () => {

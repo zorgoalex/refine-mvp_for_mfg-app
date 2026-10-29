@@ -366,7 +366,8 @@ export class PgOrderResourceDemandRepository implements OrderResourceDemandRepos
     command: ListOrderResourceDemandsCommand,
     options: OrderResourceReadOptions,
   ): Promise<OrderResourceDemandResponseDto> {
-    const { whereSql, params } = buildOrderWhere(command, options, await resolveSupplierResources(client, command.query));
+    const supplierResources = await resolveSupplierResources(client, command.query);
+    const { whereSql, params } = buildOrderWhere(command, options, supplierResources);
     const countResult = await client.query<CountRow>(
       `
       SELECT COUNT(*)::int AS total
@@ -378,17 +379,7 @@ export class PgOrderResourceDemandRepository implements OrderResourceDemandRepos
       params,
     );
     const total = toNumber(countResult.rows[0]?.total);
-    const pageParams = [...params, command.query.pageSize, (command.query.page - 1) * command.query.pageSize];
-    const pageSizeIndex = pageParams.length - 1;
-    const offsetIndex = pageParams.length;
-    const orderResult = await client.query<ResourceDemandOrderRow>(
-      `${ORDER_SELECT_SQL}
-      WHERE ${whereSql}
-      ORDER BY o.order_date DESC NULLS LAST, o.order_id DESC
-      LIMIT $${pageSizeIndex} OFFSET $${offsetIndex}
-      `,
-      pageParams,
-    );
+    const orderResult = await loadOrderPage(client, command.query, whereSql, params, supplierResources);
 
     const projected = await loadProjectedOrders(client, orderResult.rows, command.query);
     const procurement = options.procurementEnabled && projected.length > 0
@@ -1357,14 +1348,18 @@ function hasResourceFilters(query: OrderResourceDemandQuery): boolean {
     || query.vendorId !== undefined;
 }
 
-function detailMatchesResourceFilters(row: ResourceDemandDetailRow, query: OrderResourceDemandQuery): boolean {
+function detailMatchesResourceFilters(
+  row: Pick<ResourceDemandDetailRow, 'sheet_material_type_id' | 'film_id' | 'supplier_id' | 'vendor_id'>,
+  query: OrderResourceDemandQuery): boolean {
   return (query.sheetMaterialTypeId === undefined || toNullableNumber(row.sheet_material_type_id) === query.sheetMaterialTypeId)
     && (query.filmId === undefined || toNullableNumber(row.film_id) === query.filmId)
     && (query.supplierId === undefined || toNullableNumber(row.supplier_id) === query.supplierId)
     && (query.vendorId === undefined || toNullableNumber(row.vendor_id) === query.vendorId);
 }
 
-function hdfMatchesResourceFilters(row: ResourceDemandHdfRow, query: OrderResourceDemandQuery): boolean {
+function hdfMatchesResourceFilters(
+  row: Pick<ResourceDemandHdfRow, 'hdf_sheet_material_type_id' | 'supplier_id'>,
+  query: OrderResourceDemandQuery): boolean {
   if (query.filmId !== undefined || query.vendorId !== undefined) return false;
   return (query.sheetMaterialTypeId === undefined || toNullableNumber(row.hdf_sheet_material_type_id) === query.sheetMaterialTypeId)
     && (query.supplierId === undefined || toNullableNumber(row.supplier_id) === query.supplierId);
@@ -1382,6 +1377,7 @@ export function capabilities(options: OrderResourceReadOptions): OrderResourceCa
     onecDocuments: options.procurementEnabled,
     supplyWorkspace: options.procurementEnabled && options.supplyWorkspaceEnabled === true,
     serverFilters: true,
+    serverSort: true,
   };
 }
 
@@ -1570,6 +1566,158 @@ function buildOrderWhere(
   }
 
   return { whereSql: clauses.join('\n        AND '), params };
+}
+
+const DEFAULT_ORDER_BY_SQL = 'o.order_date DESC NULLS LAST, o.order_id DESC';
+
+/**
+ * Страница списка с сортировкой по всем страницам (до LIMIT/OFFSET). По умолчанию — дата заказа, новые сверху; по
+ * дате — в SQL. Номер заказа и материалы сортируются здесь тем же сравнением, что у клиента (`ru`, числа по
+ * значению, без учёта регистра), по тем же текстам, что видны в строке: номер — `orderName` (или `#id`), материалы —
+ * отсортированные имена через пробел с теми же правилами имени и сужения (legacy-фильтры, «Поставщик»), что у
+ * проекции. Пустые значения — в конце при любом направлении; при равных — порядок по умолчанию.
+ */
+async function loadOrderPage(
+  client: DatabaseClient,
+  query: OrderResourceDemandQuery,
+  whereSql: string,
+  params: unknown[],
+  supplierResources: SupplierResourceSets | undefined,
+): Promise<{ rows: ResourceDemandOrderRow[] }> {
+  const offset = (query.page - 1) * query.pageSize;
+  const sort = query.sort;
+  if (!sort || sort.key === 'date') {
+    const orderBySql = sort
+      ? `o.order_date ${sort.direction === 'desc' ? 'DESC' : 'ASC'} NULLS LAST, o.order_id DESC`
+      : DEFAULT_ORDER_BY_SQL;
+    const pageParams = [...params];
+    const pageSizeIndex = pageParams.push(query.pageSize);
+    const offsetIndex = pageParams.push(offset);
+    return client.query<ResourceDemandOrderRow>(
+      `${ORDER_SELECT_SQL}
+      WHERE ${whereSql}
+      ORDER BY ${orderBySql}
+      LIMIT $${pageSizeIndex} OFFSET $${offsetIndex}
+      `,
+      pageParams,
+    );
+  }
+
+  const candidates = await client.query<{ order_id: string; order_name: string | null; order_date: string | Date | null }>(
+    `SELECT o.order_id, o.order_name, o.order_date
+      FROM orders o
+      JOIN projects p ON p.project_id = o.project_id
+      LEFT JOIN clients c ON c.client_id = o.client_id
+      WHERE ${whereSql}`,
+    params,
+  );
+  const orderIds = candidates.rows.map((row) => toNumber(row.order_id));
+  const keys = sort.key === 'order'
+    ? new Map(candidates.rows.map((row) => [toNumber(row.order_id), row.order_name?.trim() || `#${toNumber(row.order_id)}`]))
+    : await loadMaterialSortKeys(client, sort.key, orderIds, query, supplierResources);
+  const pageIds = sortOrderIds(candidates.rows.map((row) => ({
+    orderId: toNumber(row.order_id),
+    orderDate: toDateOnly(row.order_date),
+    key: keys.get(toNumber(row.order_id)) ?? '',
+  })), sort.direction).slice(offset, offset + query.pageSize);
+  if (pageIds.length === 0) return { rows: [] };
+  const page = await client.query<ResourceDemandOrderRow>(
+    `${ORDER_SELECT_SQL}
+      WHERE o.order_id = ANY($1::bigint[])`,
+    [pageIds],
+  );
+  const position = new Map(pageIds.map((orderId, index) => [orderId, index]));
+  return { rows: [...page.rows].sort((left, right) => position.get(toNumber(left.order_id))! - position.get(toNumber(right.order_id))!) };
+}
+
+const SORT_COLLATOR = new Intl.Collator('ru', { numeric: true, sensitivity: 'base' });
+
+/** Порядок заказов по ключу: пустой ключ — в конце при любом направлении; равные — дата (новые сверху), затем id. */
+export function sortOrderIds(
+  rows: Array<{ orderId: number; orderDate: string | null; key: string }>,
+  direction: 'asc' | 'desc',
+): number[] {
+  const sign = direction === 'desc' ? -1 : 1;
+  return [...rows].sort((left, right) => {
+    if (!left.key !== !right.key) return left.key ? -1 : 1;
+    const byKey = left.key && right.key ? sign * SORT_COLLATOR.compare(left.key, right.key) : 0;
+    if (byKey !== 0) return byKey;
+    if (left.orderDate !== right.orderDate) {
+      if (left.orderDate === null) return 1;
+      if (right.orderDate === null) return -1;
+      return left.orderDate < right.orderDate ? 1 : -1;
+    }
+    return right.orderId - left.orderId;
+  }).map((row) => row.orderId);
+}
+
+/** Текст колонки материалов: имена по возрастанию через пробел (как сортирует клиент). */
+export function materialSortKey(names: Iterable<string>): string {
+  return [...names].sort((left, right) => SORT_COLLATOR.compare(left, right)).join(' ');
+}
+
+/**
+ * Ключи колонок «Листовые материалы» / «Плёнка» для заказов выборки — по правилам `projectOrders`: материал по id,
+ * имя — из первой детали (справочник), иначе из первой HDF-позиции текущей ревизии; legacy-фильтры отбирают детали и
+ * HDF-позиции целиком; фильтр «Поставщик» оставляет материалы выбранных поставщиков.
+ */
+async function loadMaterialSortKeys(
+  client: DatabaseClient,
+  kind: 'sheetMaterials' | 'films',
+  orderIds: number[],
+  query: OrderResourceDemandQuery,
+  supplierResources: SupplierResourceSets | undefined,
+): Promise<Map<number, string>> {
+  if (orderIds.length === 0) return new Map();
+  const legacy = hasResourceFilters(query);
+  const kept = supplierResources
+    ? new Set(kind === 'sheetMaterials' ? supplierResources.sheetIds : supplierResources.filmIds)
+    : null;
+  const names = new Map<number, Map<number, string>>();
+  const add = (orderId: number, resourceId: number | null, name: string | null) => {
+    if (resourceId === null || (kept && !kept.has(resourceId))) return;
+    const rows = getOrCreate(names, orderId, () => new Map<number, string>());
+    if (!rows.has(resourceId)) rows.set(resourceId, name ?? `ID: ${resourceId}`);
+  };
+  // Сочетания «лист × плёнка» деталей заказа: legacy-фильтры зависят только от них (поставщик листа, производитель плёнки).
+  const details = await client.query<Pick<ResourceDemandDetailRow,
+    'order_id' | 'sheet_material_type_id' | 'sheet_material_name' | 'supplier_id' | 'film_id' | 'film_name' | 'vendor_id'> & QueryResultRow>(
+    `SELECT DISTINCT od.order_id, od.sheet_material_type_id, smt.name AS sheet_material_name, smt.supplier_id,
+            od.film_id, f.film_name, f.vendor_id
+       FROM order_details od
+       LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
+       LEFT JOIN films f ON f.film_id = od.film_id
+      WHERE od.order_id = ANY($1::bigint[])
+        AND od.delete_flag = false
+        AND od.${kind === 'sheetMaterials' ? 'sheet_material_type_id' : 'film_id'} IS NOT NULL`,
+    [orderIds],
+  );
+  for (const row of details.rows) {
+    if (legacy && !detailMatchesResourceFilters(row, query)) continue;
+    if (kind === 'sheetMaterials') add(toNumber(row.order_id), toNullableNumber(row.sheet_material_type_id), cleanName(row.sheet_material_name));
+    else add(toNumber(row.order_id), toNullableNumber(row.film_id), cleanName(row.film_name));
+  }
+  if (kind === 'sheetMaterials') {
+    const hdf = await client.query<Pick<ResourceDemandHdfRow, 'order_id' | 'hdf_sheet_material_type_id' | 'hdf_sheet_material_name' | 'supplier_id'> & QueryResultRow>(
+      `SELECT DISTINCT ON (hdf.order_id, hdf.hdf_sheet_material_type_id)
+              hdf.order_id, hdf.hdf_sheet_material_type_id, hdf.hdf_sheet_material_name, hdf_smt.supplier_id
+         FROM order_hdf_details hdf
+         JOIN hdf_calculation_config_state hdf_state ON hdf_state.id = 1
+         LEFT JOIN sheet_material_types hdf_smt ON hdf_smt.sheet_material_type_id = hdf.hdf_sheet_material_type_id
+        WHERE hdf.order_id = ANY($1::bigint[])
+          AND hdf.delete_flag = false
+          AND hdf.status = 'ok'
+          AND hdf.config_revision = hdf_state.revision
+          AND hdf.hdf_sheet_material_type_id IS NOT NULL
+        ORDER BY hdf.order_id, hdf.hdf_sheet_material_type_id, hdf.source_detail_number, hdf.order_hdf_detail_id`,
+      [orderIds],
+    );
+    for (const row of hdf.rows) {
+      if (legacy && !hdfMatchesResourceFilters(row, query)) continue;
+      add(toNumber(row.order_id), toNullableNumber(row.hdf_sheet_material_type_id), cleanName(row.hdf_sheet_material_name));
+    }
+  }
+  return new Map([...names].map(([orderId, rows]) => [orderId, materialSortKey(rows.values())]));
 }
 
 /** OR двух условий фильтра заголовка (значения / «без значения»); ни одного — заказов нет. */

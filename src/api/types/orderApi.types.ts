@@ -49,6 +49,8 @@ export interface OrderListResponse {
   pagination: Pagination;
 }
 
+export type OrderResourceDemandSortKey = 'order' | 'date' | 'sheetMaterials' | 'films';
+
 export interface OrderResourceDemandQuery {
   page?: number;
   pageSize?: number;
@@ -78,6 +80,9 @@ export interface OrderResourceDemandQuery {
   readyCutsOnly?: boolean;
   /** Оплата: частично или полностью / только полностью. */
   payment?: OrderResourcePaymentFilter;
+  /** Сортировка по всем страницам (сервер с `capabilities.serverSort`); без неё — дата заказа, новые сверху. */
+  sort?: OrderResourceDemandSortKey;
+  sortOrder?: 'asc' | 'desc';
 }
 
 export type OrderResourcePaymentFilter = 'any_paid' | 'fully_paid';
@@ -164,6 +169,8 @@ export interface OrderResourceCapabilitiesDto {
   supplyWorkspace?: boolean;
   /** Backend сам применяет фильтры заголовков, «Готовые раскрои», «Оплату», «Поставщика»; нет у старого → false. */
   serverFilters?: boolean;
+  /** Сервер сортирует список по `sort`/`sortOrder` (по всем страницам). */
+  serverSort?: boolean;
 }
 
 export interface OrderSheetMaterialDemandDto {
