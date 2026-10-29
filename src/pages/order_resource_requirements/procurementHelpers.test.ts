@@ -251,13 +251,19 @@ describe('данные карточки другого заказа не исп�
     expect(source).toContain('data: data && data.orderId === orderId ? data : null');
   });
 
-  it('групповая отметка отключается при фильтрах, которых нет в сводке по материалам', async () => {
+  it('сводка по материалам получает все фильтры списка; при «Отключить все» её и групповой отметки нет', async () => {
     const { readFileSync } = await import('node:fs');
     const aggregate = readFileSync(new URL('./MaterialAggregateView.tsx', import.meta.url), 'utf8');
+    const panel = readFileSync(new URL('./SplitPanelView.tsx', import.meta.url), 'utf8');
     const list = readFileSync(new URL('./list.tsx', import.meta.url), 'utf8');
     expect(aggregate).toContain("|| blockedReason !== null");
-    expect(aggregate).toContain('Сводка по материалам учитывает только поиск, период и «Есть незакупленное»');
-    expect(list).toContain('clientFiltersActive={hasActiveListFilters}');
+    expect(aggregate).toContain('if (blockedReason) {\n    return <Alert showIcon type="info" message={blockedReason} />;');
+    expect(panel).toContain("subMode === 'materials' && aggregateBlockedReason === null,");
+    expect(list).toContain('const aggregateBlockedReason = headerQuery.nothingSelected');
+    // «Все, кроме» (выбор длиннее 500) тоже блокирует сводку и групповую отметку.
+    expect(list).toContain('?? (headerQuery.usesExclusion');
+    expect(list).toContain('aggregateBlockedReason={aggregateBlockedReason}');
+    expect(list).toContain('...headerQuery.filters,');
   });
 });
 
@@ -276,7 +282,7 @@ describe('групповая отметка только по сводке те�
     const handler = source.slice(source.indexOf('const handleChange = async () => {'));
     expect(handler.indexOf('if (!isCurrent())')).toBeGreaterThan(-1);
     expect(handler.indexOf('if (!isCurrent())')).toBeLessThan(handler.indexOf('bulkSetResourceProcurement'));
-    expect(source).toContain(": !state.current ? 'Сводка обновляется по новым фильтрам' : null");
+    expect(source).toContain("blockedReason={!state.current ? 'Сводка обновляется по новым фильтрам' : null}");
   });
 });
 

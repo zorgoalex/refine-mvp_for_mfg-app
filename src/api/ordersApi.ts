@@ -18,6 +18,8 @@ import type {
   OrderResourceByMaterialResponse,
   OrderResourceDemandOnecDocumentsQuery,
   OrderResourceDemandOnecDocumentsResponse,
+  OrderResourceDemandFilterOptionsQuery,
+  OrderResourceDemandFilterOptionsResponse,
   OrderResourceCardResponse,
   SetOrderResourceProcurementRequest,
   OrderResourceProcurementResultDto,
@@ -113,6 +115,15 @@ export const ordersApi = {
   ): Promise<OrderResourceDemandOnecDocumentsResponse> {
     return httpClient.get<OrderResourceDemandOnecDocumentsResponse>(
       withQuery(apiRoutes.orders.resourceDemandsOnecDocuments, params),
+    );
+  },
+
+  /** Варианты фильтров заголовков списка потребностей по всей выборке. */
+  listResourceDemandFilterOptions(
+    params: OrderResourceDemandFilterOptionsQuery = {},
+  ): Promise<OrderResourceDemandFilterOptionsResponse> {
+    return httpClient.get<OrderResourceDemandFilterOptionsResponse>(
+      withQuery(apiRoutes.orders.resourceDemandsFilterOptions, params),
     );
   },
 

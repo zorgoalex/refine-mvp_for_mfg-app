@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
-import { loadMainSupplierNames } from '../../material-suppliers/adapters/pg-material-suppliers';
+import {
+  loadCatalogMainSuppliers,
+  loadMainSuppliers,
+  type MainSupplierRef,
+} from '../../material-suppliers/adapters/pg-material-suppliers';
+import { STANDARD_PAYMENT_STATUS_IDS } from '../dto/save-order.dto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseService } from '../../../database/database.service';
@@ -8,6 +13,7 @@ import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import type { ScopeGrant } from '../../../permissions/policies/scope-sets';
 import type { CurrentUser } from '../../../permissions/current-user';
 import {
+  BATH_METER_GUIDE_SHEET_HEIGHT_MM,
   calculateBathSheetFilmUsage,
   shouldShowBathMeterGuides,
 } from '../../../shared/cut-geometry';
@@ -17,7 +23,10 @@ import {
 } from '../../cut/application/cut-freecut-mapping';
 import {
   RESOURCE_BY_MATERIAL_ORDER_LIMIT,
+  RESOURCE_FILTER_ORDER_OPTIONS_LIMIT,
   RESOURCE_ONEC_DOCUMENT_OPTIONS_LIMIT,
+  RESOURCE_SUPPLIER_NONE_KEY,
+  type OrderResourceFilterOptionsResponseDto,
   type OrderResourceOnecDocumentOptionsResponseDto,
   type OrderResourceOnecDocRefDto,
   type GetOrderResourceCardCommand,
@@ -148,6 +157,8 @@ interface SheetAccumulator {
   detailsCount: number;
   supplierId: number | null;
   supplierName: string | null;
+  /** Ключ основного поставщика (`none` — не указан). */
+  supplierKey: string;
   sources: LineSourceRef[];
 }
 
@@ -162,6 +173,7 @@ interface FilmAccumulator {
   vendorName: string | null;
   /** Основной поставщик (не производитель): первый выбранный, иначе по приходам 1С. */
   supplierName: string | null;
+  supplierKey: string;
   sources: LineSourceRef[];
   cutJobIds: Set<number>;
 }
@@ -173,8 +185,18 @@ interface ProjectionInput {
   detailCutJobs: DetailCutJobRow[];
   cutGroups: ResourceDemandCutGroupRow[];
   cutSheets: ResourceDemandCutSheetRow[];
-  /** Основные поставщики позиций (`loadMainSupplierNames`); без них — основной листового из справочника, у плёнки — нет. */
-  mainSuppliers?: Map<string, string>;
+  /** Основные поставщики позиций (`loadMainSuppliers`); без них — основной листового из справочника, у плёнки — нет. */
+  mainSuppliers?: Map<string, MainSupplierRef>;
+  /**
+   * Фильтр «Поставщик»: в `sheetMaterials`/`films` остаются только материалы этих поставщиков. Строки (`lines`) —
+   * всегда полные: по ним закуп находит «сирот»; их сужает чтение после наложения закупа (`keepSupplierLines`).
+   */
+  supplierKeys?: SupplierKeyFilter;
+}
+
+/** Фильтр «Поставщик» по ключу основного поставщика (Set выбранных или «все, кроме»). */
+export interface SupplierKeyFilter {
+  has(key: string): boolean;
 }
 
 export type OrderResourceDemandBaseDto = Omit<OrderResourceDemandDto, 'lines' | 'procurementSummary'>;
@@ -188,6 +210,7 @@ export interface ProjectedResourceLine {
   supplierName: string | null;
   /** «supplierName — поставщик» (с migr 280; прежний backend у плёнок клал сюда производителя). */
   supplierRole: 'supplier';
+  supplierKey: string;
   quantity: number | null;
   unit: OrderResourceUnit;
   areaM2: number;
@@ -264,7 +287,7 @@ export class PgOrderResourceDemandRepository implements OrderResourceDemandRepos
   ): Promise<OrderResourceByMaterialResponseDto> {
     return this.database.transaction(async (client) => {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-      const { whereSql, params } = buildOrderWhere(command, options);
+      const { whereSql, params } = buildOrderWhere(command, options, await resolveSupplierResources(client, command.query));
       const limitIndex = params.push(RESOURCE_BY_MATERIAL_ORDER_LIMIT + 1);
       const orders = await client.query<ResourceDemandOrderRow>(
         `${ORDER_SELECT_SQL}
@@ -283,7 +306,7 @@ export class PgOrderResourceDemandRepository implements OrderResourceDemandRepos
         ? await loadProcurementRows(client, projected.map((order) => order.orderId))
         : [];
       return {
-        data: aggregateByMaterial(projected, procurement),
+        data: aggregateByMaterial(projected, procurement, supplierKeySet(command.query)),
         ordersCount: projected.length,
         refreshedAt: new Date().toISOString(),
         capabilities: capabilities(options),
@@ -303,7 +326,7 @@ export class PgOrderResourceDemandRepository implements OrderResourceDemandRepos
     return this.database.transaction(async (client) => {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const { onecDocumentId: _ignored, ...query } = command.query;
-      const { whereSql, params } = buildOrderWhere({ ...command, query }, options);
+      const { whereSql, params } = buildOrderWhere({ ...command, query }, options, await resolveSupplierResources(client, query));
       const limitIndex = params.push(RESOURCE_ONEC_DOCUMENT_OPTIONS_LIMIT + 1);
       const result = await client.query<{
         onec_document_id: string; doc_kind: OrderResourceOnecDocRefDto['kind']; number: string; doc_date: string; orders_count: number;
@@ -343,7 +366,7 @@ export class PgOrderResourceDemandRepository implements OrderResourceDemandRepos
     command: ListOrderResourceDemandsCommand,
     options: OrderResourceReadOptions,
   ): Promise<OrderResourceDemandResponseDto> {
-    const { whereSql, params } = buildOrderWhere(command, options);
+    const { whereSql, params } = buildOrderWhere(command, options, await resolveSupplierResources(client, command.query));
     const countResult = await client.query<CountRow>(
       `
       SELECT COUNT(*)::int AS total
@@ -374,16 +397,166 @@ export class PgOrderResourceDemandRepository implements OrderResourceDemandRepos
     const onecLinks = options.procurementEnabled && projected.length > 0
       ? await loadOnecLinks(client, projected.map((order) => order.orderId))
       : [];
+    const orphanSuppliers = await loadOrphanSuppliers(client, projected, procurement);
+    const supplierKeys = supplierKeySet(command.query);
     const data = projected.map<OrderResourceDemandDto>((order) => {
-      const lines = applyProcurement(
+      const lines = keepSupplierLines(applyProcurement(
         order.lines,
         procurement.filter((row) => toNumber(row.order_id) === order.orderId),
-        { onecLinks, canSeeAmounts: options.canSeeAmounts === true },
-      ).map(({ line }) => line);
+        { onecLinks, canSeeAmounts: options.canSeeAmounts === true, orphanSuppliers },
+      ), supplierKeys).map(({ line }) => line);
       return { ...order.base, lines, procurementSummary: summarizeProcurement(lines) };
     });
     return response(command.query, total, data, options);
   }
+
+  /**
+   * Варианты фильтров заголовков по всей выборке (все страницы): те же scope и фильтры панели, что у списка,
+   * без фильтров заголовков. Имя позиции — из справочника (у строки HDF может быть снимок имени).
+   */
+  async listFilterOptions(
+    command: ListOrderResourceDemandsCommand,
+    options: OrderResourceReadOptions,
+  ): Promise<OrderResourceFilterOptionsResponseDto> {
+    return this.database.transaction(async (client) => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const { orderIds: _o, orderDates: _d, sheetMaterialTypeIds: _s, filmIds: _f, supplierKeys: _k, supplierKeysExclude: _x, ...query } = command.query;
+      const { whereSql, params } = buildOrderWhere({ ...command, query }, options, undefined);
+      const selection = `
+        SELECT o.order_id, o.order_name, o.order_date, p.code AS project_code, c.client_name
+          FROM orders o
+          JOIN projects p ON p.project_id = o.project_id
+          LEFT JOIN clients c ON c.client_id = o.client_id
+         WHERE ${whereSql}`;
+      const limitIndex = params.push(RESOURCE_FILTER_ORDER_OPTIONS_LIMIT + 1);
+      const orders = await client.query<{ order_id: string; order_name: string; project_code: string; client_name: string | null }>(
+        `SELECT fo.order_id::text, fo.order_name, fo.project_code, fo.client_name
+           FROM (${selection}) fo
+          ORDER BY fo.order_date DESC NULLS LAST, fo.order_id DESC
+          LIMIT $${limitIndex}`,
+        params,
+      );
+      const facets = await client.query<{ kind: 'date' | 'no_date' | 'sheet' | 'film' | 'no_sheet' | 'no_film'; id: string | null; name: string | null }>(
+        `WITH fo AS (${selection}),
+        res AS (
+          SELECT od.order_id, 'sheet'::text AS kind, od.sheet_material_type_id AS id
+            FROM order_details od JOIN fo ON fo.order_id = od.order_id
+           WHERE od.delete_flag = false AND od.sheet_material_type_id IS NOT NULL
+          UNION
+          SELECT hdf.order_id, 'sheet', hdf.hdf_sheet_material_type_id
+            FROM order_hdf_details hdf
+            JOIN fo ON fo.order_id = hdf.order_id
+            JOIN hdf_calculation_config_state hdf_state ON hdf_state.id = 1
+           WHERE hdf.delete_flag = false AND hdf.status = 'ok' AND hdf.config_revision = hdf_state.revision
+             AND hdf.hdf_sheet_material_type_id IS NOT NULL
+          UNION
+          SELECT od.order_id, 'film', od.film_id
+            FROM order_details od JOIN fo ON fo.order_id = od.order_id
+           WHERE od.delete_flag = false AND od.film_id IS NOT NULL
+        )
+        SELECT DISTINCT 'date' AS kind, fo.order_date::text AS id, NULL::text AS name FROM fo WHERE fo.order_date IS NOT NULL
+        UNION ALL
+        SELECT 'no_date', NULL, NULL WHERE EXISTS (SELECT 1 FROM fo WHERE fo.order_date IS NULL)
+        UNION ALL
+        SELECT 'sheet', r.id::text, smt.name
+          FROM (SELECT DISTINCT id FROM res WHERE kind = 'sheet') r
+          LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = r.id
+        UNION ALL
+        SELECT 'film', r.id::text, f.film_name
+          FROM (SELECT DISTINCT id FROM res WHERE kind = 'film') r
+          LEFT JOIN films f ON f.film_id = r.id
+        UNION ALL
+        SELECT 'no_sheet', NULL, NULL
+         WHERE EXISTS (SELECT 1 FROM fo WHERE NOT EXISTS (SELECT 1 FROM res WHERE res.order_id = fo.order_id AND res.kind = 'sheet'))
+        UNION ALL
+        SELECT 'no_film', NULL, NULL
+         WHERE EXISTS (SELECT 1 FROM fo WHERE NOT EXISTS (SELECT 1 FROM res WHERE res.order_id = fo.order_id AND res.kind = 'film'))`,
+        params.slice(0, limitIndex - 1),
+      );
+      const named = (kind: 'sheet' | 'film') => facets.rows
+        .filter((row) => row.kind === kind)
+        .map((row) => ({ id: Number(row.id), name: cleanName(row.name) ?? `ID: ${row.id}` }))
+        .sort((left, right) => left.name.localeCompare(right.name, 'ru') || left.id - right.id);
+      const sheetMaterials = named('sheet');
+      const films = named('film');
+      const mains = await loadMainSuppliers(client, sheetMaterials.map((row) => row.id), films.map((row) => row.id));
+      const suppliers = new Map<string, string>();
+      let withoutSupplier = false;
+      for (const key of [
+        ...sheetMaterials.map((row) => resourceKey('sheet_material', row.id)),
+        ...films.map((row) => resourceKey('film', row.id)),
+      ]) {
+        const main = mains.get(key);
+        if (main) suppliers.set(main.key, main.name);
+        else withoutSupplier = true;
+      }
+      return {
+        orders: orders.rows.slice(0, RESOURCE_FILTER_ORDER_OPTIONS_LIMIT).map((row) => ({
+          orderId: Number(row.order_id),
+          orderName: row.order_name,
+          projectCode: row.project_code,
+          clientName: cleanName(row.client_name),
+        })),
+        ordersTruncated: orders.rows.length > RESOURCE_FILTER_ORDER_OPTIONS_LIMIT,
+        dates: facets.rows.filter((row) => row.kind === 'date').map((row) => String(row.id)).sort().reverse(),
+        hasEmptyDate: facets.rows.some((row) => row.kind === 'no_date'),
+        sheetMaterials,
+        hasNoSheetMaterials: facets.rows.some((row) => row.kind === 'no_sheet'),
+        films,
+        hasNoFilms: facets.rows.some((row) => row.kind === 'no_film'),
+        suppliers: [
+          ...[...suppliers].map(([key, name]) => ({ key, name }))
+            .sort((left, right) => left.name.localeCompare(right.name, 'ru') || left.key.localeCompare(right.key)),
+          ...(withoutSupplier ? [{ key: RESOURCE_SUPPLIER_NONE_KEY, name: 'Без поставщика' }] : []),
+        ],
+      };
+    });
+  }
+}
+
+/** Фильтр «Поставщик» запроса (undefined — фильтра нет); `supplierKeysExclude` — «все, кроме». */
+export function supplierKeySet(
+  query: Pick<OrderResourceDemandQuery, 'supplierKeys' | 'supplierKeysExclude'>,
+): SupplierKeyFilter | undefined {
+  if (!query.supplierKeys) return undefined;
+  const keys = new Set(query.supplierKeys);
+  return query.supplierKeysExclude ? { has: (key) => !keys.has(key) } : keys;
+}
+
+/** Материалы основных поставщиков из фильтра — по всему справочнику, по тому же правилу, что у строк. */
+export interface SupplierResourceSets {
+  sheetIds: number[];
+  filmIds: number[];
+}
+
+export async function resolveSupplierResources(
+  client: DatabaseClient,
+  query: Pick<OrderResourceDemandQuery, 'supplierKeys' | 'supplierKeysExclude'>,
+): Promise<SupplierResourceSets | undefined> {
+  const wanted = supplierKeySet(query);
+  if (!wanted) return undefined;
+  const catalog = await loadCatalogMainSuppliers(client);
+  const matches = (kind: OrderResourceKind, id: number) => wanted.has(catalog.mains.get(resourceKey(kind, id))?.key ?? RESOURCE_SUPPLIER_NONE_KEY);
+  return {
+    sheetIds: catalog.sheetIds.filter((id) => matches('sheet_material', id)),
+    filmIds: catalog.filmIds.filter((id) => matches('film', id)),
+  };
+}
+
+/** Основные поставщики материалов, которых нет в потребности заказов, но есть отметка закупа («сироты»). */
+async function loadOrphanSuppliers(
+  client: DatabaseClient,
+  projected: ProjectedOrder[],
+  procurement: ResourceProcurementRow[],
+): Promise<Map<string, MainSupplierRef> | undefined> {
+  const present = new Set(projected.flatMap((order) => order.lines.map((line) => `${order.orderId}|${line.resourceKey}`)));
+  const orphans = procurement.filter((row) => !present.has(`${toNumber(row.order_id)}|${procurementRowKey(row)}`));
+  if (orphans.length === 0) return undefined;
+  return loadMainSuppliers(
+    client,
+    uniqueNumbers(orphans.filter((row) => row.resource_kind === 'sheet_material').map((row) => row.sheet_material_type_id)),
+    uniqueNumbers(orphans.filter((row) => row.resource_kind === 'film').map((row) => row.film_id)),
+  );
 }
 
 export const ORDER_SELECT_SQL = `
@@ -404,7 +577,8 @@ export const ORDER_SELECT_SQL = `
  * Живая потребность заказов: детали, HDF и готовые раскрои в одном снимке.
  * Строки (`lines`) всегда считаются по полному составу заказа — их отпечаток
  * сравнивается командами закупа. Фильтры ресурса из запроса влияют только на
- * совместимые поля `sheetMaterials`/`films`, как раньше.
+ * совместимые поля `sheetMaterials`/`films`, как раньше; фильтр «Поставщик»
+ * убирает строки и позиции других поставщиков, не меняя оставшиеся.
  */
 export async function loadProjectedOrders(
   client: DatabaseClient,
@@ -529,7 +703,7 @@ export async function loadProjectedOrders(
         [cutGroupIds],
       );
 
-  const mainSuppliers = await loadMainSupplierNames(
+  const mainSuppliers = await loadMainSuppliers(
     client,
     uniqueNumbers([
       ...detailResult.rows.map((row) => row.sheet_material_type_id),
@@ -537,6 +711,7 @@ export async function loadProjectedOrders(
     ].filter((id) => id !== null && id !== undefined)),
     uniqueNumbers(detailResult.rows.map((row) => row.film_id).filter((id) => id !== null && id !== undefined)),
   );
+  const supplierKeys = query ? supplierKeySet(query) : undefined;
   const full = projectOrders({
     orders: orderRows,
     details: detailResult.rows,
@@ -545,6 +720,7 @@ export async function loadProjectedOrders(
     cutGroups: cutGroups.rows,
     cutSheets: cutSheets.rows,
     mainSuppliers,
+    supplierKeys,
   });
   const legacyBase = query && hasResourceFilters(query)
     ? projectOrders({
@@ -555,6 +731,7 @@ export async function loadProjectedOrders(
         cutGroups: cutGroups.rows,
         cutSheets: cutSheets.rows,
         mainSuppliers,
+        supplierKeys,
       }).base
     : full.base;
 
@@ -673,6 +850,8 @@ export interface ApplyProcurementExtras {
   onecLinks?: OnecLinkRow[];
   /** Право finance.view: без него суммы — null. */
   canSeeAmounts?: boolean;
+  /** Основные поставщики материалов «сирот» (их нет в потребности); без карты — поставщик не указан. */
+  orphanSuppliers?: Map<string, MainSupplierRef>;
 }
 
 /**
@@ -781,8 +960,9 @@ export function orphanLine(row: ResourceProcurementRow, extras: ApplyProcurement
     kind,
     refId,
     name: cleanName(row.resource_name) ?? `ID: ${refId}`,
-    supplierName: null,
+    supplierName: extras.orphanSuppliers?.get(procurementRowKey(row))?.name ?? null,
     supplierRole: 'supplier',
+    supplierKey: extras.orphanSuppliers?.get(procurementRowKey(row))?.key ?? RESOURCE_SUPPLIER_NONE_KEY,
     quantity: 0,
     unit: kind === 'film' ? 'lm' : 'm2',
     areaM2: 0,
@@ -793,6 +973,14 @@ export function orphanLine(row: ResourceProcurementRow, extras: ApplyProcurement
     procurement: procurementDto(row, fingerprint),
     ...onecForRow(row, extras),
   };
+}
+
+/** Фильтр «Поставщик» после наложения закупа: остаются строки (и «сироты») выбранных поставщиков. */
+export function keepSupplierLines<T extends { line: OrderResourceDemandLineDto }>(
+  lines: T[],
+  supplierKeys: SupplierKeyFilter | undefined,
+): T[] {
+  return supplierKeys ? lines.filter(({ line }) => supplierKeys.has(line.supplierKey)) : lines;
 }
 
 export function summarizeProcurement(lines: OrderResourceDemandLineDto[]): OrderProcurementSummaryDto {
@@ -807,11 +995,12 @@ export function summarizeProcurement(lines: OrderResourceDemandLineDto[]): Order
 export function aggregateByMaterial(
   orders: ProjectedOrder[],
   procurement: ResourceProcurementRow[],
+  supplierKeys?: SupplierKeyFilter,
 ): OrderResourceMaterialAggregateDto[] {
   const byMaterial = new Map<string, OrderResourceMaterialAggregateDto>();
   for (const order of orders) {
     const orderProcurement = procurement.filter((row) => toNumber(row.order_id) === order.orderId);
-    for (const { line } of applyProcurement(order.lines, orderProcurement)) {
+    for (const { line } of keepSupplierLines(applyProcurement(order.lines, orderProcurement), supplierKeys)) {
       if (line.orphan) continue;
       const current = byMaterial.get(line.resourceKey) ?? {
         resourceKey: line.resourceKey,
@@ -881,6 +1070,7 @@ export function projectOrders(input: ProjectionInput): ProjectionResult {
         detailsCount: 0,
         supplierId: toNullableNumber(detail.supplier_id),
         supplierName: cleanName(detail.supplier_name),
+        supplierKey: catalogSupplierKey(detail.supplier_id),
         sources: [],
       };
       current.areaMm2 += areaMm2;
@@ -902,6 +1092,7 @@ export function projectOrders(input: ProjectionInput): ProjectionResult {
         vendorId: toNullableNumber(detail.vendor_id),
         vendorName: cleanName(detail.vendor_name),
         supplierName: null,
+        supplierKey: RESOURCE_SUPPLIER_NONE_KEY,
         sources: [],
         cutJobIds: new Set<number>(),
       };
@@ -925,6 +1116,7 @@ export function projectOrders(input: ProjectionInput): ProjectionResult {
       detailsCount: 0,
       supplierId: toNullableNumber(hdf.supplier_id),
       supplierName: cleanName(hdf.supplier_name),
+      supplierKey: catalogSupplierKey(hdf.supplier_id),
       sources: [],
     };
     current.areaMm2 += areaMm2;
@@ -984,12 +1176,24 @@ export function projectOrders(input: ProjectionInput): ProjectionResult {
   // Поставщик строки — основной поставщик позиции (правило снабжения), а не производитель.
   if (input.mainSuppliers) {
     for (const rows of sheetByOrder.values()) {
-      for (const row of rows.values()) row.supplierName = input.mainSuppliers.get(resourceKey('sheet_material', row.sheetMaterialTypeId)) ?? row.supplierName;
+      for (const row of rows.values()) {
+        const main = input.mainSuppliers.get(resourceKey('sheet_material', row.sheetMaterialTypeId));
+        if (main) Object.assign(row, { supplierName: main.name, supplierKey: main.key });
+      }
     }
     for (const rows of filmByOrder.values()) {
-      for (const row of rows.values()) row.supplierName = input.mainSuppliers.get(resourceKey('film', row.filmId)) ?? null;
+      for (const row of rows.values()) {
+        const main = input.mainSuppliers.get(resourceKey('film', row.filmId));
+        Object.assign(row, { supplierName: main?.name ?? null, supplierKey: main?.key ?? RESOURCE_SUPPLIER_NONE_KEY });
+      }
     }
   }
+  // Фильтр «Поставщик» оставляет в совместимых полях только материалы выбранных поставщиков.
+  const keep = <T extends { supplierKey: string }>(rows: Map<number, T> | undefined): Map<number, T> | undefined => (
+    rows && input.supplierKeys
+      ? new Map([...rows].filter(([, row]) => input.supplierKeys!.has(row.supplierKey)))
+      : rows
+  );
 
   const lines = new Map<number, ProjectedResourceLine[]>();
   const base = input.orders.map<OrderResourceDemandBaseDto>((order) => {
@@ -1006,8 +1210,8 @@ export function projectOrders(input: ProjectionInput): ProjectionResult {
       projectCode: order.project_code,
       clientName: cleanName(order.client_name),
       updatedAt: toIsoString(order.updated_at),
-      sheetMaterials: mapSheetRows(sheetByOrder.get(orderId)),
-      films: mapFilmRows(filmByOrder.get(orderId)),
+      sheetMaterials: mapSheetRows(keep(sheetByOrder.get(orderId))),
+      films: mapFilmRows(keep(filmByOrder.get(orderId))),
     };
   });
   return { base, lines };
@@ -1025,6 +1229,7 @@ function projectSheetLines(rows: Map<number, SheetAccumulator> | undefined): Pro
         name: row.name,
         supplierName: row.supplierName,
         supplierRole: 'supplier',
+        supplierKey: row.supplierKey,
         quantity,
         unit: 'm2',
         areaM2: quantity,
@@ -1058,6 +1263,7 @@ function projectFilmLines(rows: Map<number, FilmAccumulator> | undefined): Proje
         name: row.name,
         supplierName: row.supplierName,
         supplierRole: 'supplier',
+        supplierKey: row.supplierKey,
         quantity,
         unit: 'lm',
         areaM2: roundAreaMm2(row.areaMm2),
@@ -1175,6 +1381,7 @@ export function capabilities(options: OrderResourceReadOptions): OrderResourceCa
     cardDetails: options.procurementEnabled,
     onecDocuments: options.procurementEnabled,
     supplyWorkspace: options.procurementEnabled && options.supplyWorkspaceEnabled === true,
+    serverFilters: true,
   };
 }
 
@@ -1248,6 +1455,7 @@ export function buildOwnershipOrderWhere(currentUser: CurrentUser, params: unkno
 function buildOrderWhere(
   command: ListOrderResourceDemandsCommand,
   options: OrderResourceReadOptions,
+  supplierResources: SupplierResourceSets | undefined,
 ): { whereSql: string; params: unknown[] } {
   const params: unknown[] = [];
   const clauses = [buildScopedOrderWhere(command.currentUser, undefined, params).whereSql];
@@ -1316,8 +1524,197 @@ function buildOrderWhere(
       : 'FALSE');
   }
 
+  const query = command.query;
+  if (query.orderIds) {
+    clauses.push(`o.order_id = ANY($${params.push(query.orderIds)}::bigint[])`);
+  }
+  if (query.orderDates) {
+    const { values, exclude, includeEmpty } = query.orderDates;
+    clauses.push(valueOrEmpty(
+      exclude
+        ? `o.order_date <> ALL($${params.push(values)}::date[])`
+        : values.length > 0 ? `o.order_date = ANY($${params.push(values)}::date[])` : null,
+      includeEmpty ? 'o.order_date IS NULL' : null,
+    ));
+  }
+  if (query.sheetMaterialTypeIds) {
+    const { values, exclude, includeEmpty } = query.sheetMaterialTypeIds;
+    clauses.push(valueOrEmpty(
+      exclude || values.length > 0 ? orderHasSheetSql({ idsSql: `$${params.push(values)}::bigint[]`, exclude: exclude === true }) : null,
+      includeEmpty ? `o.order_id NOT IN ${sheetOrdersSql(null)}` : null,
+    ));
+  }
+  if (query.filmIds) {
+    const { values, exclude, includeEmpty } = query.filmIds;
+    clauses.push(valueOrEmpty(
+      exclude || values.length > 0 ? orderHasFilmSql({ idsSql: `$${params.push(values)}::bigint[]`, exclude: exclude === true }) : null,
+      includeEmpty ? `o.order_id NOT IN ${filmOrdersSql(null)}` : null,
+    ));
+  }
+  if (supplierResources) {
+    const sheetSql = supplierResources.sheetIds.length > 0
+      ? orderHasSheetSql({ idsSql: `$${params.push(supplierResources.sheetIds)}::bigint[]`, exclude: false })
+      : null;
+    const filmSql = supplierResources.filmIds.length > 0
+      ? orderHasFilmSql({ idsSql: `$${params.push(supplierResources.filmIds)}::bigint[]`, exclude: false })
+      : null;
+    clauses.push(valueOrEmpty(sheetSql, filmSql));
+  }
+  if (query.readyCutsOnly) {
+    clauses.push(READY_FILM_CUT_SQL);
+  }
+  if (query.payment === 'any_paid') {
+    clauses.push(`o.payment_status_id IN (${STANDARD_PAYMENT_STATUS_IDS.PARTIALLY_PAID}, ${STANDARD_PAYMENT_STATUS_IDS.PAID})`);
+  } else if (query.payment === 'fully_paid') {
+    clauses.push(`o.payment_status_id = ${STANDARD_PAYMENT_STATUS_IDS.PAID}`);
+  }
+
   return { whereSql: clauses.join('\n        AND '), params };
 }
+
+/** OR двух условий фильтра заголовка (значения / «без значения»); ни одного — заказов нет. */
+function valueOrEmpty(values: string | null, empty: string | null): string {
+  const parts = [values, empty].filter((part): part is string => part !== null);
+  if (parts.length === 0) return 'FALSE';
+  return parts.length === 1 ? parts[0] : `(${parts.join(' OR ')})`;
+}
+
+/**
+ * Заказы с листовым материалом (из массива `idsSql` или любым при null): деталь или HDF-позиция текущей ревизии
+ * расчёта — те же источники, что у строк потребности. Некоррелированный подзапрос — один проход по деталям.
+ */
+function sheetOrdersSql(ids: ResourceIdsSql | null): string {
+  const match = (column: string) => matchIdsSql(column, ids);
+  return `(
+        SELECT od_sh.order_id FROM order_details od_sh
+         WHERE od_sh.delete_flag = false
+           AND ${match('od_sh.sheet_material_type_id')}
+        UNION
+        SELECT hdf_sh.order_id FROM order_hdf_details hdf_sh
+          JOIN hdf_calculation_config_state hdf_state_sh ON hdf_state_sh.id = 1
+         WHERE hdf_sh.delete_flag = false
+           AND hdf_sh.status = 'ok'
+           AND hdf_sh.config_revision = hdf_state_sh.revision
+           AND ${match('hdf_sh.hdf_sheet_material_type_id')}
+      )`;
+}
+
+/** Заказы с плёнкой (из массива `idsSql` или любой при null) у активной детали. */
+function filmOrdersSql(ids: ResourceIdsSql | null): string {
+  return `(
+        SELECT od_fm.order_id FROM order_details od_fm
+         WHERE od_fm.delete_flag = false
+           AND ${matchIdsSql('od_fm.film_id', ids)}
+      )`;
+}
+
+/** Массив id параметром; `exclude` — «любой, кроме этих». */
+interface ResourceIdsSql {
+  idsSql: string;
+  exclude: boolean;
+}
+
+function matchIdsSql(column: string, ids: ResourceIdsSql | null): string {
+  if (ids === null) return `${column} IS NOT NULL`;
+  return ids.exclude ? `${column} IS NOT NULL AND ${column} <> ALL(${ids.idsSql})` : `${column} = ANY(${ids.idsSql})`;
+}
+
+function orderHasSheetSql(ids: ResourceIdsSql): string {
+  return `o.order_id IN ${sheetOrdersSql(ids)}`;
+}
+
+function orderHasFilmSql(ids: ResourceIdsSql): string {
+  return `o.order_id IN ${filmOrdersSql(ids)}`;
+}
+
+/** Число из JSON (число или строка с числом), иначе NULL — как mmOrNaN раскроя. */
+function jsonMmSql(path: string): string {
+  return `(CASE
+          WHEN jsonb_typeof(${path}) = 'number' THEN (${path})::numeric
+          WHEN jsonb_typeof(${path}) = 'string' AND (${path} #>> '{}') ~ '^\\s*-?[0-9]+(\\.[0-9]+)?\\s*$' THEN btrim(${path} #>> '{}')::numeric
+        END)`;
+}
+
+/**
+ * «Готовые раскрои»: у заказа есть плёнка с посчитанными метрами — то же правило, что у `projectOrders`
+ * (`hasCutData`): деталь с плёнкой в своём последнем активном готовом раскрое лежит на листе группы вакуумного
+ * стола из материала «Ванна…» с длинной стороной 2800 мм (ручная раскладка, если активна и не устарела, иначе
+ * автоматическая), и сам лист — 2800 мм по длинной стороне. Считается одним проходом от листов ванны к деталям.
+ */
+const READY_FILM_CUT_SQL = `o.order_id IN (
+        WITH bath_sheets_rc AS MATERIALIZED (
+          SELECT cg_rc.cut_job_id, sheet_rc.placements
+            FROM cut_group cg_rc
+            JOIN cut_job cj_rc ON cj_rc.cut_job_id = cg_rc.cut_job_id AND cj_rc.status = 'ready'
+            LEFT JOIN sheet_material_types smt_rc ON smt_rc.sheet_material_type_id = cg_rc.sheet_material_type_id
+            LEFT JOIN cut_group_manual_layout man_rc
+              ON man_rc.cut_job_id = cg_rc.cut_job_id
+             AND man_rc.group_key = cg_rc.group_key
+            CROSS JOIN LATERAL (
+              SELECT sheet_all.placements,
+                     ${jsonMmSql("sheet_all.placements -> 'sheet_width_mm'")} AS width_mm,
+                     ${jsonMmSql("sheet_all.placements -> 'sheet_height_mm'")} AS height_mm
+                FROM (
+                  SELECT manual_sheet.value -> 'placements' AS placements
+                    FROM jsonb_array_elements(
+                      CASE WHEN man_rc.is_active = true AND man_rc.is_stale IS NOT TRUE AND jsonb_typeof(man_rc.sheets) = 'array'
+                           THEN man_rc.sheets ELSE '[]'::jsonb END
+                    ) manual_sheet
+                  UNION ALL
+                  SELECT cgs_rc.placements
+                    FROM cut_group_sheet cgs_rc
+                   WHERE cgs_rc.cut_group_id = cg_rc.cut_group_id
+                     AND NOT (man_rc.is_active IS TRUE AND man_rc.is_stale IS NOT TRUE)
+                ) sheet_all
+            ) sheet_rc
+           WHERE cg_rc.summary ->> 'engine_used' = 'vacuum_table'
+             AND lower(regexp_replace(normalize(smt_rc.name, NFKC), '^\\s+', '')) LIKE 'ванна%'
+             AND GREATEST(COALESCE(smt_rc.width_mm, sheet_rc.width_mm), COALESCE(smt_rc.height_mm, sheet_rc.height_mm))
+                 = ${BATH_METER_GUIDE_SHEET_HEIGHT_MM}
+             AND sheet_rc.width_mm > 0
+             AND sheet_rc.height_mm > 0
+             AND GREATEST(sheet_rc.width_mm, sheet_rc.height_mm) = ${BATH_METER_GUIDE_SHEET_HEIGHT_MM}
+             AND jsonb_typeof(sheet_rc.placements -> 'pieces') = 'array'
+             -- calculateBathSheetFilmUsage: the pieces occupy a positive length along the long side
+             AND EXISTS (
+               SELECT 1
+                 FROM jsonb_array_elements(sheet_rc.placements -> 'pieces') occupied_rc
+                WHERE CASE WHEN sheet_rc.width_mm > sheet_rc.height_mm
+                           THEN COALESCE(${jsonMmSql("sheet_rc.placements -> 'trim_mm' -> 'left'")}, 0)
+                                + COALESCE(${jsonMmSql("occupied_rc.value -> 'x_mm'")}, 0)
+                                + COALESCE(${jsonMmSql("occupied_rc.value -> 'width_mm'")}, 0)
+                           ELSE COALESCE(${jsonMmSql("sheet_rc.placements -> 'trim_mm' -> 'top'")}, 0)
+                                + COALESCE(${jsonMmSql("occupied_rc.value -> 'y_mm'")}, 0)
+                                + COALESCE(${jsonMmSql("occupied_rc.value -> 'height_mm'")}, 0)
+                      END > 0
+             )
+        ),
+        bath_pieces_rc AS MATERIALIZED (
+          -- «det-<detail id>» (parseFreecutItemId) without a regex: a regex per piece costs seconds here
+          SELECT DISTINCT
+                 bs_rc.cut_job_id,
+                 CASE WHEN left(item_rc, 4) = 'det-' AND length(item_rc) BETWEEN 5 AND 22
+                           AND translate(substr(item_rc, 5), '0123456789', '') = ''
+                      THEN substr(item_rc, 5)::bigint END AS detail_id
+            FROM bath_sheets_rc bs_rc
+            CROSS JOIN LATERAL jsonb_array_elements_text(jsonb_path_query_array(bs_rc.placements, '$.pieces[*].item_id')) item_rc
+        )
+        SELECT od_rc.order_id
+          FROM bath_pieces_rc bp_rc
+          JOIN order_details od_rc
+            ON od_rc.detail_id = bp_rc.detail_id
+           AND od_rc.delete_flag = false
+           AND od_rc.film_id IS NOT NULL
+         -- the group's job is the detail's latest active ready cut job
+         WHERE bp_rc.cut_job_id = (
+           SELECT max(cj_last.cut_job_id)
+             FROM cut_job_item cji_last
+             JOIN cut_job cj_last ON cj_last.cut_job_id = cji_last.cut_job_id
+            WHERE cji_last.order_detail_id = od_rc.detail_id
+              AND cji_last.is_active = true
+              AND cj_last.status = 'ready'
+         )
+      )`;
 
 /**
  * Заказ, у которого есть хоть один материал без отметки «Закуплено».
@@ -1491,6 +1888,12 @@ function getOrCreate<K, V>(map: Map<K, V>, key: K, factory: () => V): V {
   const value = factory();
   map.set(key, value);
   return value;
+}
+
+/** Ключ поставщика из справочника листового (основной `supplier_id`), без него — `none`. */
+function catalogSupplierKey(supplierId: unknown): string {
+  const id = toNullableNumber(supplierId);
+  return id === null ? RESOURCE_SUPPLIER_NONE_KEY : `s:${id}`;
 }
 
 function uniqueNumbers(values: unknown[]): number[] {
