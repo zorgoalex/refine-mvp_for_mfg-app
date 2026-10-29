@@ -26,4 +26,11 @@ describe('«Менеджер» of the order form', () => {
     expect(select).toContain('options={managerOptions.map(');
     expect(select).not.toContain('resolvedEmployeeSelectProps');
   });
+
+  it('a failed candidate request is shown with a retry, not as an empty list (Hasura-reference mode)', () => {
+    expect(form).toContain('.catch(() => { if (!controller.signal.aborted) setManagerOptionsFailed(true); });');
+    expect(form).toContain('}, [useBackendReferences, packerMode, managerOptionsAttempt]);');
+    expect(form).toContain('onClick={retryManagerOptions}>Повторить</Button>');
+    expect(form).not.toContain('setManagerOptionsFromApi([])');
+  });
 });
