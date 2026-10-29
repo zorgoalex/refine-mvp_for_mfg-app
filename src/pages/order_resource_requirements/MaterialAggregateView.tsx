@@ -113,7 +113,7 @@ export function MaterialAggregateTable({
   canManage,
   manageLoading,
   onChanged,
-  clientFiltersActive = false,
+  blockedReason = null,
   periodNote = null,
 }: {
   state: MaterialAggregateState;
@@ -124,13 +124,16 @@ export function MaterialAggregateTable({
   manageLoading: boolean;
   onChanged: () => void;
   /**
-   * В списке активны фильтры колонок или «Готовые раскрои». Сервер их не знает,
-   * поэтому сводка шире списка, а групповая отметка задела бы скрытые заказы.
+   * Сводка недоступна (в заголовке списка «Отключить все»): показать причину вместо таблицы —
+   * без данных групповая отметка не задевает заказы, которых в списке нет.
    */
-  clientFiltersActive?: boolean;
+  blockedReason?: string | null;
   /** Сводка взята за период по умолчанию — показать, какой именно. */
   periodNote?: string | null;
 }) {
+  if (blockedReason) {
+    return <Alert showIcon type="info" message={blockedReason} />;
+  }
   if (state.tooMany) {
     return (
       <Alert
@@ -147,14 +150,6 @@ export function MaterialAggregateTable({
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
     {periodNote && <Typography.Text type="secondary">{periodNote}</Typography.Text>}
-    {clientFiltersActive && (
-      <Alert
-        showIcon
-        type="warning"
-        message="Сводка по материалам учитывает только поиск, период и «Есть незакупленное»"
-        description="Фильтры колонок и «Готовые раскрои» к ней не применяются, поэтому групповая отметка «Закуплено» отключена. Снимите эти фильтры, чтобы отметить материал сразу во всех заказах."
-      />
-    )}
     <Table<OrderResourceMaterialAggregateDto>
       rowKey="resourceKey"
       size="small"
@@ -223,9 +218,7 @@ export function MaterialAggregateTable({
               canManage={canManage}
               manageLoading={manageLoading}
               onChanged={onChanged}
-              blockedReason={clientFiltersActive
-                ? 'Снимите фильтры колонок и «Готовые раскрои»'
-                : !state.current ? 'Сводка обновляется по новым фильтрам' : null}
+              blockedReason={!state.current ? 'Сводка обновляется по новым фильтрам' : null}
               isCurrent={state.isCurrent}
             />
           )}

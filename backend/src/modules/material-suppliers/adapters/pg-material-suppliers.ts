@@ -124,7 +124,23 @@ export async function loadMainSupplierNames(
   sheetIds: readonly number[],
   filmIds: readonly number[],
 ): Promise<Map<string, string>> {
-  const result = new Map<string, string>();
+  const mains = await loadMainSuppliers(client, sheetIds, filmIds);
+  return new Map([...mains].map(([key, main]) => [key, main.name]));
+}
+
+/** Основной поставщик позиции: ключ (как у «Экрана снабжения»: `s:<id>` или ключ прихода 1С) и имя. */
+export interface MainSupplierRef {
+  key: string;
+  name: string;
+}
+
+/** То же правило, что у `loadMainSupplierNames`, с ключом поставщика; позиция без поставщика в карту не попадает. */
+export async function loadMainSuppliers(
+  client: DatabaseClient,
+  sheetIds: readonly number[],
+  filmIds: readonly number[],
+): Promise<Map<string, MainSupplierRef>> {
+  const result = new Map<string, MainSupplierRef>();
   if (sheetIds.length > 0) {
     const mains = (await client.query<{ id: string | number; supplier_name: string | null; supplier_id: string | number }>(
       `SELECT smt.sheet_material_type_id AS id, s.supplier_id, s.supplier_name
@@ -133,7 +149,11 @@ export async function loadMainSupplierNames(
       [sheetIds],
     )).rows;
     for (const row of mains) {
-      result.set(`sheet_material:${Number(row.id)}`, row.supplier_name?.trim() || `Поставщик #${Number(row.supplier_id)}`);
+      const supplierId = Number(row.supplier_id);
+      result.set(`sheet_material:${Number(row.id)}`, {
+        key: `s:${supplierId}`,
+        name: row.supplier_name?.trim() || `Поставщик #${supplierId}`,
+      });
     }
   }
   for (const [kind, ids] of [['sheet_material', sheetIds], ['film', filmIds]] as const) {
@@ -143,9 +163,30 @@ export async function loadMainSupplierNames(
     for (const id of ids) {
       const key = `${kind}:${id}`;
       if (result.has(key)) continue;
-      const name = chosen.get(id)?.[0]?.name ?? onec.get(id)?.[0]?.name;
-      if (name) result.set(key, name);
+      const first = chosen.get(id)?.[0];
+      if (first) {
+        result.set(key, { key: `s:${first.id}`, name: first.name });
+        continue;
+      }
+      const recorded = onec.get(id)?.[0];
+      if (recorded) result.set(key, { key: recorded.key, name: recorded.name });
     }
   }
   return result;
+}
+
+/** Основные поставщики всех листовых и плёнок справочника (для фильтра «Поставщик» по всем страницам). */
+export async function loadCatalogMainSuppliers(client: DatabaseClient): Promise<{
+  sheetIds: number[];
+  filmIds: number[];
+  mains: Map<string, MainSupplierRef>;
+}> {
+  const ids = (await client.query<{ kind: 'sheet_material' | 'film'; id: string | number }>(
+    `SELECT 'sheet_material' AS kind, sheet_material_type_id AS id FROM sheet_material_types
+     UNION ALL
+     SELECT 'film' AS kind, film_id AS id FROM films`,
+  )).rows;
+  const sheetIds = ids.filter((row) => row.kind === 'sheet_material').map((row) => Number(row.id));
+  const filmIds = ids.filter((row) => row.kind === 'film').map((row) => Number(row.id));
+  return { sheetIds, filmIds, mains: await loadMainSuppliers(client, sheetIds, filmIds) };
 }
