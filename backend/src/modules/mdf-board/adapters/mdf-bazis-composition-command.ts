@@ -523,7 +523,9 @@ export class PgMdfBazisCompositionCommand {
     }
     const actorId = actorUserId(user);
     const target = targetSource(setId);
-    // «Базис» status (migration 282): the order details whose rows leave the set are re-synced after the writes.
+    // «Базис» status (migration 282): the order details whose rows leave the set are re-synced after the writes; this
+    // transaction keeps the status in step, so the composition guard of migration 284 lets it write the rows.
+    await tx.query("SELECT set_config('erp.bazis_cut_saw_sync', 'on', true)");
     const removedDetailIds = await sourceDetailIdsOfSetRows(tx,
       changes.filter((change) => change.after === 0).map((change) => Number(change.rowId)));
     // Exact row-level writes only for eligible rows; HDF/unrelated rows stay untouched.
