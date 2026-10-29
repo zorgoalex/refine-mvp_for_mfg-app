@@ -39,3 +39,25 @@ describe('BazisCutSetsController runtime guard', () => {
     expect(Object.values(service).every((mock) => mock.mock.calls.length === 0)).toBe(true);
   });
 });
+
+describe('BazisCutSetsController composition version', () => {
+  const body = (expectedVersion: string) => ({ expectedVersion, sourceToken: 'a'.repeat(64), desiredRows: [] });
+  const request = { user: { id: 1 }, requestId: 'req-composition-1' } as never;
+
+  it('accepts version 0 of a set just created, as the other set commands do', async () => {
+    const composition = { preview: vi.fn(async () => ({ ok: true })) };
+    const controller = new BazisCutSetsController({} as never, { isEnabled: () => true } as never, composition as never);
+    await controller.previewComposition(request, '7', body('0'));
+    expect(composition.preview).toHaveBeenCalledWith({ id: 1 }, 7, body('0'), 'req-composition-1');
+  });
+
+  it('still rejects a version that is not a canonical non-negative integer', async () => {
+    const composition = { preview: vi.fn() };
+    const controller = new BazisCutSetsController({} as never, { isEnabled: () => true } as never, composition as never);
+    for (const version of ['01', '-1', '', '1.5']) {
+      await expect(Promise.resolve().then(() => controller.previewComposition(request, '7', body(version))))
+        .rejects.toMatchObject({ statusCode: 422 });
+    }
+    expect(composition.preview).not.toHaveBeenCalled();
+  });
+});

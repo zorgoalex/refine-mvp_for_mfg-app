@@ -603,7 +603,7 @@ function parseDateOnly(value: string): number | null {
 }
 
 function validateCompositionPreviewRequest(request: BazisCutCompositionPreviewRequest): void {
-  if (!request || typeof request.expectedVersion !== 'string' || !/^[1-9][0-9]{0,18}$/.test(request.expectedVersion)) {
+  if (!request || typeof request.expectedVersion !== 'string' || !/^(0|[1-9][0-9]{0,18})$/.test(request.expectedVersion)) {
     throw new Error('Invalid expectedVersion');
   }
   if (typeof request.sourceToken !== 'string' || !/^[a-f0-9]{64}$/.test(request.sourceToken)) {

@@ -242,12 +242,26 @@ describe('bazisCutApi', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toMatchObject({ expectedDigest: 'd'.repeat(64) });
   });
 
+  it('sends version 0 of a set just created to preview and confirm', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const request = { expectedVersion: '0', sourceToken: 'a'.repeat(64), desiredRows: [{ rowId: '7', quantity: 1 }] };
+    await bazisCutApi.previewComposition(42, request).catch(() => undefined);
+    await bazisCutApi.confirmComposition(42, { ...request, expectedDigest: 'd'.repeat(64) }, 'bazis-composition:abc12345')
+      .catch(() => undefined);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const call of fetchMock.mock.calls) expect(JSON.parse(String(call[1]?.body))).toMatchObject({ expectedVersion: '0' });
+  });
+
   it('rejects invalid composition preview/confirm payloads before fetch', () => {
     const fetchMock = vi.mocked(fetch);
     const validRequest = { expectedVersion: '3', sourceToken: 'a'.repeat(64), desiredRows: [{ rowId: '7', quantity: 1 }] };
 
-    expect(() => bazisCutApi.previewComposition(42, { ...validRequest, expectedVersion: '0' }))
-      .toThrow('Invalid expectedVersion');
+    for (const expectedVersion of ['01', '-1', '', '1.5']) {
+      expect(() => bazisCutApi.previewComposition(42, { ...validRequest, expectedVersion }))
+        .toThrow('Invalid expectedVersion');
+    }
     expect(() => bazisCutApi.previewComposition(42, { ...validRequest, sourceToken: 'not-hex' }))
       .toThrow('Invalid sourceToken');
     expect(() => bazisCutApi.previewComposition(42, { ...validRequest, desiredRows: [{ rowId: '7', quantity: 0 }] }))

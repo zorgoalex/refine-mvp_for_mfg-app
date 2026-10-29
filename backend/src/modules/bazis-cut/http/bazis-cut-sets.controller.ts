@@ -57,7 +57,8 @@ const updateDetailSchema: SchemaObject = { type: 'object', additionalProperties:
   required: [...detailFieldNames, 'expectedVersion'],
   properties: { ...detailProperties, expectedVersion: { type: 'integer', minimum: 0 } } };
 const compositionBodySchema = z.object({
-  expectedVersion: z.string().regex(/^[1-9][0-9]{0,18}$/),
+  // a set just created has version 0, as the other set commands accept
+  expectedVersion: z.string().regex(/^(0|[1-9][0-9]{0,18})$/),
   sourceToken: z.string().regex(/^[a-f0-9]{64}$/),
   desiredRows: z.array(z.union([
     z.object({ rowId: z.string().regex(/^[1-9][0-9]{0,18}$/), quantity: z.number().int().min(1).max(1_000_000) }).strict(),
@@ -70,7 +71,7 @@ const compositionConfirmBodySchema = compositionBodySchema.extend({
 }).strict();
 const compositionRequestSchema: SchemaObject = { type: 'object', additionalProperties: false,
   required: ['expectedVersion', 'sourceToken', 'desiredRows'], properties: {
-    expectedVersion: { type: 'string', pattern: '^[1-9][0-9]{0,18}$' },
+    expectedVersion: { type: 'string', pattern: '^(0|[1-9][0-9]{0,18})$' },
     sourceToken: { type: 'string', pattern: '^[a-f0-9]{64}$' },
     desiredRows: { type: 'array', maxItems: 5000, items: { oneOf: [
       { type: 'object', additionalProperties: false, required: ['rowId', 'quantity'], properties: {
