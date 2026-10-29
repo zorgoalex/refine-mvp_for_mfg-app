@@ -69,6 +69,7 @@ const ProfilePage = lazy(async () => ({ default: (await import("./pages/profile"
 const Bitrix24IncomingRequestsPage = lazy(async () => ({
   default: (await import("./pages/bitrix24/IncomingRequestsPage")).Bitrix24IncomingRequestsPage,
 }));
+const IntegrationsPage = lazy(async () => ({ default: (await import("./pages/integrations/IntegrationsPage")).IntegrationsPage }));
 const ClientContactsPage = lazy(async () => ({ default: (await import("./pages/clientContacts/ClientContactsPage")).ClientContactsPage }));
 const OnecPage = lazy(async () => ({ default: (await import("./pages/onec/OnecPage")).OnecPage }));
 
@@ -422,6 +423,7 @@ const ThemedApp = () => {
                       },
                     }]
                   : []),
+                { name: "integrations", list: "/integrations", meta: { label: "Интеграции" } },
                 {
                   name: "calendar",
                   list: "/calendar",
@@ -919,6 +921,7 @@ const ThemedApp = () => {
                       <Route index element={<OrderStatusBoardPage />} />
                     </Route>
                   )}
+                  <Route path="/integrations" element={<IntegrationsPage />} />
                   {featureFlags.orderStatusBoard && featureFlags.cncTelegram && (
                     <Route path="/mdf-work-board">
                       <Route index element={null} />

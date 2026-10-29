@@ -178,6 +178,15 @@ describe('PgClientPhoneRepository', () => {
     }
   });
 
+  it('a delete naming another client than the owner under the locks is refused (a merge moved the phone)', async () => {
+    const database = createDatabase();
+    const repository = new PgClientPhoneRepository(database.service);
+    await expect(repository.deleteClientPhone({ currentUser: currentUser(), phoneId: 10, dto: { idempotencyKey: 'client-phone-owner-key', clientId: 2 } }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'CLIENT_PHONE_OWNER_CHANGED' });
+    expect(normalizedSql(database.queries)).not.toContain('DELETE FROM client_phones');
+    await repository.deleteClientPhone({ currentUser: currentUser(), phoneId: 10, dto: { idempotencyKey: 'client-phone-owner-key-2', clientId: 1 } });
+  });
+
   it('delete audit diff uses {from:false,to:true} for deleted field', async () => {
     const database = createDatabase();
     const repository = new PgClientPhoneRepository(database.service);

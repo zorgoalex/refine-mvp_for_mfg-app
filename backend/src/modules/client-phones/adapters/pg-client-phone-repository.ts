@@ -23,6 +23,7 @@ import type {
 } from '../dto/client-phone.dto';
 import {
   ClientPhoneClientChangeUnsupportedError,
+  ClientPhoneOwnerChangedError,
   ClientPhoneClientNotFoundError,
   ClientPhoneDuplicateError,
   ClientPhoneIdempotencyFailedError,
@@ -250,6 +251,8 @@ export class PgClientPhoneRepository implements ClientPhoneRepositoryPort {
           actorUserId: command.currentUser.id,
           commandName: 'client_phones.delete',
           phoneId: command.phoneId,
+          // Only when given: the hash of a request without it stays as before.
+          ...(command.dto.clientId !== undefined ? { clientId: command.dto.clientId } : {}),
         },
       });
       if (idempotency.completedResponse) {
@@ -258,6 +261,10 @@ export class PgClientPhoneRepository implements ClientPhoneRepositoryPort {
 
       const existing = await loadClientPhoneLockingClientFirst(tx, command.phoneId);
       const phone = mapClientPhoneRow(existing);
+      // A form opened before a merge (or its undo) moved the phone to another client must not remove it there.
+      if (command.dto.clientId !== undefined && command.dto.clientId !== phone.clientId) {
+        throw new ClientPhoneOwnerChangedError(command.phoneId, phone.clientId, command.dto.clientId);
+      }
       await tx.query('DELETE FROM client_phones WHERE phone_id = $1', [command.phoneId]);
       const auditId = await writeAudit(tx, {
         event: 'client_phones.delete',

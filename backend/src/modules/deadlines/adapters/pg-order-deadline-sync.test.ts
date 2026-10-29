@@ -75,7 +75,8 @@ function createDatabase() {
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
 
-      if (text.includes('FROM orders')) {
+      // An INSERT of a deadline reads the order's client in a subquery: only a plain read of the order is answered here.
+      if (text.includes('FROM orders') && !text.includes('INSERT INTO')) {
         return {
           rows: [
             {

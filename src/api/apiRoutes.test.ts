@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { apiRoutes, backendApiPath, BACKEND_API_PREFIX, BACKEND_API_VERSION } from './apiRoutes';
 
+  it('exposes client merge routes', () => {
+    expect(apiRoutes.clientMerges.mergePreview(5)).toBe('/api/v1/integration-duplicates/5/merge-preview');
+    expect(apiRoutes.clientMerges.merge(5)).toBe('/api/v1/integration-duplicates/5/merge');
+    expect(apiRoutes.clientMerges.list).toBe('/api/v1/client-merges');
+    expect(apiRoutes.clientMerges.byId(7)).toBe('/api/v1/client-merges/7');
+    expect(apiRoutes.clientMerges.undoPreview(7)).toBe('/api/v1/client-merges/7/undo-preview');
+    expect(apiRoutes.clientMerges.undo(7)).toBe('/api/v1/client-merges/7/undo');
+  });
+
 describe('apiRoutes', () => {
   it('uses explicit path versioning for new backend endpoints', () => {
     expect(BACKEND_API_VERSION).toBe('v1');

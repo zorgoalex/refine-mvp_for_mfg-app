@@ -336,6 +336,62 @@ export class ClientCounterpartyRepository {
     }).catch((error: unknown) => { throw taken(error); });
   }
 
+  /**
+   * Moves the link of a client to a 1C counterparty to another client inside the caller's transaction (a merge of clients
+   * and its undo). The caller MUST already hold the advisory key `client-counterparty:<ref>` (taken before any client row,
+   * as `setLink`; taking it here, after row locks, would invert that order). An undo deletes the redirect of the merged
+   * client before calling (the guard of migration 268 refuses a 1C key on a merged client; that refusal is a 409 here).
+   * `from` must still hold the key and `to` must have none — anything else is a conflict,
+   * never an overwrite. The counterparty need not be in the loaded 1C data any more (no `requireKnown`): the link moves
+   * as it is. Two audit rows (`via`); the profile of 1C contacts of `from` is dropped — the sync builds the one of `to`.
+   */
+  async transferLink(
+    tx: TransactionClient,
+    input: { fromClientId: number; toClientId: number; refKey1c: string; actor: CurrentUser; requestId: string; via: 'merge' | 'merge_undo'; mergeId: number },
+  ): Promise<void> {
+    const ref = input.refKey1c.toLowerCase();
+    const rows = (await tx.query<{ client_id: string; ref: string | null }>(
+      'SELECT client_id, lower(ref_key_1c::text) AS ref FROM clients WHERE client_id = ANY($1::bigint[]) ORDER BY client_id FOR NO KEY UPDATE',
+      [[input.fromClientId, input.toClientId]])).rows;
+    const from = rows.find((row) => Number(row.client_id) === input.fromClientId);
+    const to = rows.find((row) => Number(row.client_id) === input.toClientId);
+    if (!from || !to) throw new ApiError(404, 'CLIENT_NOT_FOUND', 'Клиент не найден');
+    if (from.ref !== ref || to.ref !== null) {
+      throw new ApiError(409, 'CLIENT_COUNTERPARTY_CONFLICT', 'Сопоставление с контрагентом 1С уже изменено; обновите страницу',
+        { fromRefKey1c: from.ref, toRefKey1c: to.ref });
+    }
+    const available = await this.available(tx);
+    const card = available ? await this.card(tx, ref) : null;
+    const actorId = Number(input.actor.id);
+    // `from` first: the unique index admits one holder of a key at a time.
+    await tx.query('UPDATE clients SET ref_key_1c = NULL, edited_by = $2 WHERE client_id = $1', [input.fromClientId, actorId]);
+    await tx.query('UPDATE clients SET ref_key_1c = $2::uuid, edited_by = $3 WHERE client_id = $1', [input.toClientId, ref, actorId])
+      .catch((error: { code?: string; constraint?: string }) => {
+        if (error.code === '23514' && error.constraint === 'chk_client_not_merged') {
+          throw new ApiError(409, 'CLIENT_MERGED', 'Клиент объединён с другим клиентом; связь с 1С ему не переносится', { clientId: input.toClientId });
+        }
+        throw error;
+      });
+    await tx.query(`DELETE FROM party_onec_profiles WHERE party_kind = 'client' AND party_id = $1`, [input.fromClientId]);
+    const common = {
+      entityType: 'client', actorUserId: actorId, actorUsername: input.actor.username, actorRole: input.actor.role,
+      requestId: input.requestId, source: SOURCE,
+    };
+    const metadata = { counterpartyCode: card?.code ?? null, via: input.via, mergeId: input.mergeId };
+    await auditService.record(tx, {
+      ...common, event: 'client.counterparty_unlinked', entityId: input.fromClientId, relatedClientId: input.fromClientId,
+      relatedEntities: [{ entityType: 'client', entityId: input.fromClientId }, { entityType: 'client', entityId: input.toClientId }, { entityType: 'client_merge', entityId: input.mergeId }],
+      before: { refKey1c: ref, counterpartyName: card?.name ?? null }, after: { refKey1c: null, counterpartyName: null },
+      metadata: { ...metadata, otherClientId: input.toClientId },
+    });
+    await auditService.record(tx, {
+      ...common, event: 'client.counterparty_linked', entityId: input.toClientId, relatedClientId: input.toClientId,
+      relatedEntities: [{ entityType: 'client', entityId: input.toClientId }, { entityType: 'client', entityId: input.fromClientId }, { entityType: 'client_merge', entityId: input.mergeId }],
+      before: { refKey1c: null, counterpartyName: null }, after: { refKey1c: ref, counterpartyName: card?.name ?? null },
+      metadata: { ...metadata, otherClientId: input.fromClientId },
+    });
+  }
+
   /** Only a counterparty of the loaded 1C data can be linked: a typed key would silently link nothing. */
   private async requireKnown(tx: TransactionClient, refKey1c: string, available: boolean): Promise<CounterpartyCard> {
     if (!available) throw new ApiError(422, 'CLIENT_COUNTERPARTY_UNKNOWN', 'Данные контрагентов 1С не загружены');

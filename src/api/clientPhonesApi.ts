@@ -28,13 +28,15 @@ export const clientPhonesApi = {
     return response.phone;
   },
 
-  delete(phoneId: number): Promise<DeleteClientPhoneResponse> {
+  /** `clientId` — the client the form showed the phone at (a merge may have moved it since: the delete is then refused). */
+  delete(phoneId: number, clientId?: number): Promise<DeleteClientPhoneResponse> {
     return httpClient.request<DeleteClientPhoneResponse>(
       apiRoutes.clientPhones.byId(validateClientPhoneId(phoneId)),
       {
         method: 'DELETE',
         body: JSON.stringify({
           idempotencyKey: createClientPhoneIdempotencyKey('client-phone-delete'),
+          ...(clientId ? { clientId } : {}),
         }),
       },
     );

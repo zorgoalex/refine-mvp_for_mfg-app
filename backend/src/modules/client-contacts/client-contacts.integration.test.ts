@@ -132,6 +132,8 @@ describe.skipIf(!databaseUrl)('«Контакты клиентов»: list, cont
       CREATE TABLE role_permissions(role_id integer REFERENCES roles(role_id), permission_name text, is_enabled boolean, PRIMARY KEY(role_id, permission_name));
       CREATE TABLE permissions_state(id boolean PRIMARY KEY, version integer NOT NULL, updated_at timestamptz DEFAULT now());
       INSERT INTO permissions_state VALUES (true, 7);
+      -- The order import follows the redirect of a merged client (migration 268).
+      CREATE TABLE client_merge_redirects(merged_client_id bigint PRIMARY KEY, survivor_id bigint NOT NULL, merge_id bigint);
       CREATE TABLE order_import_entity_map(source_instance_id text NOT NULL, entity_type text NOT NULL, source_entity_id text NOT NULL,
         local_entity_id text NOT NULL, local_order_id bigint, payload_hash text, updated_at timestamptz DEFAULT now(),
         PRIMARY KEY (source_instance_id, entity_type, source_entity_id));`);
