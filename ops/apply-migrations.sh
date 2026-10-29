@@ -2619,6 +2619,16 @@ probe_file() {
       "SELECT (SELECT count(*) FROM policy_scope_allowed_values) = 24;" \
       "$(q_col permissions_state access_groups_enabled)" \
       "$(q_col users row_version)" ;;
+    # 285: access groups M2 — group tables and the three 248 objects as base role ∪ active groups (switch still off).
+    285_access_groups*) probe_all \
+      "$(q_tbl access_groups)" \
+      "$(q_tbl access_group_permissions)" \
+      "$(q_tbl access_group_scopes)" \
+      "$(q_tbl user_access_groups)" \
+      "$(q_idx user_access_groups_group_idx)" \
+      "$(q_idx access_group_permissions_permission_idx)" \
+      "SELECT pg_get_viewdef('public.user_effective_permissions'::regclass) LIKE '%user_access_groups%' AND pg_get_viewdef('public.user_effective_scopes'::regclass) LIKE '%access_group_scopes%';" \
+      "SELECT prosrc LIKE '%user_access_groups%' FROM pg_proc WHERE oid = to_regprocedure('public.user_authorization_snapshot(bigint)');" ;;
     # 249: access groups 0A.3 — Bitrix24 request scope and group batch linking as permissions (catalog + role grants).
     # 244: permissions of the 1C counterparty data in the client card (manager and above).
     244_client_onec_permissions*) probe_all \
@@ -3435,6 +3445,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     283_orders_manager_change_permission*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    285_access_groups*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

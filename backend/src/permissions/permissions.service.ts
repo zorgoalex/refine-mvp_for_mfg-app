@@ -250,7 +250,7 @@ export class PermissionsService {
   }
 
   /**
-   * Effective authorization of a user (base role; access groups when enabled — migration 249). One SQL
+   * Effective authorization of a user (base role; access groups when enabled — migration 285). One SQL
    * statement; takes no locks. Pass the caller's transaction client to read under the caller's locks.
    * Returns null for an unknown user. Without a database: the static matrix of the given fallback role.
    */
@@ -316,6 +316,7 @@ export class PermissionsService {
       // seed under it. Seeding first would hold catalog rows while waiting for permissions_state — a cycle with a
       // command that holds permissions_state and waits for a session whose holder seeds (R2).
       await lockAuthorizationState(tx, 'update');
+      await this.reassertMatrixMutationAccess(tx, currentUser);
       await this.seedDefaults(tx);
       const before = await this.readMatrix(tx, { lockState: true });
       this.assertExpectedVersion(request.version, before.version);
@@ -349,6 +350,7 @@ export class PermissionsService {
       // seed under it. Seeding first would hold catalog rows while waiting for permissions_state — a cycle with a
       // command that holds permissions_state and waits for a session whose holder seeds (R2).
       await lockAuthorizationState(tx, 'update');
+      await this.reassertMatrixMutationAccess(tx, currentUser);
       await this.seedDefaults(tx);
       const before = await this.readMatrix(tx, { lockState: true });
       const role = before.roles.find((row) => row.roleId === roleId);
@@ -376,6 +378,24 @@ export class PermissionsService {
       });
       return after;
     });
+  }
+
+  /**
+   * The actor again, after lockAuthorizationState (access groups plan R7 §4.2): the rights checked before the lock may
+   * have been taken away (role, access group, deactivation) while the command waited for it. Same rule and answer as
+   * requireMatrixMutationAccess, on the actor's authorization read under the lock.
+   */
+  private async reassertMatrixMutationAccess(tx: DatabaseClient, currentUser: CurrentUser): Promise<void> {
+    const actor = await this.loadUserAuthorization(currentUser.id, tx);
+    if (
+      !actor?.isActive ||
+      !actor.permissions.includes('system.superadmin') ||
+      !actor.permissions.includes('permissions.manage')
+    ) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+        requiredPermissions: ['system.superadmin', 'permissions.manage'],
+      });
+    }
   }
 
   private requireMatrixMutationAccess(currentUser: CurrentUser): void {
