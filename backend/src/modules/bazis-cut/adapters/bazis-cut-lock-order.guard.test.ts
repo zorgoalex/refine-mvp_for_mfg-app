@@ -34,3 +34,12 @@ describe('«Базис раскрой» commands lock the owners first', () => {
     }
   });
 });
+
+describe('«Базис раскрой» commands may change the card composition (migration 284 guard)', () => {
+  it('the owner lock every command takes first turns the saw-sync flag on', () => {
+    const sync = readFileSync(resolve(__dirname, '../../../shared/production-status/saw-status-sync.ts'), 'utf8');
+    const owners = sync.slice(sync.indexOf('export async function lockOrderOwners('));
+    expect(owners.indexOf("set_config('erp.bazis_cut_saw_sync', 'on', true)")).toBeGreaterThan(0);
+    expect(owners.indexOf("set_config('erp.bazis_cut_saw_sync', 'on', true)")).toBeLessThan(owners.indexOf('FOR UPDATE OF o'));
+  });
+});
