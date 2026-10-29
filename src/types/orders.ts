@@ -95,6 +95,8 @@ export interface Order {
 
   // Management and audit
   manager_id?: number | null;
+  /** Read-only: the manager's name from the order read (shown when he is not among the candidates). */
+  manager_name?: string | null;
   delete_flag?: boolean;
   version?: number;
   ref_key_1c?: string | null;

@@ -34,7 +34,7 @@ function input(over: Partial<OrderEditSourceInput> = {}): OrderEditSourceInput {
       { key: 'dates', label: 'Даты' }, { key: 'finance', label: 'Финансы' }, { key: 'cut', label: 'Раскрой' }, { key: 'services', label: 'Услуги/товары' }],
     names: {
       client: map({ 5: 'Садыков Арман' }), orderStatus: map({ 2: 'В работе' }), paymentStatus: map({ 3: 'Частично оплачен' }),
-      productionStatus: map({ 4: 'Фрезеровка' }), employee: map({ 9: 'Алия К.' }), sheetMaterial: map({ 3: 'МДФ 16 мм' }),
+      productionStatus: map({ 4: 'Фрезеровка' }), employee: map({ 9: 'Сотрудник 9' }), manager: map({ 9: 'Алия К.' }), sheetMaterial: map({ 3: 'МДФ 16 мм' }),
       millingType: map({ 1: 'Модерн' }), edgeType: map({ 2: 'R2' }), film: map({ 8: 'Белый софт' }), paymentType: map({ 2: 'Kaspi' }),
     },
     detailColumnOrder: ['detail_number', 'height', 'width', 'quantity', 'area', 'milling_type_id', 'hdf_parameter_override_mm', 'edge_type_id',
@@ -99,13 +99,20 @@ describe('buildOrderEditSource', () => {
     expect(JSON.stringify(buildClientScreenSnapshot(src, ['tab.basic', 'basic.order_name'], idFor))).toContain('PRIVATE-NAME');
   });
 
+  it('the manager is named as an ERP user (not the employee with the same id); the order\'s own name when not a candidate', () => {
+    expect(buildOrderEditSource(input()).basic.manager).toBe('Алия К.');
+    const inactive = input({ header: { ...input().header, manager_id: 77, manager_name: 'Бывший менеджер' } });
+    expect(buildOrderEditSource(inactive).basic.manager).toBe('Бывший менеджер');
+    expect(buildOrderEditSource(input({ names: { ...input().names, manager: undefined } })).basic.manager).toBeNull();
+  });
+
   it('every header value reaches the wire only under its own code (adapter → snapshot, sentinel values)', () => {
     const names = (prefix: string) => (id: number | null | undefined) => (id === null || id === undefined ? undefined : `<<${prefix}>>`);
     const src = buildOrderEditSource(input({
       orderNumber: '<<summary.number>>',
       header: { ...input().header, order_name: '<<basic.order_name>>', notes: '<<basic.notes>>' },
       names: { ...input().names, client: names('client'), orderStatus: names('basic.order_status'), paymentStatus: names('basic.payment_status'),
-        productionStatus: names('production_status'), employee: names('basic.manager') },
+        productionStatus: names('production_status'), manager: names('basic.manager') },
     }));
     const idFor = createClientScreenIdMap((() => { let n = 0; return () => `id${String(++n).padStart(6, '0')}`; })());
     for (const code of ['summary.number', 'basic.order_name', 'basic.notes', 'basic.order_status', 'basic.payment_status', 'basic.manager']) {
