@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-29", title: "Печать МДФ-доски (NewLine)",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "NewLine: кнопка «Печать» на МДФ-доске в любом формате карточек — выбор колонок галочками, A4 или A3 альбом, предпросмотр; печатаются карточки, как они сейчас на доске, колонки в своих цветах.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-29", title: "Печать производственного календаря (NewLine)",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
