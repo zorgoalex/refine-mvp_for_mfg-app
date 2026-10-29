@@ -43,6 +43,8 @@ export interface OrderEditSourceInput {
   tabs: ReadonlyArray<{ key: string; label: string }>;
   names: {
     client: NameOf; orderStatus: NameOf; paymentStatus: NameOf; productionStatus: NameOf; employee: NameOf;
+    /** The manager is an ERP user (orders.manager_id), not an employee. Optional: older callers fall back to none. */
+    manager?: NameOf;
     sheetMaterial: NameOf; millingType: NameOf; edgeType: NameOf; film: NameOf; paymentType: NameOf;
   };
   /** What the «Материалы» tab reports while it is on the manager's screen; null otherwise. */
@@ -373,7 +375,7 @@ export function buildOrderEditSource(input: OrderEditSourceInput): ClientScreenO
       order_status: named(header.order_status_id, names.orderStatus),
       payment_status: named(header.payment_status_id, names.paymentStatus),
       production_status: named(header.production_status_id, names.productionStatus),
-      manager: named(header.manager_id, names.employee),
+      manager: named(header.manager_id, names.manager ?? (() => undefined)) ?? header.manager_name ?? null,
       priority: header.priority === null || header.priority === undefined ? null : formatNumber(header.priority, 0),
       doweling: doweling.length ? doweling.join(', ') : null,
       notes: header.notes ?? null,

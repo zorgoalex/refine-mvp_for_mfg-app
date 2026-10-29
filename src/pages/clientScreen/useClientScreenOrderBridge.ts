@@ -92,6 +92,7 @@ export function orderFormNames(
     paymentStatus: fromList(references?.paymentStatuses),
     productionStatus: fromMap(references?.productionStatusNameById),
     employee: fromList(references?.employees),
+    manager: fromList(references?.managers),
     sheetMaterial: sheetMaterialName,
     millingType: fromMap(references?.millingTypeNameById),
     edgeType: fromMap(references?.edgeTypeNameById),

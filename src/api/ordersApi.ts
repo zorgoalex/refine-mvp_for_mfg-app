@@ -84,6 +84,13 @@ export const ordersApi = {
     return httpClient.get<OrderListResponse>(withQuery(apiRoutes.orders.list, params));
   },
 
+  /** Who may be chosen as the manager of an order (used when the form reads its references through Hasura). */
+  getManagerOptions(opts?: { signal?: AbortSignal }): Promise<{ managers: Array<{ id: number; fullName: string }> }> {
+    return httpClient.get<{ managers: Array<{ id: number; fullName: string }> }>(apiRoutes.orders.managerOptions, {
+      signal: opts?.signal,
+    });
+  },
+
   getFormData(opts?: { signal?: AbortSignal }): Promise<OrderFormDataResponse> {
     return httpClient.get<OrderFormDataResponse>(apiRoutes.orders.formData, {
       signal: opts?.signal,

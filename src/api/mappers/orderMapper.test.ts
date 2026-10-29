@@ -29,11 +29,13 @@ describe('orderMapper', () => {
       completionDate: null,
       discount: 0,
       surcharge: 250,
-      managerId: null,
+      managerUserId: null,
       linkCuttingFile: null,
       notes: null,
       refKey1c: 'erp-ref',
     });
+    expect(dto.header).not.toHaveProperty('managerId');
+    expect(mapOrderFormToSaveOrderDto({ ...values, header: { ...values.header, manager_id: 14 } }).header.managerUserId).toBe(14);
     expect(dto.header).not.toHaveProperty('order_id');
     expect(dto.header).not.toHaveProperty('totalAmount');
 
