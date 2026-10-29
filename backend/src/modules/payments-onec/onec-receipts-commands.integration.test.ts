@@ -645,4 +645,38 @@ describe.skipIf(!url)('1C incoming payments — slice B commands and guards, rea
       .rejects.toMatchObject({ statusCode: 403 });
     expect((await line(f.lineId)).erpOrder).toMatchObject({ orderId: mine, linkOrigin: 'manual' });
   });
+  it('unmatch on a foreign line: a right, a wrong and a missing match id all get the same 403 with a denial audit', async () => {
+    const s = await scenario({ createdBy: OWNER });
+    const matched = await match(s, undefined, 'um');
+    const other = await scenario({ createdBy: OWNER });
+    const otherMatch = await match(other, undefined, 'um2');
+    const stranger = user(STRANGER, 'own');
+    const cases: Array<[string, number]> = [['um-right', matched.matchId!], ['um-wrong', otherMatch.matchId!], ['um-missing', 2_000_000_000]];
+    for (const [suffix, matchId] of cases) {
+      await expect(service.unmatch(stranger, s.lineId, { expectedMatchId: matchId }, req(suffix)))
+        .rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+      expect((await db.query(`SELECT event, status_code FROM audit_log WHERE request_id = $1`, [`${tag}-${suffix}`])).rows)
+        .toEqual([{ event: 'payments.onec_denied', status_code: 'scope' }]);
+    }
+    expect((await line(s.lineId)).state).toBe('matched');
+  });
+
+  it('match: a payment moved to a foreign order while the command waits is authorised by its locked order → 403', async () => {
+    const s = await scenario({ createdBy: STRANGER });
+    const foreign = await erpOrder(number(), OWNER);
+    const c = await card(s.lineId);
+    const hold = await holdOrder(s.orderId);
+    const pending = service.match(user(STRANGER, 'own'), s.lineId, {
+      paymentId: s.paymentId, expectedStateToken: c.line.stateToken, expectedPaymentToken: c.candidates[0].paymentToken,
+    }, req('mv-match'));
+    pending.catch(() => undefined);
+    await lockWaiters(ORDER_LOCK.replace('final_amount', 'created_by, manager_id, client_id')); // the command waits for the order
+    // The payment moves to the owner's order (no triggers: the order rows are not touched by the move itself here).
+    await replica('UPDATE payments SET order_id = $2 WHERE payment_id = $1', [s.paymentId, foreign]);
+    await hold.release();
+    await expect(pending).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+    expect((await db.query(`SELECT event, status_code FROM audit_log WHERE request_id = $1`, [`${tag}-mv-match`])).rows)
+      .toEqual([{ event: 'payments.onec_denied', status_code: 'scope' }]);
+    expect((await db.query('SELECT count(*)::int AS n FROM payment_onec_matches WHERE onec_document_line_id = $1', [s.lineId])).rows[0].n).toBe(0);
+  });
 });

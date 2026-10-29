@@ -84,10 +84,11 @@ export class PgOnecReceiptsCommandRepository {
       const active = await this.lockMatches(tx, lineId, input.paymentId);
       const row = await this.loadLine(tx, lineId);
       // Scope FIRST, before any answer that tells the state of the line or the payment (code review B-main R1-2):
-      // the line's ERP order («no order» — only scope «all») and the payment's own order.
+      // the line's ERP order («no order» — only scope «all») and the order of the payment AS LOCKED (R2-3: a payment
+      // moved meanwhile to an order not locked here, or a payment that does not exist, needs scope «all»).
       await checkScope([
         row.erp_order_id === null ? null : orders.get(Number(row.erp_order_id)) ?? null,
-        ...(paymentOrder === null ? [] : [orders.get(paymentOrder) ?? null]),
+        payment === null ? null : orders.get(Number(payment.order_id)) ?? null,
       ]);
 
       // Repeat of the same match: the record already exists → no change (plan §6 «Идемпотентность»).
@@ -195,23 +196,28 @@ export class PgOnecReceiptsCommandRepository {
         `SELECT order_id_at_match, payment_id, removed_at, onec_document_line_id AS line_id FROM payment_onec_matches WHERE match_id = $1`,
         [input.expectedMatchId],
       );
-      if (!record || Number(record.line_id) !== lineId) throw stateChanged({ matchId: input.expectedMatchId });
-      const paymentOrder = record.payment_id === null ? null : await this.paymentOrderId(tx, Number(record.payment_id));
-      const orders = await this.lockOrders(tx, [num(record.order_id_at_match), paymentOrder, num(before.erp_order_id)]);
-      const lockedPayment = record.payment_id === null ? null : await this.lockPayment(tx, Number(record.payment_id));
+      // A record of another line (or none) is only reported AFTER the scope of this line (B-main R2-2): a foreign line
+      // answers 403 whatever match id is given, so match ids cannot be probed.
+      const mine = record && Number(record.line_id) === lineId ? record : null;
+      const paymentOrder = mine?.payment_id == null ? null : await this.paymentOrderId(tx, Number(mine.payment_id));
+      const orders = await this.lockOrders(tx, [num(mine?.order_id_at_match ?? null), paymentOrder, num(before.erp_order_id)]);
+      const lockedPayment = mine?.payment_id == null ? null : await this.lockPayment(tx, Number(mine.payment_id));
       await this.lockLineDocuments(tx, before);
       const active = await this.lockMatches(tx, lineId, null);
       const row = await this.loadLine(tx, lineId);
-      // Scope first, from the record itself (B-main R1-2): the order at match time and the current order of its payment
-      // (R1-3); a «разобрано» without an order — «all».
-      // The payment's order as locked now: one moved meanwhile to an order not locked here maps to «no order» → «all».
-      await checkScope(record.payment_id !== null
-        ? [num(record.order_id_at_match), num(lockedPayment?.order_id ?? null)].map((id) => (id === null ? null : orders.get(id) ?? null))
-        : [record.order_id_at_match === null ? null : orders.get(Number(record.order_id_at_match)) ?? null]);
+      // Scope of the line itself first («no order» now — only «all»: fails closed for a scoped user).
+      await checkScope([row.erp_order_id === null ? null : orders.get(Number(row.erp_order_id)) ?? null]);
+      if (!mine) throw stateChanged({ matchId: input.expectedMatchId });
+      // Then the scope of the record (B-main R1-2): the order at match time and the order of its payment as locked
+      // (R1-3: one moved meanwhile to an order not locked here maps to «no order» → «all»); a «разобрано» without an
+      // order — «all».
+      await checkScope(mine.payment_id !== null
+        ? [num(mine.order_id_at_match), num(lockedPayment?.order_id ?? null)].map((id) => (id === null ? null : orders.get(id) ?? null))
+        : [mine.order_id_at_match === null ? null : orders.get(Number(mine.order_id_at_match)) ?? null]);
       const own = active.find((m) => Number(m.onec_document_line_id) === lineId);
       // Already removed (a repeat) → no change; another record is active now → stale.
       if (!own) {
-        if (record.removed_at !== null) return { changed: false, matchId: input.expectedMatchId };
+        if (mine.removed_at !== null) return { changed: false, matchId: input.expectedMatchId };
         throw stateChanged({ matchId: input.expectedMatchId });
       }
       if (Number(own.match_id) !== input.expectedMatchId) throw stateChanged({ matchId: Number(own.match_id) });
@@ -250,7 +256,12 @@ export class PgOnecReceiptsCommandRepository {
     return this.database.transaction(async (tx) => {
       await this.lockUser(tx, actor.userId);
       const before = await this.loadLine(tx, lineId);
-      if (before.order_ref === null) throw new ApiError(409, 'ONEC_RECEIPT_NO_ONEC_ORDER', 'У поступления нет заказа 1С');
+      if (before.order_ref === null) {
+        // Reported only after the scope of the line (B-main R2-2); without a 1C order there is no ERP order → «all».
+        const lineOrders = await this.lockOrders(tx, [num(before.erp_order_id)]);
+        await checkScope([before.erp_order_id === null ? null : lineOrders.get(Number(before.erp_order_id)) ?? null]);
+        throw new ApiError(409, 'ONEC_RECEIPT_NO_ONEC_ORDER', 'У поступления нет заказа 1С');
+      }
       // The ERP order AFTER the change: the target, or — on unlink — what the series rule resolves without the link.
       // Both orders are locked (ascending) and their candidate sets serialised with the auto-match (code review R2-1).
       const afterOrder = input.remove ? await this.ruleOrderOf(tx, before) : input.orderId;
