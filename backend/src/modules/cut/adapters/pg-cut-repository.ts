@@ -18,7 +18,7 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { cncRouteConflicts, lockOrdersOfDetails, type SawSyncWarning } from '../../../shared/production-status/saw-status-sync';
+import { cncRouteConflicts, type SawSyncWarning } from '../../../shared/production-status/saw-status-sync';
 import {
   type PieceLabelSnapshot,
   type AutoPieceSpec,
@@ -824,9 +824,6 @@ export class PgCutRepository implements CutRepositoryPort {
       // Snapshot the freecut params at creation (config-as-data, plan §4a): a
       // config edit after the draft exists must NOT retro-mutate this job. The
       // snapshot is the authoritative payload at calculate time.
-      // Orders of the details first (order → job rows): the «Базис раскрой» side checks a CNC reservation under the
-      // same order lock, so a detail added to both at once is seen by the second command (migration 282).
-      await lockOrdersOfDetails(tx, command.dto.detailIds ?? []);
       const paramsSnapshot = await this.config.getDefaultParams();
       const inserted = await tx.query<{ cut_job_id: string | number }>(
         `
@@ -883,7 +880,10 @@ export class PgCutRepository implements CutRepositoryPort {
   addItems(command: AddCutItemsCommand): Promise<CutJobDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
-      await lockOrdersOfDetails(tx, command.dto.detailIds ?? []);
+      // No early order lock (migration 282 review): the job first, as every CNC job command and the MDF board card
+      // (job → the automation's orders). A detail added to a CNC job and a «Базис раскрой» card at once is still seen by
+      // the second command: the cut_job_item insert takes its order FK key-share lock, which waits for the card
+      // command's order lock (and the card command then sees the reservation).
       const job = await loadJobForUpdate(tx, command.cutJobId);
       assertVersion(job, command.version);
       assertMutable(job);

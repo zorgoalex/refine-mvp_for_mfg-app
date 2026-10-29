@@ -3175,6 +3175,9 @@ probe_file() {
       "SELECT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid='public.mdf_republish_jobs'::regclass AND t.tgname='mdf_republish_job_immutable' AND NOT t.tgisinternal);" \
       ;;
     # «Присадка» → «Базис-проект»: клиент карточки, ссылка XML-проекта на карточку, инвариант клиента, orders_view.
+    284_stage_letters_cut_ready_saw*) probe_all \
+      "SELECT to_regprocedure('public.reconcile_saw_detail_statuses(timestamptz,text)') IS NOT NULL;" \
+      "SELECT NOT EXISTS (SELECT 1 FROM cut_settings WHERE key='eligibility.statuses' AND jsonb_typeof(value->'codes')='array' AND (value->'codes') ? 'drawn' AND NOT (value->'codes') ? 'saw');" ;;
     282_order_stage_letters*) probe_all \
       "$(q_tbl order_stage_auto_state)" \
       "$(q_tbl order_stage_letter_overrides)" \
@@ -3426,6 +3429,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     282_order_stage_letters*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    284_stage_letters_cut_ready_saw*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     283_orders_manager_change_permission*)
