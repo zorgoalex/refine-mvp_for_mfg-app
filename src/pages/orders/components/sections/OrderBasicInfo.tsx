@@ -107,16 +107,22 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
   // Choosing another manager needs orders.manager.change; without it the field only shows the current manager.
   const canChangeManager = can(ORDER_MANAGER_CHANGE_PERMISSION, currentUser);
   const [managerOptionsFromApi, setManagerOptionsFromApi] = useState<ReferenceOption[] | null>(null);
+  const [managerOptionsFailed, setManagerOptionsFailed] = useState(false);
+  const [managerOptionsAttempt, setManagerOptionsAttempt] = useState(0);
   useEffect(() => {
     if (useBackendReferences || packerMode) return undefined;
     const controller = new AbortController();
+    setManagerOptionsFailed(false);
+    setManagerOptionsFromApi(null);
     ordersApi.getManagerOptions({ signal: controller.signal })
       .then((response) => setManagerOptionsFromApi(
         response.managers.map((manager, index) => ({ value: manager.id, label: manager.fullName, sortOrder: index })),
       ))
-      .catch(() => { if (!controller.signal.aborted) setManagerOptionsFromApi([]); });
+      // A failure is not «no candidates»: the field says so and offers a retry.
+      .catch(() => { if (!controller.signal.aborted) setManagerOptionsFailed(true); });
     return () => controller.abort();
-  }, [useBackendReferences, packerMode]);
+  }, [useBackendReferences, packerMode, managerOptionsAttempt]);
+  const retryManagerOptions = useCallback(() => setManagerOptionsAttempt((attempt) => attempt + 1), []);
   const managerOptions = useMemo(() => orderManagerOptions(
     useBackendReferences ? orderFormData.references.managers : (managerOptionsFromApi ?? []),
     header.manager_id,
@@ -550,10 +556,17 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
             <Form.Item
               label="Менеджер"
               tooltip={canChangeManager ? undefined : 'Сменить менеджера может только пользователь с правом «Заказы: смена менеджера»'}
+              validateStatus={managerOptionsFailed ? 'warning' : undefined}
+              help={managerOptionsFailed ? (
+                <span>
+                  Не удалось загрузить список менеджеров.{' '}
+                  <Button type="link" size="small" style={{ padding: 0 }} onClick={retryManagerOptions}>Повторить</Button>
+                </span>
+              ) : undefined}
             >
               <Select
                 options={managerOptions.map((option) => ({ value: option.value, label: option.label }))}
-                loading={useBackendReferences ? orderFormData.isLoading : managerOptionsFromApi === null}
+                loading={useBackendReferences ? orderFormData.isLoading : managerOptionsFromApi === null && !managerOptionsFailed}
                 value={header.manager_id}
                 onChange={(value) => updateHeaderField('manager_id', value ?? null)}
                 placeholder={header.order_id ? 'Не назначен' : 'Вы (по умолчанию)'}
