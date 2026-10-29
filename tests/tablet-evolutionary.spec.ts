@@ -694,9 +694,19 @@ test.describe('MDF background refresh', () => {
         await expect(page.locator('#status-board-viewport')).toHaveAttribute('aria-busy', 'false', { timeout: 60_000 });
         await expect(page.locator('[data-status-board-column-key="parsed"] .cnc-deferred-card')).toHaveCount(30);
         const target = page.locator('[data-cnc-card-kind="packet"][data-cnc-card-id="e2e-overflow-packet-0"]');
-        await target.click({ button: 'right', position: { x: 20, y: 20 } });
-        await page.getByRole('menuitem', { name: /^Переместить/ }).hover();
-        await page.getByRole('menuitem', { name: 'Распилено', exact: true }).click();
+        // The context menu and its submenu open with a delay and may close when the board re-renders (background
+        // refresh, a deferred card revealed): open them again until the move is clicked, never click it twice.
+        let moveClicked = false;
+        await expect(async () => {
+            if (moveClicked) return;
+            await page.keyboard.press('Escape');
+            await target.click({ button: 'right', position: { x: 20, y: 20 } });
+            await page.getByRole('menuitem', { name: /^Переместить/ }).hover({ timeout: 5_000 });
+            const completed = page.getByRole('menuitem', { name: 'Распилено', exact: true });
+            await completed.hover({ timeout: 5_000 });
+            await completed.click({ timeout: 5_000 });
+            moveClicked = true;
+        }).toPass({ timeout: 60_000 });
         await expect(page.getByText('Перемещение принято в очередь. Ожидается пересчёт доски.', { exact: true })).toBeVisible();
         await expect(page.getByText('Карточка перемещена', { exact: false })).toHaveCount(0);
         await expect(page.locator('[data-status-board-column-key="parsed"]').locator(target)).toHaveCount(1);
