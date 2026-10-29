@@ -32,6 +32,7 @@ import {
   SafetyCertificateOutlined,
   MessageOutlined,
   ShoppingOutlined,
+  DesktopOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   SearchOutlined,
@@ -56,6 +57,7 @@ import { Segmented } from '../../ui/Segmented';
 import { ExportTemplatesConfigTab } from './components/ExportTemplatesConfigTab';
 import { ProductionThresholdsConfigTab } from './components/ProductionThresholdsConfigTab';
 import { ProcurementSettingsTab } from './components/ProcurementSettingsTab';
+import { ClientScreenSettingsTab } from './components/ClientScreenSettingsTab';
 import {
   RolesPermissionsMatrixTab,
   canViewRolesMatrixTab,
@@ -837,6 +839,20 @@ export const ConfigurationPage: React.FC = () => {
       ),
       children: <ProcurementSettingsTab />,
     },
+    ...(featureFlags.clientScreen
+      ? [
+          {
+            key: 'client-screen',
+            label: (
+              <span>
+                <DesktopOutlined />
+                Экран клиента
+              </span>
+            ),
+            children: <ClientScreenSettingsTab />,
+          },
+        ]
+      : []),
     {
       key: 'table-visibility',
       label: (

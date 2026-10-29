@@ -1,5 +1,13 @@
 import type { OrderHdfDetail } from '../../../../types/orders';
 
+/** How the HDF tab names the state of a calculation. */
+export const HDF_STATUS_LABELS: Record<string, { label: string; color: string }> = {
+  ok: { label: 'Рассчитано', color: 'green' },
+  too_narrow: { label: 'ХДФ слишком узкий', color: 'red' },
+  config_missing: { label: 'Нет настройки', color: 'orange' },
+  source_changed: { label: 'Исходная деталь изменилась', color: 'volcano' },
+};
+
 export const HDF_CONFIG_SETTINGS_LOCATION = 'Конфигурация -> Пороги техпроцессов -> ХДФ';
 
 const CONFIG_ERROR_LABELS: Record<string, string> = {

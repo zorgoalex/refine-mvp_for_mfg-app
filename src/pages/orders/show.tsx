@@ -25,6 +25,7 @@ import { OrderReworkPanel } from './components/rework/OrderReworkPanel';
 import { createOrderVersionCatchUp, type OrderVersionCatchUp } from './orderVersionCatchUp';
 import { withRoundSuffix } from '../../api/orderReworkApi';
 import { OrderShowHeader } from "./components/sections/OrderShowHeader";
+import { ClientScreenShowHeader } from "../clientScreen/ClientScreenShowHeader";
 import { overlayDetailProductionStatuses } from '../../utils/orderProductionSummary';
 import { OrderDatesBlock } from "./components/sections/OrderDatesBlock";
 import { OrderFinanceBlock } from "./components/sections/OrderFinanceBlock";
@@ -322,6 +323,17 @@ function orderShowNullableFiniteNumber(value: unknown): number | null {
 function formatOrderShowHdfDimension(value: number | null): string {
   if (value === null) return '—';
   return formatNumber(value, value % 1 === 0 ? 0 : 1);
+}
+
+/** The text of the HDF cell, as the cell below draws it; null for the empty cell. */
+export function orderShowHdfCellText(display: OrderShowHdfDisplay | null, parameterMm: unknown): string | null {
+  if (display?.status === 'ok' && !display.isStale && display.heightMm !== null && display.widthMm !== null) {
+    const quantity = display.quantity === null ? '—' : formatNumber(display.quantity, display.quantity % 1 === 0 ? 0 : 1);
+    return `${formatOrderShowHdfDimension(display.heightMm)}×${formatOrderShowHdfDimension(display.widthMm)}, ${quantity} шт.`;
+  }
+  if (display) return display.isStale ? 'устар.' : ORDER_SHOW_HDF_STATUS_LABELS[display.status] ?? display.status;
+  const parameter = orderShowNullableFiniteNumber(parameterMm);
+  return parameter === null ? null : `${formatNumber(parameter, parameter % 1 === 0 ? 0 : 2)} мм`;
 }
 
 function renderOrderShowHdfCell(
@@ -3269,6 +3281,65 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     if (key === 'move-project') setMoveModalOpen(true);
     if (key === 'delete-order') handleDeleteOrder();
   };
+  // Customer screen: what this page has loaded and shows (read-only; see ClientScreenShowHeader).
+  const clientScreenPaymentTypes = useMemo(
+    () => new Map<number, string>((paymentTypesData?.data || []).map((item: any) => [Number(item.type_paid_id), String(item.type_paid_name ?? '')])),
+    [paymentTypesData],
+  );
+  const clientScreenNames = useMemo(() => ({
+    millingType: millingTypesMap as Map<number, string>,
+    edgeType: edgeTypesMap as Map<number, string>,
+    film: filmsMap,
+    paymentType: clientScreenPaymentTypes,
+    productionStatus: (id: number) => productionStatusesById.get(id)?.name,
+    materialOf: (detail: any) => resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap),
+  }), [clientScreenPaymentTypes, edgeTypesMap, filmsMap, materialsMap, millingTypesMap, productionStatusesById, resolvedNameByDetailId]);
+  const clientScreenHdfTextOf = useCallback(
+    (detail: any) => orderShowHdfCellText(getOrderShowHdfDisplay(hdfDetailBySourceDetailId, detail), detail?.hdf_parameter_override_mm),
+    [hdfDetailBySourceDetailId],
+  );
+  const clientScreenEmployeeName = useCallback(
+    (id: number) => {
+      const found = (employeesData?.data || []).find((item: any) => Number(item.employee_id) === Number(id));
+      return typeof found?.full_name === 'string' ? found.full_name : undefined;
+    },
+    [employeesData],
+  );
+  const clientScreenDowelingSource = backendOrder?.dowelingLinks ?? dowelingLinksData?.data;
+  const clientScreenDowelingLinks = useMemo(() => (clientScreenDowelingSource ?? []) as any[], [clientScreenDowelingSource]);
+  const clientScreenPaymentsSource = backendOrder?.payments ?? paymentsData?.data;
+  const clientScreenPayments = useMemo(() => (clientScreenPaymentsSource ?? []) as any[], [clientScreenPaymentsSource]);
+  const clientScreenGroupField = groupingActive ? grouping.state.field ?? null : null;
+  const clientScreenGroupLabelOf = useCallback(
+    (detail: any) => (clientScreenGroupField ? String(groupLabelOf(detail, clientScreenGroupField) ?? '') : ''),
+    [clientScreenGroupField, groupLabelOf],
+  );
+  const clientScreenControl = record?.order_id && !deletedOrder ? (
+    <ClientScreenShowHeader
+      orderId={record.order_id}
+      activeInfoPanel={activeInfoPanel}
+      ready={Boolean(productionSummaryDetailsLoaded && millingTypesData && edgeTypesData && filmsData && productionStatusesData)}
+      record={record as unknown as Record<string, unknown>}
+      clientName={resolvedClientName}
+      details={sortedDetails as any[]}
+      liveProductionStatusByDetailId={currentDetailProductionStatusById}
+      groupedRows={clientScreenGroupField ? groupedDataSource as any[] : null}
+      groupField={clientScreenGroupField}
+      groupLabelOf={clientScreenGroupLabelOf}
+      columnKeys={visibleDetailColumns.map((column) => String(column.key ?? ''))}
+      payments={clientScreenPayments}
+      catalogLines={backendOrder?.catalogLines}
+      hdfDetails={hdfDetails}
+      cutJobByDetailId={cutJobByDetailId}
+      hdfTextOf={clientScreenHdfTextOf}
+      bathCutJobByDetailId={bathCutJobByDetailId}
+      dowelingLinks={clientScreenDowelingLinks}
+      employeeName={clientScreenEmployeeName}
+      projectLabel={featureFlags.projects && projectId ? projectLabel : null}
+      names={clientScreenNames}
+      canViewFinancials={canViewFinancials}
+    />
+  ) : null;
   const workbenchEditButton = canEditOrderContent && record?.order_id ? (
     <Button type="primary" icon={<EditOutlined />} onClick={() => navigate(`/orders/edit/${record.order_id}`)}>
       Изменить
@@ -3281,6 +3352,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const workbenchBarSendAction = isWorkbench ? orderSendAction : null;
   const workbenchHeadActions = isWorkbench ? (
     <>
+      {clientScreenControl}
       {workbenchPaymentButton}
       {workbenchPrintItems.length > 0 ? (
         <Dropdown trigger={['click']} menu={{ items: workbenchPrintItems, onClick: handleWorkbenchAction }}>
@@ -3467,6 +3539,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             </>
           ) : (
             <>
+              {clientScreenControl}
               {canEditOrderContent && <EditButton>Изменить</EditButton>}
               {canUpdateOrders && (
                 <Button
@@ -3689,6 +3762,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   </>
                 ) : (
                   <>
+                    {clientScreenControl}
                     <Button
                       icon={<EyeOutlined />}
                       onClick={() => {

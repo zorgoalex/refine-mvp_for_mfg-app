@@ -57,6 +57,14 @@ const SHEET_STATUS: Record<OrderSheetStockItem['status'], string> = {
 /** Подпись покрытия листового материала; без данных — «Нет данных». */
 export const sheetStockCoverage = (status: OrderSheetStockItem['status'] | undefined): string => status ? SHEET_STATUS[status] : 'Нет данных';
 
+/** Текст ячейки «На складе (1С)»: количество в единице 1С и, если она не м², пересчёт в м²; null — данных нет. */
+export function orderSheetStockText(item: OrderSheetStockItem | undefined): string | null {
+  if (!item || item.quantity === null) return null;
+  const unit = item.unitName ? ` ${item.unitName}` : '';
+  const m2 = item.quantityM2 !== null && item.unitName && !/м2|м²/i.test(item.unitName) ? ` ≈ ${formatNumber(item.quantityM2, 2)} м²` : '';
+  return `${formatNumber(item.quantity, 3)}${unit}${m2}`;
+}
+
 /** Колонки остатка листовых материалов (данные 1С) для таблицы «Листовые материалы» заказа. */
 export function orderSheetStockColumns<Row extends { sheetMaterialTypeId: number }>(byId: ReadonlyMap<number, OrderSheetStockItem>) {
   return [
@@ -69,11 +77,10 @@ export function orderSheetStockColumns<Row extends { sheetMaterialTypeId: number
         const item = byId.get(row.sheetMaterialTypeId);
         if (!item || item.quantity === null) return '—';
         const unit = item.unitName ? ` ${item.unitName}` : '';
-        const m2 = item.quantityM2 !== null && item.unitName && !/м2|м²/i.test(item.unitName) ? ` ≈ ${formatNumber(item.quantityM2, 2)} м²` : '';
         const tooltip = [`1С: ${item.onecName ?? '—'}`, ...item.warehouses.map((w) => `${w.name}: ${formatNumber(w.quantity, 3)}${unit}`)].join('\n');
         return (
           <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{tooltip}</span>}>
-            <Text type={item.quantity < 0 ? 'danger' : undefined}>{formatNumber(item.quantity, 3)}{unit}{m2}</Text>
+            <Text type={item.quantity < 0 ? 'danger' : undefined}>{orderSheetStockText(item)}</Text>
           </Tooltip>
         );
       },

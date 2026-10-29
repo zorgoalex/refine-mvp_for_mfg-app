@@ -30,6 +30,7 @@ describe('featureFlags', () => {
       useBackendBazis: false,
       labels: false,
       statusAutomation: false,
+      clientScreen: false,
       orderStatusBoard: false,
       orderRealtime: false,
       cncTelegram: false,
@@ -41,6 +42,13 @@ describe('featureFlags', () => {
       useBackendOnec: false,
       inventory: false,
     });
+  });
+
+  it('reads the clientScreen flag from env and runtime config, default off', () => {
+    expect(getFeatureFlags({}).clientScreen).toBe(false);
+    expect(getFeatureFlags({ VITE_ENABLE_CLIENT_SCREEN: 'true' }).clientScreen).toBe(true);
+    expect(getFeatureFlags({}, { clientScreen: true }).clientScreen).toBe(true);
+    expect(getFeatureFlags({ VITE_ENABLE_CLIENT_SCREEN: 'true' }, { clientScreen: false }).clientScreen).toBe(false);
   });
 
   it('reads the statusAutomation flag from env and runtime config, default off', () => {

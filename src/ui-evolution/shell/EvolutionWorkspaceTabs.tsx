@@ -2,6 +2,7 @@ import React from 'react';
 import { message, Modal, Tabs } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { DraggableModalWrapper } from '../../components/DraggableModalWrapper';
+import { ClientScreenTabEye } from '../../pages/clientScreen/ClientScreenGlobalIndicator';
 import { computeCloseTargetPath, type WorkspaceTab, useTabStore } from '../../stores/tabStore';
 
 export interface EvolutionTabCloseRequest {
@@ -80,6 +81,7 @@ export const EvolutionWorkspaceTabs: React.FC = () => {
         key: tab.key,
         label: (
           <span className="evolution-workspace-tabs__label">
+            <ClientScreenTabEye tabKey={tab.key} />
             {tab.dirty ? <span aria-label="Есть несохраненные изменения" className="evolution-workspace-tabs__dirty" /> : null}
             {tab.label}
           </span>

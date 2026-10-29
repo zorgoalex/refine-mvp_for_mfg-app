@@ -62,7 +62,7 @@ export class Bitrix24AssignmentCommands {
            JOIN crm_sync_mapping deal ON deal.entity_type='order' AND deal.erp_id=o.order_id::text
                                      AND deal.status='active' AND deal.bitrix_id IS NOT NULL
            LEFT JOIN mapped manager ON manager.erp_user_id=o.manager_id
-           LEFT JOIN mapped author ON author.erp_user_id=o.created_by
+           LEFT JOIN mapped author ON author.erp_user_id=o.created_by AND o.manager_id IS NULL
           WHERE o.delete_flag=false AND o.order_kind='production_order'
        )
        SELECT 'orders_' || source || CASE WHEN source <> 'unmapped' AND ($1::bigint[] IS NULL OR owner = ANY($1::bigint[]))

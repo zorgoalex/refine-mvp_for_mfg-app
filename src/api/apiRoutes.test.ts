@@ -55,4 +55,8 @@ describe('apiRoutes', () => {
     expect(apiRoutes.audit.orderOptions).toBe('/api/v1/audit/order-options');
     expect(apiRoutes.audit.participantOptions).toBe('/api/v1/audit/participant-options');
   });
+
+  it('exposes the client screen settings route', () => {
+    expect(apiRoutes.clientScreen.settings).toBe('/api/v1/client-screen/settings');
+  });
 });

@@ -23,6 +23,9 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     features: {
       ...baseConfig.features,
       statusAutomation: readBooleanEnv(process.env.RUNTIME_CONFIG_STATUS_AUTOMATION, false),
+      // Customer screen UI: on by default on stage, production needs RUNTIME_CONFIG_CLIENT_SCREEN=true.
+      // Presenting also needs the organisation switch in «Конфигурация» (client_screen_settings.enabled).
+      clientScreen: readBooleanEnv(process.env.RUNTIME_CONFIG_CLIENT_SCREEN, isStageRuntime(req)),
       // Stage deployment enables the film catalog UI by default (the API stays gated by the backend
       // flag); production needs an explicit RUNTIME_CONFIG_FILM_CATALOG_IMPORT value.
       filmCatalogImport: readBooleanEnv(process.env.RUNTIME_CONFIG_FILM_CATALOG_IMPORT, isStageRuntime(req)),
