@@ -3171,6 +3171,18 @@ probe_file() {
       "SELECT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid='public.mdf_republish_jobs'::regclass AND t.tgname='mdf_republish_job_immutable' AND NOT t.tgisinternal);" \
       ;;
     # «Присадка» → «Базис-проект»: клиент карточки, ссылка XML-проекта на карточку, инвариант клиента, orders_view.
+    282_order_stage_letters*) probe_all \
+      "$(q_tbl order_stage_auto_state)" \
+      "$(q_tbl order_stage_letter_overrides)" \
+      "$(q_tbl order_stage_letters_rev)" \
+      "$(q_tbl order_detail_stage_routes)" \
+      "SELECT EXISTS (SELECT 1 FROM production_statuses WHERE production_status_code='saw');" \
+      "SELECT to_regprocedure('public.refresh_order_stage_letters(bigint[],text)') IS NOT NULL AND to_regprocedure('public.order_stage_letter_codes(bigint[])') IS NOT NULL;" \
+      "$(q_trg trg_od_saw_route)" \
+      "$(q_trg trg_od_zz_stage_letters_update)" \
+      "$(q_trg trg_ohd_zz_stage_letters_update)" \
+      "$(q_trg trg_orders_zz_stage_letters)" \
+      "$(q_trg trg_production_statuses_stage_guard)" ;;
     279_bazis_project_cards*) probe_all \
       "$(q_col doweling_orders client_id)" \
       "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='doweling_orders' AND column_name='client_id' AND is_nullable='NO');" \
@@ -3407,6 +3419,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     281_order_rework_round_deadline*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    282_order_stage_letters*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     203_film_stock*)

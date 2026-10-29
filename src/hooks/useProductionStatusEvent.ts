@@ -89,6 +89,17 @@ interface UseProductionStatusEventProps {
   enabled?: boolean;
   /** «Переделка»: the order's current production round (else the newest round among its marks). */
   productionRound?: number | null;
+  /**
+   * Backend projection of the order's stage letters (codes). When given together with
+   * statusIdToCode, the checked state comes from it (not from Hasura events), so the
+   * stage menu always equals the shown letters.
+   */
+  projectedCodes?: readonly string[] | null;
+  statusIdToCode?: ReadonlyMap<number, string>;
+  /** When the projection was last read (a re-read with unchanged codes still settles the optimistic state). */
+  projectionLoadedAt?: number;
+  /** Called after the backend answered a stage command: re-read the order so letters come from the projection. */
+  onCommandAnswered?: () => void;
 }
 
 /**
@@ -100,7 +111,13 @@ export const useProductionStatusEvent = (
   const { tabKey } = useKeepAlive();
   const dataProvider = useDataProvider();
   const invalidate = useInvalidate();
-  const { orderId, enabled = true, productionRound } = props || {};
+  const { orderId, enabled = true, productionRound, projectedCodes, statusIdToCode, onCommandAnswered, projectionLoadedAt } = props || {};
+  const onCommandAnsweredRef = useRef(onCommandAnswered);
+  onCommandAnsweredRef.current = onCommandAnswered;
+  const useProjection = !!orderId && projectedCodes != null && statusIdToCode != null;
+  const projectionKey = useProjection ? projectedCodes.join(',') : '';
+  // When the projection last changed: it plays the role of the events' load time.
+  const projectionUpdatedAt = useMemo(() => Date.now(), [projectionKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const [backendStageOverrides, setBackendStageOverrides] = useState<BackendStageOverrides>({});
   const sourceEventsRef = useRef<ProductionStatusEvent[]>([]);
   const backendStageOverridesRef = useRef<BackendStageOverrides>({});
@@ -114,18 +131,23 @@ export const useProductionStatusEvent = (
     pagination: { pageSize: 100 },
     sorters: [{ field: 'event_at', order: 'asc' }],
     queryOptions: {
-      enabled: enabled && !!orderId,
+      enabled: enabled && !!orderId && !useProjection,
     },
   });
 
   // «Переделка»: marks of earlier production rounds are history, not the order's current stages.
   const sourceEvents = useMemo(
-    () => currentRoundStageEvents(
-      eventsData?.data || [],
-      orderId && productionRound ? new Map([[Number(orderId), Number(productionRound)]]) : undefined,
-    ),
-    [eventsData, orderId, productionRound],
+    () => (useProjection
+      ? projectionToStageEvents(orderId!, projectedCodes!, statusIdToCode!, productionRound)
+      : currentRoundStageEvents(
+        eventsData?.data || [],
+        orderId && productionRound ? new Map([[Number(orderId), Number(productionRound)]]) : undefined,
+      )),
+    // projectionKey stands for projectedCodes (a fresh array every render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [eventsData, orderId, productionRound, useProjection, projectionKey, statusIdToCode],
   );
+  const loadedAt = useProjection ? Math.max(projectionUpdatedAt, projectionLoadedAt ?? 0) : dataUpdatedAt;
   sourceEventsRef.current = sourceEvents;
   // «Переделка»: the order's current round as the data shows it (given, else the round of its loaded marks).
   const roundOf = useCallback(
@@ -159,7 +181,7 @@ export const useProductionStatusEvent = (
         );
         // A command of another round says nothing about the order's current round; marks loaded after the command
         // answered already include it (or a newer state, e.g. an empty new round) — the override is done either way.
-        if (isOverrideSettled(override, { sourceHasEvent, dataRound: roundOf(overrideOrderId, sourceEvents), dataUpdatedAt })) {
+        if (isOverrideSettled(override, { sourceHasEvent, dataRound: roundOf(overrideOrderId, sourceEvents), dataUpdatedAt: loadedAt })) {
           delete next[key];
           changed = true;
         }
@@ -169,7 +191,7 @@ export const useProductionStatusEvent = (
       backendStageOverridesRef.current = result;
       return result;
     });
-  }, [orderId, sourceEvents, roundOf, dataUpdatedAt]);
+  }, [orderId, sourceEvents, roundOf, loadedAt]);
 
   const clearBackendStageOverridesForOrder = useCallback((targetOrderId: number) => {
     const result = removeBackendStageOverridesForOrder(
@@ -194,6 +216,7 @@ export const useProductionStatusEvent = (
     ]);
     assertOwnerCurrent();
     refetch();
+    onCommandAnsweredRef.current?.();
     message.warning('Данные заказа изменились. Экран обновлён, повторите действие.');
   }, [clearBackendStageOverridesForOrder, invalidate, refetch]);
 
@@ -218,6 +241,8 @@ export const useProductionStatusEvent = (
       };
       backendStageOverridesRef.current = next;
       setBackendStageOverrides(next);
+      // The projection is authoritative: re-read the order behind the optimistic state.
+      onCommandAnsweredRef.current?.();
     },
     [],
   );
@@ -547,12 +572,37 @@ export const useProductionStatusEvent = (
     getOrderEvents,
     hasOrderStatus,
     events,
-    isLoading,
-    refetch,
+    isLoading: useProjection ? false : isLoading,
+    // With a projection there are no events to re-read (the owner re-reads the order).
+    refetch: useProjection ? () => undefined : refetch,
   };
 };
 
 export default useProductionStatusEvent;
+
+/** Stage marks of an order as events, built from the backend letters projection. */
+export function projectionToStageEvents(
+  orderId: number,
+  codes: readonly string[],
+  statusIdToCode: ReadonlyMap<number, string>,
+  productionRound?: number | null,
+): ProductionStatusEvent[] {
+  const wanted = new Set(codes.map((code) => String(code).trim()).filter(Boolean));
+  const events: ProductionStatusEvent[] = [];
+  for (const [statusId, code] of statusIdToCode) {
+    if (!wanted.has(code)) continue;
+    events.push({
+      event_id: syntheticProductionEventId(orderId, statusId),
+      order_id: orderId,
+      detail_id: null,
+      production_status_id: statusId,
+      event_at: '',
+      round_no: productionRound ?? 1,
+      payload: { source: 'backend-letters-projection' },
+    } as ProductionStatusEvent);
+  }
+  return events;
+}
 
 function backendStageOverrideKey(orderId: number, productionStatusId: number): string {
   return `${orderId}:${productionStatusId}`;

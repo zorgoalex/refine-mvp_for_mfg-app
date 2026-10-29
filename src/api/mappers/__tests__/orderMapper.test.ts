@@ -113,10 +113,12 @@ describe('orderMapper inbound (OrderDto -> form values)', () => {
       header: {
         ...(dto.header as any),
         passedProductionStatusCodes: ['drawn', 'cut'],
+        manualProductionStatusCodes: ['cut'],
       } as any,
     });
 
     expect(values.header.passed_production_status_codes).toEqual(['drawn', 'cut']);
+    expect(values.header.manual_production_status_codes).toEqual(['cut']);
   });
 
   it('carries server-resolved materialName (COALESCE) onto header + detail for display', () => {

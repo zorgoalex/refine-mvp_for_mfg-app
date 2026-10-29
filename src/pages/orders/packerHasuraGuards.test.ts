@@ -20,9 +20,8 @@ describe('packer Hasura lookup guards', () => {
     expect(resourceBlock(orderListSource, 'production_statuses')).toContain(
       'canViewProductionReferences',
     );
-    expect(resourceBlock(orderListSource, 'production_status_events')).toContain(
-      'canViewProductionReferences',
-    );
+    // Letters come from the backend projection: the list no longer reads events.
+    expect(orderListSource).not.toContain('resource: "production_status_events"');
   });
 
   it('does not load protected order show lookups unconditionally', () => {

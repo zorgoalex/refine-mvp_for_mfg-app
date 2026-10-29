@@ -124,7 +124,8 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
   let engineMode: string | null = null;
   let hasMdfEngine = false;
   // Order stage-mark automation (266) audits its own changes; command assertions exclude it.
-  const commandAudit = "event NOT LIKE 'production_stage_mark.%'";
+  // Automatic facts of the database triggers (stage marks 266, stage letters 282) are not the command's own audit.
+  const commandAudit = "event NOT LIKE 'production_stage_mark.%' AND event NOT LIKE 'production_stage_letters.%'";
   const orderMarks = async (orderId: number) => (await pool.query(
     `SELECT ps.production_status_code AS code, pse.round_no FROM production_status_events pse
        JOIN production_statuses ps USING (production_status_id)
@@ -244,11 +245,14 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
     const events = (await pool.query('SELECT production_status_id, round_no FROM production_status_events WHERE detail_id = $1 ORDER BY round_no', [detailIds[0]])).rows;
     expect(events.map((e) => [Number(e.production_status_id), Number(e.round_no)])).toEqual([[stage.packed, 1], [stage.drawn, 2]]);
     const audit = (await pool.query(`SELECT event FROM audit_log WHERE related_order_id = $1 AND ${commandAudit} ORDER BY event`, [orderId])).rows.map((r) => r.event);
+    // Stage letters (migration 282): the round restages details, the order's letters change — recorded by the trigger.
+    expect((await pool.query("SELECT 1 FROM audit_log WHERE related_order_id = $1 AND event = 'production_stage_letters.changed'", [orderId])).rowCount).toBeGreaterThan(0);
     // 1.1: the round deadline changes the order date → also an `orders.update` fact (order history).
     expect(audit).toEqual(['order.rework_started', 'orders.status_change', 'orders.update']);
     // Order stage marks (266): the original run keeps its mark, the new round gets its own.
     expect(await orderMarks(orderId)).toEqual([['packed', 1], ['drawn', 2]]);
-    const outbox = (await pool.query("SELECT event_type, idempotency_key FROM outbox_events WHERE aggregate_id = $1 AND event_type LIKE 'order.%' ORDER BY event_type", [String(orderId)])).rows;
+    const outbox = (await pool.query("SELECT event_type, idempotency_key FROM outbox_events WHERE aggregate_id = $1 AND event_type LIKE 'order.%' AND event_type <> 'order.stage_letters_changed' ORDER BY event_type", [String(orderId)])).rows;
+    // (stage letters, migration 282, have their own trigger event — not the command's; asserted above via the audit)
     // 1.1: the round deadline is a change of the order's planned completion date too.
     expect(outbox.map((o) => o.event_type)).toEqual(['order.planned_completion_date_changed', 'order.rework_started', 'order.status_changed']);
     expect(outbox[1].idempotency_key).toBe(`order:${orderId}:rework:2:started:1`);

@@ -1,5 +1,4 @@
 import { useCallback, useMemo } from 'react';
-import { currentRoundStageEvents } from '../../../utils/currentRoundStageEvents';
 import { useList } from '@refinedev/core';
 import { CalendarOrder, CalendarOrderDetail, CalendarDataResult, CalendarFilters, CalendarFilterOption } from '../types/calendar';
 import { groupOrdersByDate } from '../utils/groupOrdersByDate';
@@ -12,6 +11,7 @@ import { buildProductionStagesDisplayConfig } from '../../../utils/productionWor
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../types/productionWorkflow';
 import {
   buildProductionStatusCodeLookup,
+  resolveCalendarManualProductionStatusCodes,
   resolveCalendarProductionStatusCodes,
 } from '../utils/productionStatusCodes';
 
@@ -38,7 +38,7 @@ export const useCalendarData = (
   const endDateStr = formatDateForApi(endDate);
 
   // Загружаем заказы из orders_view
-  const { data, isLoading, refetch, isError, error } = useList<CalendarOrder>({
+  const { data, isLoading, refetch, isError, error, dataUpdatedAt } = useList<CalendarOrder>({
     resource: 'orders_view',
     // Money through Hasura `financials` (access groups «финансы»): only where this path shows it.
     meta: { financials: true },
@@ -156,23 +156,6 @@ export const useCalendarData = (
     queryOptions: { staleTime: 60000 },
   });
 
-  // Загружаем production_status_events для всех заказов
-  const { data: productionEventsData, refetch: refetchProductionEvents } = useList({
-    resource: 'production_status_events',
-    filters: [
-      {
-        field: 'order_id',
-        operator: 'in',
-        value: orderIds,
-      },
-    ],
-    pagination: { pageSize: 10000 },
-    queryOptions: {
-      enabled: orderIds.length > 0,
-      staleTime: 30000,
-    },
-  });
-
   // Загружаем связи с присадками для заказов
   const { data: dowelingLinksData } = useList({
     resource: 'order_doweling_links',
@@ -274,24 +257,6 @@ export const useCalendarData = (
     }).display;
   }, [workflow, statusesForWorkflow]);
 
-  // Группируем события по order_id и получаем коды пройденных этапов
-  const passedCodesByOrderId = useMemo(() => {
-    const map: Record<number, string[]> = {};
-    // «Переделка»: only the marks of each order's current round (earlier rounds are history).
-    currentRoundStageEvents((productionEventsData?.data || []) as any[]).forEach((event: any) => {
-      if (event.order_id) {
-        if (!map[event.order_id]) {
-          map[event.order_id] = [];
-        }
-        const code = productionStatusIdToCode.idToCode.get(event.production_status_id);
-        if (code && !map[event.order_id].includes(code)) {
-          map[event.order_id].push(code);
-        }
-      }
-    });
-    return map;
-  }, [productionEventsData, productionStatusIdToCode]);
-
   // Группируем присадки по order_id (берём последнюю по order_doweling_link_id)
   const dowelingByOrderId = useMemo(() => {
     const map: Record<number, string> = {};
@@ -364,26 +329,21 @@ export const useCalendarData = (
           basisProjects: order.basis_projects,
           details,
         }).join(', ') || undefined,
-        passedProductionCodes: resolveCalendarProductionStatusCodes({
-          order,
-          eventCodes: productionEventsData ? (passedCodesByOrderId[order.order_id] ?? []) : undefined,
-        }),
+        passedProductionCodes: resolveCalendarProductionStatusCodes({ order }),
+        manualProductionCodes: resolveCalendarManualProductionStatusCodes({ order }),
       };
     });
 
     return groupOrdersByDate(applyCalendarFilters(ordersWithDetails, filters));
-  }, [data?.data, detailsByOrderId, dowelingByOrderId, filters, passedCodesByOrderId, productionEventsData]);
+  }, [data?.data, detailsByOrderId, dowelingByOrderId, filters]);
 
-  // Stage marks change without the order (detail stages set and clear them in
-  // the database): refreshing the calendar re-reads them too.
-  const refetchWithStageMarks = useCallback(() => {
-    // refetch ignores `enabled`: never load unfiltered events.
-    if (orderIds.length > 0) void refetchProductionEvents();
-    return refetch();
-  }, [orderIds.length, refetchProductionEvents, refetch]);
+  // Letters come from the backend order projection: refreshing orders re-reads them.
+  const refetchWithStageMarks = useCallback(() => refetch(), [refetch]);
 
   return {
     ordersByDate,
+    /** When the orders (and their stage-letter projection) were last read. */
+    ordersUpdatedAt: dataUpdatedAt,
     isLoading,
     refetch: refetchWithStageMarks,
     productionWorkflowDisplay,

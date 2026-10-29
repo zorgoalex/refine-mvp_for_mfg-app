@@ -699,6 +699,12 @@ async function buildSnapshot(tx: TransactionClient, orderId: number): Promise<Or
     [orderId],
   );
   const productionRounds = await readSnapshotProductionRounds(tx, orderId, header, details);
+  const stageRoutes = (await tx.query<{ detail_id: string; round_no: number }>(
+    `SELECT r.detail_id, r.round_no FROM order_detail_stage_routes r
+       JOIN order_details od ON od.detail_id = r.detail_id
+      WHERE od.order_id = $1 AND od.delete_flag = false ORDER BY r.detail_id, r.round_no`,
+    [orderId],
+  )).rows.map((row) => ({ detailSourceId: String(row.detail_id), roundNo: Number(row.round_no) }));
   const formatVersion = productionRounds ? ORDER_SNAPSHOT_ROUNDS_FORMAT_VERSION : ORDER_SNAPSHOT_FORMAT_VERSION;
   const deadlineEvents = await readOptionalTableRows(
     tx,
@@ -731,6 +737,7 @@ async function buildSnapshot(tx: TransactionClient, orderId: number): Promise<Or
     deadlineInstances,
     deadlineEvents,
     ...(productionRounds ? { productionRounds } : {}),
+    ...(stageRoutes.length > 0 ? { stageRoutes } : {}),
   };
   const snapshot: OrderSnapshotDto = {
     schema: ORDER_SNAPSHOT_SCHEMA,
@@ -1373,11 +1380,9 @@ async function importSnapshotInTransaction(
   if (restoresRounds) await markStageEventWriter(tx, 'historical_import');
   await upsertOrderChildren(tx, snapshot, orderId, dowelingOrderIds, payloadHash, command, guardDowelingOrders);
   await upsertProductionEvents(tx, snapshot, orderId, payloadHash);
-  await restoreSnapshotProductionRounds(
-    tx, snapshot, orderId,
-    await localIdsFor(tx, source, SNAPSHOT_ENTITY_TYPES.detail, snapshot.data.details),
-    reworkReasonIds,
-  );
+  const importedDetailIds = await localIdsFor(tx, source, SNAPSHOT_ENTITY_TYPES.detail, snapshot.data.details);
+  await restoreSnapshotProductionRounds(tx, snapshot, orderId, importedDetailIds, reworkReasonIds);
+  await reconcileImportedStageRoutes(tx, snapshot, importedDetailIds);
   await upsertDeadlines(tx, snapshot, orderId, payloadHash);
   // «Переделка» 1.1: the imported final deadline may lag behind a round command whose reconciliation had not run in
   // the source; the order's newest round asks for one here (background pass; the importer is the initiator).
@@ -3373,6 +3378,8 @@ function assertSupportedSnapshot(snapshot: OrderSnapshotDto): OrderSnapshotDto {
 
   validateSnapshotProductionRounds(snapshot);
 
+  validateSnapshotStageRoutes(snapshot);
+
   if (snapshot.data.catalogLines !== undefined) {
     const result = z.array(z.object({
       sourceId: z.string().min(1).max(200), catalogItemId: z.number().int().positive().safe(),
@@ -3692,3 +3699,65 @@ export {
   pruneDeletedOrderImportMaps as _testOnlyPruneDeletedOrderImportMaps,
   summarizeSnapshotBatchResults as _testOnlySummarizeSnapshotBatchResults,
 };
+
+/**
+ * The import owns the «Базис» routes of its details (plan §15): after the rounds are restored the routes of the
+ * imported details are made exactly the snapshot's (`stageRoutes`); a file without them — a route for each «Базис»
+ * detail in its restored round. The route trigger is silent under historical_import, so no route of an intermediate
+ * round survives; the route statement triggers recompute the letters.
+ */
+export async function reconcileImportedStageRoutes(
+  tx: TransactionClient,
+  snapshot: OrderSnapshotDto,
+  importedDetailIds: Map<string, number>,
+): Promise<void> {
+  const localIds = [...importedDetailIds.values()];
+  if (localIds.length === 0) return;
+  const wanted = snapshot.data.stageRoutes === undefined
+    ? (await tx.query<{ detail_id: string; round_no: number }>(
+        `SELECT od.detail_id, od.production_round AS round_no FROM order_details od
+           JOIN production_statuses ps ON ps.production_status_id = od.production_status_id AND ps.production_status_code = 'saw'
+          WHERE od.detail_id = ANY($1::bigint[])`,
+        [localIds],
+      )).rows.map((row) => ({ detailId: Number(row.detail_id), roundNo: Number(row.round_no) }))
+    : snapshot.data.stageRoutes
+        .map((route) => ({ detailId: importedDetailIds.get(route.detailSourceId), roundNo: route.roundNo }))
+        .filter((route): route is { detailId: number; roundNo: number } => route.detailId !== undefined);
+  await tx.query(
+    `DELETE FROM order_detail_stage_routes r
+      WHERE r.detail_id = ANY($1::bigint[])
+        AND NOT EXISTS (SELECT 1 FROM unnest($2::bigint[], $3::int[]) AS w(detail_id, round_no)
+                         WHERE w.detail_id = r.detail_id AND w.round_no = r.round_no)`,
+    [localIds, wanted.map((route) => route.detailId), wanted.map((route) => route.roundNo)],
+  );
+  if (wanted.length > 0) {
+    await tx.query(
+      `INSERT INTO order_detail_stage_routes (detail_id, round_no, request_id)
+       SELECT w.detail_id, w.round_no, 'order-snapshot-import' FROM unnest($1::bigint[], $2::int[]) AS w(detail_id, round_no)
+       ON CONFLICT DO NOTHING`,
+      [wanted.map((route) => route.detailId), wanted.map((route) => route.roundNo)],
+    );
+  }
+}
+
+/** «Базис» routes of a snapshot (migration 282): well-formed, for its own details, once per round, in a known round. */
+export function validateSnapshotStageRoutes(snapshot: OrderSnapshotDto): void {
+  if (snapshot.data.stageRoutes === undefined) return;
+  const routes = z.array(z.object({
+    detailSourceId: z.string().min(1).max(200), roundNo: z.number().int().min(1).max(32767),
+  }).strict()).max(20000).safeParse(snapshot.data.stageRoutes);
+  if (!routes.success) throw new ApiError(422, 'SNAPSHOT_STAGE_ROUTES_INVALID', 'Маршруты деталей в снимке заказа некорректны');
+  // Every route names a detail of this snapshot, once per round, in a round the snapshot describes (a file without
+  // rounds has only round 1) — a route of an unknown round would later mark a real rework round as «Базис».
+  const detailIds = new Set(snapshot.data.details.map((detail) => detail.sourceId));
+  const lastRound = snapshot.data.productionRounds?.lastRoundNo ?? 1;
+  const seen = new Set<string>();
+  for (const route of routes.data) {
+    const key = `${route.detailSourceId}:${route.roundNo}`;
+    if (!detailIds.has(route.detailSourceId) || route.roundNo > lastRound || seen.has(key)) {
+      throw new ApiError(422, 'SNAPSHOT_STAGE_ROUTES_INVALID', 'Маршруты деталей в снимке заказа некорректны',
+        { detailSourceId: route.detailSourceId, roundNo: route.roundNo });
+    }
+    seen.add(key);
+  }
+}

@@ -1264,6 +1264,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const shownOrderVersion = Number(record?.version ?? backendOrder?.version);
   const refetchOrderShowRef = useRef(queryResult.refetch);
   refetchOrderShowRef.current = queryResult.refetch;
+  // Stage letters come from the order projection: the header re-reads the order after a detail stage change.
+  const refreshOrderShow = useCallback(() => { void refetchOrderShowRef.current(); }, []);
   const orderVersionCatchUpRef = useRef<OrderVersionCatchUp | null>(null);
   useEffect(() => {
     // One read at a time; a failed read (or an older answer) is retried after ORDER_VERSION_CATCH_UP_RETRY_MS.
@@ -3756,6 +3758,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   compactSticky
                   showFinancials={canViewFinancials}
                   hdfDetails={hdfDetails}
+                  onRefreshOrder={refreshOrderShow}
                   compactActions={<>{workbenchPaymentButton}{workbenchEditButton}{workbenchBarSendAction}</>}
                 />
               </div>
@@ -3899,6 +3902,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               actions={workbenchHeadActions}
               projectLabel={featureFlags.projects && projectId ? projectLabel : null}
               onAddPayment={openAddPayment}
+              onRefreshOrder={refreshOrderShow}
             />
             {quickPaymentMounted && openAddPaymentForm && record?.order_id ? (
               <WorkbenchQuickPaymentSheet

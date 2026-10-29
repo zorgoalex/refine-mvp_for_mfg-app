@@ -294,6 +294,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   // Загрузка данных заказов
   const {
     ordersByDate,
+    ordersUpdatedAt,
     isLoading,
     error,
     refetch,
@@ -422,9 +423,34 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   }>({ visible: false, x: 0, y: 0, compact: false, date: '' });
 
   // Hook для событий производственных статусов выбранного заказа
-  const { events: productionEvents, toggleOrderEvent, refetch: refetchEvents } = useProductionStatusEvent({
-    orderId: contextMenu.order?.order_id,
-    enabled: !packerMode && contextMenu.visible && !!contextMenu.order?.order_id,
+  // The menu checks exactly the letters shown on the card (backend projection).
+  const productionStatusIdToCode = useMemo(() => {
+    const map = new Map<number, string>();
+    productionStatuses.forEach((status) => { if (status.code) map.set(status.id, status.code); });
+    return map;
+  }, [productionStatuses]);
+  // The menu reads the order as the calendar loaded it last (not the copy taken when the menu opened).
+  const menuOrder = useMemo(() => {
+    const id = contextMenu.order?.order_id;
+    if (id == null) return undefined;
+    for (const dayOrders of Object.values(ordersByDate)) {
+      const found = dayOrders.find((order) => order.order_id === id);
+      if (found) return found;
+    }
+    return contextMenu.order;
+  }, [contextMenu.order, ordersByDate]);
+  const { events: productionEvents, toggleOrderEvent } = useProductionStatusEvent({
+    orderId: menuOrder?.order_id,
+    enabled: !packerMode && contextMenu.visible && !!menuOrder?.order_id,
+    // The real letters (a finished order shows only its last one on the card, the menu checks every passed stage).
+    projectedCodes: menuOrder
+      ? (menuOrder.stage_production_status_codes ?? menuOrder.passedProductionCodes ?? [])
+      : undefined,
+    statusIdToCode: productionStatusIdToCode,
+    // «Переделка»: the order's current round; a re-read with unchanged codes still settles the optimistic state.
+    productionRound: (menuOrder as { production_round?: number | null } | undefined)?.production_round ?? null,
+    projectionLoadedAt: ordersUpdatedAt,
+    onCommandAnswered: () => { void refetch(); },
   });
 
   const queueOrderAction = useCallback((orderId: number, action: () => Promise<void>) => {
@@ -608,15 +634,8 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
 
           if (result === null) return null;
 
-          // Refetch events for context menu
-          refetchEvents();
-
           // Invalidate and refetch to refresh calendar cards
           await Promise.all([
-            invalidate({
-              resource: 'production_status_events',
-              invalidates: ['list'],
-            }),
             invalidate({
               resource: 'orders_view',
               invalidates: ['list'],

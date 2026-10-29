@@ -294,6 +294,7 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
         <div className="order-card-compact__line order-card-compact__production-stages">
           <ProductionStagesDisplay
             passedCodes={order.passedProductionCodes}
+            manualCodes={order.manualProductionCodes}
             displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
             codeToLetter={productionWorkflowDisplay?.codeToLetter}
             codeToName={productionWorkflowDisplay?.codeToName}

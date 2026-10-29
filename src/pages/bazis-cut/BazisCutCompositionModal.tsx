@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Modal, Space, Spin, Typography, message } from 'antd';
 import { isApiError } from '../../api/apiError';
+import { notifyDetailStageWarnings } from '../../utils/detailStageWarnings';
 import { bazisCutApi, type BazisCutSetCardDto } from '../../api/bazisCutApi';
 import {
   buildDesiredRowsForEdit,
@@ -139,6 +140,7 @@ export const BazisCutCompositionModal: React.FC<Props> = ({
         message.info('Изменений нет — состав уже соответствует запросу');
       } else {
         message.success(request?.successMessage ?? 'Изменение состава поставлено в обработку');
+        notifyDetailStageWarnings(response.warnings);
       }
       const refreshed = await reload();
       if (!builderRef.current.isCurrentAttempt(generation)) return; // superseded, ignore

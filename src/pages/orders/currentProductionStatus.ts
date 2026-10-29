@@ -31,15 +31,12 @@ export function resolveActiveProductionEventCodes(
 }
 
 /**
- * Stage letters of an order: only its own marks, the same state the status menus check.
- * Loaded event codes win; otherwise the backend projection, built from the same
- * order-level events. Detail stages reach the marks only through the database.
+ * Stage letters of an order: only the backend projection (passedProductionStatusCodes).
+ * The backend computes them (all live details passed the stage, or a manual mark);
+ * the frontend never derives letters from production_status_events.
  */
-export function resolveOrderStageCodes(
-  backendCodes: unknown,
-  eventCodes?: readonly (string | null | undefined)[],
-): string[] {
-  const source: readonly unknown[] = eventCodes ?? (Array.isArray(backendCodes) ? backendCodes : []);
+export function resolveOrderStageCodes(backendCodes: unknown): string[] {
+  const source: readonly unknown[] = Array.isArray(backendCodes) ? backendCodes : [];
   const codes = source
     .map((code) => (typeof code === 'string' ? code.trim() : ''))
     .filter(Boolean);

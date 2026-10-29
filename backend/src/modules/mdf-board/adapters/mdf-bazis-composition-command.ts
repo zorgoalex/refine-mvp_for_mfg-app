@@ -1,4 +1,5 @@
 import { mdfOwnJobSql, mdfRepublishOpen } from './mdf-republish';
+import { sourceDetailIdsOfSetRows, syncSawStatusForDetails } from '../../../shared/production-status/saw-status-sync';
 import { createHash, randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
@@ -94,7 +95,9 @@ export type MdfBazisCompositionPreviewResponse =
       blockers: MdfCorrectionBlocker[] };
 export type MdfBazisCompositionConfirmResponse =
   | { status: 'queued'; jobId: string; intentId: string; assignmentStateId: string;
-      auditId: string; outboxId: string; version: string; replay: boolean }
+      auditId: string; outboxId: string; version: string; replay: boolean;
+      /** Details also reserved by a CNC cut job (migration 282): kept, status unchanged, audited. */
+      warnings?: Array<{ code: 'DETAIL_ALSO_IN_CNC'; detailId: number; orderId: number; cutJobIds: number[] }> }
   | { status: 'unchanged'; beforeVersion: string; replay: boolean };
 
 interface CompositionHead {
@@ -520,6 +523,9 @@ export class PgMdfBazisCompositionCommand {
     }
     const actorId = actorUserId(user);
     const target = targetSource(setId);
+    // «Базис» status (migration 282): the order details whose rows leave the set are re-synced after the writes.
+    const removedDetailIds = await sourceDetailIdsOfSetRows(tx,
+      changes.filter((change) => change.after === 0).map((change) => Number(change.rowId)));
     // Exact row-level writes only for eligible rows; HDF/unrelated rows stay untouched.
     for (const change of changes) {
       if (change.after === 0) {
@@ -550,6 +556,10 @@ export class PgMdfBazisCompositionCommand {
     const bumped = (await tx.query(`UPDATE bazis_cut_sets SET version=version+1,updated_at=now()
       WHERE bazis_cut_set_id=$1 AND version=$2 RETURNING version::float8`, [setId, prepared.setVersion])).rows;
     if (bumped.length !== 1) throw new CompositionScopeChanged();
+    const saw = await syncSawStatusForDetails(tx, [...removedDetailIds, ...refill.map((row) => row.detailId)], {
+      actorUserId: actorId, actorUsername: user.username, actorRole: user.role, requestId,
+      cause: 'mdf_engine', setId, idempotencyKey: `mdf-bazis-composition:${setId}:${requestDigest}`,
+    });
     // POST-mutation raw snapshot/version: the intent binds exactly what the
     // later worker must find; the PRE snapshot stays in the preview digest.
     const post = await loadMdfBazisCompositionRawSnapshot(tx, { setId, lockRowsAfterOwnerLocks: true });
@@ -628,7 +638,9 @@ export class PgMdfBazisCompositionCommand {
       intentId, assignmentStateId }), `mdf-composition:${hash([user.id, request.idempotencyKey])}`])).rows[0];
     if (!outbox?.id) throw new Error('MDF_BAZIS_COMPOSITION_OUTBOX_FAILED');
     const response: MdfBazisCompositionConfirmResponse = { status: 'queued', jobId: saved.jobId, intentId,
-      assignmentStateId, auditId, outboxId: outbox.id, version: saved.version, replay: false };
+      assignmentStateId, auditId, outboxId: outbox.id, version: saved.version, replay: false,
+      ...(saw.warnings.length ? { warnings: saw.warnings.map((warning) => ({ code: 'DETAIL_ALSO_IN_CNC' as const,
+        detailId: warning.detailId, orderId: warning.orderId, cutJobIds: warning.cutJobIds })) } : {}) };
     await remember(tx, user, setId, request, response, requestDigest, prepared.owners);
     return response;
   }

@@ -262,8 +262,22 @@ function renderOrderCard(order: DailyDigestOrderCard, snapshot: DailyDigestSnaps
     elements.push(`<line x1="${innerX}" y1="${y}" x2="${CARD_WIDTH - innerX}" y2="${y}" stroke="#e3d5c6" stroke-width="1"/>`);
     y += 3;
     const stageLines = wrapText(stages.map((stage) => stage.letter).join('/'), TEXT_WIDTH, 2, 'production stages', 13, true);
+    // Letters set by hand are drawn in another colour, as in the calendar (migration 282).
+    const manual = new Set(order.manualProductionCodes ?? []);
+    let stageIndex = 0;
     stageLines.forEach((line, index) => {
-      elements.push(text(CARD_WIDTH / 2, baselineOf(y + index * 17, 17, 13), line, 13, '#f07800', 700, 'middle'));
+      const lineY = baselineOf(y + index * 17, 17, 13);
+      if (manual.size === 0) {
+        elements.push(text(CARD_WIDTH / 2, lineY, line, 13, STAGE_LETTER_COLOR, 700, 'middle'));
+        return;
+      }
+      const spans = line.split('/').map((letter) => {
+        const stage = stages[stageIndex];
+        stageIndex += letter ? 1 : 0;
+        const fill = stage && manual.has(stage.code) ? MANUAL_STAGE_LETTER_COLOR : STAGE_LETTER_COLOR;
+        return `<tspan fill="${fill}">${escapeXml(letter)}</tspan>`;
+      }).join(`<tspan fill="${STAGE_LETTER_COLOR}">/</tspan>`);
+      elements.push(`<text x="${CARD_WIDTH / 2}" y="${lineY}" font-family="${FONT_FAMILY}" font-size="13" font-weight="700" text-anchor="middle">${spans}</text>`);
     });
     y += stageLines.length * 17;
   }
@@ -374,6 +388,9 @@ function splitToWidth(value: string, fits: (candidate: string) => boolean): stri
   if (chunk) chunks.push(chunk);
   return chunks;
 }
+
+const STAGE_LETTER_COLOR = '#f07800';
+const MANUAL_STAGE_LETTER_COLOR = '#9254de';
 
 function getPassedStages(
   passedCodes: string[],

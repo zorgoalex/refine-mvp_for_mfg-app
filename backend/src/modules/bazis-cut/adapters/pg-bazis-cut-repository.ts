@@ -8,6 +8,7 @@ import { DatabaseService } from '../../../database/database.service';
 import { appendOrderReadScopeSql, buildOrderReadScopePredicate, normalizeActorUserId, orderAssignmentExistsSql, scopeNeedsActor } from '../../../permissions/policies/order-read-scope-sql';
 import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { assertSetOrdersLocked, lockOrderOwners, lockOrdersOfSet, syncSawStatusForDetails, type SawSyncResult } from '../../../shared/production-status/saw-status-sync';
 import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
 import { captureNewMdfBazisSource, registerNewMdfBazisSource } from '../../mdf-board/adapters/mdf-bazis-source';
 import { executeMdfBazisRename } from '../../mdf-board/adapters/mdf-bazis-rename';
@@ -285,6 +286,8 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
         if (boundary.queued) await authorizeCreationReplay(tx,command.currentUser,replay);
         return replay;
       }
+      // The owners (the order, its bath neighbours) in one sorted lock before anything else, as every set command.
+      await lockOrderOwners(tx, { orderIds: [command.orderId], detailIds, hdfDetailIds });
       if (boundary.queued) {
         await lockPickerOrders(tx,command.currentUser,[command.orderId],true);
         await lockCreationDetails(tx,command.orderId,detailIds,hdfDetailIds);
@@ -303,7 +306,8 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       const set = await loadSet(tx, setId);
       const mdfJobId = boundary.queued ? await captureNewMdfBazisSource(tx,{ setId,lockedOrderIds: [command.orderId],
         user: command.currentUser,requestId: command.requestId ?? `bazis-create-${setId}` }) : undefined;
-      const result = { set, addedCount: snapshots.length,...(mdfJobId ? { mdfJobId } : {}) };
+      const saw = await syncSaw(tx, command.currentUser, command.requestId, command.idempotencyKey, setId, detailIds);
+      const result = { set: await loadSet(tx, setId), addedCount: snapshots.length,...(mdfJobId ? { mdfJobId } : {}), ...sawWarnings(saw) };
       await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.created', setId,
         command.idempotencyKey, null, summaryAudit(set), set, set.details,
         {
@@ -340,6 +344,8 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       const initial = await picker.loadSelection(command.currentUser, criteria, requested.map((item) => item.detailId));
       assertPickerSelection(requested, initial.rows, canonicalHash);
       const orderIds = uniqueIds(initial.rows.map((row) => toNumber(row.order_id)));
+      // The owners (these orders and their bath neighbours) in one sorted lock first, as every set command.
+      await lockOrderOwners(tx, { orderIds, detailIds: requested.map((item) => item.detailId) });
       await lockPickerOrders(tx, command.currentUser, orderIds,boundary.queued);
       await lockPickerDetails(tx, requested.map((item) => item.detailId));
 
@@ -355,7 +361,8 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       const set = await loadSet(tx, setId);
       const mdfJobId = boundary.queued ? await captureNewMdfBazisSource(tx,{ setId,lockedOrderIds: orderIds,
         user: command.currentUser,requestId: command.requestId ?? `bazis-create-picker-${setId}` }) : undefined;
-      const result = { set, addedCount: snapshots.length,...(mdfJobId ? { mdfJobId } : {}) };
+      const saw = await syncSaw(tx, command.currentUser, command.requestId, command.idempotencyKey, setId, detailIds);
+      const result = { set: await loadSet(tx, setId), addedCount: snapshots.length,...(mdfJobId ? { mdfJobId } : {}), ...sawWarnings(saw) };
       await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.created', setId,
         command.idempotencyKey, null, summaryAudit(set), set, set.details, {
           creationSource: 'picker', criteriaHash: canonicalHash,
@@ -434,7 +441,11 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       const replay = await claimIdempotency<BazisCutMutationResultDto>(tx, command.idempotencyKey,
         'bazis_cut_set.details.add', actorId(command.currentUser), 'bazis_cut_set', String(command.setId), requestHash);
       if (replay) return replay;
+      // Orders → set: the orders of the set and of the added details first (plan §4.2; the legacy MDF automation locks
+      // the set's orders after the rows change).
+      const lockedOrders = await lockOrdersOfSet(tx, command.setId, detailIds, hdfDetailIds);
       await lockSet(tx, command.setId, command.expectedVersion);
+      await assertSetOrdersLocked(tx, command.setId, lockedOrders);
 
       const snapshots = [
         ...(detailIds.length > 0 ? await loadSnapshots(tx, command.orderId, detailIds) : []),
@@ -467,8 +478,10 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       const nextSort = await nextSortOrder(tx, command.setId);
       await insertSnapshots(tx, command.setId, additions, nextSort, actorId(command.currentUser));
       await bumpSet(tx, command.setId, actorId(command.currentUser));
+      const saw = await syncSaw(tx, command.currentUser, command.requestId, command.idempotencyKey, command.setId,
+        additions.map((item) => item.provenance.sourceOrderDetailId).filter((id): id is number => id !== null));
       const set = await loadSet(tx, command.setId);
-      const result = { set, addedCount: additions.length };
+      const result = { set, addedCount: additions.length, ...sawWarnings(saw) };
       await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.details_added', command.setId,
         command.idempotencyKey, null, { addedCount: additions.length, version: set.version }, set,
         set.details.filter((detail) => additions.some((item) => item.provenance.sourceOrderDetailId === detail.sourceOrderDetailId)),
@@ -498,7 +511,10 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       const replay = await claimIdempotency<BazisCutMutationResultDto>(tx, command.idempotencyKey,
         'bazis_cut_set.detail.update', actorId(command.currentUser), 'bazis_cut_set_detail', String(command.detailId), requestHash);
       if (replay) return replay;
+      // Orders → set, as every set command (the legacy MDF automation below locks the set's orders).
+      const lockedOrders = await lockOrdersOfSet(tx, command.setId);
       await lockSet(tx, command.setId, command.expectedVersion);
+      await assertSetOrdersLocked(tx, command.setId, lockedOrders);
       const beforeResult = await tx.query<DetailRow>(
         `SELECT * FROM bazis_cut_set_details
          WHERE bazis_cut_set_id=$1 AND bazis_cut_set_detail_id=$2 FOR UPDATE`,
@@ -546,7 +562,20 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       const replay = await claimIdempotency<BazisCutMutationResultDto>(tx, command.idempotencyKey,
         'bazis_cut_set.detail.delete', actorId(command.currentUser), 'bazis_cut_set_detail', String(command.detailId), requestHash);
       if (replay) return replay;
+      // The order of the removed row's detail first (order → set), and the remover must see that order: removing the
+      // last card of a «Базис» detail changes its status (plan §4.2).
+      const sourceDetailId = nullableNumber((await tx.query<{ id: string | null }>(
+        'SELECT source_order_detail_id AS id FROM bazis_cut_set_details WHERE bazis_cut_set_id=$1 AND bazis_cut_set_detail_id=$2',
+        [command.setId, command.detailId])).rows[0]?.id ?? null);
+      // One sorted lock of every order of the set (the removed row's order among them), then the set.
+      const lockedOrders = await lockOrdersOfSet(tx, command.setId);
+      const sourceOrderIds = sourceDetailId === null ? [] : (await tx.query<{ order_id: string }>(
+        'SELECT order_id FROM order_details WHERE detail_id = $1', [sourceDetailId])).rows.map((row) => Number(row.order_id));
+      for (const orderId of sourceOrderIds) {
+        await this.assertOrderReadable(tx, command.currentUser, orderId, command.requestId, command.setId);
+      }
       await lockSet(tx, command.setId, command.expectedVersion);
+      await assertSetOrdersLocked(tx, command.setId, lockedOrders);
       const beforeResult = await tx.query<DetailRow>(
         `SELECT * FROM bazis_cut_set_details
          WHERE bazis_cut_set_id=$1 AND bazis_cut_set_detail_id=$2 FOR UPDATE`,
@@ -554,8 +583,13 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       );
       if (beforeResult.rowCount === 0) throw detailNotFound(command.detailId);
       const before = mapDetail(beforeResult.rows[0]);
+      if (before.sourceOrderDetailId !== sourceDetailId) {
+        throw new ApiError(409, 'BAZIS_CUT_SET_CHANGED', 'Позиция изменилась — обновите набор и повторите');
+      }
       await tx.query(`DELETE FROM bazis_cut_set_details WHERE bazis_cut_set_detail_id=$1`, [command.detailId]);
       await bumpSet(tx, command.setId, actorId(command.currentUser));
+      await syncSaw(tx, command.currentUser, command.requestId, command.idempotencyKey, command.setId,
+        sourceDetailId === null ? [] : [sourceDetailId]);
       const set = await loadSet(tx, command.setId);
       const result = { set };
       await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.detail_removed', command.setId,
@@ -1426,6 +1460,19 @@ async function setSessionUser(client: TransactionClient, user: CurrentUser): Pro
 }
 
 function actorId(user: CurrentUser): number | null { return nullableNumber(user.id); }
+
+function syncSaw(tx: TransactionClient, user: CurrentUser, requestId: string | undefined, idempotencyKey: string,
+  setId: number, detailIds: readonly number[]): Promise<SawSyncResult> {
+  return syncSawStatusForDetails(tx, detailIds, {
+    actorUserId: actorId(user), actorUsername: user.username, actorRole: user.role,
+    requestId: requestId ?? `bazis-cut-${setId}`, cause: 'bazis_cut', setId, idempotencyKey,
+  });
+}
+
+function sawWarnings(saw: SawSyncResult): Pick<BazisCutMutationResultDto, 'warnings'> {
+  return saw.warnings.length === 0 ? {} : { warnings: saw.warnings.map((warning) => ({
+    code: 'DETAIL_ALSO_IN_CNC' as const, detailId: warning.detailId, orderId: warning.orderId, cutJobIds: warning.cutJobIds })) };
+}
 export function buildBazisCutSetName(setId: number): string { return `БР-${setId}`; }
 function pickerSelectionStale() {
   return new ApiError(409, 'BAZIS_CUT_PICKER_SELECTION_STALE',

@@ -51,6 +51,7 @@ interface DowelingRow extends QueryResultRow {
 interface EventRow extends QueryResultRow {
   order_id: string | number;
   production_status_id: string | number;
+  manual?: boolean;
 }
 
 interface StatusRow extends QueryResultRow {
@@ -164,14 +165,15 @@ export class DailyDigestOrderReader {
             `,
             [ids],
           ),
-          // Stage letters are the order-level marks, as in the calendar.
+          // Stage letters as in the calendar (migration 282): every live detail passed the stage or a manual override;
+          // orders without live details — their stage marks of the current round.
           tx.query<EventRow>(
             `
-            SELECT pse.order_id, pse.production_status_id
-            FROM production_status_events pse
-            JOIN orders o ON o.order_id = pse.order_id AND o.production_round = pse.round_no
-            WHERE pse.order_id = ANY($1::bigint[])
-            ORDER BY pse.order_id ASC, pse.event_id ASC
+            SELECT x.order_id, letters.production_status_id, letters.visible_manual AS manual
+            FROM unnest($1::bigint[]) AS x(order_id)
+            CROSS JOIN LATERAL order_stage_letters_effective(x.order_id) letters
+            WHERE letters.visible
+            ORDER BY x.order_id ASC, letters.sort_order ASC, letters.production_status_id ASC
             `,
             [ids],
           ),
@@ -239,10 +241,12 @@ export class DailyDigestOrderReader {
       }
     }
     const eventCodesByOrder = new Map<number, string[]>();
+    const manualCodesByOrder = new Map<number, string[]>();
     for (const row of eventResult.rows) {
       const orderId = Number(row.order_id);
       const code = workflow.lookup.idToCode.get(Number(row.production_status_id));
       if (!code) continue;
+      if (row.manual) manualCodesByOrder.set(orderId, [...(manualCodesByOrder.get(orderId) ?? []), code]);
       const codes = eventCodesByOrder.get(orderId) ?? [];
       if (!codes.includes(code)) codes.push(code);
       eventCodesByOrder.set(orderId, codes);
@@ -270,6 +274,7 @@ export class DailyDigestOrderReader {
         // Order stage marks only: detail stages reach them through the
         // database triggers of migration 266.
         passedProductionCodes: eventCodesByOrder.get(orderId) ?? [],
+        manualProductionCodes: manualCodesByOrder.get(orderId) ?? [],
       } satisfies DailyDigestOrderCard;
     });
 

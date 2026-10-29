@@ -208,6 +208,8 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
     production_unassigned_count: order.header.productionUnassignedCount,
     production_distinct_status_count: order.header.productionDistinctStatusCount,
     passed_production_status_codes: order.header.passedProductionStatusCodes ?? [],
+    manual_production_status_codes: order.header.manualProductionStatusCodes ?? [],
+    stage_production_status_codes: order.header.stageProductionStatusCodes ?? order.header.passedProductionStatusCodes ?? [],
     production_round: order.header.productionRound ?? 1,
     last_round_no: order.header.lastRoundNo ?? 1,
     production_status_from_details_enabled: normalizeBoolean(
@@ -352,6 +354,9 @@ export function mapOrderListItemToLegacyRow(item: OrderListItemDto): LegacyOrder
     doweling_order_name: item.dowelingOrderName ?? null,
     design_engineer_id: item.designEngineerId ?? null,
     passed_production_status_codes: item.passedProductionStatusCodes ?? [],
+    manual_production_status_codes: item.manualProductionStatusCodes ?? [],
+    production_round: item.productionRound ?? 1,
+    stage_production_status_codes: item.stageProductionStatusCodes ?? item.passedProductionStatusCodes ?? [],
     primary_group: item.primaryGroup ?? null,
     groups: item.groups ?? [],
     created_by: item.createdBy ?? undefined,

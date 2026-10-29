@@ -224,6 +224,8 @@ export interface BazisCutMutationResultDto {
   addedCount?: number;
   /** Active MDF mode: durable queue job, not a claim that its rules have run. */
   mdfJobId?: string;
+  /** Details also reserved by a CNC cut job: added anyway, their status unchanged (migration 282, «Базис»). */
+  warnings?: Array<{ code: 'DETAIL_ALSO_IN_CNC'; detailId: number; orderId: number; cutJobIds: number[] }>;
 }
 
 export interface BazisCutDeleteSetResultDto {

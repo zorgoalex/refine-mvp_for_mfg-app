@@ -1,5 +1,6 @@
 import { backendApiPath } from './apiRoutes';
 import { httpClient } from './httpClient';
+import type { DetailStageWarning } from '../utils/detailStageWarnings';
 
 export interface BazisCutSetListQuery {
   search?: string;
@@ -131,6 +132,8 @@ export interface BazisCutMutationResultDto {
   addedCount?: number;
   /** Active MDF mode: durable calculation job, not yet applied rules. */
   mdfJobId?: string;
+  /** The detail is also in a CNC cut job (DETAIL_ALSO_IN_CNC). */
+  warnings?: DetailStageWarning[];
 }
 
 export interface BazisCutDeleteSetResultDto {
@@ -342,6 +345,8 @@ export type BazisCutCompositionConfirmResponse =
       outboxId: string;
       version: string;
       replay: boolean;
+      /** Details also reserved by a CNC cut job (migration 282): kept, their status unchanged. */
+      warnings?: DetailStageWarning[];
     }
   | {
       status: 'unchanged';

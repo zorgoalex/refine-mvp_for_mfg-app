@@ -36,6 +36,9 @@ export interface Order {
   production_status_name?: string | null;
   production_status_from_details_enabled?: boolean;
   passed_production_status_codes?: string[];
+  manual_production_status_codes?: string[];
+  /** Real stage letters (the stage menu checks these); passed_production_status_codes are the shown ones. */
+  stage_production_status_codes?: string[];
   /** «Переделка»: current production round (1 = original run) and the highest used. */
   production_round?: number;
   last_round_no?: number;
@@ -445,6 +448,7 @@ export interface ProductionStatusEvent {
 export const PRODUCTION_STATUS_CODE_LETTERS: Record<string, string> = {
   new: 'Н',
   drawn: 'О',
+  saw: 'Б',
   film_purchase: 'П',
   cut: 'Р',
   drilled: 'С',
@@ -459,6 +463,7 @@ export const PRODUCTION_STATUS_CODE_LETTERS: Record<string, string> = {
 export const PRODUCTION_STATUS_DISPLAY_ORDER = [
   'new',
   'drawn',
+  'saw',
   'film_purchase',
   'cut',
   'drilled',

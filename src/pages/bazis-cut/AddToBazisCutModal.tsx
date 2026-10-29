@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { notifyDetailStageWarnings } from '../../utils/detailStageWarnings';
 import { Alert, Modal, Radio, Select, Space, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { isApiError } from '../../api/apiError';
@@ -83,6 +84,7 @@ export const AddToBazisCutModal: React.FC<Props> = ({
   })), [sets]);
 
   const finishLegacySuccess = useCallback((result: BazisCutMutationResultDto) => {
+    notifyDetailStageWarnings(result.warnings);
     message.success(result.addedCount === 0 ? 'Эти детали уже есть в наборе' : `Добавлено деталей: ${result.addedCount ?? selectedCount}`);
     onDone?.(); onClose();
     Modal.confirm({

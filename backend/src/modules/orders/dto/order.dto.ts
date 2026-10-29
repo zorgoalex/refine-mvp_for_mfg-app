@@ -184,6 +184,10 @@ export interface OrderListItemDto {
   dowelingOrderName: string | null;
   designEngineerId: number | null;
   passedProductionStatusCodes: string[];
+  /** Letters set by hand (shown in another colour); a subset of passedProductionStatusCodes. */
+  manualProductionStatusCodes: string[];
+  /** The real stage letters (a finished order shows only its last one): the stage menu checks these. */
+  stageProductionStatusCodes: string[];
   primaryGroup: OrderGroupSummaryDto | null;
   groups: OrderGroupSummaryDto[];
   createdBy: number | null;
@@ -211,6 +215,8 @@ export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
   paymentStatusName: string;
   productionStatusName: string | null;
   passedProductionStatusCodes?: string[];
+  manualProductionStatusCodes?: string[];
+  stageProductionStatusCodes?: string[];
   /** «Переделка»: current production round and the highest round number ever used. */
   productionRound?: number;
   lastRoundNo?: number;

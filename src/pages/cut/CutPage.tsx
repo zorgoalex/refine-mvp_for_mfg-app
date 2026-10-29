@@ -1,4 +1,5 @@
 import { cutJobInformationalDetails, type InformationalCutDetailRow } from './cutJobInformationalDetails';
+import { notifyDetailStageWarnings } from '../../utils/detailStageWarnings';
 import { CutSheetMiniMapView } from './CutSheetMiniMapView';
 import { sheetMiniColor } from './cutSheetMiniMap';
 import { createPortal } from 'react-dom';
@@ -2426,6 +2427,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     setBusy(true);
     try {
       const created = await cutApi.create({ name, detailIds: selected });
+      notifyDetailStageWarnings(created.warnings);
       if (!canPublishCreate()) return;
       jobContextId = created.cutJobId;
       currentJobIdRef.current = created.cutJobId;
@@ -2501,6 +2503,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     setBusy(true);
     try {
       const updated = await cutApi.addItems(job.cutJobId, { detailIds: selected, version: job.version });
+      notifyDetailStageWarnings(updated.warnings);
       if (!canPublishCutWrite(writeToken, targetJobId)) return;
       setJob(updated);
       applyPdfTemplateState(updated);

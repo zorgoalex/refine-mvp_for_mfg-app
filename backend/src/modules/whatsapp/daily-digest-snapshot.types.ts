@@ -21,6 +21,8 @@ export interface DailyDigestOrderCard {
   materials: DailyDigestMaterial[];
   millingDisplay: string;
   passedProductionCodes: string[];
+  /** Letters set by hand (another colour, migration 282); absent in earlier snapshots. */
+  manualProductionCodes?: string[];
 }
 
 export interface DailyDigestWorkflowDisplay {

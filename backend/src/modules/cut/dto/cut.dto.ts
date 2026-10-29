@@ -210,6 +210,8 @@ export interface CutSheetFitWarningDto {
 }
 
 export interface CutJobDto {
+  /** Details just added that are also in a «Базис раскрой» card (migration 282): added anyway, a warning. */
+  warnings?: Array<{ code: 'DETAIL_ALSO_IN_BAZIS'; detailId: number; orderId: number; bazisCutSetIds: number[] }>;
 
   cutJobId: number;
   /** Operator-facing job number without result version. Vacuum-table jobs use "В-<scoped number>". */

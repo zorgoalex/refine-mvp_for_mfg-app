@@ -1,5 +1,4 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
-import { currentRoundStageEvents } from '../../utils/currentRoundStageEvents';
 import type { TablePaginationConfig } from 'antd/es/table';
 import React, { useMemo, useState, useCallback, useEffect } from "react";
 import type { Dayjs } from "dayjs";
@@ -55,7 +54,7 @@ import { authSession } from "../../api/authSession";
 import { getMaterialTextColor } from "../calendar/utils/statusColors";
 import { resolveDetailMaterialName } from "../../utils/materialDisplayName";
 import { ProductionStagesDisplay } from "../../components/ProductionStagesDisplay";
-import { buildActiveProductionStatusCodeMap, resolveOrderStageCodes } from "./currentProductionStatus";
+import { resolveOrderStageCodes } from "./currentProductionStatus";
 import { useAppSettings, SETTING_KEYS } from "../../hooks/useAppSettings";
 import { buildProductionStagesDisplayConfig } from "../../utils/productionWorkflow";
 import type { ProductionStatusRef, ProductionWorkflowConfig } from "../../types/productionWorkflow";
@@ -1091,22 +1090,6 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     },
   });
 
-  // Загружаем события производственных статусов для заказов на текущей странице
-  const { data: productionEventsData } = useList({
-    resource: "production_status_events",
-    filters: [
-      {
-        field: "order_id",
-        operator: "in",
-        value: orderIds,
-      },
-    ],
-    pagination: { pageSize: 10000 },
-    queryOptions: {
-      enabled: isActive && orderIds.length > 0 && !useBackendOrdersRead && canViewProductionReferences,
-    },
-  });
-
   // Загружаем справочник production_statuses для маппинга ID -> code
   const { data: productionStatusesData } = useList({
     resource: "production_statuses",
@@ -1172,12 +1155,6 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     return map;
   }, [dowelingLinksData]);
 
-  // Stage letters follow the menu: an inactive catalog stage has no menu item and no letter.
-  const activeProductionStatusIdToCode = useMemo(
-    () => buildActiveProductionStatusCodeMap(productionStatusesData?.data || []),
-    [productionStatusesData],
-  );
-
   const statusesForWorkflow: ProductionStatusRef[] = useMemo(() => {
     return (productionStatusesData?.data || []).map((s: any) => ({
       production_status_id: s.production_status_id,
@@ -1199,24 +1176,6 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       workflowKey: SETTING_KEYS.PRODUCTION_WORKFLOW_DEFAULT,
     }).display;
   }, [workflow, statusesForWorkflow]);
-
-  // Группируем события производственных статусов по order_id и получаем коды
-  const passedCodesByOrderId = useMemo(() => {
-    const map: Record<number, string[]> = {};
-    // «Переделка»: only the marks of each order's current round (earlier rounds are history).
-    currentRoundStageEvents((productionEventsData?.data || []) as any[]).forEach((event: any) => {
-      if (event.order_id) {
-        if (!map[event.order_id]) {
-          map[event.order_id] = [];
-        }
-        const code = activeProductionStatusIdToCode.get(event.production_status_id);
-        if (code && !map[event.order_id].includes(code)) {
-          map[event.order_id].push(code);
-        }
-      }
-    });
-    return map;
-  }, [productionEventsData, activeProductionStatusIdToCode]);
 
   // Функция для получения последней (свежей) присадки для заказа
   const getLatestDoweling = (orderId: number, record?: any) => {
@@ -1538,10 +1497,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       width: 90,
       className: "orders-col status production-status",
       render: (_value, record) => {
-        // Only the order's own stage marks — the same state the status menus check.
+        // Letters come from the backend projection; manual ones are shown in another colour.
         return (
           <ProductionStagesDisplay
-            passedCodes={resolveOrderStageCodes(record.passed_production_status_codes, passedCodesByOrderId[record.order_id])}
+            passedCodes={resolveOrderStageCodes(record.passed_production_status_codes)}
+            manualCodes={resolveOrderStageCodes(record.manual_production_status_codes)}
             displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
             codeToLetter={productionWorkflowDisplay?.codeToLetter}
             codeToName={productionWorkflowDisplay?.codeToName}
@@ -1964,7 +1924,6 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           <div className={isTablet ? 'order-card-list--tablet' : 'order-card-list--mobile'}>
             <OrderCardList
               rows={tableProps.dataSource ?? []}
-              passedCodesByOrderId={passedCodesByOrderId}
               productionWorkflowDisplay={productionWorkflowDisplay}
               loading={false}
               pagination={tableProps.pagination ?? false}

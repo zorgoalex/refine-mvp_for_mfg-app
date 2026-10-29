@@ -1,4 +1,5 @@
 import type { SvgRenderContour } from '@shared/svg-render-contours';
+import type { DetailStageWarning } from '../../utils/detailStageWarnings';
 export interface CutSelectionCriteria {
   /** Variant B: filter by sheet_material_type_id (replaces materialIds post-034). */
   sheetMaterialTypeIds?: number[];
@@ -244,6 +245,8 @@ export interface SaveManualLayoutRequest {
 export type CutTextureDirection = 'vertical' | 'horizontal' | 'none';
 
 export interface CutJobDto {
+  /** Present on create / add-items answers: the detail is also in a Bazis cut set. */
+  warnings?: DetailStageWarning[];
   cutJobId: number;
   /** Operator-facing job number without result version. Vacuum-table jobs use "В-<scoped number>". */
   displayNumber?: string | null;

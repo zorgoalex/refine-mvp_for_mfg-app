@@ -1,5 +1,4 @@
 // Order Show Header (Read-only summary for show page)
-import { currentRoundStageEvents } from '../../../../utils/currentRoundStageEvents';
 import { withRoundSuffix } from '../../../../api/orderReworkApi';
 // Adapted from OrderHeaderSummary for use with props instead of store
 
@@ -21,7 +20,7 @@ import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../
 import { RowSeparator } from './RowSeparator';
 import dayjs from 'dayjs';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
-import { buildActiveProductionStatusCodeMap, buildStageMarksSignature, resolveOrderStageCodes } from '../../currentProductionStatus';
+import { buildStageMarksSignature, resolveOrderStageCodes } from '../../currentProductionStatus';
 import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
 import { can } from '../../../../utils/permissions';
 import { featureFlags } from '../../../../config/featureFlags';
@@ -53,6 +52,8 @@ interface OrderShowHeaderProps {
   /** «NewLine» page head: project code shown in the sub line. */
   projectLabel?: string | null;
   onAddPayment?: () => void;
+  /** Re-reads the order: the stage letters come from the backend projection. */
+  onRefreshOrder?: () => void;
 }
 
 export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
@@ -68,6 +69,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
   compactActions,
   projectLabel,
   onAddPayment,
+  onRefreshOrder,
 }) => {
   const navigate = useNavigate();
   const isOperational = useOperationalUi();
@@ -238,43 +240,28 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     }).display;
   }, [workflow, statusesForWorkflow]);
 
-  // Same source as the header status menu checks: the order's own stage marks
-  // (detail stages reach them through the database). The backend read carries
-  // them until the order's events load.
-  const backendStageCodes = record?.passed_production_status_codes ?? record?.passedProductionStatusCodes;
-  const { data: orderMarkEvents, refetch: refetchOrderMarks } = useList({
-    resource: 'production_status_events',
-    filters: [{ field: 'order_id', operator: 'eq', value: record?.order_id }],
-    pagination: { pageSize: 100 },
-    queryOptions: {
-      enabled: canViewProductionReferences && record?.order_id != null,
-    },
-  });
-  // Detail and HDF stages set and clear the marks in the database, so a stage
-  // change on the page (live updates included) or a re-read order re-reads them.
+  // Letters are the backend projection of the order (all live details passed the
+  // stage, or a manual mark); manual ones are shown in another colour.
+  const currentProductionStatusCodes = useMemo(
+    () => resolveOrderStageCodes(record?.passed_production_status_codes ?? record?.passedProductionStatusCodes),
+    [record?.passed_production_status_codes, record?.passedProductionStatusCodes],
+  );
+  const manualProductionStatusCodes = useMemo(
+    () => resolveOrderStageCodes(record?.manual_production_status_codes ?? record?.manualProductionStatusCodes),
+    [record?.manual_production_status_codes, record?.manualProductionStatusCodes],
+  );
+  // Detail and HDF stages change the letters on the backend, so a stage change
+  // on the page (live updates included) re-reads the order.
   const detailStageSignature = useMemo(
     () => buildStageMarksSignature(details || [], hdfDetails),
     [details, hdfDetails],
   );
-  const stageMarksSourceRef = useRef({ record, detailStageSignature });
+  const stageSignatureRef = useRef(detailStageSignature);
   useEffect(() => {
-    const previous = stageMarksSourceRef.current;
-    if (previous.record === record && previous.detailStageSignature === detailStageSignature) return;
-    stageMarksSourceRef.current = { record, detailStageSignature };
-    // refetch ignores `enabled`: keep the permission and order gates.
-    if (canViewProductionReferences && record?.order_id != null) void refetchOrderMarks();
-  }, [canViewProductionReferences, detailStageSignature, record, refetchOrderMarks]);
-  const currentProductionStatusCodes = useMemo(() => {
-    if (!orderMarkEvents) return resolveOrderStageCodes(backendStageCodes);
-    const idToCode = buildActiveProductionStatusCodeMap(allProductionStatusesData?.data || []);
-    // «Переделка»: only the marks of the order's current round (earlier rounds are history).
-    const round = Number(record?.production_round ?? 0) || undefined;
-    const marks = currentRoundStageEvents(
-      (orderMarkEvents.data || []) as Array<{ order_id?: number | null; round_no?: number | null; production_status_id?: number }>,
-      round && record?.order_id != null ? new Map([[Number(record.order_id), round]]) : undefined,
-    );
-    return resolveOrderStageCodes(undefined, marks.map((event) => idToCode.get(event.production_status_id as number)));
-  }, [allProductionStatusesData, backendStageCodes, orderMarkEvents, record?.order_id, record?.production_round]);
+    if (stageSignatureRef.current === detailStageSignature) return;
+    stageSignatureRef.current = detailStageSignature;
+    onRefreshOrder?.();
+  }, [detailStageSignature, onRefreshOrder]);
 
   const fallbackBasisProjectName =
     latestDowelingLink?.doweling_order?.doweling_order_name ||
@@ -419,6 +406,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             <span className="wb-order-bar__production">
               <ProductionStagesDisplay
                 passedCodes={currentProductionStatusCodes}
+                manualCodes={manualProductionStatusCodes}
                 displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
                 codeToLetter={productionWorkflowDisplay?.codeToLetter}
                 codeToName={productionWorkflowDisplay?.codeToName}
@@ -596,6 +584,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
               {currentProductionStatusCodes.length > 0 ? (
                 <ProductionStagesDisplay
                   passedCodes={currentProductionStatusCodes}
+                  manualCodes={manualProductionStatusCodes}
                   displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
                   codeToLetter={productionWorkflowDisplay?.codeToLetter}
                   codeToName={productionWorkflowDisplay?.codeToName}
@@ -648,6 +637,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             {currentProductionStatusCodes.length > 0 ? (
               <ProductionStagesDisplay
                 passedCodes={currentProductionStatusCodes}
+                manualCodes={manualProductionStatusCodes}
                 displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
                 codeToLetter={productionWorkflowDisplay?.codeToLetter}
                 codeToName={productionWorkflowDisplay?.codeToName}
@@ -813,6 +803,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
               <span style={{ color: 'var(--app-border)' }}>|</span>
               <ProductionStagesDisplay
                 passedCodes={currentProductionStatusCodes}
+                manualCodes={manualProductionStatusCodes}
                 displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
                 codeToLetter={productionWorkflowDisplay?.codeToLetter}
                 codeToName={productionWorkflowDisplay?.codeToName}

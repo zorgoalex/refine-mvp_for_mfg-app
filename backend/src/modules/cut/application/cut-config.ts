@@ -17,7 +17,8 @@ import { RENDER_PRESETS } from '../render/sheet-png';
  */
 
 /** Ready-to-cut production-status CODES (resolved to ids at query time). */
-export const DEFAULT_READY_STATUS_CODES = ['new', 'drawn', 'film_purchase'] as const;
+// «Базис» (saw, migration 282): a Bazis detail may still go to a CNC job — with a warning (plan §10.4).
+export const DEFAULT_READY_STATUS_CODES = ['new', 'drawn', 'saw', 'film_purchase'] as const;
 
 /**
  * Default freecut params — the freecut recommended production payload + the

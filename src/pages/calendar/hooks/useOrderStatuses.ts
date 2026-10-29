@@ -4,6 +4,8 @@ import type { CalendarError } from '../types/calendar';
 export interface StatusItem {
   id: number;
   name: string;
+  /** production_status_code (production statuses only) */
+  code?: string;
 }
 
 export interface OrderStatusesResult {
@@ -92,6 +94,7 @@ export const useOrderStatuses = (
   const productionStatuses: StatusItem[] = (productionStatusesData?.data || []).map((item: any) => ({
     id: item.production_status_id,
     name: item.production_status_name,
+    code: item.production_status_code,
   }));
 
   return {

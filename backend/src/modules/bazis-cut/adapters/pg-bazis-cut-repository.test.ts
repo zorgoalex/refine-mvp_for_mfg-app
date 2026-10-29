@@ -254,6 +254,7 @@ describe('PgBazisCutRepository security and event contract', () => {
     let outboxPayload: Record<string, unknown> | undefined;
     const tx = { query: vi.fn(async (sql: string, params?: readonly unknown[]) => {
       if (sql.includes('INSERT INTO command_idempotency_keys')) return result([{ idempotency_key: 'remove-key-123' }], 1);
+      if (sql.includes('source_order_detail_id AS id FROM bazis_cut_set_details')) return result([{ id: '40' }]);
       if (sql.includes('FROM bazis_cut_sets') && sql.includes('FOR UPDATE')) return result([setRow(2)]);
       if (sql.includes('FROM bazis_cut_set_details') && sql.includes('FOR UPDATE')) return result([detailRow()]);
       if (sql.includes('SELECT * FROM bazis_cut_sets WHERE')) return result([setRow(3)]);

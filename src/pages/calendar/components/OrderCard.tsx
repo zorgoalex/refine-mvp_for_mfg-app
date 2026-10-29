@@ -276,8 +276,9 @@ const OrderCard: React.FC<OrderCardProps> = ({
   // Получаем материалы из order_details с сокращенными именами (исключая МДФ 16мм)
   const materials = getMaterialsForCard(order.order_details, true);
 
-  // Пройденные этапы производства из production_status_events
+  // Letters of passed production stages (backend projection)
   const passedProductionCodes = order.passedProductionCodes || [];
+  const manualProductionCodes = order.manualProductionCodes || [];
 
   // Цвет номера заказа: коричневый для "К", синий для остальных
   const orderNumberColor = order.order_name?.startsWith('К') ? '#8B4513' : '#1976d2';
@@ -400,6 +401,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
             {passedProductionCodes.length > 0 ? (
               <ProductionStagesDisplay
                 passedCodes={passedProductionCodes}
+                manualCodes={manualProductionCodes}
                 displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
                 codeToLetter={productionWorkflowDisplay?.codeToLetter}
                 codeToName={productionWorkflowDisplay?.codeToName}
@@ -515,6 +517,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
           >
             <ProductionStagesDisplay
               passedCodes={passedProductionCodes}
+              manualCodes={manualProductionCodes}
               displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
               codeToLetter={productionWorkflowDisplay?.codeToLetter}
               codeToName={productionWorkflowDisplay?.codeToName}

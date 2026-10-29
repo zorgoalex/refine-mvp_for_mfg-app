@@ -1,4 +1,5 @@
 import { Table } from '../../ui/tooltipDelay';
+import { notifyDetailStageWarnings } from '../../utils/detailStageWarnings';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Col, DatePicker, Empty, Modal, Row, Select, Space, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -260,6 +261,7 @@ export const BazisCutPickerModal: React.FC<BazisCutPickerModalProps> = ({
           .map((detail) => ({ detailId: detail.detailId, selectionToken: detail.selectionToken })),
       }, { idempotencyKey: commandKeyRef.current });
       commandKeyRef.current = null;
+      notifyDetailStageWarnings(result.warnings);
       message.success(`Создан набор ${result.set.name}`);
       await onCreated(result.set.bazisCutSetId);
     } catch (createError) {
