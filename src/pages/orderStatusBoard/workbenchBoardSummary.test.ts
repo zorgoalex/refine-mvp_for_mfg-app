@@ -20,7 +20,7 @@ const column = (name: string, cards: OrderStatusBoardCard[], total = cards.lengt
 });
 
 describe('board summary', () => {
-  it('order board: in work before «Выдан», overdue, ready for issue', () => {
+  it('order board: in work before «Готов к выдаче» / «Выдан», overdue, ready for issue', () => {
     const items = boardSummary('order', [
       column('В работе', [card({ pastPlannedDate: true }), card()], 2),
       column('Готов к выдаче', [card()], 1),
@@ -28,7 +28,7 @@ describe('board summary', () => {
       column('Пусто', []),
     ]);
     expect(items.map((item) => [item.label, item.value, item.tone])).toEqual([
-      ['в работе', '3', undefined],
+      ['в работе', '2', undefined],
       ['просрочено', '2', 'danger'],
       ['готовы к выдаче', '1', 'success'],
     ]);

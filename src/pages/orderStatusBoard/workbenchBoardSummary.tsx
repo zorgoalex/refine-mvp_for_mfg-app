@@ -27,9 +27,11 @@ export function boardSummary(board: OrderStatusBoardType, columns: readonly Orde
   const overduePartial = columns.some(partial);
   const items: BoardSummaryItem[] = [];
   if (board === 'order') {
-    // a column with orders has its first page loaded: the status of its cards tells «issued or later»
+    // a column with orders has its first page loaded: the status of its cards tells «issued or later»;
+    // «готовы к выдаче» are counted on their own, not again «в работе»
     const inWork = columns
-      .filter((column) => column.cards.length > 0 && !column.cards[0].orderStatusIssuedOrLater)
+      .filter((column) => column.cards.length > 0 && !column.cards[0].orderStatusIssuedOrLater
+        && column.status.name !== READY_STATUS_NAME)
       .reduce((sum, column) => sum + column.total, 0);
     items.push({ key: 'inWork', label: 'в работе', value: String(inWork) });
   } else {
