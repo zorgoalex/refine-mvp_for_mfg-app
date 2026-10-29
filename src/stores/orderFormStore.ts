@@ -958,7 +958,7 @@ const createOrderDraftStore = (orderKey: string, namespace: string): OrderDraftS
       {
         name: storageKey,
         storage: createJSONStorage(() => sessionStorage),
-        version: 3, // Increment to force migration from old storage
+        version: ORDER_DRAFT_STORAGE_VERSION, // Increment to force migration from old storage
         // Only persist essential data for draft recovery
         partialize: (state) => ({
           header: state.header,
@@ -975,15 +975,7 @@ const createOrderDraftStore = (orderKey: string, namespace: string): OrderDraftS
           // Do not persist originals to local storage
         }),
         // Migrate old storage versions
-        migrate: (persistedState: any, version: number) => {
-          // Fix priority default value (always check, regardless of version)
-          if (persistedState?.header) {
-            if (!persistedState.header.priority || persistedState.header.priority < 1) {
-              persistedState.header.priority = 100;
-            }
-          }
-          return persistedState;
-        },
+        migrate: migrateOrderDraftState,
         // Merge persisted state with initial state, ensuring defaults
         merge: (persistedState: any, currentState) => ({
           ...currentState,
@@ -1029,6 +1021,27 @@ export function syncBazisProjectNameInDrafts(projectId: number, name: string, na
       originalDetails: Object.fromEntries(Object.entries(state.originalDetails).map(([id, detail]) => [id, update(detail)])),
     });
   }
+}
+
+/**
+ * 4: «Менеджер» holds an ERP user id (orders.manager.change). Drafts of the former form (≤ 3) could hold an employee id
+ * there, so their manager is dropped on restore: the save then keeps the order's stored manager (new order — the
+ * current user) instead of sending the employee id as a user.
+ */
+export const ORDER_DRAFT_STORAGE_VERSION = 4;
+
+export function migrateOrderDraftState(persistedState: any, version: number) {
+  // Fix priority default value (always check, regardless of version)
+  if (persistedState?.header) {
+    if (!persistedState.header.priority || persistedState.header.priority < 1) {
+      persistedState.header.priority = 100;
+    }
+    if (version < 4) {
+      delete persistedState.header.manager_id;
+      delete persistedState.header.manager_name;
+    }
+  }
+  return persistedState;
 }
 
 export const NEW_ORDER_KEY = 'new';
