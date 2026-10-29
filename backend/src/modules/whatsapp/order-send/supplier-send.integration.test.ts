@@ -478,11 +478,13 @@ describe.skipIf(!databaseUrl)('supplier request to WhatsApp (PostgreSQL, isolate
       VALUES (104, 1, 'phone', '+7 701 555 04 04', '77015550404', false, 99, 'onec', 7, date_trunc('milliseconds', now()), now())`);
     try {
       const requestId = await makeRequest();
-      // No 1C state at all (the module is not installed): nothing of 1C is offered.
-      expect((await service.menu(requestId, admin)).contacts.map((contact) => contact.contactId)).toEqual([101, 102]);
+      // The 1C state table is created in the test schema before the first read: with search_path "<schema>",public a
+      // database whose public schema has its own onec_etl_entity_state (e.g. the stage DB) would otherwise be read, and
+      // plpgsql keeps that plan for the session. No state row for the set: nothing of 1C is offered.
       await q(`CREATE TABLE onec_etl_entity_state(source_id bigint NOT NULL, entity_code text NOT NULL, revoked_at timestamptz, snapshot_version timestamptz,
-        PRIMARY KEY (source_id, entity_code));
-        INSERT INTO onec_etl_entity_state SELECT 7, 'counterparty_contacts', NULL, onec_snapshot_version FROM supplier_contacts WHERE contact_id = 104`);
+        PRIMARY KEY (source_id, entity_code))`);
+      expect((await service.menu(requestId, admin)).contacts.map((contact) => contact.contactId)).toEqual([101, 102]);
+      await q(`INSERT INTO onec_etl_entity_state SELECT 7, 'counterparty_contacts', NULL, onec_snapshot_version FROM supplier_contacts WHERE contact_id = 104`);
       const menu = await service.menu(requestId, admin);
       expect(menu.contacts.map((contact) => contact.contactId)).toEqual([101, 102, 104]);
       await openGate();
