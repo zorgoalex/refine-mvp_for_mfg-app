@@ -603,4 +603,46 @@ describe.skipIf(!url)('1C incoming payments — slice B commands and guards, rea
       await orders.end();
     }
   });
+  it('scope first: an out-of-scope user learns nothing about a matched or «разобрано» line — 403 and a denial audit', async () => {
+    const s = await scenario({ createdBy: OWNER });
+    const matched = await match(s, undefined, 'sf');
+    const c = await card(s.lineId);
+    const strangerMatch = service.match(user(STRANGER, 'own'), s.lineId, {
+      paymentId: s.paymentId, expectedStateToken: c.line.stateToken, expectedPaymentToken: 'x',
+    }, req('sf-match'));
+    await expect(strangerMatch).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+    // No match id or state in the refusal (before: 200 «no change» with matchId, or ONEC_RECEIPT_ALREADY_MATCHED).
+    const error = await strangerMatch.catch((e: { details?: unknown }) => e);
+    expect(JSON.stringify((error as { details?: unknown }).details ?? {})).not.toContain(String(matched.matchId));
+    await expect(service.unmatch(user(STRANGER, 'own'), s.lineId, { expectedMatchId: matched.matchId! }, req('sf-unmatch')))
+      .rejects.toMatchObject({ statusCode: 403 });
+    const d = await scenario({ createdBy: OWNER });
+    await service.dismiss(user(), d.lineId, { expectedStateToken: (await line(d.lineId)).stateToken, note: 'разобрано' }, req('sf-d'));
+    await expect(service.dismiss(user(STRANGER, 'own'), d.lineId, { expectedStateToken: 'x', note: 'x' }, req('sf-dismiss')))
+      .rejects.toMatchObject({ statusCode: 403 });
+    for (const suffix of ['sf-match', 'sf-unmatch', 'sf-dismiss']) {
+      expect((await db.query(`SELECT event, status_code FROM audit_log WHERE request_id = $1`, [`${tag}-${suffix}`])).rows)
+        .toEqual([{ event: 'payments.onec_denied', status_code: 'scope' }]);
+    }
+    expect((await line(s.lineId)).state).toBe('matched');
+    expect((await line(d.lineId)).state).toBe('dismissed');
+  });
+
+  it('unlink with scope «own»: back to an own order passes; back to a foreign one is denied', async () => {
+    // own → own: the rule order and the linked order both belong to the stranger.
+    const s = await scenario({ createdBy: STRANGER });
+    const other = await erpOrder(number(), STRANGER);
+    const stranger = user(STRANGER, 'own');
+    await service.link(stranger, s.lineId, { expectedStateToken: (await line(s.lineId)).stateToken, orderId: other }, req('uo-link'));
+    expect((await line(s.lineId)).erpOrder).toMatchObject({ orderId: other, linkOrigin: 'manual' });
+    const back = await service.unlink(stranger, s.lineId, { expectedStateToken: (await line(s.lineId)).stateToken }, req('uo-unlink'));
+    expect(back.line).toMatchObject({ erpOrder: { orderId: s.orderId, linkOrigin: 'rule' } });
+    // own → foreign: the rule order is the owner's; the stranger may not move the receipt there.
+    const f = await scenario({ createdBy: OWNER });
+    const mine = await erpOrder(number(), STRANGER);
+    await service.link(user(), f.lineId, { expectedStateToken: (await line(f.lineId)).stateToken, orderId: mine }, req('uf-link'));
+    await expect(service.unlink(stranger, f.lineId, { expectedStateToken: (await line(f.lineId)).stateToken }, req('uf-unlink')))
+      .rejects.toMatchObject({ statusCode: 403 });
+    expect((await line(f.lineId)).erpOrder).toMatchObject({ orderId: mine, linkOrigin: 'manual' });
+  });
 });
