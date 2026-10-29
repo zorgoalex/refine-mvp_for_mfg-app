@@ -444,7 +444,8 @@ export class PgOrderDeadlineSync implements OrderDeadlineSyncPort {
         responsible_user_id, deadline_at, status, source, metadata_json,
         created_by_user_id, updated_by_user_id, idempotency_key
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, 'active', 'recalculated', $8::jsonb, $9, $9, $10)
+      -- The client is the order's at this statement (a copy; a merge of clients may have moved the order since it was read).
+      VALUES ($1, $2, $3, $4, COALESCE((SELECT o.client_id FROM orders o WHERE o.order_id = $3::bigint), $5::bigint), $6, $7::timestamptz, 'active', 'recalculated', $8::jsonb, $9, $9, $10)
       RETURNING *
       `,
       [

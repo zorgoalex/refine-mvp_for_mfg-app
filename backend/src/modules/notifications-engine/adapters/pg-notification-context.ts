@@ -76,7 +76,8 @@ export class PgNotificationContextBuilder implements NotificationContextBuilderP
       const row = result.rows[0];
       if (row) {
         orderStatusId = orderStatusId ?? toNullableNumber(row.order_status_id);
-        clientId = clientId ?? toNullableNumber(row.client_id);
+        // The order's client first: a client copied into an event (a deadline) may be older than a merge of clients.
+        clientId = toNullableNumber(row.client_id) ?? clientId;
         isOrderCompleted = row.completion_date != null;
       }
     }

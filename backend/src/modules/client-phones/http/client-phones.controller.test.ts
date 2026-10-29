@@ -74,7 +74,20 @@ describe('ClientPhonesController', () => {
   });
 });
 
-function createController(input: { flags: { clientPhonesEnabled: boolean } }) {
+describe('the owner of a phone while merges of clients are on', () => {
+  it('a change or a delete without the client of the form is refused before the service; with it, or with merges off, it goes on', async () => {
+    const on = createController({ flags: { clientPhonesEnabled: true, ownerRequired: true } });
+    await expect(on.update(request() as never, '10', { phoneType: 'work', idempotencyKey: 'client-phone-update-test' })).rejects.toMatchObject({ statusCode: 422 });
+    await expect(on.delete(request() as never, '10', { idempotencyKey: 'client-phone-delete-test' })).rejects.toMatchObject({ statusCode: 422 });
+    // With the client, the service is reached (the test service throws its own error).
+    await expect(on.delete(request() as never, '10', { idempotencyKey: 'client-phone-delete-test', clientId: 1 })).rejects.toThrow('delete should not be called');
+    await expect(on.update(request() as never, '10', { clientId: 1, phoneType: 'work', idempotencyKey: 'client-phone-update-test' })).rejects.toThrow('update should not be called');
+    const off = createController({ flags: { clientPhonesEnabled: true, ownerRequired: false } });
+    await expect(off.delete(request() as never, '10', { idempotencyKey: 'client-phone-delete-test' })).rejects.toThrow('delete should not be called');
+  });
+});
+
+function createController(input: { flags: { clientPhonesEnabled: boolean; ownerRequired?: boolean } }) {
   const service = {
     create: async () => {
       throw new Error('create should not be called');

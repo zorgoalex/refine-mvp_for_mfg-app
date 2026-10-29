@@ -42,6 +42,14 @@ import type {
   UpsertDeadlineOrderOverrideCommand,
 } from '../application/deadline.types';
 
+/**
+ * The client of a deadline (or its event) of an order is the order's client at the moment of the statement — a copy,
+ * never a value of the caller (a merge of clients may have moved the order since the caller read it). An ordinary read:
+ * no lock of the order inside the deadline paths. Without an order — the given client.
+ */
+const CLIENT_OF_ORDER = (orderParam: string, clientParam: string) =>
+  `COALESCE((SELECT o.client_id FROM orders o WHERE o.order_id = ${orderParam}::bigint), ${clientParam}::bigint)`;
+
 export interface DeadlineRow {
   deadline_id: string;
   policy_id: string | null;
@@ -500,7 +508,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
         responsible_user_id, deadline_at, source, metadata_json,
         created_by_user_id, updated_by_user_id, idempotency_key
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8, $9::jsonb, $10, $10, $11)
+      VALUES ($1, $2, $3, $4, ${CLIENT_OF_ORDER('$3', '$5')}, $6, $7::timestamptz, $8, $9::jsonb, $10, $10, $11)
       ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE
       SET idempotency_key = deadline_instances.idempotency_key
       RETURNING ${DEADLINE_COLUMNS}
@@ -584,7 +592,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
       )
       VALUES (
         $1, $2, $3, $4, $5,
-        $6, $7, $8, $9, $10,
+        $6, $7, $8, ${CLIENT_OF_ORDER('$7', '$9')}, $10,
         $11::timestamptz, 'active', 'manual', true, $12::jsonb,
         $13::jsonb, $14, $15, $15, $16
       )
@@ -995,7 +1003,7 @@ export class PgDeadlineRepository implements DeadlineRepositoryPort {
         order_workshop_id, client_id, deadline_at, event_at, delay_minutes, payload_json,
         idempotency_key
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz, $10::timestamptz, $11, $12::jsonb, $13)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, ${CLIENT_OF_ORDER('$6', '$8')}, $9::timestamptz, $10::timestamptz, $11, $12::jsonb, $13)
       ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE
       SET idempotency_key = deadline_events.idempotency_key
       RETURNING ${EVENT_COLUMNS}, (xmax = 0) AS was_inserted

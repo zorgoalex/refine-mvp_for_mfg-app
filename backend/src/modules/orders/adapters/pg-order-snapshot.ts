@@ -442,7 +442,7 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
             snapshotImportAuditEvent(result.status),
             command.currentUser,
             result.orderId,
-            null,
+            result.orderId ? await localOrderClient(tx, result.orderId) : null,
             {
               requestId: command.requestId,
               payloadHash,
@@ -479,7 +479,8 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
           snapshotImportAuditEvent(result.status),
           command.currentUser,
           result.orderId,
-          null, // relatedClientId unavailable before payload build; local clientId not returned from importSnapshotInTransaction
+          // The local client of the imported order (after a merge of clients, the survivor).
+          result.orderId ? await localOrderClient(tx, result.orderId) : null,
           {
             requestId: command.requestId,
             payloadHash,
@@ -1350,7 +1351,9 @@ async function importSnapshotInTransaction(
   const orderId = await upsertOrderHeader(tx, snapshot, clientId, payloadHash, command);
   if (restoresRounds) await tx.query("SELECT set_config('erp.rework_command', '', true)");
   await restoreSnapshotOrderRound(tx, snapshot, orderId);
-  await upsertClientPhones(tx, snapshot, clientId, orderId, payloadHash);
+  // The phones of a snapshot describe its own client: a client merged into another one keeps none (its phones were moved or
+  // dropped as duplicates by the merge), and the survivor's phones are not rewritten from the merged client's snapshot.
+  if (!(await isMergedSnapshotClient(tx, snapshot))) await upsertClientPhones(tx, snapshot, clientId, orderId, payloadHash);
   // An existing doweling order is overwritten only under the doweling rule of the order save (doweling-write-guard.ts).
   const guardDowelingOrders = (dowelingOrderIds: number[]) =>
     assertDowelingOrdersWritable({
@@ -1414,6 +1417,10 @@ export async function upsertClient(
 
   if (mapped) {
     const clientId = Number(mapped.local_entity_id);
+    // A client merged into another one stays mapped (an undo of the merge needs it) but is never written again: the
+    // order goes to the client it lives on in, which the snapshot does not describe.
+    const survivorId = await mergedInto(tx, clientId);
+    if (survivorId !== null) return survivorId;
     // The link to a 1C counterparty (clients.ref_key_1c) is never written by an import: it is set, replaced and
     // removed only by the audited command of the client card; a snapshot key would silently bring an old link back.
     await tx.query(
@@ -1439,7 +1446,24 @@ export async function upsertClient(
   if (byName !== null) await tx.query('SELECT 1 FROM clients WHERE client_id = $1 FOR NO KEY UPDATE', [byName]);
   const clientId = byName ?? await insertClient(tx, client);
   await upsertMap(tx, { source, entityType: SNAPSHOT_ENTITY_TYPES.client, sourceId: client.sourceId, localId: String(clientId), localOrderId: null, payloadHash });
-  return clientId;
+  return (await mergedInto(tx, clientId)) ?? clientId;
+}
+
+async function localOrderClient(tx: TransactionClient, orderId: number): Promise<number | null> {
+  const row = (await tx.query<{ client_id: string | null }>('SELECT client_id FROM orders WHERE order_id = $1', [orderId])).rows[0];
+  return row?.client_id ? Number(row.client_id) : null;
+}
+
+/** The snapshot's client was mapped (or matched) to a client merged into another one. */
+async function isMergedSnapshotClient(tx: TransactionClient, snapshot: OrderSnapshotDto): Promise<boolean> {
+  const mapped = await getMap(tx, snapshot.source.sourceInstanceId, SNAPSHOT_ENTITY_TYPES.client, snapshot.data.client.sourceId);
+  return mapped ? (await mergedInto(tx, Number(mapped.local_entity_id))) !== null : false;
+}
+
+/** The client a merged client lives on in (`client_merge_redirects`, always the last one), or null. */
+async function mergedInto(tx: TransactionClient, clientId: number): Promise<number | null> {
+  const row = (await tx.query<{ survivor_id: string }>('SELECT survivor_id FROM client_merge_redirects WHERE merged_client_id = $1', [clientId])).rows[0];
+  return row ? Number(row.survivor_id) : null;
 }
 
 async function upsertOrderHeader(
@@ -2438,7 +2462,7 @@ async function insertDeadlineInstance(
     )
     VALUES (
       $1::uuid, $2::uuid, $3, $4, $5,
-      $6, $7, $8, $9, $10,
+      $6, $7, $8, COALESCE((SELECT o.client_id FROM orders o WHERE o.order_id = $7::bigint), $9::bigint), $10,
       $11, $12, $13, $14, $15::jsonb,
       $16::jsonb, $17, $18, $19, $20,
       $21, $22, COALESCE($23::timestamptz, now()), COALESCE($24::timestamptz, now())
@@ -2467,7 +2491,7 @@ async function updateDeadlineInstance(
         parent_entity_id = $7,
         order_id = $8,
         order_workshop_id = $9,
-        client_id = $10,
+        client_id = COALESCE((SELECT o.client_id FROM orders o WHERE o.order_id = $8::bigint), $10::bigint),
         responsible_user_id = $11,
         deadline_at = $12,
         status = $13,
@@ -2489,6 +2513,8 @@ async function updateDeadlineInstance(
   return deadlineId;
 }
 
+// The client of an imported deadline (and event) is the local order's client in the statement (raw.client_id is only a
+// fallback): the order may live on another client after a merge of clients.
 function deadlineInstanceValues(orderId: number, raw: Record<string, unknown>) {
   return [
     nullableUuid(raw.policy_id),
@@ -2533,7 +2559,7 @@ async function insertDeadlineEvent(
     )
     VALUES (
       $1::uuid, $2, $3, $4, $5, $6,
-      $7, $8, $9, $10, $11,
+      $7, COALESCE((SELECT o.client_id FROM orders o WHERE o.order_id = $6::bigint), $8::bigint), $9, $10, $11,
       $12::jsonb, COALESCE($13::timestamptz, now())
     )
     RETURNING deadline_event_id::text AS id
@@ -2560,7 +2586,7 @@ async function updateDeadlineEvent(
         entity_id = $6,
         order_id = $7,
         order_workshop_id = $8,
-        client_id = $9,
+        client_id = COALESCE((SELECT o.client_id FROM orders o WHERE o.order_id = $7::bigint), $9::bigint),
         deadline_at = $10,
         event_at = $11,
         delay_minutes = $12,

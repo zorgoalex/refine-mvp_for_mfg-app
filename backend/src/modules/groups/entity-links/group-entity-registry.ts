@@ -55,6 +55,8 @@ export const GROUP_ENTITY_REGISTRY = {
         SELECT client_id::text AS entity_id, COALESCE(client_name, client_id::text) AS display_label
         FROM public.clients
         WHERE client_id = $1::bigint
+          -- A client merged into another one is not linked any more (link the client it lives on in).
+          AND NOT EXISTS (SELECT 1 FROM public.client_merge_redirects r WHERE r.merged_client_id = clients.client_id)
         FOR KEY SHARE
       `,
       values: [entityId],

@@ -17,6 +17,9 @@ import { CLIENT_CONTACTS } from "../../components/contacts/partyContactsSources"
 import { can } from "../../utils/permissions";
 import { ClientPhone } from "../../types/clients";
 import { useState, useEffect, useCallback } from "react";
+import { useClientMergeHistory } from "./useClientMergeHistory";
+import { MergedClientBanner } from "./MergedClientBanner";
+import { saveErrorDescription } from "./clientMergesModel";
 
 export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
   const { formProps, saveButtonProps, id } = useForm({
@@ -25,6 +28,7 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
     redirect: false,
   });
 
+  const { history: mergeHistory } = useClientMergeHistory(Number(id) || null);
   const [phones, setPhones] = useState<ClientPhone[]>([]);
   const [deletedPhones, setDeletedPhones] = useState<number[]>([]);
   const [phonesLoaded, setPhonesLoaded] = useState(false);
@@ -71,7 +75,8 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
       await deletePhone({
         resource: "client_phones",
         id: phoneId,
-        meta: { idColumnName: "phone_id" },
+        // The client of this form: the backend refuses the delete when the phone lives at another client now.
+        meta: { idColumnName: "phone_id", clientId },
       });
     }
 
@@ -123,7 +128,7 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
     } catch (error: any) {
       notification.error({
         message: "Ошибка сохранения клиента или телефонов",
-        description: error?.message || "Неизвестная ошибка",
+        description: saveErrorDescription(error?.message),
       });
     } finally {
       setIsSaving(false);
@@ -138,6 +143,7 @@ export const ClientEdit: React.FC<IResourceComponentsProps> = () => {
         disabled: isSaving || saveButtonProps.disabled,
       }}
     >
+      <MergedClientBanner history={mergeHistory} clientId={Number(id) || null} />
       <Form {...formProps} layout="vertical" onFinish={handleFinish}>
         <Form.Item
           label="Название клиента"

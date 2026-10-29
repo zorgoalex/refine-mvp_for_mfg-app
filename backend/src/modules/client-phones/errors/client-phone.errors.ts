@@ -29,6 +29,12 @@ export class ClientPhoneRefKeyDuplicateError extends ApiError {
   }
 }
 
+export class ClientPhoneOwnerChangedError extends ApiError {
+  constructor(phoneId: number, currentClientId: number, expectedClientId: number) {
+    super(409, 'CLIENT_PHONE_OWNER_CHANGED', 'Телефон уже принадлежит другому клиенту; обновите карточку', { phoneId, currentClientId, expectedClientId });
+  }
+}
+
 export class ClientPhoneClientChangeUnsupportedError extends ApiError {
   constructor(phoneId: number, currentClientId: number, requestedClientId: number) {
     super(

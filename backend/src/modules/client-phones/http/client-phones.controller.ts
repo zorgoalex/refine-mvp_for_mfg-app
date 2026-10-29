@@ -70,6 +70,7 @@ const updateClientPhoneRequestSchema = z
 
 const deleteClientPhoneRequestSchema = z.object({
   idempotencyKey: idempotencyKeySchema,
+  clientId: z.number().int().positive().optional(),
 });
 
 const phoneTypeSwaggerSchema = { type: 'string', enum: ['mobile', 'work', 'home', 'fax'] } as const;
@@ -108,7 +109,7 @@ const updateClientPhoneRequestSwaggerSchema = {
   type: 'object',
   required: ['idempotencyKey'],
   properties: {
-    clientId: { type: 'integer' },
+    clientId: { type: 'integer', description: 'The client the form showed the phone at; required while merges of clients are on' },
     phoneNumber: { type: 'string', minLength: 7, maxLength: 20 },
     phoneType: phoneTypeSwaggerSchema,
     isPrimary: { type: 'boolean' },
@@ -122,6 +123,7 @@ const deleteClientPhoneRequestSwaggerSchema = {
   required: ['idempotencyKey'],
   properties: {
     idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 },
+    clientId: { type: 'integer', minimum: 1, description: 'The client the form showed the phone at; required while merges of clients are on' },
   },
 } as const;
 
@@ -204,7 +206,7 @@ export class ClientPhonesController {
     return this.clientPhones.update({
       currentUser: this.requireCurrentUser(request),
       phoneId: parseClientPhoneId(phoneIdParam),
-      dto: parseUpdateClientPhoneRequest(body),
+      dto: requireOwnerWhenMerging(parseUpdateClientPhoneRequest(body), this.runtimeConfig.getFeatureFlags().ownerRequired),
       requestId: request.requestId,
     });
   }
@@ -232,7 +234,7 @@ export class ClientPhonesController {
     return this.clientPhones.delete({
       currentUser: this.requireCurrentUser(request),
       phoneId: parseClientPhoneId(phoneIdParam),
-      dto: parseDeleteClientPhoneRequest(body),
+      dto: requireOwnerWhenMerging(parseDeleteClientPhoneRequest(body), this.runtimeConfig.getFeatureFlags().ownerRequired),
       requestId: request.requestId,
     });
   }
@@ -291,6 +293,20 @@ export function parseDeleteClientPhoneRequest(body: unknown): DeleteClientPhoneR
   }
 
   return parsed.data;
+}
+
+/**
+ * While merges of clients are on, a change or a delete must name the client the form showed the phone at (an update with
+ * another client is refused, a delete — CLIENT_PHONE_OWNER_CHANGED): without it a form opened before a merge could change
+ * or remove a phone that lives at another client now.
+ */
+function requireOwnerWhenMerging<T extends { clientId?: number }>(dto: T, required: boolean): T {
+  if (required && dto.clientId === undefined) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Client phone payload validation failed', {
+      errors: [{ field: 'clientId', message: 'Required while merges of clients are on' }],
+    });
+  }
+  return dto;
 }
 
 function clientPhoneValidationError(error: z.ZodError): ApiError {

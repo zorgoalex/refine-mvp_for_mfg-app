@@ -383,6 +383,21 @@ export const apiRoutes = {
     configuration: backendApiPath('/message-processing/configuration'),
     test: backendApiPath('/message-processing/test'),
   },
+  integrationDuplicates: {
+    list: backendApiPath('/integration-duplicates'),
+    rules: backendApiPath('/integration-duplicates/rules'),
+    detail: (caseId: number) => backendApiPath(`/integration-duplicates/${caseId}`),
+    command: (caseId: number, action: 'dismiss' | 'external' | 'reopen') =>
+      backendApiPath(`/integration-duplicates/${caseId}/${action}`),
+  },
+  clientMerges: {
+    mergePreview: (caseId: number) => backendApiPath(`/integration-duplicates/${caseId}/merge-preview`),
+    merge: (caseId: number) => backendApiPath(`/integration-duplicates/${caseId}/merge`),
+    list: backendApiPath('/client-merges'),
+    byId: (mergeId: number) => backendApiPath(`/client-merges/${mergeId}`),
+    undoPreview: (mergeId: number) => backendApiPath(`/client-merges/${mergeId}/undo-preview`),
+    undo: (mergeId: number) => backendApiPath(`/client-merges/${mergeId}/undo`),
+  },
   employees: {
     contacts: (employeeId: number) => backendApiPath(`/employees/${employeeId}/contacts`),
     contactsList: backendApiPath('/employee-contacts'),

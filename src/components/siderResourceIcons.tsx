@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   AimOutlined,
+  ApiOutlined,
   ApartmentOutlined,
   AppstoreOutlined,
   ArrowsAltOutlined,
@@ -96,4 +97,5 @@ export const SIDER_RESOURCE_ICONS: Record<string, React.ReactNode> = {
   configuration: <SettingOutlined />,
   audit: <AuditOutlined />,
   sheet_material_types: <BorderOutlined />,
+  integrations: <ApiOutlined />,
 };

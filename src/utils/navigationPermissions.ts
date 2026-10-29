@@ -81,6 +81,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   audit: ['audit.view'],
   onec: ['onec.view', 'onec.manage', 'onec.commands.send'],
   'inbound-signals': ['message_signals.view'],
+  integrations: ['integrations.duplicates.view'],
   'cut-jobs': ['cut.view'],
   cad: ['cad.view'],
   'bazis-cut-sets': ['cut.view'],
