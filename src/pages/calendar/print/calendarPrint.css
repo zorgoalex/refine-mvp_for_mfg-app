@@ -1,0 +1,264 @@
+/* «NewLine»: printed production calendar. Paper colours (white sheet, dark text) in any theme; status and material
+   colours as on screen. The same markup is the preview in the dialog and the printed sheet in <body>. */
+
+.wb-cal-print {
+  color: #1d2433;
+  font-family: Inter, Arial, sans-serif;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+.wb-cal-print__sheet {
+  box-sizing: border-box;
+  width: var(--wb-print-width, 281mm);
+  background: #fff;
+}
+
+.wb-cal-print__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1mm 4mm;
+  margin-bottom: 2.5mm;
+  font-size: 9pt;
+}
+
+.wb-cal-print__header b {
+  font-size: 12pt;
+}
+
+.wb-cal-print__filters {
+  color: #5b6474;
+}
+
+.wb-cal-print__stamp {
+  margin-left: auto;
+  color: #5b6474;
+}
+
+.wb-cal-print__week {
+  width: 100%;
+  margin-bottom: 3mm;
+  border-collapse: separate;
+  border-spacing: 1.2mm 0;
+  table-layout: fixed;
+}
+
+.wb-cal-print__week caption {
+  padding: 0 0 1mm 1.2mm;
+  color: #5b6474;
+  font-size: 8pt;
+  font-weight: 600;
+  text-align: left;
+}
+
+.wb-cal-print__week thead {
+  display: table-header-group;
+}
+
+.wb-cal-print__week th {
+  padding: 1.2mm 1.5mm;
+  border: 0.25mm solid #d6dbe4;
+  border-bottom: 0;
+  border-radius: 1.5mm 1.5mm 0 0;
+  background: #f4f6f9;
+  font-weight: 400;
+  text-align: left;
+  vertical-align: top;
+}
+
+.wb-cal-print__week th[data-weekend] {
+  background: #eceff3;
+}
+
+.wb-cal-print__week th[data-today] {
+  border-color: #2f6fed;
+  box-shadow: inset 0 0.6mm 0 #2f6fed;
+}
+
+.wb-cal-print__day {
+  display: block;
+  font-size: 8.5pt;
+}
+
+.wb-cal-print__day b {
+  font-size: 10pt;
+}
+
+.wb-cal-print__load {
+  display: block;
+  color: #5b6474;
+  font-size: 7.5pt;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-cal-print__week td {
+  padding: 1mm;
+  border: 0.25mm solid #d6dbe4;
+  border-top: 0;
+  vertical-align: top;
+}
+
+.wb-cal-print__week td[data-weekend] {
+  background: #f7f8fa;
+}
+
+.wb-cal-print__card {
+  margin-bottom: 1mm;
+  padding: 0.9mm 1.2mm 0.9mm 1.8mm;
+  border: 0.25mm solid #d6dbe4;
+  border-left: 1.2mm solid var(--wb-print-stripe, #8c8c8c);
+  border-radius: 1mm;
+  background: #fff;
+  font-size: 7.5pt;
+  line-height: 1.25;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.wb-cal-print__card[data-ready] {
+  outline: 0.4mm solid #389e0d;
+}
+
+.wb-cal-print__card[data-issued] {
+  outline: 0.4mm solid #8b4513;
+}
+
+.wb-cal-print__card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1mm;
+}
+
+.wb-cal-print__number {
+  overflow: hidden;
+  color: #1976d2;
+  font-size: 9pt;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-cal-print__number span {
+  color: #5b6474;
+  font-size: 7.5pt;
+  font-weight: 400;
+}
+
+.wb-cal-print__number--k {
+  color: #8b4513;
+}
+
+.wb-cal-print__area {
+  flex: none;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-cal-print__client {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-cal-print__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6mm 1mm;
+  margin-top: 0.4mm;
+  color: #5b6474;
+}
+
+.wb-cal-print__facts i {
+  padding: 0 1mm;
+  border-radius: 0.8mm;
+  background: color-mix(in srgb, var(--wb-material, #8c8c8c) 18%, #fff);
+  box-shadow: inset 0.6mm 0 0 var(--wb-material, #8c8c8c);
+  color: #1d2433;
+  font-style: normal;
+}
+
+.wb-cal-print__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1mm;
+  margin-top: 0.4mm;
+}
+
+.wb-cal-print__payment {
+  color: #5b6474;
+  white-space: nowrap;
+}
+
+.wb-cal-print__payment--danger {
+  color: #cf1322;
+}
+
+/* --- предпросмотр в окне: листы в уменьшенном виде --- */
+.wb-cal-print-dialog__options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.wb-cal-print-dialog__summary {
+  color: var(--evo-text-secondary, #5b6474);
+}
+
+.wb-cal-print-dialog__hint {
+  margin: 8px 0 12px;
+  color: var(--evo-text-secondary, #5b6474);
+  font-size: 12.5px;
+}
+
+.wb-cal-print--preview {
+  max-height: 60vh;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: #e9ecf1;
+}
+
+.wb-cal-print--preview .wb-cal-print__sheet {
+  margin-bottom: 12px;
+  padding: 8mm;
+  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.18);
+  box-sizing: content-box;
+  zoom: 0.62;
+}
+
+/* --- бумага: только печатаемый лист, остальная страница скрыта --- */
+.wb-cal-print--paper {
+  display: none;
+}
+
+@media print {
+  html.wb-cal-printing,
+  html.wb-cal-printing body {
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  html.wb-cal-printing body > :not(.wb-cal-print--paper) {
+    display: none !important;
+  }
+
+  html.wb-cal-printing body > .wb-cal-print--paper {
+    display: block !important;
+  }
+
+  .wb-cal-print--paper .wb-cal-print__sheet {
+    width: auto;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .wb-cal-print--paper .wb-cal-print__sheet:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+}

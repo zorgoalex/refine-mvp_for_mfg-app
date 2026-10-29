@@ -29,6 +29,7 @@ import OrderContextMenu from './OrderContextMenu';
 import DayContextMenu from './DayContextMenu';
 import { useCalendarDays } from '../hooks/useCalendarDays';
 import { useCalendarData } from '../hooks/useCalendarData';
+import { CalendarPrintButton } from '../print/CalendarPrint';
 import { useOrderMove } from '../hooks/useOrderMove';
 import { useOrderStatuses } from '../hooks/useOrderStatuses';
 import { useOrderStatusUpdate } from '../hooks/useOrderStatusUpdate';
@@ -998,6 +999,16 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
                 </Button>
               </Badge>
             ) : null}
+            <CalendarPrintButton
+              weeks={workbenchWeeks}
+              ordersOf={visibleOrdersOf}
+              periodLabel={periodLabel}
+              filters={filters}
+              productionOnly={productionOnly}
+              showFinancials={canViewFinancials}
+              productionWorkflowDisplay={productionWorkflowDisplay}
+              disabled={isLoading || workbenchWeeks.length === 0}
+            />
             <Tooltip title="Обновить данные">
               <Button aria-label="Обновить" icon={<ReloadOutlined />} onClick={() => refetch()} loading={isLoading || isMoving} />
             </Tooltip>

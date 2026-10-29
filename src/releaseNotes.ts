@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-29", title: "Печать производственного календаря (NewLine)",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "NewLine: кнопка «Печать» в календаре — недели периода на экране с теми же фильтрами, A4 (неделя на лист) или A3 (две недели), предпросмотр перед печатью; в окне печати браузера можно сохранить PDF.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-29", title: "Видимость отдельных вкладок «Конфигурации»",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
