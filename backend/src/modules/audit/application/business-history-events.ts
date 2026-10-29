@@ -122,6 +122,9 @@ export const PAYMENT_HISTORY_PREDICATE =
 export const FINANCIAL_AUDIT_PREDICATE =
   `(${PAYMENT_HISTORY_PREDICATE}` +
   " OR audit_log.event = 'orders.payment_status_change'" +
+  // 1C receipts matching: matches carry 1C and payment amounts; order links name the order of a 1C payment.
+  " OR starts_with(COALESCE(audit_log.event, ''), 'payment.onec_')" +
+  " OR starts_with(COALESCE(audit_log.event, ''), 'order.onec_order_')" +
   " OR starts_with(COALESCE(audit_log.event, ''), 'crm_sync.payment_')" +
   // Bitrix24 payment imports, reconciles and widget commands carry amounts (e.g. activePaymentAmount).
   " OR ((starts_with(COALESCE(audit_log.event, ''), 'bitrix24.') OR starts_with(COALESCE(audit_log.event, ''), 'bitrix24_reverse.'))" +

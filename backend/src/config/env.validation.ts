@@ -500,6 +500,20 @@ export const envSchema = z
      */
     BACKEND_ONEC_PAYMENT_MATCHING_VIEW: booleanFromEnv.default(false),
     /**
+     * Commands of the «Поступления 1С» tab (slice B): manual match, unmatch, «разобрано», link of a 1C order. Needs
+     * the view flag. Off: the tab is read-only, and deleting a matched payment removes its match with the delete.
+     */
+    BACKEND_ONEC_PAYMENT_MATCHING_COMMANDS: booleanFromEnv.default(false),
+    /**
+     * Auto-match of 1C receipts with ERP payments (same order and amount, dates ≤ 3 days apart, unique on both sides):
+     * after loader passes, hourly and by the tab button. Needs the commands flag and the actor below; default off.
+     */
+    BACKEND_ONEC_PAYMENT_AUTO_MATCH: booleanFromEnv.default(false),
+    /** Author of automatic matches: the `onec_sync_service` service account (cannot sign in). Empty — auto-match off. */
+    BACKEND_ONEC_PAYMENT_MATCH_ACTOR_USER_ID: z
+      .union([emptyTrimmedStringFromEnv, z.coerce.number().int().positive()])
+      .optional(),
+    /**
      * Number series of the 1C customer orders that are ERP orders (`<series>-<order_name>`), e.g. «Ф25».
      * Letters and digits only; empty = the rule is off (only manual links resolve an ERP order).
      */
@@ -1136,6 +1150,13 @@ export const envSchema = z
         code: 'custom',
         path: ['BITRIX24_REQUEST_TIMEOUT_MS'],
         message: 'must be less than BACKEND_BITRIX24_SYNC_LEASE_MS',
+      });
+    }
+    if (env.BACKEND_ONEC_PAYMENT_AUTO_MATCH && !env.BACKEND_ONEC_PAYMENT_MATCH_ACTOR_USER_ID) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['BACKEND_ONEC_PAYMENT_MATCH_ACTOR_USER_ID'],
+        message: 'required when BACKEND_ONEC_PAYMENT_AUTO_MATCH=true',
       });
     }
     if (env.BACKEND_ENABLE_BITRIX24_REVERSE_SYNC) {

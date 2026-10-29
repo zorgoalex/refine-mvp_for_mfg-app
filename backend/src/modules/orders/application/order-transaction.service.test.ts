@@ -123,6 +123,8 @@ interface FakeState {
 
 class FakeOrderTransactions implements OrderTransactionManagerPort {
   calls: string[] = [];
+  /** 1C receipt match hooks (separate log: the call-order expectations predate them). */
+  readonly onecMatchHooks: Array<{ hook: 'release' | 'detect'; orderId?: number; ids?: number[]; requestId: string }> = [];
   lockedOrderNames: string[] = [];
   committed = 0;
   rolledBack = 0;
@@ -653,6 +655,14 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
       state.orders.set(orderId, { paidAmount, paymentStatusId: null, paymentStatusName: null });
     }
     return state;
+  }
+
+  async releaseOnecMatchesBeforePaymentDelete(ids: readonly number[], _currentUser: unknown, requestId: string): Promise<void> {
+    this.owner.onecMatchHooks.push({ hook: 'release', ids: [...ids], requestId });
+  }
+
+  async detectOnecMatchTransitions(orderId: number, _currentUser: unknown, requestId: string): Promise<void> {
+    this.owner.onecMatchHooks.push({ hook: 'detect', orderId, requestId });
   }
 
   async deletePayments(orderId: number, ids: readonly number[]): Promise<void> {
@@ -3810,6 +3820,11 @@ describe('OrderTransactionService', () => {
     expect(result.payments).toHaveLength(0);
     expect(transactions.state.orders.get(42)?.payments).toHaveLength(0);
     expect(transactions.calls).toContain('deletePayments');
+    // 1C receipt matches: released before the delete, re-checked after the save (plan 2026-10-04 §6–7).
+    expect(transactions.onecMatchHooks.map(({ hook, orderId, ids }) => ({ hook, orderId, ids }))).toEqual([
+      { hook: 'release', orderId: undefined, ids: [21] },
+      { hook: 'detect', orderId: 42, ids: undefined },
+    ]);
   });
 
   it('rejects top manager nested order-save payment deletion outside own order', async () => {

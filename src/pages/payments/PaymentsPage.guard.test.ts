@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-// Source-text guards (Vitest runs in node, no DOM): the «Поступления 1С» tab is gated and read-only in slice A.
+// Source-text guards (Vitest runs in node, no DOM): the «Поступления 1С» tab is gated; its writes are the slice B commands.
 const page = readFileSync(new URL('./PaymentsPage.tsx', import.meta.url), 'utf8');
 const tab = readFileSync(new URL('./OnecReceiptsTab.tsx', import.meta.url), 'utf8');
+const actions = readFileSync(new URL('./OnecReceiptActions.tsx', import.meta.url), 'utf8');
 const api = readFileSync(new URL('../../api/paymentsOnecApi.ts', import.meta.url), 'utf8');
 const app = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
 
@@ -18,12 +19,21 @@ describe('«Платежи → Поступления 1С» guards', () => {
     expect(app).toMatch(/<Route path="\/payments" element=\{<FinancialRoute><Outlet \/><\/FinancialRoute>\}>\s*<Route index element=\{<PaymentsPage \/>\} \/>/);
   });
 
-  it('reads only through the backend API and has no write calls in slice A', () => {
+  it('reads and writes only through the backend API; writes are the slice B commands, offered only with capabilities.commands', () => {
     expect(api).toContain('apiRoutes.paymentsOnec.receipts');
-    expect(api).not.toMatch(/httpClient\.(post|put|patch|delete)/);
-    expect(tab).not.toMatch(/useList|useMany|dataProvider|httpClient/);
+    // The only writes: the five commands of the tab, each to its own backend route (no Hasura, no generic dataProvider).
+    expect(api.match(/httpClient\.(post|put|patch|delete)/g)).toHaveLength(6);
+    for (const route of ['receiptMatch', 'receiptUnmatch', 'receiptDismiss', 'receiptOrderLink', 'receiptOrderUnlink']) {
+      expect(api).toContain(`apiRoutes.paymentsOnec.${route}(lineId)`);
+    }
+    expect(api).toContain('apiRoutes.paymentsOnec.autoMatch');
+    expect(tab).toMatch(/response\?\.capabilities\.commands && \(\s*<Button onClick=\{runAutoMatch\}/);
+    for (const source of [tab, actions]) expect(source).not.toMatch(/useList|useMany|dataProvider|httpClient/);
     expect(tab).toContain('paymentsOnecApi.listReceipts');
     expect(tab).toContain('paymentsOnecApi.getReceipt');
+    // Buttons follow the backend capability and the line state (pure helper), never a local guess.
+    expect(actions).toContain('onecReceiptActions(line, card.capabilities.commands)');
+    expect(actions).toMatch(/const toolbar = card\.capabilities\.commands \?/);
   });
 
   it('handles the disabled feature and a stale response', () => {
