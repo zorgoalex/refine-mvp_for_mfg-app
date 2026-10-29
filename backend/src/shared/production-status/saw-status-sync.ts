@@ -82,6 +82,9 @@ export async function lockOrderOwners(
   tx: TransactionClient,
   input: { setId?: number | null; detailIds?: readonly number[]; hdfDetailIds?: readonly number[]; orderIds?: readonly number[] },
 ): Promise<number[]> {
+  // This transaction keeps the «Базис» status in step with the card composition: the DB guard of migration 284 lets it
+  // change bazis_cut_set_details (a previous backend without the sync is refused).
+  await tx.query("SELECT set_config('erp.bazis_cut_saw_sync', 'on', true)");
   const rows = (await tx.query<{ order_id: string }>(
     `WITH source_orders AS (
        -- both owners of a row: the one recorded on the card (source_order_id) and the detail's current order (a detail

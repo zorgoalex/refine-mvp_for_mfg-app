@@ -3176,7 +3176,7 @@ probe_file() {
       ;;
     # «Присадка» → «Базис-проект»: клиент карточки, ссылка XML-проекта на карточку, инвариант клиента, orders_view.
     284_stage_letters_cut_ready_saw*) probe_all \
-      "SELECT to_regprocedure('public.reconcile_saw_detail_statuses(timestamptz,text)') IS NOT NULL;" \
+      "$(q_trg trg_bazis_cut_set_details_saw_guard)" \
       "SELECT NOT EXISTS (SELECT 1 FROM cut_settings WHERE key='eligibility.statuses' AND jsonb_typeof(value->'codes')='array' AND (value->'codes') ? 'drawn' AND NOT (value->'codes') ? 'saw');" ;;
     282_order_stage_letters*) probe_all \
       "$(q_tbl order_stage_auto_state)" \
