@@ -287,3 +287,46 @@ function normalizeNumber(value: unknown): number {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : 0;
 }
+
+const sameFormValue = (left: unknown, right: unknown): boolean => {
+  const empty = (value: unknown) => value === null || value === undefined || value === '';
+  if (empty(left) || empty(right)) return empty(left) && empty(right);
+  if (typeof left === 'number' || typeof right === 'number') return Number(left) === Number(right);
+  return left === right;
+};
+
+/**
+ * May the open grid row be left without its checks? Only a grid row never saved by the user (still a placeholder:
+ * saving a row in the table turns the flag off; quick-add rows start as placeholders with the form's defaults)
+ * whose form is exactly as it opened. Anything typed or chosen — a size, a note, a material — keeps the checks.
+ * (The import keeps its own stricter «pristine» rule.)
+ */
+export function canLeaveOpenRowUnchecked(
+  storeRow: Pick<OrderDetail, 'is_placeholder' | 'detail_id'> | null | undefined,
+  openedWith: Record<string, unknown> | null | undefined,
+  current: Record<string, unknown>,
+): boolean {
+  if (!storeRow || storeRow.is_placeholder !== true || storeRow.detail_id != null || !openedWith) return false;
+  return isOpenRowUntouched(openedWith, current);
+}
+
+/**
+ * Nothing changed in an open grid row since it opened: every value it opened with is still there (empty values
+ * equal each other), and no other field got a value. Such a row may be left without its checks.
+ */
+export function isOpenRowUntouched(openedWith: Record<string, unknown>, current: Record<string, unknown>): boolean {
+  const keys = new Set([...Object.keys(openedWith), ...Object.keys(current)]);
+  for (const key of keys) {
+    if (!sameFormValue(openedWith[key], current[key])) return false;
+  }
+  return true;
+}
+
+/** The snapshot of an untouched open row from the tab checkpoint; only for the row being restored. */
+export function readOpenedRowValues(raw: unknown, editingKey: string | number): { key: string | number; values: Record<string, unknown> } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const { key, values } = raw as { key?: unknown; values?: unknown };
+  if ((typeof key !== 'string' && typeof key !== 'number') || String(key) !== String(editingKey)) return null;
+  if (!values || typeof values !== 'object' || Array.isArray(values)) return null;
+  return { key, values: { ...(values as Record<string, unknown>) } };
+}

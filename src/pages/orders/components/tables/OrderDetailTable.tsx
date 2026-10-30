@@ -69,6 +69,8 @@ import {
   recentOrderDetailReferenceIds,
   isOrderDetailPlaceholder,
   isPristineOrderDetailPlaceholder,
+  canLeaveOpenRowUnchecked,
+  readOpenedRowValues,
 } from '../../../../utils/orderDetailRows';
 import {
   noteOpenRowRuleMaterial,
@@ -154,6 +156,9 @@ export interface OrderDetailTableRef {
   saveCurrentAndStartNew: (newDetail: OrderDetail) => Promise<boolean>;
   isEditing: () => boolean;
   applyCurrentEdits: () => Promise<boolean>;
+  /** Leave the open row before adding another (quick add): an untouched empty row closes, anything entered is
+   * checked and kept — never the empty-tail clearing of the order save. */
+  leaveCurrentEdits: () => Promise<boolean>;
   prepareFileImport: () => Promise<boolean>;
 }
 
@@ -308,6 +313,9 @@ export function orderDetailSpreadsheetNavigationRows(
 ): OrderDetail[] {
   return [...details, ...placeholders];
 }
+
+/** columns an untouched empty grid row still shows */
+const BLANK_PLACEHOLDER_KEPT_COLUMNS = new Set(['detail_number', 'actions']);
 
 const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'detail_number', label: '№', lockVisible: true },
@@ -846,6 +854,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   latestDetailsRef.current = details;
   // what the defaults put into the form of the open untouched row (the form opens row 1 by itself on load)
   const appliedRowDefaultsRef = useRef<OpenRowDefaults | null>(null);
+  // the form values an untouched grid row opened with (kept in step with the defaults and the material rule)
+  const openedRowValuesRef = useRef<{ key: React.Key; values: Record<string, unknown> } | null>(null);
   const { tabKey } = useKeepAlive();
   const workspaceKey = tabKey || `/orders/edit/${header?.order_id ?? 'new'}`;
   const restored = useRef(
@@ -1056,6 +1066,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       activeSorter,
       filmQuickCreateOpen,
       activeCell: activeSpreadsheetCellRef.current,
+      // the values an untouched empty row opened with: a restored tab still lets that row be left untouched
+      openedRowValues: inlineRestorePending ? restored?.openedRowValues ?? null : openedRowValuesRef.current,
       form: inlineRestorePending && restored?.form
         ? restored.form
         : captureAntFormCheckpoint(form),
@@ -1065,6 +1077,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     if (editingKey === null || !restoredInlineEditActive) return;
     setDetailEditing?.(true);
     restoreAntFormCheckpoint(form, restored?.form);
+    openedRowValuesRef.current = readOpenedRowValues(restored?.openedRowValues, editingKey);
   }, [editingKey, form, restored, restoredInlineEditActive, setDetailEditing]);
   const spreadsheetFocusFramesRef = useRef<number[]>([]);
   const focusSpreadsheetCell = useCallback((cell: OrderDetailSpreadsheetCell) => {
@@ -1111,6 +1124,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         cellRuntime.notifyCell(previousEditingKey, 'actions');
         cellRuntime.notifyCell(editingKey, 'actions');
         cellRuntime.notifyRowState(editingKey);
+        // an empty grid row shows its values only while open: every cell of the opened/closed placeholder redraws
+        const isPlaceholderKey = (key: React.Key | null) => key !== null
+          && latestDetailsRef.current.some((detail) =>
+            String(detail.temp_id || detail.detail_id) === String(key) && isOrderDetailPlaceholder(detail));
+        if (isPlaceholderKey(previousEditingKey)) cellRuntime.notifyRow(previousEditingKey);
+        if (isPlaceholderKey(editingKey)) cellRuntime.notifyRow(editingKey);
       }
     }
   }, [cellRuntime, editingField, editingKey]);
@@ -1337,6 +1356,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     // the rule filled the material of an open row after it opened: still the defaults' value, not the user's
     const applied = appliedRowDefaultsRef.current;
     if (applied && String(applied.key) === String(editingKey)) noteOpenRowRuleMaterial(applied, materialDefault);
+    const opened = openedRowValuesRef.current;
+    if (opened && String(opened.key) === String(editingKey)) opened.values.sheet_material_type_id = materialDefault;
   }, [defaultSheetMaterialTypeId, editingKey, form, sortedDetails]);
   const localRecentIds = useMemo(() => {
     if (!editingDetailForOptions) {
@@ -1606,6 +1627,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       }
     }
     form.setFieldsValue(initialFormValues);
+    // the values a never-saved grid row (placeholder, quick-add row too) opened with — see canLeaveOpenRowUnchecked
+    openedRowValuesRef.current = rowKey !== null && isOrderDetailPlaceholder(storeRecord) && storeRecord.detail_id == null
+      && initialValue === undefined
+      ? { key: rowKey, values: { ...initialFormValues } }
+      : null;
 
     if (
       initialValue !== undefined
@@ -1635,11 +1661,28 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     }
     if (Object.keys(patch).length > 0) {
       form.setFieldsValue(patch);
+      if (openedRowValuesRef.current && String(openedRowValuesRef.current.key) === String(editingKey)) {
+        Object.assign(openedRowValuesRef.current.values, patch);
+      }
       if (patch.milling_cost_per_sqm !== undefined) recalcSum();
       for (const field of Object.keys(patch)) cellRuntime.notifyCell(editingKey, field);
       cellRuntime.notifyRowState(editingKey);
     }
   }, [newRowDefaults]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Leaving the open row for another one: an untouched prepared row (nothing changed since it opened) just
+  // closes and stays an empty grid row; anything typed or chosen keeps the row's checks.
+  const leaveCurrentRow = async (): Promise<boolean> => {
+    const opened = openedRowValuesRef.current;
+    if (opened && editingKey !== null && String(opened.key) === String(editingKey)) {
+      const storeRow = details.find((detail) => String(detail.temp_id || detail.detail_id) === String(editingKey));
+      if (canLeaveOpenRowUnchecked(storeRow, opened.values, form.getFieldsValue(true))) {
+        cancelEdit();
+        return true;
+      }
+    }
+    return saveCurrentRow();
+  };
 
   // Save current editing row and return success status
   const saveCurrentRow = async (
@@ -1694,7 +1737,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   // Save on Tab past the last inline-entry field and optionally add a new row.
   const finishInlineEditOnTab = async (record: OrderDetail) => {
     return await finishOrderDetailInlineTab({
-      saveCurrentRow,
+      saveCurrentRow: leaveCurrentRow,
       isLastRow: isLastOrderDetailRow(sortedDetails, record),
       onQuickAdd,
     });
@@ -1744,7 +1787,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     pendingFocusFieldRef.current = field;
 
     try {
-      const saved = await saveCurrentRow();
+      const saved = await leaveCurrentRow();
       if (!saved) {
         pendingFocusFieldRef.current = null;
         return;
@@ -1789,7 +1832,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     isEditing: () => inlineRestorePending || editingKey !== null,
     saveCurrentAndStartNew: async (newDetail: OrderDetail) => {
       const requestedField = pendingQuickAddFocusFieldRef.current;
-      const saved = await saveCurrentRow();
+      const saved = await leaveCurrentRow();
       pendingQuickAddFocusFieldRef.current = null;
       if (saved) {
         // Start editing the new detail after a short delay
@@ -1808,6 +1851,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         }, 50);
       }
       return saved;
+    },
+    leaveCurrentEdits: async () => {
+      if (editingKey === null && !inlineRestorePending) return true;
+      return await leaveCurrentRow();
     },
     // Apply current edits without starting new row (for form save)
     applyCurrentEdits: async () => {
@@ -2728,9 +2775,24 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     },
   ];
 
+  // An untouched prepared row shows only its number and actions until it is opened: no «0», «0,00 м²», «модерн»
+  // filling twenty empty lines.
+  const blankPlaceholderColumns = columns.map((column) => {
+    const key = String(column.key ?? '');
+    const render = column.render;
+    if (BLANK_PLACEHOLDER_KEPT_COLUMNS.has(key) || typeof render !== 'function') return column;
+    return {
+      ...column,
+      render: (value: unknown, row: any, index: number) => {
+        const d = asDetail(row);
+        if (d && isOrderDetailPlaceholder(d) && !isEditing(d)) return null;
+        return render(value, row, index);
+      },
+    };
+  });
   const visibleColumns = useMemo(
-    () => applyOrderDetailColumnSettings(columns, columnSettings),
-    [columns, columnSettings],
+    () => applyOrderDetailColumnSettings(blankPlaceholderColumns, columnSettings),
+    [blankPlaceholderColumns, columnSettings],
   );
   const inlineTabFields = orderDetailInlineTabFields(
     visibleColumns.map((column) => String(column.key ?? getTableColumnDataIndex(column) ?? '')),
@@ -2783,7 +2845,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     activeSpreadsheetCellRef.current = { rowKey, columnKey: String(columnKey) };
 
     if (editingKey !== null && String(editingKey) !== rowKey) {
-      const saved = await saveCurrentRow();
+      const saved = await leaveCurrentRow();
       if (!saved) return false;
     }
 
@@ -2926,7 +2988,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         currentCell,
         editorDirection,
       ) ?? currentCell;
-      void saveCurrentRow().then((saved) => {
+      void leaveCurrentRow().then((saved) => {
         if (saved) focusSpreadsheetCoordinate(nextCell);
       });
       return;
@@ -2941,7 +3003,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         currentCell,
         'down',
       ) ?? currentCell;
-      void saveCurrentRow().then((saved) => {
+      void leaveCurrentRow().then((saved) => {
         if (saved) focusSpreadsheetCoordinate(nextCell);
       });
       return;
@@ -2973,7 +3035,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       const previousField = inlineTabFields[inlineTabFields.length - 1];
       if (!previousRowKey || !previousField) return;
       event.preventDefault();
-      void saveCurrentRow().then((saved) => {
+      void leaveCurrentRow().then((saved) => {
         if (saved) {
           focusSpreadsheetCoordinate({
             rowKey: previousRowKey,
@@ -3130,7 +3192,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               if (!clickedInteractiveChild) setEditingField(null);
               return;
             }
-            void saveCurrentRow().then((saved) => {
+            void leaveCurrentRow().then((saved) => {
               if (saved) focusSpreadsheetCell({ rowKey, columnKey: key });
             });
           },

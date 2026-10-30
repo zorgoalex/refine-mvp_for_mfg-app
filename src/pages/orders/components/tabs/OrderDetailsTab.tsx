@@ -475,7 +475,8 @@ export const OrderDetailsTab = forwardRef<
   const handleQuickAdd = async (skipCurrentSave = false): Promise<boolean> => {
     if (!tableRef.current) return false;
     if (!skipCurrentSave && tableRef.current.isEditing()) {
-      const saved = await tableRef.current.applyCurrentEdits();
+      // leaving the open row: an untouched empty row closes, a row with anything entered (a note too) is checked
+      const saved = await tableRef.current.leaveCurrentEdits();
       if (!saved) {
         message.warning('Сначала заполните обязательные поля текущей позиции');
         return false;

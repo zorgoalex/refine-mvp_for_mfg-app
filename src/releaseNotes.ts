@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-31", title: "Таблица деталей: чистые пустые строки",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Пустые строки таблицы деталей больше не заполнены нулями, «модерн», «р-1» и «Не назначен» — видны только номер строки и действия, значения появляются при заполнении.",
+      "Нетронутую пустую строку (в том числе строку быстрого добавления с параметрами по умолчанию) можно покинуть без требования заполнить размеры; строка с любым введённым значением проверяется как раньше.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-31", title: "Печать МДФ-доски и календаря как на экране (NewLine)",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: [
