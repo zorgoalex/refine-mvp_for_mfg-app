@@ -170,6 +170,8 @@ describe.skipIf(!databaseUrl)('merge of duplicate clients (PostgreSQL, isolated 
     await q(m279.slice(m279.indexOf('CREATE OR REPLACE FUNCTION bazis_card_client_violation'), m279.indexOf('-- Итоговая проверка переноса')));
     await q(m279.slice(m279.indexOf('-- Проверочные триггеры'), m279.indexOf('-- Вставка без клиента')));
     await q(m279.slice(m279.indexOf('-- Карточка не пишется на объединённого клиента'), m279.indexOf('-- ----', m279.indexOf('-- Карточка не пишется на объединённого клиента'))));
+    // Migration 288: only the card-aware merge and undo write the merge journal.
+    await q(await migration('288_client_merge_cards_guard'));
     // The invariant of migration 145 (its functions are replaced by 268).
     await q(`CREATE CONSTRAINT TRIGGER ctrg_bitrix24_request_link AFTER INSERT OR UPDATE ON bitrix24_incoming_request DEFERRABLE INITIALLY DEFERRED
                FOR EACH ROW EXECUTE FUNCTION validate_bitrix24_incoming_request_link();
@@ -367,6 +369,7 @@ describe.skipIf(!databaseUrl)('merge of duplicate clients (PostgreSQL, isolated 
       await holder.query(`SET search_path="${schema}",public`);
       await writer.query(`SET search_path="${schema}",public`);
       await holder.query('BEGIN');
+      await holder.query("SELECT set_config('erp.client_merge_cards', 'on', true)");
       await holder.query('SELECT client_id FROM clients WHERE client_id = ANY($1::bigint[]) ORDER BY client_id FOR UPDATE', [[s, m]]);
       const insert = writer.query('INSERT INTO client_phones (client_id, phone_number) VALUES ($1, $2)', [m, '+7 705 000 00 05']).then(() => null, (e: { constraint?: string }) => e);
       await new Promise((resolve) => setTimeout(resolve, 300));
@@ -1031,5 +1034,23 @@ describe.skipIf(!databaseUrl)('merge of duplicate clients (PostgreSQL, isolated 
     const taken = await undo(second.mergeId) as { report: { skipped: Array<{ reason: string }> } };
     expect(taken.report.skipped.map((x) => x.reason)).toEqual(['primary_taken']);
     expect(await rowsOf(s2)).toEqual(['erp:email:c@mail.kz:primary']);
+  });
+
+  it('a backend without the cards (no session flag) cannot write the merge journal; maintenance and counts still can (migration 288)', async () => {
+    const s = await newClient('Тест S288');
+    const m = await newClient('Тест M288');
+    const caseId = await newCase(s, m);
+    // a previous backend inserting its merge: refused with a clear code
+    await expect(q(`INSERT INTO client_merges (case_id, survivor_id, merged_id, status, actor_user_id, request_id, correlation_id, undo_until)
+                    VALUES ($1, $2, $3, 'done', 11, 'r288', 'r288', now()) RETURNING merge_id`, [caseId, s, m]))
+      .rejects.toMatchObject({ message: expect.stringContaining('CLIENT_MERGE_REQUIRES_CARDS') });
+    // the real merge sets the flag and passes; a previous backend closing it as undone is refused
+    await merge(caseId, s, m);
+    const mergeId = (await one<{ merge_id: string }>('SELECT merge_id FROM client_merges WHERE merged_id = $1', [m])).merge_id;
+    await expect(q(`UPDATE client_merges SET status = 'undone' WHERE merge_id = $1`, [mergeId]))
+      .rejects.toMatchObject({ message: expect.stringContaining('CLIENT_MERGE_REQUIRES_CARDS') });
+    // the journal maintenance and the counts do not change the status: not guarded
+    await q(`UPDATE client_merges SET journal_purged_at = now(), counts = counts WHERE merge_id = $1`, [mergeId]);
+    expect((await one<{ status: string }>('SELECT status FROM client_merges WHERE merge_id = $1', [mergeId])).status).toBe('done');
   });
 });

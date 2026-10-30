@@ -122,6 +122,9 @@ export async function applyMerge(
   const m = state.merged.clientId;
   const items: MergeItem[] = [];
   await tx.query('SELECT set_session_user($1)', [actor.id]);
+  // This code moves the Bazis project cards with the client (migration 279): the guard of migration 288 lets it write the
+  // merge journal (a backend without the cards is refused instead of leaving a card behind).
+  await tx.query("SELECT set_config('erp.client_merge_cards', 'on', true)");
   // The operation first: every change below (the 1C link audit too) refers to it.
   const mergeId = Number((await tx.query<{ merge_id: string }>(
     `INSERT INTO client_merges (case_id, survivor_id, merged_id, status, actor_user_id, request_id, correlation_id, undo_until)

@@ -3185,6 +3185,10 @@ probe_file() {
       "SELECT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid='public.mdf_republish_jobs'::regclass AND t.tgname='mdf_republish_job_immutable' AND NOT t.tgisinternal);" \
       ;;
     # «Присадка» → «Базис-проект»: клиент карточки, ссылка XML-проекта на карточку, инвариант клиента, orders_view.
+    # Client merge journal written only by the card-aware merge/undo (rollback of 279 refused, not desynced).
+    288_client_merge_cards_guard*) probe_all \
+      "SELECT to_regprocedure('public.trg_client_merges_cards_guard()') IS NOT NULL;" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_client_merges_cards_guard' AND tgrelid = 'public.client_merges'::regclass AND tgenabled <> 'D' AND NOT tgisinternal);" ;;
     # «Базис» for «Новый» details already in «Базис раскрой» cards before 282: one-time backfill, its summary audit row.
     286_saw_status_backfill*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event='orders.saw_status_backfill' AND entity_type='migration' AND entity_id='286');" ;;
@@ -3442,6 +3446,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     282_order_stage_letters*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    288_client_merge_cards_guard*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     286_saw_status_backfill*)

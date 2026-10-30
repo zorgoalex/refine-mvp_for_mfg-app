@@ -438,6 +438,8 @@ export async function applyUndo(
     orderIds: plan.orderIds,
     projectIds: plan.projects.map((p) => p.projectId),
   };
+  // This undo returns the Bazis project cards too (migration 279): the guard of migration 288 lets it close the merge.
+  await tx.query("SELECT set_config('erp.client_merge_cards', 'on', true)");
   await tx.query(
     `UPDATE client_merges SET status = 'undone', undone_at = now(), undone_by = $2, undo_request_id = $3, undo_report = $4::jsonb WHERE merge_id = $1`,
     [merge.mergeId, actorId, ctx.requestId, JSON.stringify(report)]);
