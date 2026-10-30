@@ -9,6 +9,7 @@ export type RecipientResolverKind =
   | 'stage_assignee'
   | 'workshop_head'
   | 'direction_head'
+  | 'rework_managers'
   | 'group_participants';
 
 export interface NotificationRuleConditions {

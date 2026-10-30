@@ -7,6 +7,8 @@ import {
   normalizeStages,
   stageError,
   targetStage,
+  stageMapping,
+  REWORK_UNMAPPED_ERROR,
   verifyDeal,
   type StageConfig,
   type StageOrder,
@@ -100,10 +102,15 @@ export class StageWorker {
       }
       const catalog = await this.repo.catalog(c);
       const mappings = await this.repo.mappings(c);
+      const mapping = stageMapping(order, mappings);
+      if (order.order_status_code === 'rework' && !mapping.stageId) {
+        // D4: explicit skip until «В производстве» is mapped — not a blocked deal.
+        await this.repo.finish(w, c, order, 'waiting_mapping', REWORK_UNMAPPED_ERROR);
+        return;
+      }
       const target = targetStage(
-        order.order_status_id,
-        mappings.find((m) => m.order_status_id === order!.order_status_id)
-          ?.stage_id,
+        mapping.statusId,
+        mapping.stageId,
         catalog?.stages ?? [],
         c.completed_status_id
       );
@@ -180,7 +187,7 @@ export class StageWorker {
             503
           );
         targetStage(
-          order!.order_status_id,
+          stageMapping(order!, mappings).statusId,
           target.id,
           normalizeStages(await this.bitrix.listDealStages(c.category_id!)),
           c.completed_status_id

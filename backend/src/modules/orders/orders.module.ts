@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { DatabaseModule } from '../../database/database.module';
 import { DatabaseService } from '../../database/database.service';
 import type { BackendEnv } from '../../config/env.validation';
+import { ORDER_FINAL_DEADLINE_SYSTEM_ACTOR } from '../deadlines/domain/order-final-deadline';
 import { PgOrderDeadlineSync } from '../deadlines/adapters/pg-order-deadline-sync';
 import { PgDeadlineDefaultScheduleRepository } from '../deadlines/adapters/pg-deadline-default-schedule-repository';
 import {
@@ -65,6 +66,12 @@ import { SupplierRequestsService } from './application/supplier-requests.service
 import { SupplierRequestsController } from './http/supplier-requests.controller';
 import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
+import { OrderReworkCatalogController, OrderReworkController } from './http/order-rework.controller';
+import { OrderReworkService } from './application/order-rework.service';
+import { OrderReworkReasonCatalogService } from './application/order-rework-reason-catalog.service';
+import { OrderRealtimeModule } from '../order-realtime/order-realtime.module';
+import { OrderReworkDeadlineSweeper } from './application/order-rework-deadline-sweeper.service';
+import { OrderRealtimeDeferredDrainService } from '../order-realtime/application/order-realtime-deferred-drain.service';
 import { OrderHdfSettingsController } from './http/order-hdf-settings.controller';
 import { OrderStatusBoardController } from './http/order-status-board.controller';
 import { OrdersRuntimeConfigService } from './http/orders-runtime-config.service';
@@ -90,7 +97,7 @@ export function shouldEnableOrderDeadlineSync(input: {
 }
 
 @Module({
-  imports: [DatabaseModule, OnecSyncModule],
+  imports: [DatabaseModule, OnecSyncModule, OrderRealtimeModule],
   controllers: [
     // Register static `/orders/*` routes before the generic `/orders/:orderId`.
     MdfBoardManualMoveController,
@@ -105,6 +112,8 @@ export function shouldEnableOrderDeadlineSync(input: {
     SupplierRequestsController,
     ProcurementWorkspaceController,
     OrderHdfSettingsController,
+    OrderReworkCatalogController,
+    OrderReworkController,
     OrdersController, SupplierTextTemplatesController, MySupplierTextTemplatesController],
   providers: [
     OnecDocumentsProcurementConsumer,
@@ -191,6 +200,63 @@ export function shouldEnableOrderDeadlineSync(input: {
           reader,
           nameSuggestions: reader,
           history: reader,
+        });
+      },
+      inject: [DatabaseService, ConfigService],
+    },
+    {
+      provide: OrderReworkReasonCatalogService,
+      useFactory: (database: DatabaseService) => new OrderReworkReasonCatalogService(database),
+      inject: [DatabaseService],
+    },
+    {
+      provide: OrderReworkService,
+      useFactory: (
+        database: DatabaseService,
+        config: ConfigService<BackendEnv, true>,
+        query: OrderQueryService,
+        drain: OrderRealtimeDeferredDrainService,
+      ) =>
+        new OrderReworkService({
+          database,
+          isEnabled: () => config.get('BACKEND_ORDER_REWORK_ENABLED', { infer: true }) === true,
+          readOrder: (currentUser, orderId) => query.getById({ currentUser, orderId }),
+          requestRealtimeDrain: (orderIds) => drain.request(orderIds),
+          // «Переделка» 1.1: the round deadline from «Схема этапов и сроки»; the final deadline is reconciled after
+          // commit with the same gate as the order save (no deadline engine → no reconciliation, dates still apply).
+          ...(database.isConfigured && config.get('BACKEND_ENABLE_DEADLINES', { infer: true })
+            ? { loadDeadlineSchedule: (client) => new PgDeadlineDefaultScheduleRepository(database).getSchedule(client) }
+            : {}),
+          ...(shouldEnableOrderDeadlineSync({
+            databaseConfigured: database.isConfigured,
+            deadlinesEnabled: config.get('BACKEND_ENABLE_DEADLINES', { infer: true }),
+            deadlinesReadOnly: config.get('BACKEND_DEADLINES_READ_ONLY', { infer: true }),
+            orderSyncEnabled: config.get('BACKEND_ENABLE_DEADLINE_ORDER_SYNC', { infer: true }),
+          })
+            ? {
+              reconcileOrderDeadline: ({ orderId, actorUserId, requestId, context }) =>
+                new PgOrderDeadlineSync(database).reconcileOrderFinalDeadline({ orderId, currentUser: { id: actorUserId }, requestId, context }),
+            }
+            : {}),
+        }),
+      inject: [DatabaseService, ConfigService, OrderQueryService, OrderRealtimeDeferredDrainService],
+    },
+    {
+      provide: OrderReworkDeadlineSweeper,
+      useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) => {
+        const enabled = shouldEnableOrderDeadlineSync({
+          databaseConfigured: database.isConfigured,
+          deadlinesEnabled: config.get('BACKEND_ENABLE_DEADLINES', { infer: true }),
+          deadlinesReadOnly: config.get('BACKEND_DEADLINES_READ_ONLY', { infer: true }),
+          orderSyncEnabled: config.get('BACKEND_ENABLE_DEADLINE_ORDER_SYNC', { infer: true }),
+        });
+        return new OrderReworkDeadlineSweeper({
+          database,
+          enabled: () => enabled,
+          reconcile: ({ orderId, requestId, context }) =>
+            new PgOrderDeadlineSync(database).reconcileOrderFinalDeadline({
+              orderId, currentUser: { id: ORDER_FINAL_DEADLINE_SYSTEM_ACTOR }, requestId, context,
+            }),
         });
       },
       inject: [DatabaseService, ConfigService],

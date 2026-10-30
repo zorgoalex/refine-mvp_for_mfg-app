@@ -47,14 +47,14 @@ describe('OrderShow sticky detail header guards', () => {
   });
 
   it('shows actual order and payment statuses in the operational summary', () => {
-    expect(operationalHeaderSource).toContain("{record?.order_status_name || 'Не назначен'}");
+    expect(operationalHeaderSource).toContain("{withRoundSuffix(record?.order_status_name || 'Не назначен', record?.production_round)}");
     expect(operationalHeaderSource).toContain("{record?.payment_status_name || 'Не назначен'}");
     expect(operationalHeaderSource).not.toContain("{isAtRisk ? 'Под риском' : 'В работе'}");
     expect(operationalHeaderSource).not.toContain('`${paymentPercent}%`');
   });
 
   it('shows the same actual statuses in the operational edit summary', () => {
-    expect(operationalEditHeaderSource).toContain("{orderStatusData?.data?.order_status_name || 'Не назначен'}");
+    expect(operationalEditHeaderSource).toContain("{withRoundSuffix(orderStatusData?.data?.order_status_name || 'Не назначен', header.production_round)}");
     expect(operationalEditHeaderSource).toContain("{paymentStatusData?.data?.payment_status_name || 'Не назначен'}");
     expect(operationalEditHeaderSource).not.toContain("{daysToDeadline != null && daysToDeadline < 0 ? 'Под риском' : 'В работе'}");
     expect(operationalEditHeaderSource).not.toContain('`${paymentPercent}%`');

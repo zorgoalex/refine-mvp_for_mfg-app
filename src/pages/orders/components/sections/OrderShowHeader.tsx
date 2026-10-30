@@ -1,4 +1,6 @@
 // Order Show Header (Read-only summary for show page)
+import { currentRoundStageEvents } from '../../../../utils/currentRoundStageEvents';
+import { withRoundSuffix } from '../../../../api/orderReworkApi';
 // Adapted from OrderHeaderSummary for use with props instead of store
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -265,9 +267,14 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
   const currentProductionStatusCodes = useMemo(() => {
     if (!orderMarkEvents) return resolveOrderStageCodes(backendStageCodes);
     const idToCode = buildActiveProductionStatusCodeMap(allProductionStatusesData?.data || []);
-    return resolveOrderStageCodes(undefined, (orderMarkEvents.data || [])
-      .map((event: any) => idToCode.get(event.production_status_id)));
-  }, [allProductionStatusesData, backendStageCodes, orderMarkEvents]);
+    // «Переделка»: only the marks of the order's current round (earlier rounds are history).
+    const round = Number(record?.production_round ?? 0) || undefined;
+    const marks = currentRoundStageEvents(
+      (orderMarkEvents.data || []) as Array<{ order_id?: number | null; round_no?: number | null; production_status_id?: number }>,
+      round && record?.order_id != null ? new Map([[Number(record.order_id), round]]) : undefined,
+    );
+    return resolveOrderStageCodes(undefined, marks.map((event) => idToCode.get(event.production_status_id as number)));
+  }, [allProductionStatusesData, backendStageCodes, orderMarkEvents, record?.order_id, record?.production_round]);
 
   const fallbackBasisProjectName =
     latestDowelingLink?.doweling_order?.doweling_order_name ||
@@ -312,7 +319,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
                   : '#4F46E5'
             }
           >
-            {record?.order_status_name || 'Не назначен'}
+            {withRoundSuffix(record?.order_status_name || 'Не назначен', record?.production_round)}
           </Tag>
           {showFinancials && (
             <Tag
@@ -619,7 +626,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
               {record?.priority !== undefined ? formatNumber(record.priority, 0) : '—'}
             </span>
             <Tag color={record?.order_status_name === 'Готов к выдаче' ? '#059669' : record?.order_status_name === 'Предварительный' ? '#91caff' : '#4F46E5'}>
-              {record?.order_status_name || 'Не назначен'}
+              {withRoundSuffix(record?.order_status_name || 'Не назначен', record?.production_round)}
             </Tag>
           </span>
           <span className="order-show-header__compact-item order-show-header__compact-client" title={record?.client_name || ''}>

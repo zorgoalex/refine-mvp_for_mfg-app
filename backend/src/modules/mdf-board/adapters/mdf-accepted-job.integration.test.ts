@@ -39,6 +39,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF receipt → que
       'app_settings','bazis_order_links','order_import_entity_map','order_workshops']) {
       await db.query(`CREATE TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
     }
+    // CREATE TABLE AS drops defaults; order_details.production_round is NOT NULL DEFAULT 1 («Переделка»).
+    await db.query('ALTER TABLE order_details ALTER COLUMN production_round SET DEFAULT 1');
     await db.query(`ALTER TABLE audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();
       CREATE UNIQUE INDEX e2e_audit_related ON audit_log_related_entity(audit_id,entity_type,entity_id);
       CREATE UNIQUE INDEX e2e_outbox ON outbox_events(idempotency_key);

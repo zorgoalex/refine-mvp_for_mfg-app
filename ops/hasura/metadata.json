@@ -24173,7 +24173,7 @@
                                 "columns": "*",
                                 "filter": {
                                     "_and": [
-                                        {},
+                                        {"_or": [{"order_id": {"_is_null": true}}, {"order": {"production_round": {"_ceq": ["$", "round_no"]}}}]},
                                         {
                                             "_and": [
                                                 {
@@ -24321,7 +24321,7 @@
                                 "columns": "*",
                                 "filter": {
                                     "_and": [
-                                        {},
+                                        {"_or": [{"order_id": {"_is_null": true}}, {"order": {"production_round": {"_ceq": ["$", "round_no"]}}}]},
                                         {
                                             "_and": [
                                                 {
@@ -24469,7 +24469,7 @@
                                 "columns": "*",
                                 "filter": {
                                     "_and": [
-                                        {},
+                                        {"_or": [{"order_id": {"_is_null": true}}, {"order": {"production_round": {"_ceq": ["$", "round_no"]}}}]},
                                         {
                                             "_and": [
                                                 {
@@ -24617,7 +24617,7 @@
                                 "columns": "*",
                                 "filter": {
                                     "_and": [
-                                        {},
+                                        {"_or": [{"order_id": {"_is_null": true}}, {"order": {"production_round": {"_ceq": ["$", "round_no"]}}}]},
                                         {
                                             "_and": [
                                                 {
@@ -24765,7 +24765,7 @@
                                 "columns": "*",
                                 "filter": {
                                     "_and": [
-                                        {},
+                                        {"_or": [{"order_id": {"_is_null": true}}, {"order": {"production_round": {"_ceq": ["$", "round_no"]}}}]},
                                         {
                                             "_and": [
                                                 {
@@ -24913,7 +24913,7 @@
                                 "columns": "*",
                                 "filter": {
                                     "_and": [
-                                        {},
+                                        {"_or": [{"order_id": {"_is_null": true}}, {"order": {"production_round": {"_ceq": ["$", "round_no"]}}}]},
                                         {
                                             "_and": [
                                                 {
@@ -25061,7 +25061,7 @@
                                 "columns": "*",
                                 "filter": {
                                     "_and": [
-                                        {},
+                                        {"_or": [{"order_id": {"_is_null": true}}, {"order": {"production_round": {"_ceq": ["$", "round_no"]}}}]},
                                         {
                                             "_and": [
                                                 {
@@ -25209,7 +25209,7 @@
                                 "columns": "*",
                                 "filter": {
                                     "_and": [
-                                        {},
+                                        {"_or": [{"order_id": {"_is_null": true}}, {"order": {"production_round": {"_ceq": ["$", "round_no"]}}}]},
                                         {
                                             "_and": [
                                                 {

@@ -45,3 +45,21 @@ describe('PgOrderRealtimeReader replay bounds', () => {
     });
   });
 });
+
+describe('PgOrderRealtimeReader snapshot', () => {
+  it.each([true, false])('reads the order version with the detail stages (cut refs: %s)', async (cutRefsAllowed) => {
+    const database = {
+      query: vi.fn().mockResolvedValue({
+        rows: [{ order_version: '9', commit_sequence: 4, detail_status_revision: 3, cut_refs_revision: 2, details: [] }],
+      }),
+    };
+    const reader = new PgOrderRealtimeReader(database as never);
+
+    const snapshot = await reader.loadSnapshot(42, cutRefsAllowed);
+
+    expect(snapshot.orderVersion).toBe(9);
+    const sql = String(database.query.mock.calls[0][0]);
+    expect(sql).toContain('o.version AS order_version');
+    expect(sql).toContain('GROUP BY s.commit_sequence, s.detail_status_revision, s.cut_refs_revision, s.order_version');
+  });
+});

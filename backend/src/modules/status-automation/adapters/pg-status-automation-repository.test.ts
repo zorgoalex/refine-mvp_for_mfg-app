@@ -95,6 +95,28 @@ describe('PgStatusAutomationRepository', () => {
     expect(query?.text).toMatch(/ORDER BY order_date DESC, order_id DESC/i);
   });
 
+  it('refuses a rule whose order-status target is «Переделка» without writing anything', async () => {
+    const database = createDatabase({
+      reworkStatusIds: [10],
+      responses: ({ text }) => (text.includes('FROM order_statuses') ? result([{ order_status_id: '10' }]) : result([])),
+    });
+    const repository = new PgStatusAutomationRepository(database.service);
+    await expect(repository.createRule({
+      currentUser: currentUser(),
+      requestId: 'request-rework',
+      dto: {
+        name: 'В переделку',
+        eventType: 'order.status_changed',
+        actionType: 'change_order_status',
+        targetStatusId: 10,
+        conditions: {},
+        priority: 10,
+        isEnabled: true,
+      },
+    })).rejects.toMatchObject({ code: 'TARGET_STATUS_REWORK_FORBIDDEN' });
+    expect(database.queries.some((q) => q.text.includes('INSERT INTO status_automation_rules'))).toBe(false);
+  });
+
   it('creates a rule after validating the target status and audits in the same transaction', async () => {
     const database = createDatabase({
       responses: ({ text }) => {
@@ -459,6 +481,8 @@ interface QueryCall {
 }
 
 interface DatabaseOptions {
+  /** Order status ids the rework probe reports as «Переделка». */
+  reworkStatusIds?: number[];
   responses: (call: QueryCall) => QueryResult<QueryResultRow>;
 }
 
@@ -471,6 +495,14 @@ function createDatabase(options: DatabaseOptions): {
   const query = async <T extends QueryResultRow>(text: string, params: readonly unknown[] = []): Promise<QueryResult<T>> => {
     const call = { text, params };
     queries.push(call);
+    // «Переделка» target probe: none of the fixture statuses is rework unless a test says so.
+    if (text.includes("order_status_code = 'rework'") && !options.reworkStatusIds) {
+      return result([]) as unknown as QueryResult<T>;
+    }
+    if (text.includes("order_status_code = 'rework'") && options.reworkStatusIds) {
+      const ids = (params[0] as Array<number | string>).map(Number);
+      return result(ids.filter((id) => options.reworkStatusIds!.includes(id)).map(() => ({ '?column?': 1 }))) as unknown as QueryResult<T>;
+    }
     return options.responses(call) as unknown as QueryResult<T>;
   };
   const tx = { query } as unknown as TransactionClient;

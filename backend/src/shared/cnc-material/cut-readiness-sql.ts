@@ -77,7 +77,9 @@ export function mdfCutReadinessCtes(scope: CutReadinessScope = {}): string {
         COALESCE(matched.detail_id, inferred.detail_id) AS detail_id,
         COALESCE(matched.order_id, inferred.order_id) AS order_id,
         GREATEST(COALESCE(i.quantity, 0), 0) AS quantity,
-        status.sort_order AS status_sort_order
+        status.sort_order AS status_sort_order,
+        -- «Переделка» (plan §5.5): a detail of production round > 1 neither blocks nor completes a card.
+        COALESCE(matched.production_round, inferred.production_round, 1) > 1 AS excluded
       FROM mdf_source_packets packet
       LEFT JOIN cnc_telegram_packet_items i ON i.packet_id = packet.packet_id
       LEFT JOIN orders matched_owner ON matched_owner.order_id = i.match_order_id AND matched_owner.delete_flag = false
@@ -86,7 +88,8 @@ export function mdfCutReadinessCtes(scope: CutReadinessScope = {}): string {
         AND matched.order_id = matched_owner.order_id AND matched.delete_flag = false
       LEFT JOIN LATERAL (
         SELECT MIN(candidate.detail_id)::bigint AS detail_id, MIN(candidate.order_id)::bigint AS order_id,
-          MIN(candidate.production_status_id)::bigint AS production_status_id
+          MIN(candidate.production_status_id)::bigint AS production_status_id,
+          MIN(candidate.production_round)::integer AS production_round
         FROM order_details candidate
         WHERE candidate.order_id = COALESCE(matched_owner.order_id, named_owner.order_id)
           AND candidate.delete_flag = false AND candidate.detail_number = i.detail_number
@@ -105,8 +108,10 @@ export function mdfCutReadinessCtes(scope: CutReadinessScope = {}): string {
     ),
     mdf_packet_status AS (
       SELECT item.packet_id,
-        BOOL_AND(COALESCE(item.has_item AND item.detail_id IS NOT NULL AND item.status_sort_order >= threshold.packed, false)) AS all_packed,
-        BOOL_AND(COALESCE(item.has_item AND item.detail_id IS NOT NULL AND item.status_sort_order >= threshold.issued, false)) AS all_issued
+        COALESCE(BOOL_AND(COALESCE(item.has_item AND item.detail_id IS NOT NULL AND item.status_sort_order >= threshold.packed, false))
+          FILTER (WHERE NOT item.excluded), false) AS all_packed,
+        COALESCE(BOOL_AND(COALESCE(item.has_item AND item.detail_id IS NOT NULL AND item.status_sort_order >= threshold.issued, false))
+          FILTER (WHERE NOT item.excluded), false) AS all_issued
       FROM mdf_resolved_packet_items item CROSS JOIN mdf_cut_thresholds threshold GROUP BY item.packet_id
     ),
     mdf_packet_columns AS (
@@ -158,6 +163,8 @@ export function mdfCutReadinessCtes(scope: CutReadinessScope = {}): string {
           AND COALESCE(item.material_name, '') ~* '${CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE}'
           AND COALESCE(item.material_name, '') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}' AS mdf_relevant,
         COALESCE(status.sort_order >= threshold.packed OR order_status.sort_order >= threshold.order_issued, false) AS packed,
+        -- «Переделка» (plan §5.5): excluded from the card readiness below.
+        COALESCE(detail.production_round, 1) > 1 AS excluded,
         owner.order_id IS NOT NULL AND owner.delete_flag = false AND CASE
           WHEN jsonb_typeof(setting.value -> 'cardRules') = 'array' THEN
             ${idsContain(`(SELECT rule -> 'orderStatusIds' FROM jsonb_array_elements(setting.value -> 'cardRules') rule
@@ -178,7 +185,8 @@ export function mdfCutReadinessCtes(scope: CutReadinessScope = {}): string {
     ),
     mdf_bazis_columns AS (
       SELECT bazis_cut_set_id,
-        BOOL_AND(packed) OR BOOL_AND(COALESCE(hidden_by_rule, false))
+        COALESCE(BOOL_AND(packed) FILTER (WHERE NOT excluded), false)
+          OR COALESCE(BOOL_AND(COALESCE(hidden_by_rule, false)) FILTER (WHERE NOT excluded), false)
           OR COALESCE(MIN(manual_column) IN ('completed', 'completed_laminated'), false) AS visually_cut
       FROM mdf_bazis_items GROUP BY bazis_cut_set_id
     ),

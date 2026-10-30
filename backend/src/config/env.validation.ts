@@ -302,6 +302,10 @@ export const envSchema = z
     BACKEND_PROCUREMENT_NOTIFICATIONS_ENABLED: booleanFromEnv.default(false),
     // Шаблоны текста заявки поставщику (миграция 229); выключение — откат функции без заявок.
     BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED: booleanFromEnv.default(false),
+    // «Переделка»: команды кругов производства (миграции 274–276). Default off.
+    BACKEND_ORDER_REWORK_ENABLED: booleanFromEnv.default(false),
+    // «Переделка» §5.9: false stops the deferred realtime drain and sweeper (DB migrations/maintenance).
+    BACKEND_ORDER_REALTIME_DEFERRED_DRAIN: booleanFromEnv.default(true),
     // Контакты поставщиков из 1С (K4a): сверка с контактами привязанного контрагента 1С после выгрузки и раз в час.
     BACKEND_PARTY_CONTACTS_ONEC_SYNC: booleanFromEnv.default(false),
     // Журнал дублей интеграций (D0): поиск дублей справочников ERP / Bitrix24 / 1С. Очистка данных 1С в журнале

@@ -14,6 +14,8 @@ export const SETTINGS_CATEGORY_PERMISSIONS: PermissionName[] = [
   'message_signals.manage_config',
   // «Интеграция 1С» lives in this category: its operator role has no settings.* permission.
   'onec.view',
+  // «Причины переделки» tab in /configuration.
+  'references.manage',
 ];
 
 export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
@@ -74,6 +76,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
     'onec.view',
     'onec.manage',
     'onec.commands.send',
+    'references.manage',
   ],
   audit: ['audit.view'],
   onec: ['onec.view', 'onec.manage', 'onec.commands.send'],

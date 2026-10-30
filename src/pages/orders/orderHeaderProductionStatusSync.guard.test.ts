@@ -26,7 +26,9 @@ describe('order header production status synchronization', () => {
   });
 
   it('keeps event reads enabled for packers while hiding their mutation menus', () => {
-    expect(summarySource).toContain('useProductionStatusEvent({\n    orderId: header.order_id,\n  })');
+    // Reads are never gated by role (no `enabled`); «Переделка»: the current round selects the marks.
+    expect(summarySource).toContain('useProductionStatusEvent({\n    orderId: header.order_id,\n    productionRound:');
+    expect(summarySource.slice(summarySource.indexOf('useProductionStatusEvent({'), summarySource.indexOf('});', summarySource.indexOf('useProductionStatusEvent({')))).not.toContain('enabled');
     expect(menuSource).toContain('...(!packerMode');
     expect(menuSource).toContain("key: 'production_status'");
   });
