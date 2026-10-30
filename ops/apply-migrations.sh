@@ -3007,6 +3007,10 @@ probe_file() {
       "$(q_trg trg_orders_close_rework_round)" \
       "$(q_fun_hash 'public.trg_orders_close_rework_round()' b5591f65ae646e55dd5232ad77f8cac7)" ;;
     # «Переделка» 1.1: срок готовности круга и отметка сверки итогового дедлайна (аддитивно).
+    # Client merge journal written only by the card-aware merge/undo (rollback of 279 refused, not desynced).
+    288_client_merge_cards_guard*) probe_all \
+      "SELECT to_regprocedure('public.trg_client_merges_cards_guard()') IS NOT NULL;" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_client_merges_cards_guard' AND tgrelid = 'public.client_merges'::regclass AND tgenabled <> 'D' AND NOT tgisinternal);" ;;
     # «Присадка» → «Базис-проект»: клиент карточки, ссылка XML-проекта на карточку, инвариант клиента, orders_view.
     279_bazis_project_cards*) probe_all \
       "$(q_col doweling_orders client_id)" \
@@ -3133,6 +3137,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     276_order_rework_round_closure*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    288_client_merge_cards_guard*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     279_bazis_project_cards*)
