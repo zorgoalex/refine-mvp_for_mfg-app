@@ -109,8 +109,14 @@ export interface OrderResourceDemandLineDto {
   kind: OrderResourceKind;
   refId: number;
   name: string;
+  /**
+   * Прежний смысл (его читает прежний интерфейс): листовой — поставщик, плёнка — производитель, у «сироты»-плёнки null.
+   * Поставщик позиции — `mainSupplierName`.
+   */
   supplierName: string | null;
-  /** «supplierName — поставщик» (с migr 280; прежний backend у плёнок клал сюда производителя). */
+  /** Основной поставщик позиции (с migr 280; правило «Экрана снабжения»); null — не указан. */
+  mainSupplierName: string | null;
+  /** Есть `mainSupplierName` — поставщик позиции (признак backend с migr 280). */
   supplierRole: 'supplier';
   /** Ключ основного поставщика (как в фильтре «Поставщик»); `none` — поставщик не указан. */
   supplierKey: string;
@@ -231,7 +237,9 @@ export interface OrderResourceMaterialAggregateDto {
   kind: OrderResourceKind;
   refId: number;
   name: string;
+  /** Как у строки: прежний смысл (у плёнки — производитель); поставщик — `mainSupplierName`. */
   supplierName: string | null;
+  mainSupplierName: string | null;
   supplierRole: 'supplier';
   unit: OrderResourceUnit;
   totalQuantity: number;

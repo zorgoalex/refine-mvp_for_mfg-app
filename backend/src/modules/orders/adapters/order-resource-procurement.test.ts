@@ -218,11 +218,14 @@ describe('projectOrders', () => {
       cutSheets: [],
     };
     const chosen = projectOrders({ ...input, mainSuppliers: new Map([['film:7', { key: 'c:abc-1', name: 'E2E-Тест Поставщик Плёнки' }]]) });
-    expect(chosen.lines.get(101)!.find((line) => line.kind === 'film')).toMatchObject({ supplierName: 'E2E-Тест Поставщик Плёнки', supplierKey: 'c:abc-1' });
-    expect(chosen.lines.get(101)!.find((line) => line.kind === 'sheet_material')).toMatchObject({ supplierName: 'E2E-Тест Основной', supplierKey: 's:31' });
+    expect(chosen.lines.get(101)!.find((line) => line.kind === 'film')).toMatchObject({
+      // прежний интерфейс читает supplierName плёнки как производителя — там он и остаётся
+      supplierName: 'E2E-Тест Производитель', mainSupplierName: 'E2E-Тест Поставщик Плёнки', supplierKey: 'c:abc-1',
+    });
+    expect(chosen.lines.get(101)!.find((line) => line.kind === 'sheet_material')).toMatchObject({ supplierName: 'E2E-Тест Основной', mainSupplierName: 'E2E-Тест Основной', supplierKey: 's:31' });
     expect(chosen.base[0].films[0]).toMatchObject({ vendorName: 'E2E-Тест Производитель', supplierName: 'E2E-Тест Поставщик Плёнки' });
     const none = projectOrders({ ...input, mainSuppliers: new Map() });
-    expect(none.lines.get(101)!.find((line) => line.kind === 'film')).toMatchObject({ supplierName: null, supplierKey: 'none' });
+    expect(none.lines.get(101)!.find((line) => line.kind === 'film')).toMatchObject({ supplierName: 'E2E-Тест Производитель', mainSupplierName: null, supplierKey: 'none' });
   });
 
   it('the supplier filter narrows only sheetMaterials/films; lines stay complete for the procurement overlay', () => {

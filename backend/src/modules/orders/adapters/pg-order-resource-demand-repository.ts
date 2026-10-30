@@ -207,8 +207,10 @@ export interface ProjectedResourceLine {
   kind: OrderResourceKind;
   refId: number;
   name: string;
+  /** Прежний смысл для прежнего интерфейса: листовой — поставщик, плёнка — производитель. */
   supplierName: string | null;
-  /** «supplierName — поставщик» (с migr 280; прежний backend у плёнок клал сюда производителя). */
+  /** Основной поставщик позиции (с migr 280). */
+  mainSupplierName: string | null;
   supplierRole: 'supplier';
   supplierKey: string;
   quantity: number | null;
@@ -951,7 +953,9 @@ export function orphanLine(row: ResourceProcurementRow, extras: ApplyProcurement
     kind,
     refId,
     name: cleanName(row.resource_name) ?? `ID: ${refId}`,
-    supplierName: extras.orphanSuppliers?.get(procurementRowKey(row))?.name ?? null,
+    // прежний интерфейс подписывает supplierName плёнки как производителя — поставщика туда не кладём
+    supplierName: kind === 'film' ? null : extras.orphanSuppliers?.get(procurementRowKey(row))?.name ?? null,
+    mainSupplierName: extras.orphanSuppliers?.get(procurementRowKey(row))?.name ?? null,
     supplierRole: 'supplier',
     supplierKey: extras.orphanSuppliers?.get(procurementRowKey(row))?.key ?? RESOURCE_SUPPLIER_NONE_KEY,
     quantity: 0,
@@ -999,6 +1003,7 @@ export function aggregateByMaterial(
         refId: line.refId,
         name: line.name,
         supplierName: line.supplierName,
+        mainSupplierName: line.mainSupplierName,
         supplierRole: 'supplier',
         unit: line.unit,
         totalQuantity: 0,
@@ -1219,6 +1224,7 @@ function projectSheetLines(rows: Map<number, SheetAccumulator> | undefined): Pro
         refId: row.sheetMaterialTypeId,
         name: row.name,
         supplierName: row.supplierName,
+        mainSupplierName: row.supplierName,
         supplierRole: 'supplier',
         supplierKey: row.supplierKey,
         quantity,
@@ -1252,7 +1258,9 @@ function projectFilmLines(rows: Map<number, FilmAccumulator> | undefined): Proje
         kind: 'film',
         refId: row.filmId,
         name: row.name,
-        supplierName: row.supplierName,
+        // прежний интерфейс подписывает supplierName плёнки как производителя (до migr 280 так и было)
+        supplierName: row.vendorName,
+        mainSupplierName: row.supplierName,
         supplierRole: 'supplier',
         supplierKey: row.supplierKey,
         quantity,
