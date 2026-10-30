@@ -366,20 +366,31 @@ export function resolveByMaterialPeriod(
   return { dateFrom: defaultFrom, dateTo: defaultTo, isDefault: true };
 }
 
+type SupplierFields = { kind: ResourceKind; supplierName: string | null; mainSupplierName?: string | null; supplierRole?: 'supplier' };
+
 /**
- * Подпись поставщика строки. Новый backend (migr 280) кладёт в supplierName основного поставщика и помечает это
- * `supplierRole: 'supplier'`; прежний backend у плёнок клал туда производителя — его не выдаём за поставщика.
+ * Основной поставщик строки: `mainSupplierName` (backend сохраняет в supplierName прежний смысл — у плёнки
+ * производитель, его читает прежний интерфейс); без него — supplierName, если это поставщик (листовой или
+ * `supplierRole` у backend между migr 280 и mainSupplierName). `undefined` — backend поставщика не сообщает
+ * (прежний: у плёнки в supplierName производитель).
  */
-export function lineSupplierLabel(line: { kind: ResourceKind; supplierName: string | null; supplierRole?: 'supplier' }): string | null {
-  if (!line.supplierName) return null;
-  const isSupplier = line.kind === 'sheet_material' || line.supplierRole === 'supplier';
-  return `${isSupplier ? 'Поставщик' : 'Производитель'}: ${line.supplierName}`;
+export function lineMainSupplier(line: SupplierFields): string | null | undefined {
+  if (line.mainSupplierName !== undefined) return line.mainSupplierName;
+  return line.kind === 'sheet_material' || line.supplierRole === 'supplier' ? line.supplierName : undefined;
+}
+
+/** Подпись поставщика строки; производителя от прежнего backend не выдаём за поставщика. */
+export function lineSupplierLabel(line: SupplierFields): string | null {
+  const supplier = lineMainSupplier(line);
+  if (supplier !== undefined) return supplier ? `Поставщик: ${supplier}` : null;
+  return line.supplierName ? `Производитель: ${line.supplierName}` : null;
 }
 
 /** Значение колонки «Поставщик» сводки: производитель от прежнего backend — с пометкой. */
-export function aggregateSupplierText(row: { kind: ResourceKind; supplierName: string | null; supplierRole?: 'supplier' }): string {
-  if (!row.supplierName) return '—';
-  return row.kind === 'sheet_material' || row.supplierRole === 'supplier' ? row.supplierName : `${row.supplierName} (производитель)`;
+export function aggregateSupplierText(row: SupplierFields): string {
+  const supplier = lineMainSupplier(row);
+  if (supplier !== undefined) return supplier || '—';
+  return row.supplierName ? `${row.supplierName} (производитель)` : '—';
 }
 
 /**

@@ -361,6 +361,19 @@ describe('поставщик в сводке и строках (migr 280)', () =
     expect(aggregateSupplierText({ kind: 'film', supplierName: null })).toBe('—');
     expect(lineSupplierLabel({ kind: 'sheet_material', supplierName: 'Alpi' })).toBe('Поставщик: Alpi');
   });
+
+  it('поставщик — из mainSupplierName; supplierName плёнки там — производитель для прежнего интерфейса', async () => {
+    const { aggregateSupplierText, lineMainSupplier, lineSupplierLabel } = await import('./resourceKinds');
+    const film = { kind: 'film' as const, supplierName: 'Производитель A', mainSupplierName: 'Поставщик B', supplierRole: 'supplier' as const };
+    expect(lineMainSupplier(film)).toBe('Поставщик B');
+    expect(lineSupplierLabel(film)).toBe('Поставщик: Поставщик B');
+    expect(aggregateSupplierText(film)).toBe('Поставщик B');
+    const noSupplier = { ...film, mainSupplierName: null };
+    expect(lineMainSupplier(noSupplier)).toBeNull();
+    expect(lineSupplierLabel(noSupplier)).toBeNull();
+    expect(aggregateSupplierText(noSupplier)).toBe('—');
+    expect(lineMainSupplier({ kind: 'film', supplierName: 'Kira' })).toBeUndefined();
+  });
 });
 
 describe('колонка «Поставщик» таблиц (migr 280)', () => {

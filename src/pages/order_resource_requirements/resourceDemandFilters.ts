@@ -1,5 +1,6 @@
 import type { Key } from 'react';
 import type { OrderResourceDemandFilters, OrderResourceDemandLineDto } from '../../api/types/orderApi.types';
+import { lineMainSupplier } from './resourceKinds';
 
 /** Значение «(без …)» в фильтре заголовка. */
 export const RESOURCE_FILTER_EMPTY = '__order_resource_requirement_filter_empty__';
@@ -97,10 +98,11 @@ export function resourceDemandHeaderQuery(filters: HeaderFilterState, known?: He
 export function rowSupplierNames(row: { lines?: OrderResourceDemandLineDto[] }): string[] {
   const names = new Map<string, string>();
   for (const line of row.lines ?? []) {
-    if (line.orphan || !line.supplierName || line.supplierKey === SUPPLIER_NONE_KEY) continue;
-    // Прежний backend без supplierKey у плёнки клал производителя — такие строки не считаем поставщиком.
-    if (line.supplierKey === undefined && line.kind === 'film' && line.supplierRole !== 'supplier') continue;
-    names.set(line.supplierKey ?? line.supplierName, line.supplierName);
+    if (line.orphan || line.supplierKey === SUPPLIER_NONE_KEY) continue;
+    // прежний backend у плёнки клал в supplierName производителя — lineMainSupplier его не выдаёт за поставщика
+    const supplier = lineMainSupplier(line);
+    if (!supplier) continue;
+    names.set(line.supplierKey ?? supplier, supplier);
   }
   return [...names.values()].sort(compareNames);
 }

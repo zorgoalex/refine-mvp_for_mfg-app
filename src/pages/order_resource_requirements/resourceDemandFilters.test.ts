@@ -117,6 +117,13 @@ describe('rowSupplierNames', () => {
     ] })).toEqual(['Алер', 'AGER-2005 TOO']);
   });
 
+  it('takes the supplier from mainSupplierName; supplierName of a film is the manufacturer for older screens', () => {
+    expect(rowSupplierNames({ lines: [
+      line({ supplierKey: 's:2', supplierName: 'Производитель A', mainSupplierName: 'Поставщик B' }),
+      line({ resourceKey: 'film:4', supplierKey: 'none', supplierName: 'Производитель C', mainSupplierName: null }),
+    ] })).toEqual(['Поставщик B']);
+  });
+
   it('an older backend without supplierKey: a film supplier without the supplier role is the manufacturer, not shown', () => {
     expect(rowSupplierNames({ lines: [
       line({ supplierKey: undefined, supplierRole: undefined, supplierName: 'Производитель' }),
