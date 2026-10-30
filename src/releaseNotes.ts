@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-30", title: "Смена статусов деталей больше не падает по таймауту",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "Смена производственного статуса деталей заказа, у которого есть ванны МДФ, могла завершаться ошибкой сервера через ~12 секунд при загруженной базе. Проверки автоматики МДФ-доски теперь выполняются быстро (доли секунды).",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-28", title: "Журнал дублей интеграций и объединение клиентов",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
