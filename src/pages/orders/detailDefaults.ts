@@ -46,6 +46,22 @@ export function newDetailDefaults(
 const validPrice = (value: number | null): number | null =>
   value != null && Number.isFinite(value) && value > 0 ? value : null;
 
+/**
+ * The values the defaults give an untouched grid row opened in the inline editor — every field explicitly
+ * (null where the default is empty), so a later change of the defaults can tell which fields are still theirs.
+ */
+export function rowDefaultFormValues(defaults: DetailDefaults, ruleMaterialId: number | undefined): Record<string, unknown> {
+  const values = newDetailDefaults(defaults, ruleMaterialId);
+  return {
+    milling_type_id: values.milling_type_id,
+    edge_type_id: values.edge_type_id,
+    sheet_material_type_id: values.sheet_material_type_id ?? null,
+    film_id: values.film_id ?? null,
+    milling_cost_per_sqm: values.milling_cost_per_sqm ?? null,
+    prefilled_milling_cost_per_sqm: values.prefilled_milling_cost_per_sqm ?? null,
+  };
+}
+
 /** Defaults kept in the tab checkpoint (a restored tab keeps them); anything malformed — null. */
 export function readDetailDefaults(raw: unknown): DetailDefaults | null {
   if (!raw || typeof raw !== 'object') return null;

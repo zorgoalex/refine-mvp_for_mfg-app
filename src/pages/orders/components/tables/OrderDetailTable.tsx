@@ -70,7 +70,7 @@ import {
   isOrderDetailPlaceholder,
   isPristineOrderDetailPlaceholder,
 } from '../../../../utils/orderDetailRows';
-import { newDetailDefaults, type DetailDefaults } from '../../detailDefaults';
+import { rowDefaultFormValues, type DetailDefaults } from '../../detailDefaults';
 import { OrderDetailsToolbar } from '../OrderDetailsToolbar';
 import type { CutDetailLastReadyJobRef } from '../../../../api/types/cutApi.types';
 import { CutJobVersionLines } from '../../CutJobVersionLines';
@@ -837,6 +837,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   newRowDefaultsRef.current = newRowDefaults;
   const latestDetailsRef = useRef(details);
   latestDetailsRef.current = details;
+  // what the defaults put into the form of the open untouched row (the form opens row 1 by itself on load)
+  const appliedRowDefaultsRef = useRef<{ key: React.Key; rule: number | undefined; values: Record<string, unknown> } | null>(null);
   const { tabKey } = useKeepAlive();
   const workspaceKey = tabKey || `/orders/edit/${header?.order_id ?? 'new'}`;
   const restored = useRef(
@@ -1570,13 +1572,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     const currentDefaults = newRowDefaultsRef.current;
     const storeRecord = latestDetailsRef.current.find((detail) =>
       (detail.temp_id || detail.detail_id) === (record.temp_id || record.detail_id)) ?? record;
+    appliedRowDefaultsRef.current = null;
     if (currentDefaults && isPristineOrderDetailPlaceholder(storeRecord)) {
-      const rule = initialFormValues.sheet_material_type_id;
-      const defaults = newDetailDefaults(currentDefaults, typeof rule === 'number' ? rule : undefined);
+      const rule = typeof initialFormValues.sheet_material_type_id === 'number'
+        ? initialFormValues.sheet_material_type_id
+        : undefined;
+      const defaults = rowDefaultFormValues(currentDefaults, rule);
       Object.assign(initialFormValues, defaults);
-      if (defaults.milling_cost_per_sqm != null) {
-        fieldValuesRef.current.milling_cost_per_sqm = defaults.milling_cost_per_sqm;
-      }
+      fieldValuesRef.current.milling_cost_per_sqm = (defaults.milling_cost_per_sqm as number | null) ?? null;
+      if (rowKey !== null) appliedRowDefaultsRef.current = { key: rowKey, rule, values: defaults };
     }
     if (initialValue !== undefined) {
       initialFormValues[String(nextEditingField)] = initialValue;
@@ -1610,6 +1614,31 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       recalcSum();
     }
   };
+
+  // The defaults changed while an untouched row is open: fields the user has not changed follow them.
+  useEffect(() => {
+    const applied = appliedRowDefaultsRef.current;
+    if (!applied || !newRowDefaults || editingKey === null || String(applied.key) !== String(editingKey)) return;
+    const next = rowDefaultFormValues(newRowDefaults, applied.rule);
+    const patch: Record<string, unknown> = {};
+    for (const field of Object.keys(next)) {
+      if (form.getFieldValue(field) === applied.values[field] && next[field] !== applied.values[field]) {
+        patch[field] = next[field];
+      }
+    }
+    if (patch.milling_cost_per_sqm !== undefined) {
+      // the marker follows the price only together with it
+      patch.prefilled_milling_cost_per_sqm = next.prefilled_milling_cost_per_sqm;
+      fieldValuesRef.current.milling_cost_per_sqm = (next.milling_cost_per_sqm as number | null) ?? null;
+    }
+    appliedRowDefaultsRef.current = { ...applied, values: next };
+    if (Object.keys(patch).length > 0) {
+      form.setFieldsValue(patch);
+      if (patch.milling_cost_per_sqm !== undefined) recalcSum();
+      for (const field of Object.keys(patch)) cellRuntime.notifyCell(editingKey, field);
+      cellRuntime.notifyRowState(editingKey);
+    }
+  }, [newRowDefaults]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Save current editing row and return success status
   const saveCurrentRow = async (

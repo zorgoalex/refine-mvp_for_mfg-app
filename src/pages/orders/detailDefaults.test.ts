@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { changedDetailDefaults, INITIAL_DETAIL_DEFAULTS, newDetailDefaults, readDetailDefaults } from './detailDefaults';
+import {
+  changedDetailDefaults,
+  INITIAL_DETAIL_DEFAULTS,
+  newDetailDefaults,
+  readDetailDefaults,
+  rowDefaultFormValues,
+} from './detailDefaults';
 
 describe('detail defaults of the order form', () => {
   it('untouched — the long-standing new-row values (Модерн, р-1, the material rule)', () => {
@@ -30,5 +36,17 @@ describe('detail defaults of the order form', () => {
     expect(readDetailDefaults({ ...chosen, millingTypeId: 0 })).toBeNull();
     expect(readDetailDefaults({ ...chosen, pricePerSqm: 'x' })).toBeNull();
     expect(readDetailDefaults(undefined)).toBeNull();
+  });
+});
+
+describe('form values of an opened untouched row', () => {
+  it('every field is explicit, so a later change of the defaults knows which ones are still theirs', () => {
+    expect(rowDefaultFormValues(INITIAL_DETAIL_DEFAULTS, 7)).toEqual({
+      milling_type_id: 1, edge_type_id: 1, sheet_material_type_id: 7, film_id: null,
+      milling_cost_per_sqm: null, prefilled_milling_cost_per_sqm: null,
+    });
+    expect(rowDefaultFormValues({ ...INITIAL_DETAIL_DEFAULTS, millingTypeId: 9, pricePerSqm: 9500 }, 7)).toMatchObject({
+      milling_type_id: 9, milling_cost_per_sqm: 9500, prefilled_milling_cost_per_sqm: 9500,
+    });
   });
 });
