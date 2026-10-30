@@ -48,10 +48,14 @@ describe('calendar print sheets', () => {
 });
 
 describe('calendar print isolation', () => {
-  it('while printing the calendar only its sheet is printed (not the MDF board print or the app)', () => {
+  it('the calendar itself is printed (copies of its weeks); while printing only those sheets go to paper', () => {
     const css = readFileSync(join(__dirname, 'calendarPrint.css'), 'utf8');
-    expect(css).toContain('html.wb-cal-printing body > :not(.wb-cal-print--paper)');
-    expect(css).toContain('html.wb-cal-printing body > .wb-cal-print--paper');
-    expect(css).toMatch(/\.wb-cal-print--paper\s*{\s*display: none;/);
+    expect(css).toContain('html.wb-cal-printing body > :not(.wb-cal-print-live)');
+    expect(css).toContain('html.wb-cal-printing body > .wb-cal-print-live');
+    expect(css).toMatch(/\.wb-cal-print-live\s*{\s*display: none;/);
+    const board = readFileSync(join(__dirname, '../components/CalendarBoard.tsx'), 'utf8');
+    expect(board).toContain("getGrid={() => containerRef.current?.querySelector<HTMLElement>('.calendar-grid') ?? null}");
+    const sheet = readFileSync(join(__dirname, 'calendarPrintSheet.ts'), 'utf8');
+    expect(sheet).toContain("sheet.className = 'calendar-board calendar-board--wb calendar-board--wb-weeks wb-cal-print-sheet';");
   });
 });

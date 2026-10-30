@@ -90,9 +90,12 @@ export function buildMdfPrintSheet(options: MdfPrintSheetOptions): HTMLElement {
  */
 export function fitMdfPrintSheet(sheet: HTMLElement): void {
   const copy = sheet.querySelector<HTMLElement>(':scope > .status-board-columns');
-  const sheetWidth = Number(sheet.dataset.sheetWidth);
-  if (!copy || !(sheetWidth > 0)) return;
+  if (!copy) return;
+  // the room inside the sheet (a preview sheet has its paper margins as padding)
+  const style = getComputedStyle(sheet);
+  const available = sheet.clientWidth - parseFloat(style.paddingLeft || '0') - parseFloat(style.paddingRight || '0');
+  if (!(available > 0)) return;
   copy.style.setProperty('zoom', '1');
   const natural = copy.scrollWidth;
-  if (natural > 0) copy.style.setProperty('zoom', String(Math.min(1, Math.floor((sheetWidth / natural) * 1000) / 1000)));
+  if (natural > 0) copy.style.setProperty('zoom', String(Math.min(1, Math.floor((available / natural) * 1000) / 1000)));
 }

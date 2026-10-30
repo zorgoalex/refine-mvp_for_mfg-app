@@ -1,32 +1,23 @@
 // «NewLine»: «Печать» of the production calendar — a dialog with the sheet preview, then the browser print
-// (where «Сохранить как PDF» is too). The printed sheet is mounted into <body> only while printing.
-import React, { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
+// (where «Сохранить как PDF» is too). The sheets are copies of the calendar itself (its week rows with the cards as
+// on screen in the chosen view), mounted into <body> only while printing.
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Modal, Space } from 'antd';
 import { PrinterOutlined } from '@ant-design/icons';
 import { Segmented } from '../../../ui/Segmented';
-import { ProductionStagesDisplay } from '../../../components/ProductionStagesDisplay';
-import type { CalendarFilters, CalendarOrder, ProductionWorkflowDisplay } from '../types/calendar';
-import {
-  areAllProductionStagesReady,
-  getMaterialsForCard,
-  getMillingDisplayValue,
-  getStatusColor,
-} from '../utils/statusColors';
+import type { CalendarFilters, CalendarOrder } from '../types/calendar';
 import { formatDateKey } from '../utils/dateUtils';
-import { useWorkbenchMaterialColor } from '../utils/workbenchMaterialColors';
 import type { WorkbenchWeek } from '../utils/workbenchCalendar';
 import {
-  buildCalendarPrintSheets,
+  buildCalendarPrintSheets as buildCalendarPrintModel,
   CALENDAR_PRINT_MARGIN_MM,
-  CALENDAR_PRINT_PAPERS,
   calendarPrintFilterLine,
   calendarPrintStamp,
   calendarPrintStats,
   ordersWord,
   type CalendarPrintPaper,
-  type CalendarPrintSheet,
 } from './calendarPrintModel';
+import { buildCalendarPrintSheets, fitCalendarPrintSheet } from './calendarPrintSheet';
 import './calendarPrint.css';
 
 const PRINTING_CLASS = 'wb-cal-printing';
@@ -40,140 +31,6 @@ const readPaper = (): CalendarPrintPaper => {
   }
 };
 
-interface PrintCardProps {
-  order: CalendarOrder;
-  showFinancials: boolean;
-  productionWorkflowDisplay?: ProductionWorkflowDisplay;
-}
-
-const PrintCard: React.FC<PrintCardProps> = ({ order, showFinancials, productionWorkflowDisplay }) => {
-  const materialColor = useWorkbenchMaterialColor();
-  const status = (order.order_status_name ?? '').toLowerCase();
-  const milling = getMillingDisplayValue(order.order_details);
-  const materials = getMaterialsForCard(order.order_details, true);
-  const passed = order.passedProductionCodes ?? [];
-  const payment = showFinancials ? order.payment_status_name ?? '' : '';
-  return (
-    <div
-      className="wb-cal-print__card"
-      data-issued={status === 'выдан' || undefined}
-      data-ready={status === 'готов к выдаче' || undefined}
-      style={{ ['--wb-print-stripe' as string]: getStatusColor(order.order_status_name || '') }}
-    >
-      <div className="wb-cal-print__card-head">
-        <b className={order.order_name?.startsWith('К') ? 'wb-cal-print__number wb-cal-print__number--k' : 'wb-cal-print__number'}>
-          {order.order_name}
-          {order.basis_project_display ? <span> - {order.basis_project_display}</span> : null}
-        </b>
-        <span className="wb-cal-print__area">
-          {order.total_area > 0 ? `${order.total_area.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} м²` : '0 м²'}
-        </span>
-      </div>
-      {order.client_name ? <div className="wb-cal-print__client">{order.client_name}</div> : null}
-      {milling || materials.length > 0 ? (
-        <div className="wb-cal-print__facts">
-          {milling ? <span>{milling}</span> : null}
-          {materials.map((material) => (
-            <i key={material.fullName} style={{ ['--wb-material' as string]: materialColor(material.fullName) }}>{material.name}</i>
-          ))}
-        </div>
-      ) : null}
-      {passed.length > 0 || payment ? (
-        <div className="wb-cal-print__foot">
-          {passed.length > 0 ? (
-            <span data-ready={areAllProductionStagesReady(order) || undefined}>
-              <ProductionStagesDisplay
-                passedCodes={passed}
-                manualCodes={order.manualProductionCodes ?? []}
-                displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
-                codeToLetter={productionWorkflowDisplay?.codeToLetter}
-                codeToName={productionWorkflowDisplay?.codeToName}
-                fontSize={9}
-                showTooltip={false}
-                passedColor="#d46b08"
-              />
-            </span>
-          ) : <span />}
-          {payment ? (
-            <span className={payment.toLowerCase().includes('не оплачен') ? 'wb-cal-print__payment wb-cal-print__payment--danger' : 'wb-cal-print__payment'}>
-              {payment}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-};
-
-interface SheetsProps {
-  sheets: CalendarPrintSheet[];
-  paper: CalendarPrintPaper;
-  title: string;
-  filterLine: string;
-  stamp: string;
-  showFinancials: boolean;
-  productionWorkflowDisplay?: ProductionWorkflowDisplay;
-}
-
-export const CalendarPrintSheets: React.FC<SheetsProps> = ({
-  sheets, paper, title, filterLine, stamp, showFinancials, productionWorkflowDisplay,
-}) => {
-  const size = CALENDAR_PRINT_PAPERS[paper];
-  return (
-    <>
-      {sheets.map((sheet, sheetIndex) => (
-        <section
-          key={sheet.weeks[0]?.label ?? sheetIndex}
-          className="wb-cal-print__sheet"
-          style={{ ['--wb-print-width' as string]: `${size.widthMm - CALENDAR_PRINT_MARGIN_MM * 2}mm` }}
-        >
-          <header className="wb-cal-print__header">
-            <b>Производственный календарь</b>
-            <span>{title}</span>
-            <span className="wb-cal-print__filters">{filterLine}</span>
-            <span className="wb-cal-print__stamp">на {stamp} · лист {sheetIndex + 1} из {sheets.length}</span>
-          </header>
-          {sheet.weeks.map((week) => (
-            <table key={week.label} className="wb-cal-print__week">
-              <caption>{week.label}</caption>
-              <thead>
-                <tr>
-                  {week.days.map((day) => (
-                    <th key={day.key} data-weekend={day.weekend || undefined} data-today={day.today || undefined}>
-                      <span className="wb-cal-print__day">{day.weekday} <b>{day.dayMonth}</b></span>
-                      <span className="wb-cal-print__load">
-                        {day.orders.length > 0
-                          ? `${day.orders.length} ${ordersWord(day.orders.length)} · ${day.area.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} м²`
-                          : '—'}
-                      </span>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  {week.days.map((day) => (
-                    <td key={day.key} data-weekend={day.weekend || undefined}>
-                      {day.orders.map((order) => (
-                        <PrintCard
-                          key={order.order_id}
-                          order={order}
-                          showFinancials={showFinancials}
-                          productionWorkflowDisplay={productionWorkflowDisplay}
-                        />
-                      ))}
-                    </td>
-                  ))}
-                </tr>
-              </tbody>
-            </table>
-          ))}
-        </section>
-      ))}
-    </>
-  );
-};
-
 export interface CalendarPrintButtonProps {
   weeks: readonly WorkbenchWeek[];
   ordersOf: (day: Date) => CalendarOrder[];
@@ -181,42 +38,87 @@ export interface CalendarPrintButtonProps {
   filters: CalendarFilters;
   productionOnly: boolean;
   showFinancials: boolean;
-  productionWorkflowDisplay?: ProductionWorkflowDisplay;
+  /** «Подробно», «Компактно», «Кратко» — the card view on screen, printed as it is */
+  viewLabel: string;
+  /** the calendar's own week grid; the sheets are copies of it */
+  getGrid: () => HTMLElement | null;
   disabled?: boolean;
 }
 
 export const CalendarPrintButton: React.FC<CalendarPrintButtonProps> = ({
-  weeks, ordersOf, periodLabel, filters, productionOnly, showFinancials, productionWorkflowDisplay, disabled,
+  weeks, ordersOf, periodLabel, filters, productionOnly, showFinancials, viewLabel, getGrid, disabled,
 }) => {
   const [open, setOpen] = useState(false);
   const [paper, setPaper] = useState<CalendarPrintPaper>(readPaper);
   const [printing, setPrinting] = useState(false);
   const [now, setNow] = useState(() => new Date());
+  const previewRef = useRef<HTMLDivElement | null>(null);
 
-  const sheets = useMemo(
-    () => (open ? buildCalendarPrintSheets(weeks, ordersOf, paper, now) : []),
+  const model = useMemo(
+    () => (open ? buildCalendarPrintModel(weeks, ordersOf, paper, now) : []),
     [now, open, ordersOf, paper, weeks],
   );
-  const stats = useMemo(() => calendarPrintStats(sheets), [sheets]);
+  const stats = useMemo(() => calendarPrintStats(model), [model]);
   const filterLine = calendarPrintFilterLine(filters, productionOnly, showFinancials);
   const stamp = calendarPrintStamp(now);
   const firstDay = weeks[0]?.days[0];
   const lastDay = weeks.at(-1)?.days.at(-1);
-  const title = firstDay && lastDay ? `${formatDateKey(firstDay)} – ${formatDateKey(lastDay)}` : periodLabel;
+  const period = firstDay && lastDay ? `${formatDateKey(firstDay)} – ${formatDateKey(lastDay)}` : periodLabel;
+
+  const buildSheets = (): HTMLElement[] => {
+    const grid = getGrid();
+    if (!grid) return [];
+    return buildCalendarPrintSheets({
+      grid,
+      paper,
+      title: 'Производственный календарь',
+      period: viewLabel ? `${period} · вид «${viewLabel}»` : period,
+      filterLine,
+      stamp,
+    });
+  };
+
+  // preview: copies of the calendar weeks, after the dialog has opened
+  useEffect(() => {
+    if (!open) return undefined;
+    const frame = requestAnimationFrame(() => {
+      const holder = previewRef.current;
+      if (!holder) return;
+      holder.replaceChildren();
+      for (const sheet of buildSheets()) {
+        holder.append(sheet);
+        fitCalendarPrintSheet(sheet);
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open, paper, now, viewLabel, filterLine]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!printing) return undefined;
     const root = document.documentElement;
-    root.classList.add(PRINTING_CLASS);
+    const container = document.createElement('div');
+    container.className = 'wb-cal-print-live';
+    const style = document.createElement('style');
+    style.textContent = `@page { size: ${paper} landscape; margin: ${CALENDAR_PRINT_MARGIN_MM}mm; }`;
     let done = false;
     const finish = () => {
       if (done) return;
       done = true;
       root.classList.remove(PRINTING_CLASS);
+      container.remove();
+      style.remove();
       setPrinting(false);
     };
-    window.addEventListener('afterprint', finish);
-    // two frames: the portal is laid out before the print snapshot
+    const sheets = buildSheets();
+    // laid out off screen once, so each sheet can be scaled by its real width (on screen the container is hidden)
+    container.style.cssText = 'display:block;position:absolute;left:-100000px;top:0;visibility:hidden';
+    sheets.forEach((sheet) => container.append(sheet));
+    document.body.append(container);
+    sheets.forEach(fitCalendarPrintSheet);
+    container.style.cssText = '';
+    document.head.append(style);
+    root.classList.add(PRINTING_CLASS);
+    window.addEventListener('afterprint', finish, { once: true });
     const frame = requestAnimationFrame(() => requestAnimationFrame(() => {
       window.print();
       finish();
@@ -225,8 +127,10 @@ export const CalendarPrintButton: React.FC<CalendarPrintButtonProps> = ({
       cancelAnimationFrame(frame);
       window.removeEventListener('afterprint', finish);
       root.classList.remove(PRINTING_CLASS);
+      container.remove();
+      style.remove();
     };
-  }, [printing]);
+  }, [printing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const choosePaper = (value: CalendarPrintPaper) => {
     setPaper(value);
@@ -236,9 +140,6 @@ export const CalendarPrintButton: React.FC<CalendarPrintButtonProps> = ({
       // only a convenience
     }
   };
-
-  const size = CALENDAR_PRINT_PAPERS[paper];
-  const sheetsProps = { sheets, paper, title, filterLine, stamp, showFinancials, productionWorkflowDisplay };
 
   return (
     <>
@@ -259,7 +160,7 @@ export const CalendarPrintButton: React.FC<CalendarPrintButtonProps> = ({
         footer={(
           <Space>
             <Button onClick={() => setOpen(false)}>Отмена</Button>
-            <Button type="primary" icon={<PrinterOutlined />} disabled={sheets.length === 0} onClick={() => setPrinting(true)}>
+            <Button type="primary" icon={<PrinterOutlined />} disabled={model.length === 0} loading={printing} onClick={() => setPrinting(true)}>
               Печать
             </Button>
           </Space>
@@ -276,25 +177,19 @@ export const CalendarPrintButton: React.FC<CalendarPrintButtonProps> = ({
             onChange={(value) => choosePaper(value as CalendarPrintPaper)}
           />
           <span className="wb-cal-print-dialog__summary">
-            {title} · {stats.orders} {ordersWord(stats.orders)} · {stats.area.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} м²
-            {' · '}листов: {sheets.length}
+            {period} · {stats.orders} {ordersWord(stats.orders)} · {stats.area.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} м²
+            {' · '}листов: {model.length}
           </span>
         </div>
         <p className="wb-cal-print-dialog__hint">
-          Печатается период и заказы, как на экране ({filterLine}). Неделя, две или месяц выбираются над календарём.
-          В окне печати браузера можно выбрать «Сохранить как PDF».
+          Печатается календарь как на экране{viewLabel ? <> — вид «{viewLabel}»</> : null}: те же карточки, период и
+          заказы ({filterLine}). Неделя, две или месяц и вид карточек выбираются над календарём. В окне печати браузера
+          можно выбрать «Сохранить как PDF».
         </p>
-        <div className="wb-cal-print wb-cal-print--preview">
-          <CalendarPrintSheets {...sheetsProps} />
+        <div className="wb-cal-print-preview" data-paper={paper}>
+          <div ref={previewRef} />
         </div>
       </Modal>
-      {printing ? createPortal(
-        <div className="wb-cal-print wb-cal-print--paper">
-          <style>{`@page { size: ${size.label} landscape; margin: ${CALENDAR_PRINT_MARGIN_MM}mm; }`}</style>
-          <CalendarPrintSheets {...sheetsProps} />
-        </div>,
-        document.body,
-      ) : null}
     </>
   );
 };

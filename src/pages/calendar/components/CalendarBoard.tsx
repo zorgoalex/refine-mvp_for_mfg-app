@@ -1006,7 +1006,8 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
               filters={filters}
               productionOnly={productionOnly}
               showFinancials={canViewFinancials}
-              productionWorkflowDisplay={productionWorkflowDisplay}
+              viewLabel={viewMode === ViewMode.COMPACT ? 'Компактно' : viewMode === ViewMode.BRIEF ? 'Кратко' : 'Подробно'}
+              getGrid={() => containerRef.current?.querySelector<HTMLElement>('.calendar-grid') ?? null}
               disabled={isLoading || workbenchWeeks.length === 0}
             />
             <Tooltip title="Обновить данные">
