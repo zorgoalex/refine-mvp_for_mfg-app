@@ -11,6 +11,12 @@ interface OutboxRow {
   payload_json: Record<string, unknown> | null;
   attempts: number | string;
   lock_token: string | null;
+  created_at?: Date | string | null;
+}
+
+function createdAtOf(row: OutboxRow): string | undefined {
+  if (!row.created_at) return undefined;
+  return (row.created_at instanceof Date ? row.created_at : new Date(row.created_at)).toISOString();
 }
 
 export class PgCrmSyncOutboxRepository {
@@ -92,7 +98,7 @@ export class PgCrmSyncOutboxRepository {
          LIMIT $1
          FOR UPDATE SKIP LOCKED
        )
-       RETURNING outbox_event_id, event_type, aggregate_type, aggregate_id, payload_json, attempts, lock_token`,
+       RETURNING outbox_event_id, event_type, aggregate_type, aggregate_id, payload_json, attempts, lock_token, created_at`,
       [batchSize, workerId, leaseMs],
     );
     return result.rows.map((row) => ({
@@ -103,6 +109,7 @@ export class PgCrmSyncOutboxRepository {
       payload: row.payload_json ?? {},
       attempts: Number(row.attempts),
       lockToken: String(row.lock_token),
+      createdAt: createdAtOf(row),
     }));
   }
 
@@ -155,7 +162,7 @@ export class PgCrmSyncOutboxRepository {
     limit: number,
   ): Promise<OutboxEventRecord[]> {
     const result = await client.query<OutboxRow>(
-      `SELECT outbox_event_id, event_type, aggregate_type, aggregate_id, payload_json, attempts
+      `SELECT outbox_event_id, event_type, aggregate_type, aggregate_id, payload_json, attempts, created_at
        FROM crm_sync_outbox
        WHERE status='pending' AND next_attempt_at <= now()
        ORDER BY next_attempt_at, created_at
@@ -169,6 +176,7 @@ export class PgCrmSyncOutboxRepository {
       aggregateId: row.aggregate_id,
       payload: row.payload_json ?? {},
       attempts: Number(row.attempts),
+      createdAt: createdAtOf(row),
     }));
   }
 }

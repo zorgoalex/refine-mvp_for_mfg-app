@@ -147,9 +147,10 @@ function harness(input?: {
       '00000000-0000-4000-8000-000000000001',
     ),
     completeOutboundOperation: vi.fn().mockResolvedValue(undefined),
+    upsertSuccess: vi.fn().mockResolvedValue(true),
   } as unknown as PgCrmSyncMappingRepository;
   const db = {
-    transaction: vi.fn(async (handler) => handler({})),
+    transaction: vi.fn(async (handler) => handler({ query: vi.fn().mockResolvedValue({ rows: [] }) })),
   } as unknown as DatabaseService;
   const consumer = new Bitrix24SyncConsumer({
     source,
@@ -837,7 +838,7 @@ describe('Bitrix24SyncConsumer with the real paid-payment guard (backfill and re
     (h.bitrix as unknown as { getPayment: unknown }).getPayment = vi.fn().mockRejectedValue(new Error('Bitrix down'));
     const consumer = new Bitrix24SyncConsumer({
       source: h.source, bitrix: h.bitrix, mapping: h.mapping,
-      db: { transaction: vi.fn(async (handler) => handler({})) } as unknown as DatabaseService,
+      db: { transaction: vi.fn(async (handler) => handler({ query: vi.fn().mockResolvedValue({ rows: [] }) })) } as unknown as DatabaseService,
       options, durablePaymentCreates: true,
       paidPayments: realGuard(h.bitrix, [openOperation]),
     });
@@ -857,7 +858,7 @@ describe('Bitrix24SyncConsumer with the real paid-payment guard (backfill and re
     (h.bitrix as unknown as { getPayment: unknown }).getPayment = vi.fn().mockResolvedValue({ paid: 'N', sum: 50, xmlId: null });
     const consumer = new Bitrix24SyncConsumer({
       source: h.source, bitrix: h.bitrix, mapping: h.mapping,
-      db: { transaction: vi.fn(async (handler) => handler({})) } as unknown as DatabaseService,
+      db: { transaction: vi.fn(async (handler) => handler({ query: vi.fn().mockResolvedValue({ rows: [] }) })) } as unknown as DatabaseService,
       options, durablePaymentCreates: true,
       paidPayments: realGuard(h.bitrix, []),
     });

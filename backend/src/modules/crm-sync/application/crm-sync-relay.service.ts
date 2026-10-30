@@ -2,6 +2,7 @@ import { Logger, type LoggerService } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { redactLogFields } from '../../../common/logging/redaction';
 import type { DatabaseService } from '../../../database/database.service';
+import type { DatabaseClient } from '../../../database/database.types';
 import type { AuditService } from '../../../common/audit/audit.service';
 import type {
   ClaimedCrmSyncOutboxEvent,
@@ -9,6 +10,7 @@ import type {
 } from '../adapters/pg-crm-sync-outbox-repository';
 import type { PgCrmSyncMappingRepository } from '../adapters/pg-crm-sync-mapping-repository';
 import {
+  CrmSyncAuditOnlyError,
   CrmSyncTargetError,
   type Bitrix24SyncConsumer,
 } from './bitrix24-sync-consumer';
@@ -113,9 +115,9 @@ export class CrmSyncRelayService {
               eventType: event.eventType,
               intentCount: intents.length,
               intents: intents.map((i) => ({
-                entityType: i.mapping.entityType,
-                erpId: i.mapping.erpId,
-                bitrixObject: i.mapping.bitrixObject,
+                entityType: i.mapping?.entityType ?? i.audit.entityType,
+                erpId: i.mapping?.erpId ?? String(i.audit.entityId),
+                bitrixObject: i.mapping?.bitrixObject ?? null,
               })),
             }),
           );
@@ -307,6 +309,8 @@ export class CrmSyncRelayService {
         const bitrixObject =
           target?.bitrixObject ??
           (entityType === 'client' ? 'contact' : entityType === 'payment' ? 'payment' : 'deal');
+        // A merged client's alias or a merge comment: the failure is audited on the client, no mapping is touched.
+        const auditOnly = err instanceof CrmSyncAuditOnlyError ? err.target : null;
 
         const didFail = await this.db.transaction(async (tx) => {
           // markRetry FIRST, token-gated: advances attempts and (when exhausted) flips the row
@@ -327,7 +331,36 @@ export class CrmSyncRelayService {
           // but ONLY for a structurally valid payload so it never violates the entity_type
           // CHECK or writes a junk mapping row for a bad id. For a malformed payload we still
           // commit markRetry (no mapping write) → the outbox row advances toward 'failed'.
-          if (validEntity && validId) {
+          const survivorId = !auditOnly && validEntity && validId && entityType === 'client'
+            ? await mergedSurvivor(tx, erpId)
+            : null;
+          if (auditOnly) {
+            await this.audit.record(tx, {
+              event: 'crm_sync.failed',
+              entityType: 'client',
+              entityId: auditOnly.erpId,
+              requestId: event.outboxEventId,
+              source: 'crm-sync',
+              actorUserId: null,
+              relatedClientId: Number(auditOnly.erpId),
+              relatedEntities: auditOnly.relatedEntities,
+              metadata: { ...auditOnly.metadata, eventType: event.eventType, error: errMsg.slice(0, 1000) },
+            });
+          } else if (survivorId !== null) {
+            // The client was merged (perhaps while this event ran): its mapping is the alias that requests of the
+            // survivor rely on (migration 268) and stays as it is; the failure is audited only.
+            await this.audit.record(tx, {
+              event: 'crm_sync.failed',
+              entityType: 'client',
+              entityId: erpId,
+              requestId: event.outboxEventId,
+              source: 'crm-sync',
+              actorUserId: null,
+              relatedClientId: Number(erpId),
+              relatedEntities: [{ entityType: 'client', entityId: survivorId }],
+              metadata: { bitrixObject, eventType: event.eventType, mergedClient: true, error: errMsg.slice(0, 1000) },
+            });
+          } else if (validEntity && validId) {
             await this.mapping.markFailed(tx, entityType, erpId, bitrixObject, errMsg);
             await this.audit.record(tx, {
               event: 'crm_sync.failed',
@@ -476,4 +509,14 @@ async function proveOwnership(
   } catch {
     return false;
   }
+}
+
+/** Survivor of a merged client, read under the key a merge takes exclusively (so a merge in progress is waited for). */
+async function mergedSurvivor(tx: DatabaseClient, clientId: string): Promise<number | null> {
+  await tx.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))', [`bitrix24-reverse:client:erp:${clientId}`]);
+  const result = await tx.query<{ survivor_id: string | number }>(
+    'SELECT survivor_id FROM client_merge_redirects WHERE merged_client_id = $1',
+    [clientId],
+  );
+  return result.rows[0] ? Number(result.rows[0].survivor_id) : null;
 }
