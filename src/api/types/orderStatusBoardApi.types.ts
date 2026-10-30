@@ -87,6 +87,10 @@ export interface OrderStatusBoardCardDetail {
   /** MDF demand of the detail (same material rule as the MDF engine's demand). Absent from an older
    * backend: the hybrid MDF board then treats order readiness as unknown. */
   mdfEligible?: boolean;
+  /** Production status «Распилен» or later (an older backend omits it). */
+  statusCut?: boolean;
+  /** Production status «Закатан» or later (an older backend omits it). */
+  statusRolled?: boolean;
 }
 
 export interface OrderStatusBoardCard {

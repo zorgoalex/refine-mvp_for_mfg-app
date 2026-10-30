@@ -10029,6 +10029,7 @@ function normalizeCncOrderReadiness(
   let cutDetails = 0;
   let rolledDetails = 0;
   let requiredTotal = 0;
+  const excessQuantities: CncPositionQuantities = { cut: 0, rolled: 0 };
   for (const detail of details) {
     const required = nonNegativeInteger(detail.quantity);
     requiredTotal += required;
@@ -10043,9 +10044,19 @@ function normalizeCncOrderReadiness(
     }
     cutDetails += Math.max(0, cut - rolled);
     rolledDetails += rolled;
-    const rolledCredit = Math.min(required, rolled);
+    // Board facts beyond the order: rolled over the ordered quantity, cut over both the order and what is rolled.
+    excessQuantities.rolled += Math.max(0, rolled - required);
+    excessQuantities.cut += Math.max(0, cut - Math.max(required, rolled));
+    // The detail's own production status is evidence too («Распилен» / «Закатан» or later): with no production
+    // signal from the machines, a detail packed without a bath is still done. A piece counts once: the stronger of
+    // the board facts and the status, within the ordered quantity.
+    const statusRolled = detail.statusRolled === true ? required : 0;
+    const statusCut = detail.statusCut === true || detail.statusRolled === true ? required : 0;
+    const rolledEvidence = Math.max(rolled, statusRolled);
+    const cutEvidence = Math.max(cut, statusCut, rolledEvidence);
+    const rolledCredit = Math.min(required, rolledEvidence);
     creditedQuantities.rolled += rolledCredit;
-    creditedQuantities.cut += Math.min(required - rolledCredit, Math.max(0, cut - rolled));
+    creditedQuantities.cut += Math.min(required - rolledCredit, Math.max(0, cutEvidence - rolledEvidence));
   }
   // Missing composition/identity never becomes ready by aggregate arithmetic.
   // A partsCount larger than the known composition leaves an uncovered remainder.
@@ -10058,6 +10069,9 @@ function normalizeCncOrderReadiness(
     const rolled = nonNegativeInteger(quantities.rolled);
     cutDetails += Math.max(0, cut - rolled);
     rolledDetails += rolled;
+    // rows matching no detail of the order are all beyond it
+    excessQuantities.cut += Math.max(0, cut - rolled);
+    excessQuantities.rolled += rolled;
   }
   if (!source.positionQuantities) {
     cutDetails = nonNegativeInteger(source.cutDetails);
@@ -10080,7 +10094,7 @@ function normalizeCncOrderReadiness(
     rolledDetails: shownRolled,
     remainingDetails: Math.max(0, totalDetails - creditedQuantities.cut - creditedQuantities.rolled),
     creditedQuantities,
-    excessQuantities: {
+    excessQuantities: details.length > 0 ? excessQuantities : {
       cut: Math.max(0, cutDetails - shownCut),
       rolled: Math.max(0, rolledDetails - shownRolled),
     },

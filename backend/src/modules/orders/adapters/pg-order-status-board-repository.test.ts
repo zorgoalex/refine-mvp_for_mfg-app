@@ -18,6 +18,26 @@ describe('PgOrderStatusBoardRepository', () => {
     expect(createOrderStatusBoardFilterKey(query)).not.toBe(createOrderStatusBoardFilterKey({ ...query, includeBazisAllocation: false }));
     expect(createOrderStatusBoardFilterKey(query)).toBe(createOrderStatusBoardFilterKey({ ...query, includeBazisAllocation: true }));
   });
+  it('gives each detail its production-status evidence for the MDF board («Распилен» / «Закатан» or later)', async () => {
+    const database = fakeDatabase([boardRow(null, null), { ...boardRow(101, null), details_json: [
+      { detailId: 1001, detailNumber: 1, quantity: 2, bazisCutQuantity: 0, statusCut: true, statusRolled: false },
+      { detailId: 1002, detailNumber: 2, quantity: 3, bazisCutQuantity: 0, statusCut: false, statusRolled: true },
+      { detailId: 1003, detailNumber: 3, quantity: 1, bazisCutQuantity: 0 },
+    ] }]);
+    const board = await new PgOrderStatusBoardRepository(database.client).getBoard({ currentUser: worker(),
+      query: { board: 'production', limit: 60, onlyMyOrders: false, overdueOnly: false } });
+    const text = database.queries[0].text;
+    expect(text).toContain("'statusCut', COALESCE(detail_status.sort_order >= stage_marks.cut_sort_order, false)");
+    expect(text).toContain("'statusRolled', COALESCE(detail_status.sort_order >= stage_marks.rolled_sort_order, false)");
+    expect(text).toContain("= 'laminated'");
+    expect(board.columns.flatMap((column) => column.cards).find((card) => card.orderId === 101)?.details).toEqual([
+      { detailId: 1001, detailNumber: 1, quantity: 2, bazisCutQuantity: 0, mdfEligible: false, statusCut: true, statusRolled: false },
+      // rolled implies cut
+      { detailId: 1002, detailNumber: 2, quantity: 3, bazisCutQuantity: 0, mdfEligible: false, statusCut: true, statusRolled: true },
+      // an older read without the fields: no evidence
+      { detailId: 1003, detailNumber: 3, quantity: 1, bazisCutQuantity: 0, mdfEligible: false, statusCut: false, statusRolled: false },
+    ]);
+  });
   it('returns a virtual unassigned column, limit+1 cursor and exact total', async () => {
     const database = fakeDatabase([
       boardRow(null, null),

@@ -694,6 +694,8 @@ export function buildCncOrderMissingDetails(
     const missing = details.flatMap((detail): CncOrderMissingDetail[] => {
       const requiredQuantity = nonNegativeInteger(detail.quantity);
       if (requiredQuantity <= 0) return [];
+      // its production status already proves it cut (or later): not missing, even without a file on the board
+      if (detail.statusCut === true || detail.statusRolled === true) return [];
       const keys = cncOrderDetailSourceKeys(detail, numberCounts);
       // The all-period BASIS aggregate contains only ID-linked rows. Its visible
       // subset must not be added twice; number-only portions are independent.
