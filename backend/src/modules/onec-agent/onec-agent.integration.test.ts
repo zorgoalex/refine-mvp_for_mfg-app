@@ -308,6 +308,110 @@ suite('1C agent E1 — isolated PostgreSQL', () => {
     expect(alerts.rows).toEqual([{ kind: 'source_identity_changed', severity: 'critical' }]);
   });
 
+  it('does not open the identity alert when a rebaseline accepted the identity before the event was relayed', async () => {
+    const { source } = await registerAgent();
+    const agent = await authenticate(agentRequest());
+    const identity = { databaseId: 'db-1', exportEpoch: 'e-1', environment: 'test' };
+    const changed = { databaseId: 'db-2', exportEpoch: 'e-9', environment: 'test' };
+    const start = (sourceIdentity: typeof identity) =>
+      protocol.startSession(agent, { agentId: 'agent-a', siteId: 'e2e-site', agentVersion: '1.2.0', sourceIdentity });
+    expect((await start(identity)).accepted).toBe(true);
+    expect((await start(changed)).accepted).toBe(false);
+    const { rows: [{ generation }] } = await pool.query(`SELECT generation FROM onec_sources WHERE source_id = $1`, [source.sourceId]);
+    // The operator confirms the new base while the identity_changed event still waits in the outbox.
+    const result = await admin.rebaseline(source.sourceId, { expectedGeneration: Number(generation), acceptIdentity: changed }, actor, ctx('rb'));
+    expect(result).toMatchObject({ identityAccepted: true });
+    await monitor.relayOutbox();
+    const open = await pool.query(`SELECT kind FROM onec_alerts WHERE state <> 'resolved'`);
+    expect(open.rows).toEqual([]);
+    // A later change of the base still raises the alert.
+    expect((await start({ ...changed, exportEpoch: 'e-10' })).accepted).toBe(false);
+    await monitor.relayOutbox();
+    const again = await pool.query(`SELECT kind, state FROM onec_alerts WHERE state <> 'resolved'`);
+    expect(again.rows).toEqual([{ kind: 'source_identity_changed', state: 'open' }]);
+  });
+
+  it('an identity event of a generation accepted by a rebaseline opens no alert, also when replayed after a newer change', async () => {
+    const { source } = await registerAgent();
+    const agent = await authenticate(agentRequest());
+    const start = (exportEpoch: string) => protocol.startSession(agent,
+      { agentId: 'agent-a', siteId: 'e2e-site', agentVersion: '1.2.0', sourceIdentity: { databaseId: 'db-1', exportEpoch, environment: 'test' } });
+    expect((await start('e-1')).accepted).toBe(true);
+    expect((await start('e-2')).accepted).toBe(false); // E1
+    const { rows: [{ generation }] } = await pool.query(`SELECT generation FROM onec_sources WHERE source_id = $1`, [source.sourceId]);
+    await admin.rebaseline(source.sourceId, { expectedGeneration: Number(generation),
+      acceptIdentity: { databaseId: 'db-1', exportEpoch: 'e-2', environment: 'test' } }, actor, ctx('rb1'));
+    expect((await start('e-3')).accepted).toBe(false); // E2, newer generation, still not relayed together with E1
+    await monitor.relayOutbox();
+    const open = () => pool.query(`SELECT kind FROM onec_alerts WHERE state <> 'resolved'`).then((r) => r.rows);
+    const episodes = () => pool.query(`SELECT count(*)::int AS n FROM onec_alert_episodes`).then((r) => r.rows[0].n);
+    expect(await open()).toEqual([{ kind: 'source_identity_changed' }]);
+    const episodesBefore = await episodes();
+    // Replay of every identity event (e.g. a relay retry): still one open alert, no new episode.
+    await pool.query(`UPDATE onec_outbox_events SET status = 'pending', locked_at = NULL, locked_by = NULL, next_attempt_at = now()
+                       WHERE event_type = 'onec.source.identity_changed'`);
+    expect(await monitor.relayOutbox()).toBe(2);
+    expect(await open()).toEqual([{ kind: 'source_identity_changed' }]);
+    expect(await episodes()).toBe(episodesBefore);
+  });
+
+  it('a base that changes back and forth across rebaselines (A → B → A → B) still gets its alert', async () => {
+    const { source } = await registerAgent();
+    const agent = await authenticate(agentRequest());
+    const base = (exportEpoch: string) => ({ databaseId: 'db-1', exportEpoch, environment: 'test' });
+    const start = (exportEpoch: string) => protocol.startSession(agent,
+      { agentId: 'agent-a', siteId: 'e2e-site', agentVersion: '1.2.0', sourceIdentity: base(exportEpoch) });
+    const accept = async (exportEpoch: string, requestId: string) => {
+      const { rows: [{ generation }] } = await pool.query(`SELECT generation FROM onec_sources WHERE source_id = $1`, [source.sourceId]);
+      await admin.rebaseline(source.sourceId, { expectedGeneration: Number(generation), acceptIdentity: base(exportEpoch) }, actor, ctx(requestId));
+    };
+    expect((await start('A')).accepted).toBe(true);
+    expect((await start('B')).accepted).toBe(false); // E1: A → B
+    await accept('B', 'rb1');
+    expect((await start('A')).accepted).toBe(false); // E2: B → A
+    await accept('A', 'rb2');
+    expect((await start('B')).accepted).toBe(false); // E3: A → B again, same identity as E1
+    const identityEvents = await pool.query(`SELECT count(*)::int AS n FROM onec_outbox_events WHERE event_type = 'onec.source.identity_changed'`);
+    expect(identityEvents.rows[0].n).toBe(3);
+    await monitor.relayOutbox();
+    const open = () => pool.query(`SELECT kind FROM onec_alerts WHERE state <> 'resolved'`).then((r) => r.rows);
+    const episodes = () => pool.query(`SELECT count(*)::int AS n FROM onec_alert_episodes`).then((r) => r.rows[0].n);
+    expect(await open()).toEqual([{ kind: 'source_identity_changed' }]);
+    const episodesBefore = await episodes();
+    await pool.query(`UPDATE onec_outbox_events SET status = 'pending', locked_at = NULL, locked_by = NULL, next_attempt_at = now()
+                       WHERE event_type = 'onec.source.identity_changed'`);
+    expect(await monitor.relayOutbox()).toBe(3);
+    expect(await open()).toEqual([{ kind: 'source_identity_changed' }]);
+    expect(await episodes()).toBe(episodesBefore);
+  });
+
+  it('projects an identity alert while a session start holds the agent, without a deadlock', async () => {
+    await registerAgent();
+    const agent = await authenticate(agentRequest());
+    const start = (exportEpoch: string) => protocol.startSession(agent,
+      { agentId: 'agent-a', siteId: 'e2e-site', agentVersion: '1.2.0', sourceIdentity: { databaseId: 'db-1', exportEpoch, environment: 'test' } });
+    expect((await start('e-1')).accepted).toBe(true);
+    expect((await start('e-2')).accepted).toBe(false);
+    // Connection A: a session start's order — agent FOR UPDATE, then (after the relay started) the source.
+    const session = await pool.connect();
+    try {
+      await session.query('BEGIN');
+      await session.query(`SELECT 1 FROM onec_agents WHERE agent_id = 'agent-a' FOR UPDATE`);
+      const relay = monitor.relayOutbox();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      // The projector waits on the agent and holds nothing on the source: this lock is granted at once.
+      await session.query(`SELECT 1 FROM onec_sources s JOIN onec_agents a ON a.source_id = s.source_id
+                            WHERE a.agent_id = 'agent-a' FOR NO KEY UPDATE OF s`);
+      await session.query('COMMIT');
+      await relay;
+    } finally {
+      session.release();
+    }
+    expect((await pool.query(`SELECT status FROM onec_outbox_events WHERE event_type = 'onec.source.identity_changed'`)).rows)
+      .toEqual([{ status: 'processed' }]);
+    expect((await pool.query(`SELECT kind FROM onec_alerts WHERE state <> 'resolved'`)).rows).toEqual([{ kind: 'source_identity_changed' }]);
+  });
+
   // ------------------------------------------------------------------ configuration admin
 
   it('protects the draft against stale writes and publishes only the confirmed revision', async () => {
