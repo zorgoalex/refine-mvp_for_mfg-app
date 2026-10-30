@@ -6,7 +6,7 @@ import { Button, Checkbox, Modal, Space } from 'antd';
 import { PrinterOutlined } from '@ant-design/icons';
 import { Segmented } from '../../../ui/Segmented';
 import { chosenMdfPrintColumns, mdfPrint, useMdfPrintState, type MdfPrintPaper } from './mdfPrintStore';
-import { buildMdfPrintSheet, MDF_PRINT_SHEET_WIDTH_PX } from './mdfPrintSheet';
+import { buildMdfPrintSheet, fitMdfPrintSheet, MDF_PRINT_SHEET_WIDTH_PX } from './mdfPrintSheet';
 import './mdfPrint.css';
 
 const PRINTING_CLASS = 'wb-mdf-printing';
@@ -66,7 +66,10 @@ export const MdfPrintDialog: React.FC<MdfPrintDialogProps> = ({ columns, printDa
       if (!holder) return;
       holder.replaceChildren();
       const sheet = sheetFor();
-      if (sheet) holder.append(sheet);
+      if (sheet) {
+        holder.append(sheet);
+        fitMdfPrintSheet(sheet);
+      }
       setPreviewReady(true);
     });
   }, [open, paper, chosenKey, modeLabel]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -94,7 +97,11 @@ export const MdfPrintDialog: React.FC<MdfPrintDialogProps> = ({ columns, printDa
         return;
       }
       container.append(sheet);
+      // laid out off screen once, so the copy can be scaled by its real width (on screen the container is hidden)
+      container.style.cssText = 'display:block;position:absolute;left:-100000px;top:0;visibility:hidden';
       document.body.append(container);
+      fitMdfPrintSheet(sheet);
+      container.style.cssText = '';
       document.head.append(style);
       root.classList.add(PRINTING_CLASS);
       window.addEventListener('afterprint', finish, { once: true });

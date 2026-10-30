@@ -99,11 +99,10 @@
   page-break-inside: avoid;
 }
 
-/* controls of the live board are not printed */
-.wb-mdf-print-sheet button,
+/* controls of the live board are not printed (order numbers are buttons too — they stay) */
 .wb-mdf-print-sheet .cnc-card-display-toggle,
 .wb-mdf-print-sheet .status-board-column-help,
-.wb-mdf-print-sheet .ant-btn {
+.wb-mdf-print-sheet .status-board-column__header .ant-btn {
   visibility: hidden;
 }
 

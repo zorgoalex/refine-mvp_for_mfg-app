@@ -71,10 +71,28 @@ export function buildMdfPrintSheet(options: MdfPrintSheetOptions): HTMLElement {
   Array.from(copy.children).forEach((child) => {
     if (!(child as HTMLElement).dataset.statusBoardColumnKey) child.remove();
   });
-  copy.style.gridTemplateColumns = `repeat(${Math.max(1, index)}, minmax(0, 1fr))`;
+  // columns as wide as on the board (their own minimum widths); the copy is scaled to the sheet once laid out
   const zoom = mdfPrintZoom(board.scrollWidth, liveColumns.length, index, sheetWidth);
-  copy.style.width = `${Math.round(sheetWidth / zoom)}px`;
+  const columnWidth = liveColumns.length > 0 ? Math.round(board.scrollWidth / liveColumns.length) : 0;
+  copy.style.gridTemplateColumns = columnWidth > 0
+    ? `repeat(${Math.max(1, index)}, ${columnWidth}px)`
+    : `repeat(${Math.max(1, index)}, minmax(0, 1fr))`;
+  copy.style.width = 'max-content';
   copy.style.setProperty('zoom', String(zoom));
+  sheet.dataset.sheetWidth = String(sheetWidth);
   sheet.append(copy);
   return sheet;
+}
+
+/**
+ * Scale the attached copy to the sheet by its real laid-out width (columns keep their own minimum widths, so the
+ * estimate from the board may be off). The sheet must be laid out (attached and displayed) when called.
+ */
+export function fitMdfPrintSheet(sheet: HTMLElement): void {
+  const copy = sheet.querySelector<HTMLElement>(':scope > .status-board-columns');
+  const sheetWidth = Number(sheet.dataset.sheetWidth);
+  if (!copy || !(sheetWidth > 0)) return;
+  copy.style.setProperty('zoom', '1');
+  const natural = copy.scrollWidth;
+  if (natural > 0) copy.style.setProperty('zoom', String(Math.min(1, Math.floor((sheetWidth / natural) * 1000) / 1000)));
 }
