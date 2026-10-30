@@ -2204,6 +2204,17 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The open «Переделка» round of the order: its own line, apart from the round-1 counters. */
+.cnc-order-card__readiness .cnc-order-card__readiness-rework {
+  color: #531dab;
+  font-weight: 500;
+}
+
+:root[data-theme="dark"] .cnc-order-card__readiness .cnc-order-card__readiness-rework,
+[data-theme="dark"] .cnc-order-card__readiness .cnc-order-card__readiness-rework {
+  color: #b37feb;
+}
+
 /* Pieces beyond the order (re-cut duplicates, repeated files): never part of the counters above. */
 .cnc-order-card__readiness .cnc-order-card__readiness-excess {
   color: #ad4e00;

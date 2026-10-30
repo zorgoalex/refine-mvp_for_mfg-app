@@ -9030,6 +9030,16 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         </div>
       )}
 
+      {/* the open «Переделка» round: its own line, shown whatever the main counters show («Без МДФ», «Учёт обновляется») */}
+      {cncOrderCard && !cncNumberOnly && cncOrderReworkText(card) && (
+        <div className="cnc-order-card__readiness">
+          <span className="cnc-order-card__readiness-rework"
+            title="Детали круга переделки: их этапы отмечаются вручную; счёт — по текущему статусу деталей круга">
+            {cncOrderReworkText(card)}
+          </span>
+        </div>
+      )}
+
       {cncOrderCard && cncMissingDetails.length > 0 && !cncNumberOnly && (
         <CncOrderMissingDetailsSpoiler details={cncMissingDetails} />
       )}
@@ -10099,6 +10109,27 @@ function normalizeCncOrderReadiness(
       rolled: Math.max(0, rolledDetails - shownRolled),
     },
   };
+}
+
+/** «Переделка ·N: распилено X из M · закатано Y» for the latest open «Переделка» round of the order's MDF details:
+ * the details of round N and their current status (which describes round N), else null. */
+export function cncOrderReworkText(card: Pick<OrderStatusBoardCard, 'details'>): string | null {
+  const reworked = (card.details ?? []).filter((detail) =>
+    (detail.productionRound ?? 1) > 1 && detail.mdfEligible !== false);
+  if (!reworked.length) return null;
+  const round = Math.max(...reworked.map((detail) => detail.productionRound ?? 1));
+  let required = 0;
+  let cut = 0;
+  let rolled = 0;
+  for (const detail of reworked) {
+    if ((detail.productionRound ?? 1) !== round) continue;
+    const quantity = nonNegativeInteger(detail.quantity);
+    required += quantity;
+    if (detail.statusRolled === true) rolled += quantity;
+    else if (detail.statusCut === true) cut += quantity;
+  }
+  if (required === 0) return null;
+  return `Переделка ·${round}: распилено ${cut + rolled} из ${required} · закатано ${rolled}`;
 }
 
 /** «Излишек: распил +N · закатка +M» when the board holds more than the order, else null. */

@@ -64,6 +64,12 @@ describe('MDF order card counters', () => {
     expect(page).toContain('...collectCncMdfOrderIds(readinessColumns),');
     expect(page).toContain('{ mdfWorkOrderIds },');
     expect(page).toContain('missingDetails: withoutMdfWork ? [] :');
+    // its own block, independent of «Без МДФ» / «Учёт обновляется» and the main counters
+    expect(page).toContain('{cncOrderCard && !cncNumberOnly && cncOrderReworkText(card) && (');
+    const readinessBlock = page.slice(page.indexOf('<span>Распилено {cncReadiness.cutDetails}</span>'),
+      page.indexOf('{cncOrderCard && !cncNumberOnly && cncOrderReworkText(card) && ('));
+    expect(readinessBlock).not.toContain('cncOrderReworkText(card)');
+    expect(page).toContain('className="cnc-order-card__readiness-rework"');
   });
 });
 

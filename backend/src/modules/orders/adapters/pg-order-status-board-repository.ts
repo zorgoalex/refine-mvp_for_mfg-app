@@ -280,7 +280,8 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
             'bazisCutQuantity', ${command.query.includeBazisAllocation === false ? '0' : 'COALESCE(bazis_cut.quantity, 0)'},
             'mdfEligible', ${mdfDemandMaterialSql('mt', 'm')},
             'statusCut', COALESCE(detail_status.sort_order >= stage_marks.cut_sort_order, false),
-            'statusRolled', COALESCE(detail_status.sort_order >= stage_marks.rolled_sort_order, false)
+            'statusRolled', COALESCE(detail_status.sort_order >= stage_marks.rolled_sort_order, false),
+            'productionRound', GREATEST(COALESCE(od.production_round, 1), 1)
           )
           ORDER BY od.detail_number ASC NULLS LAST, od.detail_id ASC
         ) AS details_json
@@ -742,6 +743,12 @@ function mapBoardCard(row: BoardRow, currentUser: CurrentUser): OrderStatusBoard
   };
 }
 
+/** A detail's production round («Переделка» opens round 2, 3…); 1 when absent (an older read). */
+function positiveRound(value: unknown): number {
+  const round = numberFromUnknown(value);
+  return round !== null && Number.isSafeInteger(round) && round > 1 ? round : 1;
+}
+
 function mapBoardCardDetails(value: unknown): OrderStatusBoardCardDetailDto[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item): OrderStatusBoardCardDetailDto[] => {
@@ -765,6 +772,7 @@ function mapBoardCardDetails(value: unknown): OrderStatusBoardCardDetailDto[] {
       mdfEligible: record.mdfEligible === true,
       statusCut: record.statusCut === true || record.statusRolled === true,
       statusRolled: record.statusRolled === true,
+      productionRound: positiveRound(record.productionRound),
     }];
   });
 }

@@ -20,6 +20,7 @@ import {
   buildCncMachineColumnCards,
   buildCncOrderReadiness,
   cncOrderReadinessProgress,
+  cncOrderReworkText,
   cncReadinessExcessText,
   buildCncOrderStatusBoardRequestKey,
   cncOrderStatusBoardKeyCovers,
@@ -1822,6 +1823,25 @@ describe('order status board model', () => {
     ], {}), {});
     expect([...split.orders, ...split.orders_ready][0]!.readiness).toMatchObject({
       cutDetails: 0, rolledDetails: 1, remainingDetails: 0, excessQuantities: { cut: 0, rolled: 1 } });
+  });
+
+  it('shows the open «Переделка» round of the MDF details by their current status', () => {
+    const base = { detailNumber: 1, bazisCutQuantity: 0, mdfEligible: true };
+    expect(cncOrderReworkText({ details: [{ ...base, detailId: 1, quantity: 3 }] })).toBeNull();
+    expect(cncOrderReworkText({ details: [
+      { ...base, detailId: 1, quantity: 3, productionRound: 1, statusRolled: true, statusCut: true },
+      // round 2: one rolled, one cut, one back at the start
+      { ...base, detailId: 2, quantity: 2, productionRound: 2, statusRolled: true, statusCut: true },
+      { ...base, detailId: 3, quantity: 1, productionRound: 2, statusCut: true },
+      { ...base, detailId: 4, quantity: 4, productionRound: 2 },
+      // a non-MDF detail of the round is not on the MDF board
+      { ...base, detailId: 5, quantity: 9, productionRound: 2, mdfEligible: false, statusCut: true },
+    ] })).toBe('Переделка ·2: распилено 3 из 7 · закатано 2');
+    // the latest round only
+    expect(cncOrderReworkText({ details: [
+      { ...base, detailId: 6, quantity: 1, productionRound: 2, statusRolled: true, statusCut: true },
+      { ...base, detailId: 7, quantity: 2, productionRound: 3 },
+    ] })).toBe('Переделка ·3: распилено 0 из 2 · закатано 0');
   });
 
   it('keeps excess cut apart while using ordered quantity as the denominator', () => {

@@ -487,6 +487,9 @@ export async function dispatchMdfBoardEvent(tx: TransactionClient, input: MdfBoa
   if (pinnedRules.has(tx)) throw new Error('MDF_PINNED_LEGACY_DISPATCH_FORBIDDEN');
   if (input.source) markMdfShadowSource(tx, input);
   if (!isStatusAutomationEnabled() || !input.source) return;
+  // The board-event read compiles under PostgreSQL JIT for 10+ s on a busy host (its cost estimate is inflated):
+  // off for this transaction, as in the MDF board commands.
+  await tx.query('SET LOCAL jit=off');
   const usePins = process.env.BACKEND_MDF_PINNED_DISPATCH === 'true';
   let pins = liveMdfPins.get(tx);
   // Do not query a new set on later source dispatches in this transaction.

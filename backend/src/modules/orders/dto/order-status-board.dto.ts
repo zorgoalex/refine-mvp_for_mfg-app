@@ -20,6 +20,8 @@ export interface OrderStatusBoardCardDetailDto {
   statusCut: boolean;
   /** The detail's production status is «Закатан» (code `laminated`) or later: evidence of rolling for the MDF board. */
   statusRolled: boolean;
+  /** Production round of the detail: 1, or N for a «Переделка» round; its status then describes round N. */
+  productionRound: number;
 }
 
 export interface OrderStatusBoardCardDto {

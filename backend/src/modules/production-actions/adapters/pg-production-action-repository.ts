@@ -3642,6 +3642,9 @@ async function evaluateMdfBoardLaminatedBathAutomationForDetails(
     .sort((left, right) => left - right);
   if (detailIds.length === 0) return;
 
+  // The bath read is cheap, but its estimated cost turns PostgreSQL JIT on, and compiling it took 10+ s on a busy
+  // host — past the query timeout, failing the whole status change. Same as the MDF board commands.
+  await tx.query('SET LOCAL jit=off');
   const rows = await loadMdfLaminatedBathAutomationRows(tx, detailIds);
   const orderIdsByCutResult = new Map<number, Set<number>>();
   for (const row of rows) {
