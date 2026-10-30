@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-31", title: "Печать МДФ-доски как на экране (NewLine)",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "NewLine: «Печать» МДФ-доски печатает саму доску в выбранном виде карточек («Стандарт», «Скрин», «Средний», «Компактный») — те же карточки и цвета, все карточки колонок; раньше любой вид печатался упрощёнными карточками «Среднего», и текст в них налезал.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-30", title: "МДФ-доска: точные счётчики на карточках заказов",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: [

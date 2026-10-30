@@ -1,6 +1,6 @@
-/* «NewLine»: print of the MDF board. The sheet is the board's own print view (`.cnc-print-board`, its print CSS in
-   orderStatusBoard.css); here: the dialog, the on-screen preview of that view, the colours of the columns (as on the
-   board) and the isolation while printing from NewLine. */
+/* «NewLine»: print of the MDF board. The sheet is a copy of the board's columns (its own cards and colours), put in a
+   `.status-board-page--cnc` wrapper so the board styles apply; here the copy is let out of the screen layout (no fixed
+   heights, inner scrolling or sticky headers), the dialog, the preview and the isolation while printing. */
 
 .wb-mdf-print-dialog__options {
   display: flex;
@@ -35,34 +35,79 @@
   font-size: 12.5px;
 }
 
-/* --- цвета колонок: верхняя полоса и счётчик колонки, полоса карточки (на бумаге и в предпросмотре) --- */
-.cnc-print-board[data-colored] thead th {
-  border-top-width: 0.3mm !important;
-  border-top-color: #bfbfbf !important;
-}
-
-/* the colour is set on the column title (its cell keeps its markup): a bar across the top of the cell */
-.cnc-print-board[data-colored] .cnc-print-board__column-title {
-  margin: -2mm -2mm 0;
-  padding: 1.2mm 2mm 0;
-  border-top: 1mm solid var(--cnc-print-color, #595959);
-  border-radius: 2mm 2mm 0 0;
-}
-
-.cnc-print-board[data-colored] .cnc-print-board__column-title b {
-  background: var(--cnc-print-color, #595959) !important;
-}
-
-.cnc-print-board[data-colored] tbody td .cnc-print-card {
-  border-left: 1mm solid var(--cnc-print-color, #d9d9d9) !important;
-}
-
-.cnc-print-board[data-colored] {
+/* --- the sheet (preview and paper) --- */
+.wb-mdf-print-sheet.status-board-page {
+  box-sizing: border-box;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  background: #fff;
+  color: #1d2433;
   print-color-adjust: exact;
   -webkit-print-color-adjust: exact;
 }
 
-/* --- предпросмотр в окне: печатный вид на экране, в уменьшенном виде --- */
+.wb-mdf-print-sheet__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.wb-mdf-print-sheet__header b {
+  font-size: 16px;
+}
+
+.wb-mdf-print-sheet .status-board-columns {
+  display: grid !important;
+  gap: 8px;
+  min-width: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.wb-mdf-print-sheet .status-board-column,
+.wb-mdf-print-sheet .status-board-column * {
+  max-height: none !important;
+}
+
+.wb-mdf-print-sheet .status-board-column {
+  height: auto !important;
+  overflow: visible !important;
+}
+
+.wb-mdf-print-sheet .status-board-column > *,
+.wb-mdf-print-sheet .status-board-column__cards,
+.wb-mdf-print-sheet .cnc-today-column__cards {
+  height: auto !important;
+  overflow: visible !important;
+}
+
+.wb-mdf-print-sheet .status-board-column__header {
+  position: static !important;
+}
+
+.wb-mdf-print-sheet .status-board-card,
+.wb-mdf-print-sheet .cnc-deferred-card {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* controls of the live board are not printed */
+.wb-mdf-print-sheet button,
+.wb-mdf-print-sheet .cnc-card-display-toggle,
+.wb-mdf-print-sheet .status-board-column-help,
+.wb-mdf-print-sheet .ant-btn {
+  visibility: hidden;
+}
+
+/* --- preview in the dialog --- */
 .wb-mdf-print-preview {
   max-height: 56vh;
   overflow: auto;
@@ -75,160 +120,35 @@
   color: var(--evo-text-secondary, #5b6474);
 }
 
-.wb-mdf-print-preview .cnc-print-board {
-  display: block;
-  box-sizing: content-box;
-  width: 281mm;
-  padding: 8mm;
-  background: #fff;
+.wb-mdf-print-preview__sheet > .wb-mdf-print-sheet {
+  padding: 8mm !important;
   box-shadow: 0 1px 4px rgba(16, 24, 40, 0.18);
-  color: #111;
-  font-family: Arial, sans-serif;
-  zoom: 0.55;
+  zoom: 0.7;
 }
 
-.wb-mdf-print-preview[data-paper="A3"] .cnc-print-board {
-  width: 404mm;
-  zoom: 0.4;
+.wb-mdf-print-preview[data-paper="A3"] .wb-mdf-print-preview__sheet > .wb-mdf-print-sheet {
+  zoom: 0.5;
 }
 
-.wb-mdf-print-preview .cnc-print-board__title {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8mm;
-  margin-bottom: 4mm;
-  font-size: 12pt;
+/* --- paper: only the sheet (not the app, the open dialog, the calendar print or the former compact print) --- */
+.wb-mdf-print-live {
+  display: none;
 }
 
-.wb-mdf-print-preview .cnc-print-board table {
-  width: 100%;
-  border-spacing: 2mm 1.5mm;
-  table-layout: fixed;
-}
-
-.wb-mdf-print-preview .cnc-print-board thead th {
-  padding: 2mm;
-  border: 0.3mm solid #bfbfbf;
-  border-top: 1mm solid #595959;
-  border-radius: 2mm;
-  background: #f5f5f5;
-  text-align: left;
-  vertical-align: top;
-}
-
-.wb-mdf-print-preview .cnc-print-board__column-title {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 2mm;
-  font-size: 9pt;
-  line-height: 1.2;
-}
-
-.wb-mdf-print-preview .cnc-print-board__column-title b {
-  min-width: 5mm;
-  padding: 0.4mm 1mm;
-  border-radius: 3mm;
-  background: #595959;
-  color: #fff;
-  font-size: 7.5pt;
-  text-align: center;
-}
-
-.wb-mdf-print-preview .cnc-print-board thead small {
-  display: block;
-  margin-top: 1mm;
-  color: #595959;
-  font-size: 7pt;
-  font-weight: 400;
-}
-
-.wb-mdf-print-preview .cnc-print-board tbody td {
-  padding: 0;
-  vertical-align: top;
-}
-
-.wb-mdf-print-preview .cnc-print-card {
-  min-height: 10mm;
-  padding: 1.7mm 2mm;
-  border: 0.25mm solid #d9d9d9;
-  border-radius: 1.8mm;
-  background: #fff;
-  font-size: 8pt;
-  line-height: 1.25;
-}
-
-.wb-mdf-print-preview .cnc-print-board--minimal .cnc-print-card {
-  min-height: 6.5mm;
-  padding: 1mm 1.4mm;
-}
-
-.wb-mdf-print-preview .cnc-print-card__minimal-number,
-.wb-mdf-print-preview .cnc-print-card__summary strong,
-.wb-mdf-print-preview .cnc-print-card__order-number {
-  color: #111;
-  font-size: 9.6pt;
-  font-variant-numeric: tabular-nums;
-}
-
-.wb-mdf-print-preview .cnc-print-card__summary {
-  display: flex;
-  align-items: baseline;
-}
-
-.wb-mdf-print-preview .cnc-print-card__summary + .cnc-print-card__summary {
-  margin-top: 1.2mm;
-}
-
-.wb-mdf-print-preview .cnc-print-card__summary span,
-.wb-mdf-print-preview .cnc-print-card__client {
-  color: #777;
-}
-
-.wb-mdf-print-preview .cnc-print-card--bath {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 2mm;
-}
-
-.wb-mdf-print-preview .cnc-print-card--order {
-  display: grid;
-  justify-items: start;
-  gap: 1mm;
-}
-
-.wb-mdf-print-preview .cnc-print-card__bath-cut-number {
-  padding: 0.4mm 1mm;
-  border: 0.25mm solid #bfbfbf;
-  border-radius: 1mm;
-  background: #f5f5f5;
-  font-size: 9.6pt;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.wb-mdf-print-preview .cnc-print-card__sequence {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.4mm 1.5mm;
-  border-radius: 3mm;
-  background: color-mix(in srgb, #1677ff 10%, transparent);
-  font-size: 8pt;
-}
-
-.wb-mdf-print-preview .cnc-print-card__sequence-row {
-  margin-bottom: 1.1mm;
-}
-
-/* --- печать из NewLine: только лист доски (не приложение, не открытое окно, не печать календаря) --- */
 @media print {
-  html.wb-mdf-printing body > :not(.cnc-print-board) {
+  html.wb-mdf-printing,
+  html.wb-mdf-printing body {
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  html.wb-mdf-printing body > :not(.wb-mdf-print-live) {
     display: none !important;
   }
 
-  html.wb-mdf-printing body > .cnc-print-board {
+  html.wb-mdf-printing body > .wb-mdf-print-live {
     display: block !important;
   }
 }

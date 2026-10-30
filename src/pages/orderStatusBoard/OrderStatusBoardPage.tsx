@@ -1,6 +1,6 @@
 import { Popover, Tooltip } from '../../ui/tooltipDelay';
 import { MdfPrintDialog } from './mdfPrint/MdfPrintDialog';
-import { chosenMdfPrintColumns, mdfPrint, useMdfPrintState } from './mdfPrint/mdfPrintStore';
+import { mdfPrint, useMdfPrintState } from './mdfPrint/mdfPrintStore';
 import { useOptionalUiVariant } from '../../ui-variant/UiVariantProvider';
 import { WorkbenchBoardSummary, WorkbenchColumnTotals } from './workbenchBoardSummary';
 import { MdfProductionReturnDialog, isMdfBackwardMove, type MdfReturnIntent } from './MdfProductionReturnDialog';
@@ -4254,6 +4254,10 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   const isOperational = useOperationalUi();
   const isWorkbenchUi = useOptionalUiVariant()?.variant === 'workbench';
   const mdfPrintState = useMdfPrintState();
+  // «NewLine» print: while its dialog is open every card is drawn (no deferred or held-back cards), so the board
+  // itself can be printed as it looks on screen in the chosen card mode
+  const mdfPrintAll = isWorkbenchUi && mdfPrintState.open;
+  const mdfPrintSourceRef = useRef<HTMLDivElement | null>(null);
   const [standardCardOverrides, setStandardCardOverrides] =
     useState<Set<string>>(() => new Set());
   const orderColumnRefs = useRef<Partial<Record<CncOrderDisplayColumnKey, HTMLElement | null>>>({});
@@ -4558,6 +4562,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     : 'var(--status-board-cnc-column-width, 220px)';
   const highlightedOrderKeys = relationContext?.activeOrderKeys ?? null;
   const deferOverflowCards = !overflowCardsVisible
+    && !mdfPrintAll
     && cardDisplayMode === 'standard'
     && !focusedCardId
     && !relationContext
@@ -4569,6 +4574,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   return (
     <>
       <div
+        ref={mdfPrintSourceRef}
+        data-mdf-print-mode={cardDisplayMode}
         className={[
           'status-board-columns status-board-columns--cnc',
           cncStandardColumnLayout ? 'status-board-columns--cnc-standard' : '',
@@ -4781,8 +4788,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                     );
                     return (
                       <CncDeferredCard
-                        key={card.orderId}
-                        defer={shouldDeferCncCard(
+                        key={`${card.orderId}:${mdfPrintState.generation}`}
+                        defer={!mdfPrintAll && shouldDeferCncCard(
                           cardDisplayMode,
                           'order',
                           String(card.orderId),
@@ -4897,8 +4904,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
 
                     return (
                       <CncDeferredCard
-                        key={bath.bathCardId}
-                        defer={shouldDeferCncCard(
+                        key={`${bath.bathCardId}:${mdfPrintState.generation}`}
+                        defer={!mdfPrintAll && shouldDeferCncCard(
                           cardDisplayMode,
                           'bath',
                           bath.bathCardId,
@@ -4989,8 +4996,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                     );
                     return (
                       <CncDeferredCard
-                        key={`bazis:${bazisCutSet.bazisCutSetId}`}
-                        defer={shouldDeferCncCard(
+                        key={`${`bazis:${bazisCutSet.bazisCutSetId}`}:${mdfPrintState.generation}`}
+                        defer={!mdfPrintAll && shouldDeferCncCard(
                           cardDisplayMode,
                           'bazisCutSet',
                           String(bazisCutSet.bazisCutSetId),
@@ -5067,8 +5074,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                   );
                   return (
                     <CncDeferredCard
-                      key={`packet:${packet.packetId}`}
-                      defer={shouldDeferCncCard(
+                      key={`${`packet:${packet.packetId}`}:${mdfPrintState.generation}`}
+                      defer={!mdfPrintAll && shouldDeferCncCard(
                         cardDisplayMode,
                         'packet',
                         packet.packetId,
@@ -5198,24 +5205,10 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       </div>
       {cardDisplayMode !== 'standard' && createPortal(
         <CncTelegramPrintBoard
-          columns={mdfPrintState.printing
-            ? chosenMdfPrintColumns(displayColumns, mdfPrintState.columnKeys)
-            : displayColumns}
+          columns={displayColumns}
           orderStatusColumns={orderStatusColumns}
           displayMode={cardDisplayMode}
           printDate={printDate}
-          colored={mdfPrintState.printing}
-        />,
-        document.body,
-      )}
-      {/* «NewLine» print in the standard card mode: the print view exists only while printing */}
-      {cardDisplayMode === 'standard' && mdfPrintState.printing && createPortal(
-        <CncTelegramPrintBoard
-          columns={chosenMdfPrintColumns(displayColumns, mdfPrintState.columnKeys)}
-          orderStatusColumns={orderStatusColumns}
-          displayMode={cardDisplayMode}
-          printDate={printDate}
-          colored
         />,
         document.body,
       )}
@@ -5227,15 +5220,9 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
             total: column.total,
             color: cncColumnBadgeColor(column.key),
           }))}
-          renderPreview={(columnKeys) => (
-            <CncTelegramPrintBoard
-              columns={chosenMdfPrintColumns(displayColumns, columnKeys)}
-              orderStatusColumns={orderStatusColumns}
-              displayMode={cardDisplayMode}
-              printDate={printDate}
-              colored
-            />
-          )}
+          printDate={printDate}
+          modeLabel={CNC_CARD_DISPLAY_OPTIONS.find((option) => option.value === cardDisplayMode)?.label ?? ''}
+          getBoard={() => mdfPrintSourceRef.current}
         />
       ) : null}
     </>
@@ -6314,8 +6301,6 @@ interface CncTelegramPrintBoardProps {
   orderStatusColumns: OrderStatusBoardColumn[];
   displayMode: CncCardDisplayMode;
   printDate: string;
-  /** «NewLine» print: column colours as on the board */
-  colored?: boolean;
 }
 
 type CncPrintCard =
@@ -6343,7 +6328,6 @@ const CncTelegramPrintBoard: React.FC<CncTelegramPrintBoardProps> = ({
   orderStatusColumns,
   displayMode,
   printDate,
-  colored = false,
 }) => {
   const printColumns: CncPrintColumn[] = columns.map((column) => {
     const cards: CncPrintCard[] = isCncOrderColumnKey(column.key)
@@ -6376,7 +6360,6 @@ const CncTelegramPrintBoard: React.FC<CncTelegramPrintBoardProps> = ({
   return (
     <section
       className={`cnc-print-board cnc-print-board--${displayMode}`}
-      data-colored={colored || undefined}
       aria-label="Печатная версия МДФ-доски"
     >
       <header className="cnc-print-board__title">
@@ -6388,10 +6371,7 @@ const CncTelegramPrintBoard: React.FC<CncTelegramPrintBoardProps> = ({
           <tr>
             {printColumns.map((column) => (
               <th key={column.key} scope="col">
-                <div
-                  className="cnc-print-board__column-title"
-                  style={{ '--cnc-print-color': cncColumnBadgeColor(column.key) } as React.CSSProperties}
-                >
+                <div className="cnc-print-board__column-title">
                   <span>{column.title}</span>
                   <b>{column.total}</b>
                 </div>
@@ -6407,10 +6387,7 @@ const CncTelegramPrintBoard: React.FC<CncTelegramPrintBoardProps> = ({
           {Array.from({ length: rowCount }, (_, rowIndex) => (
             <tr key={rowIndex}>
               {printColumns.map((column) => (
-                <td
-                  key={column.key}
-                  style={{ '--cnc-print-color': cncColumnBadgeColor(column.key) } as React.CSSProperties}
-                >
+                <td key={column.key}>
                   {column.cards[rowIndex] ? (
                     <CncTelegramPrintCard
                       card={column.cards[rowIndex]}
