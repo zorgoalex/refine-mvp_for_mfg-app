@@ -646,3 +646,11 @@
 .day-column-brief__order-item:last-child {
   border-bottom: none;
 }
+
+/* «Выборка» и «Неоклассика» — подчёркнуты, чтобы такие заказы выделялись среди остальных */
+.order-card__milling--accent {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+  font-weight: 600;
+}

@@ -13,6 +13,7 @@ import {
   areAllProductionStagesReady,
   hasDrawnProductionStatus,
   getMillingDisplayValue,
+  isAccentMilling,
   getMaterialsForCard,
 } from '../utils/statusColors';
 import { formatDateKey } from '../utils/dateUtils';
@@ -364,7 +365,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
         </div>
         <div className="order-card__facts">
           <span
-            className={`order-card__milling${millingDisplay?.trim().toLocaleLowerCase('ru-RU') === 'модерн' ? ' order-card__milling--faint' : ''}`}
+            className={`order-card__milling${millingDisplay?.trim().toLocaleLowerCase('ru-RU') === 'модерн' ? ' order-card__milling--faint' : ''}${isAccentMilling(millingDisplay) ? ' order-card__milling--accent' : ''}`}
             title={millingDisplay || undefined}
           >
             {millingDisplay}
@@ -479,7 +480,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
       {/* Строка 2: . Фрезеровка – Площадь */}
       <div className="order-card__milling-line">
         <span className="order-card__dot">.</span>
-        <span>{millingDisplay}</span>
+        <span className={isAccentMilling(millingDisplay) ? 'order-card__milling--accent' : undefined}>{millingDisplay}</span>
         <span className="order-card__separator"> – </span>
         <span>{order.total_area > 0 ? `${order.total_area.toFixed(2)} кв.м.` : '0 кв.м.'}</span>
       </div>

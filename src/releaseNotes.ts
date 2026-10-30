@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-31", title: "Календарь: «Неоклассика» на карточке, просторные карточки",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Фрезеровка «неоклассика…» показывается на карточке календаря явно — как «Выборка» (раньше — общей «Фрезеровкой»); «Выборка» и «Неоклассика» подчёркнуты, чтобы такие заказы выделялись.",
+      "NewLine: карточки календаря просторнее — больше отступы между строками и иконками, колонка дня шире на 10%; номер заказа и Базис-проект крупнее и жирнее.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-30", title: "Буква «Б» сразу после «О»; детали в картах «Базис раскрой» — «Базис»",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDrag, useDragDropManager } from 'react-dnd';
 import { OrderCardProps, DragItem } from '../types/calendar';
-import { getCardBorderColor, getMillingDisplayValue } from '../utils/statusColors';
+import { getCardBorderColor, getMillingDisplayValue, isAccentMilling } from '../utils/statusColors';
 import { formatDateKey } from '../utils/dateUtils';
 import { buildCalendarOrderDragPreview } from './calendarDragPreview';
 import { ProductionStagesDisplay } from '../../../components/ProductionStagesDisplay';
@@ -272,7 +272,7 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
       {/* Фрезеровка */}
       {millingDisplay && (
         <div className="order-card-compact__line">
-          {millingDisplay}
+          <span className={isAccentMilling(millingDisplay) ? 'order-card__milling--accent' : undefined}>{millingDisplay}</span>
         </div>
       )}
 

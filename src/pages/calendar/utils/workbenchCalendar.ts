@@ -30,8 +30,9 @@ export function buildWorkbenchWeeks(center: Date, periodDays: 7 | 14 | 30, today
   });
 }
 
-/** Default width of a day column (its cards) at 100% zoom. */
-export const WORKBENCH_COLUMN_BASE_WIDTH = 170;
+/** Default width of a day column (its cards) at 100% zoom: roomier cards (was 170, +10%); a whole week still fits a
+ * row from ~1405px of calendar width. */
+export const WORKBENCH_COLUMN_BASE_WIDTH = 187;
 
 export interface WorkbenchLayout {
   /** day column width in px, proportional to the zoom */

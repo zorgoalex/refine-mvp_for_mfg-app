@@ -183,6 +183,7 @@ interface OrderDetailForDisplay {
  * Вычисляет отображаемое значение фрезеровки из деталей заказа
  * Правила:
  * - "Выборка" — если хотя бы одна деталь содержит слово "Выборка"
+ * - "Неоклассика" — если хотя бы одна деталь «неоклассика…» (обе сразу — «Выборка, неоклассика»)
  * - "Фрезеровка" — если есть детали с фрезеровкой не равной "Модерн" и без слова "Выборка"
  * - "Модерн" — если все детали имеют фрезеровку "Модерн"
  * @param orderDetails - массив деталей заказа с milling_type
@@ -199,10 +200,12 @@ export function getMillingDisplayValue(orderDetails: OrderDetailForDisplay[] | u
 
   if (millingTypes.length === 0) return '';
 
-  // Приоритет 1: Выборка — если хотя бы одна деталь содержит "Выборка"
-  if (millingTypes.some(t => t.includes('выборка'))) {
-    return 'Выборка';
-  }
+  // Приоритет 1: Выборка и неоклассика — видны явно (их выделяют на карточке)
+  const hasSampling = millingTypes.some(t => t.includes('выборка'));
+  const hasNeoclassic = millingTypes.some(t => t.includes('неоклассик'));
+  if (hasSampling && hasNeoclassic) return 'Выборка, неоклассика';
+  if (hasSampling) return 'Выборка';
+  if (hasNeoclassic) return 'Неоклассика';
 
   // Приоритет 2: Фрезеровка — если есть что-то кроме "Модерн"
   const hasNonModern = millingTypes.some(t => t !== 'модерн' && !t.includes('модерн'));
@@ -378,4 +381,10 @@ export function getMaterialTextColor(material: string): string {
 
   // По умолчанию - темно-серый
   return '#333333';
+}
+
+/** «Выборка» и «Неоклассика» выделяются на карточке календаря (подчёркнуты). */
+export function isAccentMilling(millingDisplay: string | null | undefined): boolean {
+  const value = (millingDisplay ?? '').toLowerCase();
+  return value.includes('выборка') || value.includes('неоклассика');
 }

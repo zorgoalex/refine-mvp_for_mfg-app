@@ -123,3 +123,20 @@ describe('manual stage letters and the saw status', () => {
     expect(PRODUCTION_STATUS_DISPLAY_ORDER.indexOf('saw')).toBe(PRODUCTION_STATUS_DISPLAY_ORDER.indexOf('drawn') + 1);
   });
 });
+
+describe('milling on calendar cards: «выборка» and «неоклассика» are shown and accented', () => {
+  const details = (...names: string[]) => names.map((name) => ({ milling_type: { milling_type_name: name } }));
+  it('names them explicitly', async () => {
+    const { getMillingDisplayValue, isAccentMilling } = await import('./statusColors');
+    expect(getMillingDisplayValue(details('модерн', 'неоклассика арка') as never)).toBe('Неоклассика');
+    expect(getMillingDisplayValue(details('Неоклассика Люкс') as never)).toBe('Неоклассика');
+    expect(getMillingDisplayValue(details('выборка-1ступень', 'модерн') as never)).toBe('Выборка');
+    expect(getMillingDisplayValue(details('выборка арка', 'неоклассика') as never)).toBe('Выборка, неоклассика');
+    expect(getMillingDisplayValue(details('крупная лапша') as never)).toBe('Фрезеровка');
+    expect(getMillingDisplayValue(details('модерн') as never)).toBe('Модерн');
+    expect(isAccentMilling('Неоклассика')).toBe(true);
+    expect(isAccentMilling('Выборка, неоклассика')).toBe(true);
+    expect(isAccentMilling('Фрезеровка')).toBe(false);
+    expect(isAccentMilling(undefined)).toBe(false);
+  });
+});

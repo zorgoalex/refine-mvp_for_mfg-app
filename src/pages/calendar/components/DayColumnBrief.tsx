@@ -4,7 +4,7 @@ import { Empty } from 'antd';
 import { CalendarOrder } from '../types/calendar';
 import { getDayName, formatDateKey } from '../utils/dateUtils';
 import { calculateTotalArea } from '../utils/groupOrdersByDate';
-import { getMillingDisplayValue, getMaterialsForCard, getMaterialTextColor } from '../utils/statusColors';
+import { getMillingDisplayValue, getMaterialsForCard, getMaterialTextColor, isAccentMilling } from '../utils/statusColors';
 import { ProductionStagesDisplay } from '../../../components/ProductionStagesDisplay';
 import type { ProductionWorkflowDisplay } from '../types/calendar';
 
@@ -116,7 +116,9 @@ const DayColumnBrief: React.FC<DayColumnBriefProps> = ({ date, orders, columnWid
                   ))
                 ) : null}
                 {' - '}
-                <span>{getMillingDisplayValue(order.order_details) || '—'}</span>
+                <span className={isAccentMilling(getMillingDisplayValue(order.order_details)) ? 'order-card__milling--accent' : undefined}>
+                  {getMillingDisplayValue(order.order_details) || '—'}
+                </span>
                 {(order.passedProductionCodes?.length ?? 0) > 0 && (
                   <>
                     {' - '}

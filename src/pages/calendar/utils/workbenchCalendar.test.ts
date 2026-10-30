@@ -24,10 +24,11 @@ describe('workbench calendar weeks', () => {
   });
 
   it('columns follow the zoom: wider cards, fewer days in a row; weeks only when seven fit', () => {
-    expect(workbenchLayout(1176, 1)).toEqual({ columnWidth: 170, perRow: 6, weekRows: false });
-    expect(workbenchLayout(1310, 1)).toEqual({ columnWidth: 170, perRow: 7, weekRows: true });
-    expect(workbenchLayout(1176, 1.5)).toEqual({ columnWidth: 255, perRow: 4, weekRows: false });
-    expect(workbenchLayout(1176, 0.7)).toEqual({ columnWidth: 119, perRow: 7, weekRows: true });
+    expect(workbenchLayout(1176, 1)).toEqual({ columnWidth: 187, perRow: 5, weekRows: false });
+    expect(workbenchLayout(1404, 1)).toEqual({ columnWidth: 187, perRow: 6, weekRows: false });
+    expect(workbenchLayout(1405, 1)).toEqual({ columnWidth: 187, perRow: 7, weekRows: true });
+    expect(workbenchLayout(1176, 1.5)).toEqual({ columnWidth: 281, perRow: 3, weekRows: false });
+    expect(workbenchLayout(1176, 0.7)).toEqual({ columnWidth: 131, perRow: 7, weekRows: true });
     expect(workbenchLayout(200, 1).perRow).toBe(1);
   });
 
