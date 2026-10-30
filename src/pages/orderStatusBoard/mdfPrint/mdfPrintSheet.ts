@@ -55,6 +55,11 @@ export function buildMdfPrintSheet(options: MdfPrintSheetOptions): HTMLElement {
   copy.querySelectorAll<HTMLElement>('.cnc-board-card-shell--deep-linked').forEach((element) => {
     element.classList.remove('cnc-board-card-shell--deep-linked');
   });
+  // the detailed bath view covers columns on screen; the copy prints the columns themselves
+  copy.classList.remove('status-board-columns--cnc-detailed');
+  copy.querySelectorAll<HTMLElement>('.cnc-today-column--detailed-covered, .cnc-today-column--detailed').forEach((element) => {
+    element.classList.remove('cnc-today-column--detailed-covered', 'cnc-today-column--detailed');
+  });
   const copiedColumns = Array.from(copy.querySelectorAll<HTMLElement>(':scope > [data-status-board-column-key]'));
   let index = 0;
   copiedColumns.forEach((column) => {

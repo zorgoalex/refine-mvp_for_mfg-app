@@ -6,7 +6,8 @@ import { Button, Checkbox, Modal, Space } from 'antd';
 import { PrinterOutlined } from '@ant-design/icons';
 import { Segmented } from '../../../ui/Segmented';
 import { chosenMdfPrintColumns, mdfPrint, useMdfPrintState, type MdfPrintPaper } from './mdfPrintStore';
-import { buildMdfPrintSheet, fitMdfPrintSheet, MDF_PRINT_SHEET_WIDTH_PX } from './mdfPrintSheet';
+import { buildMdfPrintSheet, fitMdfPrintSheet } from './mdfPrintSheet';
+import { currentPrintSnapshot, runIsolatedPrint, type PrintSnapshot } from '../../../ui/isolatedPrint';
 import './mdfPrint.css';
 
 const PRINTING_CLASS = 'wb-mdf-printing';
@@ -44,23 +45,25 @@ export const MdfPrintDialog: React.FC<MdfPrintDialogProps> = ({ columns, printDa
   const chosen = chosenMdfPrintColumns(columns, columnKeys);
   const chosenKeys = chosen.map((column) => column.key);
   const chosenKey = chosenKeys.join('|');
+  // the settings a preview snapshot belongs to: a change makes the shown snapshot stale until it is rebuilt
+  const settingsKey = `${paper}#${chosenKey}#${modeLabel}`;
   const previewRef = useRef<HTMLDivElement | null>(null);
+  const snapshotRef = useRef<PrintSnapshot<MdfPrintPaper> | null>(null);
   const [previewReady, setPreviewReady] = useState(false);
 
-  const sheetFor = (sheetWidth?: number) => {
+  const sheetFor = () => {
     const board = getBoard();
     if (!board || chosenKeys.length === 0) return null;
     return buildMdfPrintSheet({
-      board, columnKeys: chosenKeys, paper, title: 'МДФ-работы', printDate, modeLabel, sheetWidth,
+      board, columnKeys: chosenKeys, paper, title: 'МДФ-работы', printDate, modeLabel,
     });
   };
 
   // preview: the copy taken after the board has drawn all its cards, in a scaled-down sheet
   useEffect(() => {
-    if (!open) {
-      setPreviewReady(false);
-      return undefined;
-    }
+    setPreviewReady(false);
+    snapshotRef.current = null;
+    if (!open) return undefined;
     let retry = 0;
     const draw = () => {
       const holder = previewRef.current;
@@ -70,11 +73,14 @@ export const MdfPrintDialog: React.FC<MdfPrintDialogProps> = ({ columns, printDa
       }
       holder.replaceChildren();
       const sheet = sheetFor();
+      snapshotRef.current = sheet
+        ? { key: settingsKey, paper, sheets: [sheet.cloneNode(true) as HTMLElement] }
+        : null;
       if (sheet) {
         holder.append(sheet);
         fitMdfPrintSheet(sheet);
       }
-      setPreviewReady(true);
+      setPreviewReady(Boolean(sheet));
     };
     const cancel = afterCardsDrawn(draw);
     return () => {
@@ -83,49 +89,22 @@ export const MdfPrintDialog: React.FC<MdfPrintDialogProps> = ({ columns, printDa
     };
   }, [open, paper, chosenKey, modeLabel]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // the sheet printed is the snapshot shown in the preview (the board keeps refreshing while the dialog is open)
   useEffect(() => {
     if (!printing) return undefined;
-    const root = document.documentElement;
-    const container = document.createElement('div');
-    container.className = 'wb-mdf-print-live';
-    const style = document.createElement('style');
-    style.textContent = `@page { size: ${paper} landscape; margin: 8mm; }`;
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      root.classList.remove(PRINTING_CLASS);
-      container.remove();
-      style.remove();
+    const snapshot = currentPrintSnapshot(snapshotRef.current, settingsKey);
+    if (!snapshot) {
       mdfPrint.setPrinting(false);
-    };
-    const cancel = afterCardsDrawn(() => {
-      const sheet = sheetFor(MDF_PRINT_SHEET_WIDTH_PX[paper]);
-      if (!sheet) {
-        finish();
-        return;
-      }
-      container.append(sheet);
-      // laid out off screen once, so the copy can be scaled by its real width (on screen the container is hidden)
-      container.style.cssText = 'display:block;position:absolute;left:-100000px;top:0;visibility:hidden';
-      document.body.append(container);
-      fitMdfPrintSheet(sheet);
-      container.style.cssText = '';
-      document.head.append(style);
-      root.classList.add(PRINTING_CLASS);
-      window.addEventListener('afterprint', finish, { once: true });
-      requestAnimationFrame(() => {
-        window.print();
-        finish();
-      });
+      return undefined;
+    }
+    return runIsolatedPrint({
+      containerClass: 'wb-mdf-print-live',
+      rootClass: PRINTING_CLASS,
+      pageRule: `@page { size: ${snapshot.paper} landscape; margin: 8mm; }`,
+      sheets: snapshot.sheets.map((sheet) => sheet.cloneNode(true) as HTMLElement),
+      fit: fitMdfPrintSheet,
+      onDone: () => mdfPrint.setPrinting(false),
     });
-    return () => {
-      cancel();
-      window.removeEventListener('afterprint', finish);
-      root.classList.remove(PRINTING_CLASS);
-      container.remove();
-      style.remove();
-    };
   }, [printing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = (key: string, checked: boolean) => {

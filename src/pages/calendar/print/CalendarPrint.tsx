@@ -18,6 +18,7 @@ import {
   type CalendarPrintPaper,
 } from './calendarPrintModel';
 import { buildCalendarPrintSheets, fitCalendarPrintSheet } from './calendarPrintSheet';
+import { currentPrintSnapshot, runIsolatedPrint, type PrintSnapshot } from '../../../ui/isolatedPrint';
 import './calendarPrint.css';
 
 const PRINTING_CLASS = 'wb-cal-printing';
@@ -53,6 +54,8 @@ export const CalendarPrintButton: React.FC<CalendarPrintButtonProps> = ({
   const [printing, setPrinting] = useState(false);
   const [now, setNow] = useState(() => new Date());
   const previewRef = useRef<HTMLDivElement | null>(null);
+  const snapshotRef = useRef<PrintSnapshot<CalendarPrintPaper> | null>(null);
+  const [previewReady, setPreviewReady] = useState(false);
 
   const model = useMemo(
     () => (open ? buildCalendarPrintModel(weeks, ordersOf, paper, now) : []),
@@ -64,6 +67,8 @@ export const CalendarPrintButton: React.FC<CalendarPrintButtonProps> = ({
   const firstDay = weeks[0]?.days[0];
   const lastDay = weeks.at(-1)?.days.at(-1);
   const period = firstDay && lastDay ? `${formatDateKey(firstDay)} – ${formatDateKey(lastDay)}` : periodLabel;
+  // the settings a preview snapshot belongs to: a change makes the shown snapshot stale until it is rebuilt
+  const settingsKey = `${paper}#${period}#${viewLabel}#${filterLine}#${now.getTime()}`;
 
   const buildSheets = (): HTMLElement[] => {
     const grid = getGrid();
@@ -80,6 +85,8 @@ export const CalendarPrintButton: React.FC<CalendarPrintButtonProps> = ({
 
   // preview: copies of the calendar weeks, after the dialog has opened
   useEffect(() => {
+    setPreviewReady(false);
+    snapshotRef.current = null;
     if (!open) return undefined;
     let timer = 0;
     let attempts = 0;
@@ -92,10 +99,13 @@ export const CalendarPrintButton: React.FC<CalendarPrintButtonProps> = ({
         return;
       }
       holder.replaceChildren();
-      for (const sheet of buildSheets()) {
+      const sheets = buildSheets();
+      snapshotRef.current = { key: settingsKey, paper, sheets: sheets.map((sheet) => sheet.cloneNode(true) as HTMLElement) };
+      for (const sheet of sheets) {
         holder.append(sheet);
         fitCalendarPrintSheet(sheet);
       }
+      setPreviewReady(sheets.length > 0);
     };
     const frame = requestAnimationFrame(draw);
     return () => {
@@ -104,44 +114,24 @@ export const CalendarPrintButton: React.FC<CalendarPrintButtonProps> = ({
     };
   }, [open, paper, now, viewLabel, filterLine]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // the sheets printed are the snapshot shown in the preview
   useEffect(() => {
-    if (!printing) return undefined;
-    const root = document.documentElement;
-    const container = document.createElement('div');
-    container.className = 'wb-cal-print-live';
-    const style = document.createElement('style');
-    style.textContent = `@page { size: ${paper} landscape; margin: ${CALENDAR_PRINT_MARGIN_MM}mm; }`;
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      root.classList.remove(PRINTING_CLASS);
-      container.remove();
-      style.remove();
+    // closing the dialog cancels a print not yet started
+    if (!printing || !open) return undefined;
+    const snapshot = currentPrintSnapshot(snapshotRef.current, settingsKey);
+    if (!snapshot) {
       setPrinting(false);
-    };
-    const sheets = buildSheets();
-    // laid out off screen once, so each sheet can be scaled by its real width (on screen the container is hidden)
-    container.style.cssText = 'display:block;position:absolute;left:-100000px;top:0;visibility:hidden';
-    sheets.forEach((sheet) => container.append(sheet));
-    document.body.append(container);
-    sheets.forEach(fitCalendarPrintSheet);
-    container.style.cssText = '';
-    document.head.append(style);
-    root.classList.add(PRINTING_CLASS);
-    window.addEventListener('afterprint', finish, { once: true });
-    const frame = requestAnimationFrame(() => requestAnimationFrame(() => {
-      window.print();
-      finish();
-    }));
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener('afterprint', finish);
-      root.classList.remove(PRINTING_CLASS);
-      container.remove();
-      style.remove();
-    };
-  }, [printing]); // eslint-disable-line react-hooks/exhaustive-deps
+      return undefined;
+    }
+    return runIsolatedPrint({
+      containerClass: 'wb-cal-print-live',
+      rootClass: PRINTING_CLASS,
+      pageRule: `@page { size: ${snapshot.paper} landscape; margin: ${CALENDAR_PRINT_MARGIN_MM}mm; }`,
+      sheets: snapshot.sheets.map((sheet) => sheet.cloneNode(true) as HTMLElement),
+      fit: fitCalendarPrintSheet,
+      onDone: () => setPrinting(false),
+    });
+  }, [printing, open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const choosePaper = (value: CalendarPrintPaper) => {
     setPaper(value);
@@ -166,12 +156,12 @@ export const CalendarPrintButton: React.FC<CalendarPrintButtonProps> = ({
         title="Печать календаря"
         width={1000}
         className="wb-cal-print-dialog"
-        onCancel={() => setOpen(false)}
+        onCancel={() => { setOpen(false); setPrinting(false); }}
         destroyOnClose
         footer={(
           <Space>
-            <Button onClick={() => setOpen(false)}>Отмена</Button>
-            <Button type="primary" icon={<PrinterOutlined />} disabled={model.length === 0} loading={printing} onClick={() => setPrinting(true)}>
+            <Button onClick={() => { setOpen(false); setPrinting(false); }}>Отмена</Button>
+            <Button type="primary" icon={<PrinterOutlined />} disabled={model.length === 0 || !previewReady} loading={printing} onClick={() => setPrinting(true)}>
               Печать
             </Button>
           </Space>
