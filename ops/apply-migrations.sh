@@ -3185,6 +3185,9 @@ probe_file() {
       "SELECT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid='public.mdf_republish_jobs'::regclass AND t.tgname='mdf_republish_job_immutable' AND NOT t.tgisinternal);" \
       ;;
     # «Присадка» → «Базис-проект»: клиент карточки, ссылка XML-проекта на карточку, инвариант клиента, orders_view.
+    # «Базис» for «Новый» details already in «Базис раскрой» cards before 282: one-time backfill, its summary audit row.
+    286_saw_status_backfill*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event='orders.saw_status_backfill' AND entity_type='migration' AND entity_id='286');" ;;
     284_stage_letters_cut_ready_saw*) probe_all \
       "$(q_trg trg_bazis_cut_set_details_saw_guard)" \
       "SELECT NOT EXISTS (SELECT 1 FROM cut_settings WHERE key='eligibility.statuses' AND jsonb_typeof(value->'codes')='array' AND (value->'codes') ? 'drawn' AND NOT (value->'codes') ? 'saw');" ;;
@@ -3439,6 +3442,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     282_order_stage_letters*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    286_saw_status_backfill*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     284_stage_letters_cut_ready_saw*)

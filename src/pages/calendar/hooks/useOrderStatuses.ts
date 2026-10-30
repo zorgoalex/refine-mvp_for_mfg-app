@@ -62,6 +62,8 @@ export const useOrderStatuses = (
     resource: 'production_statuses',
     pagination: { pageSize: 100 },
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    // The step order of the workflow («Базис» right after «Отрисован»: same sort_order, later id).
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
     queryOptions: { enabled: loadPaymentAndProduction },
   });
 
