@@ -84,6 +84,10 @@ export interface OrderStatusBoardCardDetail {
   detailNumber: number | null;
   quantity: number;
   bazisCutQuantity: number;
+  /** Production status «Распилен» or later (an older backend omits it). */
+  statusCut?: boolean;
+  /** Production status «Закатан» or later (an older backend omits it). */
+  statusRolled?: boolean;
 }
 
 export interface OrderStatusBoardCard {

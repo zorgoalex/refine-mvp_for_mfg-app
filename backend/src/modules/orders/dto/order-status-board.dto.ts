@@ -14,6 +14,10 @@ export interface OrderStatusBoardCardDetailDto {
   detailNumber: number | null;
   quantity: number;
   bazisCutQuantity: number;
+  /** The detail's production status is «Распилен» (code `cut`) or later: evidence of cutting for the MDF board. */
+  statusCut: boolean;
+  /** The detail's production status is «Закатан» (code `laminated`) or later: evidence of rolling for the MDF board. */
+  statusRolled: boolean;
 }
 
 export interface OrderStatusBoardCardDto {
