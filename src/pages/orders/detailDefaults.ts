@@ -62,6 +62,59 @@ export function rowDefaultFormValues(defaults: DetailDefaults, ruleMaterialId: n
   };
 }
 
+/** Fields of an open untouched row the defaults may still change (the price brings its marker along). */
+export const OPEN_ROW_DEFAULT_FIELDS = ['milling_type_id', 'edge_type_id', 'sheet_material_type_id', 'film_id', 'milling_cost_per_sqm'] as const;
+
+export interface OpenRowDefaults {
+  key: string | number;
+  /** material of the material rule for this row (set later if the catalog arrives after the row opened) */
+  rule: number | undefined;
+  /** what the defaults last put into each field */
+  values: Record<string, unknown>;
+  /** fields still the defaults' own; a field the user changed leaves the set for good */
+  owned: Set<string>;
+}
+
+export function openRowDefaults(key: string | number, rule: number | undefined, values: Record<string, unknown>): OpenRowDefaults {
+  return { key, rule, values: { ...values }, owned: new Set(OPEN_ROW_DEFAULT_FIELDS) };
+}
+
+/**
+ * The defaults changed while the row is open: fields still owned by the defaults (their form value is what the
+ * defaults put there) take the new defaults; a field whose value differs was changed by the user and is dropped from
+ * the defaults for good. The price marker moves only together with a price the defaults set.
+ */
+export function reconcileOpenRowDefaults(
+  applied: OpenRowDefaults,
+  formValueOf: (field: string) => unknown,
+  defaults: DetailDefaults,
+): Record<string, unknown> {
+  const next = rowDefaultFormValues(defaults, applied.rule);
+  const patch: Record<string, unknown> = {};
+  for (const field of OPEN_ROW_DEFAULT_FIELDS) {
+    if (!applied.owned.has(field)) continue;
+    if ((formValueOf(field) ?? null) !== (applied.values[field] ?? null)) {
+      applied.owned.delete(field);
+      continue;
+    }
+    if ((next[field] ?? null) !== (applied.values[field] ?? null)) patch[field] = next[field];
+    applied.values[field] = next[field];
+  }
+  if ('milling_cost_per_sqm' in patch) {
+    patch.prefilled_milling_cost_per_sqm = next.prefilled_milling_cost_per_sqm;
+    applied.values.prefilled_milling_cost_per_sqm = next.prefilled_milling_cost_per_sqm;
+  }
+  return patch;
+}
+
+/** The material rule filled the open row's material later (catalog arrived): still the defaults' value. */
+export function noteOpenRowRuleMaterial(applied: OpenRowDefaults, materialId: number): void {
+  applied.rule = materialId;
+  if (applied.owned.has('sheet_material_type_id') && applied.values.sheet_material_type_id == null) {
+    applied.values.sheet_material_type_id = materialId;
+  }
+}
+
 /** Defaults kept in the tab checkpoint (a restored tab keeps them); anything malformed — null. */
 export function readDetailDefaults(raw: unknown): DetailDefaults | null {
   if (!raw || typeof raw !== 'object') return null;

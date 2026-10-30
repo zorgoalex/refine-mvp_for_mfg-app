@@ -58,7 +58,8 @@ describe('«Параметры деталей по умолчанию» in the d
     expect(table).toContain('if (currentDefaults && isPristineOrderDetailPlaceholder(storeRecord)) {');
     expect(table).toContain('const currentDefaults = newRowDefaultsRef.current;');
     // the open untouched row (the form opens row 1 by itself) follows a change of the defaults in untouched fields
-    expect(table).toContain('if (form.getFieldValue(field) === applied.values[field] && next[field] !== applied.values[field]) {');
+    expect(table).toContain('const patch = reconcileOpenRowDefaults(applied, (field) => form.getFieldValue(field), newRowDefaults);');
+    expect(table).toContain('noteOpenRowRuleMaterial(applied, materialDefault)');
     const tab = readFileSync(join(__dirname, '../pages/orders/components/tabs/OrderDetailsTab.tsx'), 'utf8');
     expect(tab).toContain('newRowDefaults={detailDefaults}');
     expect(tab).not.toContain('patchPlaceholderDetails');
