@@ -1561,7 +1561,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     };
     // an untouched prepared row starts from the form's defaults (values, not a background sync of the grid); the
     // price carries its marker in the form, so an unfilled row stays an empty tail (orderDetailRows)
-    if (newRowDefaults && isPristineOrderDetailPlaceholder(record)) {
+    // the grid hands over a display row (sorting/grouping fields); the store row decides whether it is untouched
+    const storeRecord = details.find((detail) =>
+      (detail.temp_id || detail.detail_id) === (record.temp_id || record.detail_id)) ?? record;
+    if (newRowDefaults && isPristineOrderDetailPlaceholder(storeRecord)) {
       const rule = initialFormValues.sheet_material_type_id;
       const defaults = newDetailDefaults(newRowDefaults, typeof rule === 'number' ? rule : undefined);
       Object.assign(initialFormValues, defaults);

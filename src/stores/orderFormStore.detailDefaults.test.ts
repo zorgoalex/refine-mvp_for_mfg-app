@@ -55,7 +55,7 @@ describe('«Параметры деталей по умолчанию» in the d
 
   it('the table puts the defaults into a pristine row only when it is opened (no background sync of the grid)', () => {
     const table = readFileSync(join(__dirname, '../pages/orders/components/tables/OrderDetailTable.tsx'), 'utf8');
-    expect(table).toContain('if (newRowDefaults && isPristineOrderDetailPlaceholder(record)) {');
+    expect(table).toContain('if (newRowDefaults && isPristineOrderDetailPlaceholder(storeRecord)) {');
     const tab = readFileSync(join(__dirname, '../pages/orders/components/tabs/OrderDetailsTab.tsx'), 'utf8');
     expect(tab).toContain('newRowDefaults={detailDefaults}');
     expect(tab).not.toContain('patchPlaceholderDetails');
