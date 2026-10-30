@@ -23,9 +23,13 @@ import {
 } from '../../api/ordersApi';
 import type {
   OrderResourceByMaterialQuery,
+  OrderResourceDemandFilterOptionsQuery,
+  OrderResourceDemandFilterOptionsResponse,
+  OrderResourceDemandFilters,
   OrderResourceDemandOnecDocumentsQuery,
   OrderResourceDemandQuery,
   OrderResourceDemandResponse,
+  OrderResourcePaymentFilter,
 } from '../../api/types/orderApi.types';
 import { LocalizedList } from '../../components/LocalizedList';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
@@ -57,15 +61,24 @@ import { KindSummaryCell, ResourceDemandBreakdown } from './ResourceDemandParts'
 import { resolveByMaterialPeriod, resolveResourceCapabilities, resourceDemandLines, type ResourceDemandLine } from './resourceKinds';
 import { SplitPanelView } from './SplitPanelView';
 import { useStoredViewMode } from './useStoredViewMode';
+import {
+  RESOURCE_FILTER_EMPTY,
+  RESOURCE_FILTER_NONE,
+  SUPPLIER_NONE_KEY,
+  resourceDemandHeaderQuery,
+  rowSupplierNames,
+  type HeaderFilterField,
+  type HeaderFilterState,
+  type HeaderFilterValues,
+} from './resourceDemandFilters';
 
 const ONEC_DOCUMENT_FILTER_DEBOUNCE_MS = 300;
+const HEADER_FILTER_OPTIONS_DEBOUNCE_MS = 300;
 
 const LIVE_REFRESH_INTERVAL_MS = 5_000;
 const numericStyle = { fontVariantNumeric: 'tabular-nums' } as const;
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
-const RESOURCE_FILTER_EMPTY = '__order_resource_requirement_filter_empty__';
-const RESOURCE_FILTER_NONE = '__order_resource_requirement_filter_none__';
 type ResourceListViewMode = 'summary' | 'materials' | 'panel';
 const RESOURCE_LIST_VIEW_MODES: readonly ResourceListViewMode[] = ['summary', 'materials', 'panel'];
 const RESOURCE_LIST_VIEW_OPTIONS = [
@@ -74,6 +87,13 @@ const RESOURCE_LIST_VIEW_OPTIONS = [
   { value: 'panel', label: 'Панель' },
 ];
 const EMPTY_LIST_TEXT = 'Заказы по выбранным условиям не найдены';
+
+type PaymentFilterValue = 'all' | OrderResourcePaymentFilter;
+const PAYMENT_FILTER_OPTIONS: Array<{ value: PaymentFilterValue; label: string }> = [
+  { value: 'all', label: 'Оплата: все' },
+  { value: 'any_paid', label: 'Есть оплата' },
+  { value: 'fully_paid', label: 'Оплачено полностью' },
+];
 
 const REPORT_MATERIAL_OPTIONS: Array<{ value: ResourceDemandReportMaterial; label: string }> = [
   { value: 'films', label: 'Плёнка' },
@@ -91,8 +111,6 @@ const REPORT_FILE_FORMAT_OPTIONS: Array<{ value: ResourceDemandReportFileFormat;
 
 type DateRange = [Dayjs | null, Dayjs | null] | null;
 type OrderResourceDemandRow = OrderResourceDemandResponse['data'][number];
-type HeaderFilterField = 'order' | 'date' | 'sheetMaterials' | 'films';
-type HeaderFilterState = Record<HeaderFilterField, Key[] | null>;
 type HeaderSortKey = 'order' | 'date' | 'sheetMaterials' | 'films';
 
 interface HeaderFilterOption {
@@ -116,6 +134,7 @@ function createDefaultHeaderFilters(): HeaderFilterState {
     date: null,
     sheetMaterials: null,
     films: null,
+    suppliers: null,
   };
 }
 
@@ -136,6 +155,7 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
   const [dateRange, setDateRange] = useState<DateRange>(null);
   const [readyCutsOnly, setReadyCutsOnly] = useState(false);
   const [unpurchasedOnly, setUnpurchasedOnly] = useState(false);
+  const [paymentFilter, setPaymentFilter] = useState<PaymentFilterValue>('all');
   const [searchParams, setSearchParams] = useSearchParams();
   const [onecDocumentFilter, setOnecDocumentFilter] = useState<OnecDocumentFilterValue | null>(null);
   // Инициализация из URL идёт асинхронно (карточка документа) — синхронизация фильтра
@@ -173,18 +193,61 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
   const [drawerSnapshot, setDrawerSnapshot] = useState<OrderResourceDemandRow | null>(null);
   const [panelOrderId, setPanelOrderId] = useState<number | null>(null);
   const deferredSearch = useDeferredValue(searchInput.trim());
-  const query = useMemo<OrderResourceDemandQuery>(() => ({
-    page,
-    pageSize,
+  // Все фильтры считает сервер (по всем страницам): панель + заголовки колонок. Прежний backend (без
+  // capabilities.serverFilters) их не знает — тогда эти фильтры не показываются и не передаются.
+  const [serverFilters, setServerFilters] = useState(false);
+  // Сортировку колонок считает сервер по всем страницам; прежний backend (без capabilities.serverSort) —
+  // сортировка только текущей страницы.
+  const [serverSort, setServerSort] = useState(false);
+  const panelFilters = useMemo<OrderResourceDemandFilterOptionsQuery>(() => ({
     ...(deferredSearch ? { search: deferredSearch } : {}),
     ...(dateRange?.[0] ? { dateFrom: dateRange[0].format('YYYY-MM-DD') } : {}),
     ...(dateRange?.[1] ? { dateTo: dateRange[1].format('YYYY-MM-DD') } : {}),
     ...(unpurchasedOnly ? { unpurchasedOnly: true } : {}),
+    ...(serverFilters && readyCutsOnly ? { readyCutsOnly: true } : {}),
+    ...(serverFilters && paymentFilter !== 'all' ? { payment: paymentFilter } : {}),
+  }), [dateRange, deferredSearch, paymentFilter, readyCutsOnly, serverFilters, unpurchasedOnly]);
+  // Варианты фильтров заголовков — по всей выборке панели (документ 1С тоже сужает выборку).
+  const filterOptionsQuery = useMemo<OrderResourceDemandFilterOptionsQuery>(() => ({
+    ...panelFilters,
     ...(onecDocumentFilter ? { onecDocumentId: onecDocumentFilter.documentId } : {}),
-  }), [dateRange, deferredSearch, onecDocumentFilter, page, pageSize, unpurchasedOnly]);
-  const { response, loading, error } = useLiveOrderResourceDemands(query, refreshRevision, !active);
-  const rows = response?.data ?? EMPTY_RESOURCE_DEMAND_ROWS;
+  }), [onecDocumentFilter, panelFilters]);
+  const filterOptionsState = useResourceDemandFilterOptions(filterOptionsQuery, active && serverFilters);
+  const filterOptionsResponse = filterOptionsState.options;
+  const filterOptions = useMemo(() => buildResourceDemandFilterOptions(filterOptionsResponse), [filterOptionsResponse]);
+  // «Все, кроме» строится только по вариантам, загруженным для ТЕХ ЖЕ фильтров панели: устаревшие варианты
+  // (период расширен, ответ ещё не пришёл или упал) пропустили бы новые, не виденные пользователем значения.
+  const optionsCurrent = filterOptionsState.queryKey === JSON.stringify(filterOptionsQuery);
+  const headerQuery = useMemo(
+    () => (serverFilters
+      ? resourceDemandHeaderQuery(
+        headerFilters,
+        optionsCurrent ? knownHeaderFilterValues(filterOptions, filterOptionsResponse) : undefined,
+      )
+      : { filters: {}, nothingSelected: false, usesExclusion: false, tooMany: null }),
+    [filterOptions, filterOptionsResponse, headerFilters, optionsCurrent, serverFilters],
+  );
+  // Запроса нет: «Отключить все» (заказов нет) или выбор, который нельзя передать (слишком много значений).
+  const listSuppressed = headerQuery.nothingSelected || headerQuery.tooMany !== null;
+  const query = useMemo<OrderResourceDemandQuery>(() => ({
+    page,
+    pageSize,
+    ...panelFilters,
+    ...headerQuery.filters,
+    ...(onecDocumentFilter ? { onecDocumentId: onecDocumentFilter.documentId } : {}),
+    ...(serverSort && sortState.columnKey && sortState.order
+      ? { sort: sortState.columnKey, sortOrder: sortState.order === 'descend' ? 'desc' as const : 'asc' as const }
+      : {}),
+  }), [headerQuery, onecDocumentFilter, page, pageSize, panelFilters, serverSort, sortState]);
+  // «Отключить все» в заголовке — заказов нет, сервер не спрашиваем.
+  const { response, loading, error } = useLiveOrderResourceDemands(query, refreshRevision, !active || listSuppressed);
+  const rows = listSuppressed ? EMPTY_RESOURCE_DEMAND_ROWS : response?.data ?? EMPTY_RESOURCE_DEMAND_ROWS;
   const capabilities = useMemo(() => resolveResourceCapabilities(response?.capabilities), [response]);
+  useEffect(() => {
+    if (!response) return;
+    setServerFilters(response.capabilities?.serverFilters === true);
+    setServerSort(response.capabilities?.serverSort === true);
+  }, [response]);
   const triggerRefresh = useCallback(() => setRefreshRevision((value) => value + 1), []);
   const todayKey = dayjs().format('YYYY-MM-DD');
   const byMaterialPeriod = useMemo(() => resolveByMaterialPeriod(
@@ -194,24 +257,25 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
     todayKey,
     onecDocumentFilter != null,
   ), [dateRange, onecDocumentFilter, todayKey]);
-  const byMaterialQuery = useMemo<OrderResourceByMaterialQuery>(() => ({
-    ...(deferredSearch ? { search: deferredSearch } : {}),
-    ...(byMaterialPeriod.dateFrom ? { dateFrom: byMaterialPeriod.dateFrom } : {}),
-    ...(byMaterialPeriod.dateTo ? { dateTo: byMaterialPeriod.dateTo } : {}),
-    ...(unpurchasedOnly ? { unpurchasedOnly: true } : {}),
-    ...(onecDocumentFilter ? { onecDocumentId: onecDocumentFilter.documentId } : {}),
-  }), [byMaterialPeriod, deferredSearch, onecDocumentFilter, unpurchasedOnly]);
+  const byMaterialQuery = useMemo<OrderResourceByMaterialQuery>(() => {
+    const { dateFrom: _from, dateTo: _to, ...rest } = panelFilters;
+    return {
+      ...rest,
+      ...headerQuery.filters,
+      ...(byMaterialPeriod.dateFrom ? { dateFrom: byMaterialPeriod.dateFrom } : {}),
+      ...(byMaterialPeriod.dateTo ? { dateTo: byMaterialPeriod.dateTo } : {}),
+      ...(onecDocumentFilter ? { onecDocumentId: onecDocumentFilter.documentId } : {}),
+    };
+  }, [byMaterialPeriod, headerQuery, onecDocumentFilter, panelFilters]);
   const byMaterialPeriodNote = byMaterialPeriod.isDefault && byMaterialPeriod.dateFrom && byMaterialPeriod.dateTo
     ? `Период по умолчанию — последний месяц: ${formatDate(byMaterialPeriod.dateFrom)} – ${formatDate(byMaterialPeriod.dateTo)}. Чтобы изменить, выберите даты в фильтре «Заказы с даты — по дату».`
     : null;
   // «Документ 1С»-фильтр: список опций Select — документы, привязанные к заказам ЭТОЙ
   // выборки (те же условия, что у основного списка, без paging и onecDocumentId).
-  const onecDocumentPickerQuery = useMemo<OrderResourceDemandOnecDocumentsQuery>(() => ({
-    ...(deferredSearch ? { search: deferredSearch } : {}),
-    ...(dateRange?.[0] ? { dateFrom: dateRange[0].format('YYYY-MM-DD') } : {}),
-    ...(dateRange?.[1] ? { dateTo: dateRange[1].format('YYYY-MM-DD') } : {}),
-    ...(unpurchasedOnly ? { unpurchasedOnly: true } : {}),
-  }), [dateRange, deferredSearch, unpurchasedOnly]);
+  const onecDocumentPickerQuery = useMemo<OrderResourceDemandOnecDocumentsQuery>(
+    () => ({ ...panelFilters, ...headerQuery.filters }),
+    [headerQuery, panelFilters],
+  );
   const onecDocumentOptionsState = useOnecDocumentFilterOptions(
     onecDocumentPickerQuery,
     capabilities.onecDocuments,
@@ -221,10 +285,9 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
     [onecDocumentOptionsState.documents],
   );
   const onecDocumentTruncatedHint = onecDocumentFilterTruncatedHint(onecDocumentOptionsState.truncated);
-  const filterOptions = useMemo(() => buildResourceDemandFilterOptions(rows), [rows]);
   const tableRows = useMemo(
-    () => sortResourceDemandRows(filterResourceDemandRows(rows, headerFilters, readyCutsOnly), sortState),
-    [headerFilters, readyCutsOnly, rows, sortState],
+    () => (serverSort ? rows : sortResourceDemandRows(rows, sortState)),
+    [rows, serverSort, sortState],
   );
   // Карточка берёт свежую строку из live-обновлений, а если заказ ушёл со страницы — последний снимок.
   const drawerRow = useMemo(
@@ -265,7 +328,7 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
     [reportFileFormat, reportFormat, reportGeneratedAt, reportMaterial, reportRows],
   );
   const hasActiveHeaderFilters = useMemo(() => hasResourceDemandHeaderFilters(headerFilters), [headerFilters]);
-  const hasActiveListFilters = hasActiveHeaderFilters || readyCutsOnly;
+  const hasActiveListFilters = hasActiveHeaderFilters || readyCutsOnly || paymentFilter !== 'all';
   const hasActiveSort = sortState.columnKey != null && sortState.order != null;
   const hasDateRange = Boolean(dateRange?.[0] || dateRange?.[1]);
   const hasTodayRange = Boolean(
@@ -362,6 +425,7 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
     setDateRange(null);
     setReadyCutsOnly(false);
     setUnpurchasedOnly(false);
+    setPaymentFilter('all');
     setOnecDocumentFilter(null);
     setHeaderFilters(createDefaultHeaderFilters());
     setSortState(DEFAULT_SORT_STATE);
@@ -398,6 +462,11 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
     setPage(DEFAULT_PAGE);
   }, []);
 
+  const handlePaymentFilterChange = useCallback((value: PaymentFilterValue) => {
+    setPaymentFilter(value);
+    setPage(DEFAULT_PAGE);
+  }, []);
+
   const openReportModal = useCallback(() => {
     const selectedOnly = selectedRowKeys.length > 0;
     const rowsForReport = selectedOnly
@@ -426,12 +495,10 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
   const paginationConfig: TablePaginationConfig = {
     current: response?.pagination.page ?? page,
     pageSize: response?.pagination.pageSize ?? pageSize,
-    total: response?.pagination.total ?? 0,
+    total: listSuppressed ? 0 : response?.pagination.total ?? 0,
     showSizeChanger: true,
     pageSizeOptions: PAGE_SIZE_OPTIONS,
-    showTotal: (total) => (
-      hasActiveListFilters ? `Заказов: ${total}; показано: ${tableRows.length}` : `Заказов: ${total}`
-    ),
+    showTotal: (total) => `Заказов: ${total}`,
     onChange: (nextPage, nextPageSize) => {
       if (nextPageSize !== pageSize) {
         rememberPageSize(nextPageSize);
@@ -442,7 +509,7 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
     },
   };
 
-  const filterProps = (field: HeaderFilterField, options: HeaderFilterOption[]) => ({
+  const filterProps = (field: HeaderFilterField, options: HeaderFilterOption[]) => (!serverFilters ? {} : {
     filteredValue: headerFilters[field],
     filterIcon: (filtered: boolean) => (
       <FilterFilled style={{ color: filtered ? '#1677ff' : undefined }} />
@@ -455,6 +522,14 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
       />
     ),
   });
+  // «По материалам»: без заказов — без сводки; при «все, кроме» новые значения выборки могли бы попасть в
+  // групповую отметку, поэтому сводка не показывается и при нём.
+  const aggregateBlockedReason = headerQuery.nothingSelected
+    ? 'В фильтре колонки ничего не выбрано — заказов нет, сводка по материалам и групповая отметка недоступны.'
+    : headerQuery.tooMany
+      ?? (headerQuery.usesExclusion
+        ? 'В фильтре колонки выбрано больше 500 значений — сводка по материалам и групповая отметка недоступны. Сузьте выбор.'
+        : null);
 
   return (
     <ListFrame embedded={embedded}>
@@ -507,13 +582,24 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
           >
             Сегодня
           </Button>
-          <Checkbox
-            checked={readyCutsOnly}
-            style={{ whiteSpace: 'nowrap' }}
-            onChange={(event) => handleReadyCutsOnlyChange(event.target.checked)}
-          >
-            Готовые раскрои
-          </Checkbox>
+          {serverFilters && (
+            <Checkbox
+              checked={readyCutsOnly}
+              style={{ whiteSpace: 'nowrap' }}
+              onChange={(event) => handleReadyCutsOnlyChange(event.target.checked)}
+            >
+              Готовые раскрои
+            </Checkbox>
+          )}
+          {serverFilters && (
+            <Select<PaymentFilterValue>
+              aria-label="Оплата"
+              value={paymentFilter}
+              options={PAYMENT_FILTER_OPTIONS}
+              onChange={handlePaymentFilterChange}
+              style={{ width: 190 }}
+            />
+          )}
           {capabilities.procurement && (
             <Checkbox
               checked={unpurchasedOnly}
@@ -577,7 +663,8 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
           )}
         </Space>
 
-        {error && (
+        {headerQuery.tooMany && <Alert showIcon type="warning" message={headerQuery.tooMany} />}
+        {error && !listSuppressed && (
           <Alert
             showIcon
             type="error"
@@ -672,6 +759,15 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
                 <KindSummaryCell lines={resourceDemandLines(row)} kind="film" />
               )}
             />
+            {serverFilters && (
+              <Table.Column
+                key="suppliers"
+                title="Поставщик"
+                width={200}
+                {...filterProps('suppliers', filterOptions.suppliers)}
+                render={(_, row: OrderResourceDemandRow) => <SupplierNamesCell row={row} />}
+              />
+            )}
             {capabilities.procurement && (
               <Table.Column
                 key="procurement"
@@ -712,7 +808,7 @@ export const OrderResourceRequirementList: React.FC<OrderResourceRequirementList
             manageLoading={manageLoading}
             onProcurementChanged={triggerRefresh}
             byMaterialQuery={byMaterialQuery}
-            clientFiltersActive={hasActiveListFilters}
+            aggregateBlockedReason={aggregateBlockedReason}
             byMaterialPeriodNote={byMaterialPeriodNote}
             refreshRevision={refreshRevision}
           />
@@ -1043,69 +1139,60 @@ function isResourceDemandSortKey(value: string | null): value is HeaderSortKey {
   return value === 'order' || value === 'date' || value === 'sheetMaterials' || value === 'films';
 }
 
-function buildResourceDemandFilterOptions(rows: OrderResourceDemandRow[]): Record<HeaderFilterField, HeaderFilterOption[]> {
-  const orders = new Map<string, HeaderFilterOption>();
-  const dates = new Map<string, HeaderFilterOption>();
-  const sheetMaterials = new Map<string, HeaderFilterOption>();
-  const films = new Map<string, HeaderFilterOption>();
-  let hasRowsWithoutDate = false;
-  let hasRowsWithoutSheetMaterials = false;
-  let hasRowsWithoutFilms = false;
+/** Значения вариантов фильтров заголовков: «Заказ» — неполный, если сервер обрезал список. */
+function knownHeaderFilterValues(
+  options: Record<HeaderFilterField, HeaderFilterOption[]>,
+  response: OrderResourceDemandFilterOptionsResponse | null,
+): HeaderFilterValues | undefined {
+  if (!response) return undefined;
+  const of = (field: HeaderFilterField, complete = true) => ({ values: options[field].map((option) => option.value), complete });
+  return {
+    order: of('order', !response.ordersTruncated),
+    date: of('date'),
+    sheetMaterials: of('sheetMaterials'),
+    films: of('films'),
+    suppliers: of('suppliers'),
+  };
+}
 
-  for (const row of rows) {
-    const orderSortText = [orderNumberText(row), row.clientName?.trim()].filter(Boolean).join(' · ') || `#${row.orderId}`;
-    orders.set(String(row.orderId), {
-      value: String(row.orderId),
-      label: (
-        <span>
-          <OrderNumber orderName={row.orderName} orderId={row.orderId} projectCode={row.projectCode} />
-          {row.clientName?.trim() ? ` · ${row.clientName.trim()}` : ''}
-        </span>
-      ),
-      sortText: orderSortText,
-    });
-
-    if (row.orderDate) {
-      dates.set(row.orderDate, { value: row.orderDate, label: formatDate(row.orderDate), sortText: formatDate(row.orderDate) });
-    } else {
-      hasRowsWithoutDate = true;
-    }
-
-    if (row.sheetMaterials.length === 0) {
-      hasRowsWithoutSheetMaterials = true;
-    } else {
-      for (const material of row.sheetMaterials) {
-        const value = String(material.sheetMaterialTypeId);
-        sheetMaterials.set(value, { value, label: material.name, sortText: material.name });
-      }
-    }
-
-    if (row.films.length === 0) {
-      hasRowsWithoutFilms = true;
-    } else {
-      for (const film of row.films) {
-        const value = String(film.filmId);
-        films.set(value, { value, label: film.name, sortText: film.name });
-      }
-    }
-  }
-
-  const dateOptions = sortHeaderFilterOptions([...dates.values()]);
-  if (hasRowsWithoutDate) dateOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без даты)', sortText: '(без даты)' });
-
-  const sheetMaterialOptions = sortHeaderFilterOptions([...sheetMaterials.values()]);
-  if (hasRowsWithoutSheetMaterials) {
+function buildResourceDemandFilterOptions(
+  response: OrderResourceDemandFilterOptionsResponse | null,
+): Record<HeaderFilterField, HeaderFilterOption[]> {
+  if (!response) return { order: [], date: [], sheetMaterials: [], films: [], suppliers: [] };
+  const orders = response.orders.map<HeaderFilterOption>((order) => ({
+    value: String(order.orderId),
+    label: (
+      <span>
+        <OrderNumber orderName={order.orderName} orderId={order.orderId} projectCode={order.projectCode} />
+        {order.clientName?.trim() ? ` · ${order.clientName.trim()}` : ''}
+      </span>
+    ),
+    sortText: [orderNumberText(order), order.clientName?.trim()].filter(Boolean).join(' · ') || `#${order.orderId}`,
+  }));
+  const dateOptions = response.dates.map<HeaderFilterOption>((date) => ({ value: date, label: formatDate(date), sortText: date }));
+  if (response.hasEmptyDate) dateOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без даты)', sortText: '(без даты)' });
+  const named = (items: Array<{ id: number; name: string }>) => sortHeaderFilterOptions(
+    items.map((item) => ({ value: String(item.id), label: item.name, sortText: item.name })),
+  );
+  const sheetMaterialOptions = named(response.sheetMaterials);
+  if (response.hasNoSheetMaterials) {
     sheetMaterialOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без листовых материалов)', sortText: '(без листовых материалов)' });
   }
-
-  const filmOptions = sortHeaderFilterOptions([...films.values()]);
-  if (hasRowsWithoutFilms) filmOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без плёнки)', sortText: '(без плёнки)' });
-
+  const filmOptions = named(response.films);
+  if (response.hasNoFilms) filmOptions.push({ value: RESOURCE_FILTER_EMPTY, label: '(без плёнки)', sortText: '(без плёнки)' });
+  // Поставщики — в порядке сервера (по имени, «Без поставщика» последним).
+  const supplierOptions = response.suppliers.map<HeaderFilterOption>((supplier) => ({
+    value: supplier.key,
+    label: supplier.key === SUPPLIER_NONE_KEY ? '(без поставщика)' : supplier.name,
+    sortText: supplier.name,
+  }));
   return {
-    order: sortHeaderFilterOptions([...orders.values()]),
+    order: sortHeaderFilterOptions(orders),
+    // Даты — от новых к старым, как пришли.
     date: dateOptions,
     sheetMaterials: sheetMaterialOptions,
     films: filmOptions,
+    suppliers: supplierOptions,
   };
 }
 
@@ -1113,37 +1200,19 @@ function sortHeaderFilterOptions(options: HeaderFilterOption[]): HeaderFilterOpt
   return [...options].sort((a, b) => compareText(a.sortText, b.sortText));
 }
 
-function filterResourceDemandRows(
-  rows: OrderResourceDemandRow[],
-  filters: HeaderFilterState,
-  readyCutsOnly: boolean,
-): OrderResourceDemandRow[] {
-  if (!hasResourceDemandHeaderFilters(filters) && !readyCutsOnly) return rows;
-  return rows.filter((row) =>
-    (!readyCutsOnly || rowHasReadyCut(row)) &&
-    (Object.keys(filters) as HeaderFilterField[]).every((field) => rowMatchesHeaderFilter(field, filters[field], row)),
+function SupplierNamesCell({ row }: { row: OrderResourceDemandRow }) {
+  const names = rowSupplierNames(row);
+  if (names.length === 0) return <Typography.Text type="secondary">—</Typography.Text>;
+  const shown = names.slice(0, 2);
+  const rest = names.slice(2);
+  return (
+    <Space direction="vertical" size={0}>
+      {shown.map((name) => <span key={name}>{name}</span>)}
+      {rest.length > 0 && (
+        <Typography.Text type="secondary" title={rest.join(', ')}>+{rest.length}</Typography.Text>
+      )}
+    </Space>
   );
-}
-
-function rowHasReadyCut(row: OrderResourceDemandRow): boolean {
-  return row.films.some((film) => film.hasCutData);
-}
-
-function rowMatchesHeaderFilter(field: HeaderFilterField, keys: Key[] | null, row: OrderResourceDemandRow): boolean {
-  if (!keys || keys.length === 0) return true;
-  const selected = new Set(keys.map(String));
-  if (selected.has(RESOURCE_FILTER_NONE)) return false;
-
-  if (field === 'order') return selected.has(String(row.orderId));
-  if (field === 'date') return row.orderDate ? selected.has(row.orderDate) : selected.has(RESOURCE_FILTER_EMPTY);
-  if (field === 'sheetMaterials') {
-    return row.sheetMaterials.length === 0
-      ? selected.has(RESOURCE_FILTER_EMPTY)
-      : row.sheetMaterials.some((material) => selected.has(String(material.sheetMaterialTypeId)));
-  }
-  return row.films.length === 0
-    ? selected.has(RESOURCE_FILTER_EMPTY)
-    : row.films.some((film) => selected.has(String(film.filmId)));
 }
 
 function sortResourceDemandRows(
@@ -1307,6 +1376,47 @@ function useOnecDocumentFilterOptions(
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, query]);
+
+  return state;
+}
+
+/**
+ * Варианты фильтров заголовков по всей выборке панели. Перезагружаются с debounce при смене фильтров панели
+ * (и раз в минуту — появляются новые заказы/материалы); устаревший ответ игнорируется по номеру запроса.
+ * Ошибка не мешает списку — остаются прежние варианты.
+ */
+function useResourceDemandFilterOptions(
+  query: OrderResourceDemandFilterOptionsQuery,
+  active: boolean,
+): { options: OrderResourceDemandFilterOptionsResponse | null; queryKey: string | null } {
+  const [state, setState] = useState<{ options: OrderResourceDemandFilterOptionsResponse | null; queryKey: string | null }>(
+    { options: null, queryKey: null },
+  );
+  const requestSequence = useRef(0);
+  const queryKey = JSON.stringify(query);
+
+  useEffect(() => {
+    if (!active) return undefined;
+    let cancelled = false;
+    const load = () => {
+      const requestId = requestSequence.current + 1;
+      requestSequence.current = requestId;
+      ordersApi.listResourceDemandFilterOptions(query)
+        .then((response) => {
+          // Варианты помнят, для каких фильтров панели они загружены.
+          if (!cancelled && requestSequence.current === requestId) setState({ options: response, queryKey });
+        })
+        .catch(() => undefined);
+    };
+    const timer = window.setTimeout(load, HEADER_FILTER_OPTIONS_DEBOUNCE_MS);
+    const interval = window.setInterval(load, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, queryKey]);
 
   return state;
 }

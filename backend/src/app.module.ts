@@ -14,6 +14,7 @@ import { ClientPhonesModule } from './modules/client-phones/client-phones.module
 import { ClientScreenModule } from './modules/client-screen/client-screen.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { PartyContactsModule } from './modules/party-contacts/party-contacts.module';
+import { MaterialSuppliersModule } from './modules/material-suppliers/material-suppliers.module';
 import { IntegrationDuplicatesModule } from './modules/integration-duplicates/integration-duplicates.module';
 import { ClientMergeModule } from './modules/client-merge/client-merge.module';
 import { ClientContactsModule } from './modules/client-contacts/client-contacts.module';
@@ -66,6 +67,7 @@ import { MdfBoardModule } from './modules/mdf-board/mdf-board.module';
     ClientScreenModule,
     EmployeesModule,
     PartyContactsModule,
+    MaterialSuppliersModule,
     IntegrationDuplicatesModule,
     ClientMergeModule,
     ClientContactsModule,

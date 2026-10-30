@@ -1,6 +1,7 @@
 import type { AuditEvent, DeniedAuditEvent } from '../../../common/audit/audit-event.types';
 import { computeDiff } from '../../../common/audit/audit-diff';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { supplierRelatedEntities } from '../../material-suppliers/application/material-suppliers';
 
 export const SHEET_MATERIALS_AUDIT_EVENTS = {
   created: 'sheet_material.created',
@@ -18,6 +19,8 @@ export interface BuildSheetMaterialAuditInput {
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   requestId: string;
+  /** Все поставщики позиции до и после (основной + дополнительные) — связанные сущности `supplier`. */
+  supplierIds?: { before: readonly number[]; after: readonly number[] };
 }
 
 export function buildSheetMaterialAuditEvent(input: BuildSheetMaterialAuditInput): AuditEvent {
@@ -34,7 +37,10 @@ export function buildSheetMaterialAuditEvent(input: BuildSheetMaterialAuditInput
     before: input.before,
     after: input.after,
     diff,
-    relatedEntities: [{ entityType: 'sheet_material_type', entityId: input.sheetMaterialTypeId }],
+    relatedEntities: [
+      { entityType: 'sheet_material_type', entityId: input.sheetMaterialTypeId },
+      ...(input.supplierIds ? supplierRelatedEntities(input.supplierIds.before, input.supplierIds.after) : []),
+    ],
   };
 }
 

@@ -18,6 +18,40 @@ describe('order resource requirements list guards', () => {
     expect(source).not.toContain('filterOptions.dates');
   });
 
+  it('все фильтры считает сервер по всем страницам, а не по загруженной странице', () => {
+    expect(source).not.toContain('filterResourceDemandRows');
+    expect(source).toContain('...headerQuery.filters');
+    expect(source).toContain('ordersApi.listResourceDemandFilterOptions(query)');
+    expect(source).toContain('!active || listSuppressed');
+    expect(source).toContain("const optionsCurrent = filterOptionsState.queryKey === JSON.stringify(filterOptionsQuery);");
+    expect(source).toContain('optionsCurrent ? knownHeaderFilterValues(filterOptions, filterOptionsResponse) : undefined');
+  });
+
+  it('без capabilities.serverFilters (прежний backend) серверные фильтры не показываются и не передаются', () => {
+    expect(source).toContain('setServerFilters(response.capabilities?.serverFilters === true);');
+    expect(source).toContain("...(serverFilters && readyCutsOnly ? { readyCutsOnly: true } : {})");
+    expect(source).toContain("...(serverFilters && paymentFilter !== 'all' ? { payment: paymentFilter } : {})");
+    expect(source).toContain('const filterProps = (field: HeaderFilterField, options: HeaderFilterOption[]) => (!serverFilters ? {} : {');
+    expect(source).toContain(': { filters: {}, nothingSelected: false, usesExclusion: false, tooMany: null }');
+  });
+
+  it('сортировку считает сервер по всем страницам (capabilities.serverSort), прежний backend — сортировка страницы', () => {
+    expect(source).toContain('setServerSort(response.capabilities?.serverSort === true);');
+    expect(source).toContain("? { sort: sortState.columnKey, sortOrder: sortState.order === 'descend' ? 'desc' as const : 'asc' as const }");
+    expect(source).toContain('() => (serverSort ? rows : sortResourceDemandRows(rows, sortState)),');
+    expect(source).not.toContain('Сортировка колонок — по текущей странице');
+  });
+
+  it('фильтр «Оплата» (все / есть оплата / оплачено полностью) и колонка «Поставщик» с мультиселектом', () => {
+    expect(source).toContain('aria-label="Оплата"');
+    expect(source).toContain("{ value: 'any_paid', label: 'Есть оплата' }");
+    expect(source).toContain("{ value: 'fully_paid', label: 'Оплачено полностью' }");
+    expect(source).toContain("paymentFilter !== 'all' ? { payment: paymentFilter } : {}");
+    expect(source).toContain("setPaymentFilter('all')");
+    expect(source).toContain('title="Поставщик"');
+    expect(source).toContain("filterProps('suppliers', filterOptions.suppliers)");
+  });
+
   it('позволяет независимо выбирать произвольные строки чекбоксами', () => {
     expect(source).toContain('selectedRowKeys');
     expect(source).toContain('setSelectedRowKeys');
@@ -54,11 +88,10 @@ describe('order resource requirements list guards', () => {
     expect(source).toContain('setDateRange([today, today])');
   });
 
-  it('имеет верхний чекбокс фильтра готовых раскроев', () => {
+  it('имеет верхний чекбокс фильтра готовых раскроев, который считает сервер', () => {
     expect(source).toContain('Готовые раскрои');
-    expect(source).toContain('readyCutsOnly');
-    expect(source).toContain('rowHasReadyCut');
-    expect(source).toContain('film.hasCutData');
+    expect(source).toContain("readyCutsOnly ? { readyCutsOnly: true } : {}");
+    expect(source).not.toContain('rowHasReadyCut');
     expect(source).toContain('handleReadyCutsOnlyChange');
     expect(source).toContain('if (checked)');
     expect(source).toContain('setSelectedRowKeys([])');

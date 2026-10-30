@@ -1,4 +1,5 @@
 import type { QueryResultRow } from 'pg';
+import { loadMaterialSuppliers } from '../../material-suppliers/adapters/pg-material-suppliers';
 import { auditService } from '../../../common/audit/audit.service';
 import { computeDiff } from '../../../common/audit/audit-diff';
 import { ApiError } from '../../../common/errors/api-error';
@@ -521,6 +522,7 @@ export async function buildWorklistLines(
     .filter((line) => line.kind === 'film').map((line) => line.refId))];
   const geometry = await loadGeometry(client, sheetIds);
   const recorded = await loadRecordedSuppliers(client, sheetIds, filmIds);
+  const chosen = await loadChosenSuppliers(client, sheetIds, filmIds);
 
   const orderById = new Map(orders.map((row) => [Number(row.order_id), row]));
   const procurementByKey = new Map(procurement.map((row) => [`${Number(row.order_id)}|${procurementRowKey(row)}`, row]));
@@ -615,6 +617,7 @@ export async function buildWorklistLines(
         supplier: resolveSupplier(
           geo?.supplier ?? null,
           recorded.get(resourceKey(projectedLine.kind, projectedLine.refId)) ?? [],
+          chosen.get(resourceKey(projectedLine.kind, projectedLine.refId)) ?? [],
         ),
         procurementVersion: row ? Number(row.version) : 0,
         demandFingerprint: projectedLine.demandFingerprint,
@@ -665,7 +668,12 @@ export function buildNarrowingPredicates(query: ProcurementWorklistQuery, leadDa
                    SELECT 1 FROM resource_suppliers srs LEFT JOIN suppliers srsup ON srsup.supplier_id = srs.supplier_id
                     WHERE ((srs.resource_kind = 'sheet_material' AND srs.sheet_material_type_id = sd.sheet_material_type_id)
                         OR (srs.resource_kind = 'film' AND srs.film_id = sd.film_id))
-                      AND (srs.counterparty_name ILIKE $${s} OR srsup.supplier_name ILIKE $${s}))))
+                      AND (srs.counterparty_name ILIKE $${s} OR srsup.supplier_name ILIKE $${s}))
+                 OR EXISTS (
+                   SELECT 1 FROM material_suppliers sms JOIN suppliers smsup ON smsup.supplier_id = sms.supplier_id
+                    WHERE ((sms.resource_kind = 'sheet_material' AND sms.sheet_material_type_id = sd.sheet_material_type_id)
+                        OR (sms.resource_kind = 'film' AND sms.film_id = sd.film_id))
+                      AND smsup.supplier_name ILIKE $${s})))
           OR EXISTS (
             SELECT 1 FROM order_hdf_details shdf
               LEFT JOIN sheet_material_types shsmt ON shsmt.sheet_material_type_id = shdf.hdf_sheet_material_type_id
@@ -675,7 +683,11 @@ export function buildNarrowingPredicates(query: ProcurementWorklistQuery, leadDa
                  OR EXISTS (
                    SELECT 1 FROM resource_suppliers shrs LEFT JOIN suppliers shrsup ON shrsup.supplier_id = shrs.supplier_id
                     WHERE shrs.resource_kind = 'sheet_material' AND shrs.sheet_material_type_id = shdf.hdf_sheet_material_type_id
-                      AND (shrs.counterparty_name ILIKE $${s} OR shrsup.supplier_name ILIKE $${s}))))
+                      AND (shrs.counterparty_name ILIKE $${s} OR shrsup.supplier_name ILIKE $${s}))
+                 OR EXISTS (
+                   SELECT 1 FROM material_suppliers shms JOIN suppliers shmsup ON shmsup.supplier_id = shms.supplier_id
+                    WHERE shms.resource_kind = 'sheet_material' AND shms.sheet_material_type_id = shdf.hdf_sheet_material_type_id
+                      AND shmsup.supplier_name ILIKE $${s})))
         )`);
   }
   // «Нужно к» = плановая − leadDays рабочих дней ≤ плановой; сверху — с запасом на выходные.
@@ -690,26 +702,33 @@ export function buildNarrowingPredicates(query: ProcurementWorklistQuery, leadDa
           OR EXISTS (SELECT 1 FROM order_hdf_details khdf WHERE khdf.order_id = o.order_id AND khdf.delete_flag = false AND khdf.hdf_sheet_material_type_id IS NOT NULL))`);
   }
   if (query.supplierKey) {
-    // Основной поставщик позиции (§4.3): ручной из справочника, иначе самый ранний записанный.
+    // Основной поставщик позиции (§4.3, как resolveSupplier): ручной из справочника (у листового — основной, иначе
+    // первый выбранный; у плёнки — первый выбранный), иначе самый ранний записанный.
     const k = params.push(query.supplierKey);
     const firstRecorded = (kind: 'sheet_material' | 'film', column: string, ref: string) => `(
           SELECT rs.supplier_key FROM resource_suppliers rs
            WHERE rs.resource_kind = '${kind}' AND rs.${column} = ${ref}
            ORDER BY rs.first_seen_at, rs.resource_supplier_id LIMIT 1)`;
+    const firstChosen = (kind: 'sheet_material' | 'film', column: string, ref: string) => `(
+          SELECT 's:' || ms.supplier_id FROM material_suppliers ms
+           WHERE ms.resource_kind = '${kind}' AND ms.${column} = ${ref}
+           ORDER BY ms.position LIMIT 1)`;
     clauses.push(`(
           EXISTS (
             SELECT 1 FROM order_details pd
               LEFT JOIN sheet_material_types psmt ON psmt.sheet_material_type_id = pd.sheet_material_type_id
              WHERE pd.order_id = o.order_id AND pd.delete_flag = false
                AND ((pd.sheet_material_type_id IS NOT NULL
-                     AND COALESCE('s:' || psmt.supplier_id, ${firstRecorded('sheet_material', 'sheet_material_type_id', 'pd.sheet_material_type_id')}, 'none') = $${k})
+                     AND COALESCE('s:' || psmt.supplier_id, ${firstChosen('sheet_material', 'sheet_material_type_id', 'pd.sheet_material_type_id')},
+                       ${firstRecorded('sheet_material', 'sheet_material_type_id', 'pd.sheet_material_type_id')}, 'none') = $${k})
                  OR (pd.film_id IS NOT NULL
-                     AND COALESCE(${firstRecorded('film', 'film_id', 'pd.film_id')}, 'none') = $${k})))
+                     AND COALESCE(${firstChosen('film', 'film_id', 'pd.film_id')}, ${firstRecorded('film', 'film_id', 'pd.film_id')}, 'none') = $${k})))
           OR EXISTS (
             SELECT 1 FROM order_hdf_details phdf
               LEFT JOIN sheet_material_types phsmt ON phsmt.sheet_material_type_id = phdf.hdf_sheet_material_type_id
              WHERE phdf.order_id = o.order_id AND phdf.delete_flag = false AND phdf.hdf_sheet_material_type_id IS NOT NULL
-               AND COALESCE('s:' || phsmt.supplier_id, ${firstRecorded('sheet_material', 'sheet_material_type_id', 'phdf.hdf_sheet_material_type_id')}, 'none') = $${k})
+               AND COALESCE('s:' || phsmt.supplier_id, ${firstChosen('sheet_material', 'sheet_material_type_id', 'phdf.hdf_sheet_material_type_id')},
+                 ${firstRecorded('sheet_material', 'sheet_material_type_id', 'phdf.hdf_sheet_material_type_id')}, 'none') = $${k})
         )`);
   }
   if (query.onecDocumentId !== undefined) {
@@ -932,6 +951,21 @@ async function loadGeometry(
       ? null
       : { id: Number(row.supplier_id), name: row.supplier_name?.trim() || `Поставщик #${Number(row.supplier_id)}` },
   }]));
+}
+
+/** Выбранные человеком поставщики (migr 280): листовые — дополнительные к основному, плёнки — весь список. */
+async function loadChosenSuppliers(
+  client: DatabaseClient,
+  sheetIds: number[],
+  filmIds: number[],
+): Promise<Map<string, Array<{ id: number; name: string }>>> {
+  const result = new Map<string, Array<{ id: number; name: string }>>();
+  for (const [kind, ids] of [['sheet_material', sheetIds], ['film', filmIds]] as const) {
+    for (const [refId, list] of await loadMaterialSuppliers(client, kind, ids)) {
+      if (list.length > 0) result.set(resourceKey(kind, refId), list.map(({ id, name }) => ({ id, name })));
+    }
+  }
+  return result;
 }
 
 async function loadRecordedSuppliers(

@@ -7,6 +7,7 @@ import {
   buildScopedOrderWhere,
   demandFingerprint,
   emptyDemandFingerprint,
+  keepSupplierLines,
   parseResourceKey,
   projectOrders,
   summarizeProcurement,
@@ -95,6 +96,7 @@ function demandLine(overrides: Partial<ProjectedResourceLine> = {}): ProjectedRe
     refId: 11,
     name: 'E2E-Тест ЛДСП Белый',
     supplierName: 'E2E-Тест Поставщик Листов',
+    supplierRole: 'supplier',
     quantity: 2.5,
     unit: 'm2',
     areaM2: 2.5,
@@ -204,6 +206,77 @@ describe('demandFingerprint', () => {
 // --- projectOrders -----------------------------------------------------------
 
 describe('projectOrders', () => {
+  it('the supplier of a line is the main supplier, not the film manufacturer (migr 280)', () => {
+    const input = {
+      orders: [order()],
+      details: [
+        detail({ detail_id: 1, height: 500, width: 500, quantity: 1, film_id: 7, film_name: 'E2E-Тест Плёнка', vendor_id: 4, vendor_name: 'E2E-Тест Производитель' }),
+        detail({ detail_id: 2, height: 500, width: 500, quantity: 1, sheet_material_type_id: 11, sheet_material_name: 'E2E-Тест ЛДСП', supplier_id: 31, supplier_name: 'E2E-Тест Основной' }),
+      ],
+      detailCutJobs: [],
+      cutGroups: [],
+      cutSheets: [],
+    };
+    const chosen = projectOrders({ ...input, mainSuppliers: new Map([['film:7', { key: 'c:abc-1', name: 'E2E-Тест Поставщик Плёнки' }]]) });
+    expect(chosen.lines.get(101)!.find((line) => line.kind === 'film')).toMatchObject({
+      // прежний интерфейс читает supplierName плёнки как производителя — там он и остаётся
+      supplierName: 'E2E-Тест Производитель', mainSupplierName: 'E2E-Тест Поставщик Плёнки', supplierKey: 'c:abc-1',
+    });
+    expect(chosen.lines.get(101)!.find((line) => line.kind === 'sheet_material')).toMatchObject({ supplierName: 'E2E-Тест Основной', mainSupplierName: 'E2E-Тест Основной', supplierKey: 's:31' });
+    expect(chosen.base[0].films[0]).toMatchObject({ vendorName: 'E2E-Тест Производитель', supplierName: 'E2E-Тест Поставщик Плёнки' });
+    const none = projectOrders({ ...input, mainSuppliers: new Map() });
+    expect(none.lines.get(101)!.find((line) => line.kind === 'film')).toMatchObject({ supplierName: 'E2E-Тест Производитель', mainSupplierName: null, supplierKey: 'none' });
+  });
+
+  it('the supplier filter narrows only sheetMaterials/films; lines stay complete for the procurement overlay', () => {
+    const input = {
+      orders: [order()],
+      details: [
+        detail({ detail_id: 1, height: 500, width: 500, quantity: 1, film_id: 7, film_name: 'E2E-Тест Плёнка' }),
+        detail({ detail_id: 2, height: 500, width: 500, quantity: 1, sheet_material_type_id: 11, sheet_material_name: 'E2E-Тест ЛДСП', supplier_id: 31, supplier_name: 'E2E-Тест Основной' }),
+      ],
+      detailCutJobs: [],
+      cutGroups: [],
+      cutSheets: [],
+      mainSuppliers: new Map([['sheet_material:11', { key: 's:31', name: 'E2E-Тест Основной' }]]),
+    };
+    const onlySheet = projectOrders({ ...input, supplierKeys: new Set(['s:31']) });
+    expect(onlySheet.base[0].sheetMaterials.map((row) => row.sheetMaterialTypeId)).toEqual([11]);
+    expect(onlySheet.base[0].films).toEqual([]);
+    expect(onlySheet.lines.get(101)!.map((line) => line.resourceKey).sort()).toEqual(['film:7', 'sheet_material:11']);
+    const full = projectOrders(input);
+    // Same fingerprints with and without the filter: the filter never changes a line.
+    expect(onlySheet.lines.get(101)!.map((line) => line.demandFingerprint)).toEqual(full.lines.get(101)!.map((line) => line.demandFingerprint));
+    const onlyNone = projectOrders({ ...input, supplierKeys: new Set(['none']) });
+    expect(onlyNone.base[0].films.map((row) => row.filmId)).toEqual([7]);
+    expect(onlyNone.base[0].sheetMaterials).toEqual([]);
+  });
+});
+
+describe('keepSupplierLines', () => {
+  it('keeps lines and purchased orphans of the selected suppliers only, after the procurement overlay', () => {
+    const lines = projectOrders({
+      orders: [order()],
+      details: [
+        detail({ detail_id: 1, height: 500, width: 500, quantity: 1, film_id: 7, film_name: 'E2E-Тест Плёнка' }),
+        detail({ detail_id: 2, height: 500, width: 500, quantity: 1, sheet_material_type_id: 11, sheet_material_name: 'E2E-Тест ЛДСП', supplier_id: 31 }),
+      ],
+      detailCutJobs: [],
+      cutGroups: [],
+      cutSheets: [],
+    }).lines.get(101)!;
+    const purchasedFilm = procurementRow({ resource_kind: 'film', film_id: 7, sheet_material_type_id: null, purchased: true });
+    const orphanSheet = procurementRow({ order_resource_procurement_id: 2, resource_kind: 'sheet_material', sheet_material_type_id: 99, film_id: null, purchased: true });
+    const applied = applyProcurement(lines, [purchasedFilm, orphanSheet], {
+      orphanSuppliers: new Map([['sheet_material:99', { key: 's:31', name: 'E2E-Тест Основной' }]]),
+    });
+    // The other supplier's purchased film is not turned into an orphan by the filter.
+    expect(applied.filter(({ line }) => line.orphan).map(({ line }) => line.resourceKey)).toEqual(['sheet_material:99']);
+    expect(keepSupplierLines(applied, new Set(['s:31'])).map(({ line }) => line.resourceKey)).toEqual(['sheet_material:11', 'sheet_material:99']);
+    expect(keepSupplierLines(applied, new Set(['none'])).map(({ line }) => line.resourceKey)).toEqual(['film:7']);
+    expect(keepSupplierLines(applied, undefined)).toHaveLength(3);
+  });
+
   it('produces a sheet line in m2 with quantity equal to the rounded detail area', () => {
     const result = projectOrders({
       orders: [order()],
@@ -550,11 +623,11 @@ describe('decide', () => {
 describe('capabilities follow the procurement flag (rollback returns phase 1 UI)', () => {
   it('turns every phase-2 capability off with the flag and on with it', async () => {
     const { capabilities } = await import('./pg-order-resource-demand-repository');
-    expect(capabilities({ procurementEnabled: false })).toEqual({ procurement: false, byMaterial: false, cardDetails: false, onecDocuments: false, supplyWorkspace: false });
-    expect(capabilities({ procurementEnabled: true })).toEqual({ procurement: true, byMaterial: true, cardDetails: true, onecDocuments: true, supplyWorkspace: false });
+    expect(capabilities({ procurementEnabled: false })).toEqual({ procurement: false, byMaterial: false, cardDetails: false, onecDocuments: false, supplyWorkspace: false, serverFilters: true, serverSort: true });
+    expect(capabilities({ procurementEnabled: true })).toEqual({ procurement: true, byMaterial: true, cardDetails: true, onecDocuments: true, supplyWorkspace: false, serverFilters: true, serverSort: true });
     // Экран снабжения — только при обоих флагах: откат флагом закупа прячет и его.
     expect(capabilities({ procurementEnabled: true, supplyWorkspaceEnabled: true })).toMatchObject({ supplyWorkspace: true });
-    expect(capabilities({ procurementEnabled: false, supplyWorkspaceEnabled: true })).toMatchObject({ supplyWorkspace: false });
+    expect(capabilities({ procurementEnabled: false, supplyWorkspaceEnabled: true })).toMatchObject({ supplyWorkspace: false, serverFilters: true, serverSort: true });
   });
 
   it('uses the runtime-configured scope of the user, not only the static role policy', async () => {

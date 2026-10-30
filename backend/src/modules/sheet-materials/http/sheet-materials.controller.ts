@@ -16,6 +16,8 @@ const inputSchema = z.object({
   widthMm: z.number().positive(),
   heightMm: z.number().positive(),
   supplierId: z.number().int().positive().nullable().optional(),
+  // Дополнительные поставщики (кроме основного supplierId), по порядку. Не передано — не менять (старые клиенты).
+  additionalSupplierIds: z.array(z.number().int().positive()).max(20).nullable().optional(),
   vendorId: z.number().int().positive().nullable().optional(),
   supplierArticle: z.string().trim().max(200).nullable().optional(),
   texture: z.boolean().nullable().optional(),
@@ -63,7 +65,7 @@ export class SheetMaterialsController {
   // До ':id': иначе «capabilities» разбирался бы как идентификатор (так отвечает прежний backend — FE считает поля неподдержанными).
   @ApiOperation({ operationId: 'getSheetMaterialCapabilities', summary: 'Fields this backend supports for sheet material types' })
   @Get('capabilities')
-  async capabilities(@Req() request: RequestWithCurrentUser): Promise<{ nomenclatureFields: true; onecItemPicker: true }> {
+  async capabilities(@Req() request: RequestWithCurrentUser): Promise<{ nomenclatureFields: true; onecItemPicker: true; supplierList: true }> {
     this.assertEnabled();
     return this.service.capabilities(this.context(request));
   }

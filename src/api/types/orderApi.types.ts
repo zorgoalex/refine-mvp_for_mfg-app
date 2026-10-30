@@ -49,6 +49,8 @@ export interface OrderListResponse {
   pagination: Pagination;
 }
 
+export type OrderResourceDemandSortKey = 'order' | 'date' | 'sheetMaterials' | 'films';
+
 export interface OrderResourceDemandQuery {
   page?: number;
   pageSize?: number;
@@ -63,7 +65,30 @@ export interface OrderResourceDemandQuery {
   unpurchasedOnly?: boolean;
   /** Только заказы с активным распределением этого документа 1С (капабилити onecDocuments). */
   onecDocumentId?: number;
+  /** Фильтр «Заказ» (до 500 id). */
+  orderIds?: number[];
+  /**
+   * Фильтры «Дата заказа», «Листовые материалы», «Плёнка», «Поставщик» — значения через запятую (`none` — без
+   * значения / без поставщика); ведущий `!` — «все, кроме» (длинный выбор передаётся дополнением).
+   * У «Поставщика» в ответе остаются только материалы выбранных поставщиков.
+   */
+  orderDates?: string;
+  sheetMaterialTypeIds?: string;
+  filmIds?: string;
+  supplierKeys?: string;
+  /** Только заказы с готовым раскроем плёнки на ванне. */
+  readyCutsOnly?: boolean;
+  /** Оплата: частично или полностью / только полностью. */
+  payment?: OrderResourcePaymentFilter;
+  /** Сортировка по всем страницам (сервер с `capabilities.serverSort`); без неё — дата заказа, новые сверху. */
+  sort?: OrderResourceDemandSortKey;
+  sortOrder?: 'asc' | 'desc';
 }
+
+export type OrderResourcePaymentFilter = 'any_paid' | 'fully_paid';
+
+/** Фильтры, которые одинаково понимают список, «по материалам», документы 1С и варианты фильтров. */
+export type OrderResourceDemandFilters = Omit<OrderResourceDemandQuery, 'page' | 'pageSize'>;
 
 export type OrderResourceKind = 'sheet_material' | 'film';
 export type OrderResourceUnit = 'm2' | 'lm';
@@ -105,7 +130,14 @@ export interface OrderResourceDemandLineDto {
   kind: OrderResourceKind;
   refId: number;
   name: string;
+  /** Прежний смысл: листовой — поставщик, плёнка — производитель (у backend между migr 280 и mainSupplierName — поставщик). */
   supplierName: string | null;
+  /** Основной поставщик позиции; нет у прежних backend. Читать через `lineMainSupplier`. */
+  mainSupplierName?: string | null;
+  /** Есть у backend с миграции 280. */
+  supplierRole?: 'supplier';
+  /** Ключ основного поставщика (как в фильтре «Поставщик»), `none` — не указан. Нет у прежнего backend. */
+  supplierKey?: string;
   /** null — количество не посчитано (нет готового раскроя у плёнки). */
   quantity: number | null;
   unit: OrderResourceUnit;
@@ -138,6 +170,10 @@ export interface OrderResourceCapabilitiesDto {
   onecDocuments: boolean;
   /** Вкладка «Экран снабжения»; нет в ответе старого backend → false. */
   supplyWorkspace?: boolean;
+  /** Backend сам применяет фильтры заголовков, «Готовые раскрои», «Оплату», «Поставщика»; нет у старого → false. */
+  serverFilters?: boolean;
+  /** Сервер сортирует список по `sort`/`sortOrder` (по всем страницам). */
+  serverSort?: boolean;
 }
 
 export interface OrderSheetMaterialDemandDto {
@@ -159,6 +195,8 @@ export interface OrderFilmDemandDto {
   hasCutData: boolean;
   vendorId: number | null;
   vendorName: string | null;
+  /** Основной поставщик плёнки (backend с миграции 280); производитель — vendorName, справочно. */
+  supplierName?: string | null;
 }
 
 export interface OrderResourceDemandDto {
@@ -222,6 +260,8 @@ export interface OrderResourceMaterialAggregateDto {
   refId: number;
   name: string;
   supplierName: string | null;
+  mainSupplierName?: string | null;
+  supplierRole?: 'supplier';
   unit: OrderResourceUnit;
   totalQuantity: number;
   ordersCount: number;
@@ -231,14 +271,7 @@ export interface OrderResourceMaterialAggregateDto {
   participants: OrderResourceMaterialParticipantDto[];
 }
 
-export interface OrderResourceByMaterialQuery {
-  search?: string;
-  dateFrom?: DateOnlyString;
-  dateTo?: DateOnlyString;
-  unpurchasedOnly?: boolean;
-  /** Только заказы с активным распределением этого документа 1С (капабилити onecDocuments). */
-  onecDocumentId?: number;
-}
+export type OrderResourceByMaterialQuery = OrderResourceDemandFilters;
 
 export interface OrderResourceByMaterialResponse {
   data: OrderResourceMaterialAggregateDto[];
@@ -252,15 +285,25 @@ export interface OrderResourceByMaterialResponse {
  * `GET orders/resource-demands` (без paging и без onecDocumentId) — backend
  * возвращает документы, привязанные к заказам ЭТОЙ выборки.
  */
-export interface OrderResourceDemandOnecDocumentsQuery {
-  search?: string;
-  dateFrom?: DateOnlyString;
-  dateTo?: DateOnlyString;
-  sheetMaterialTypeId?: number;
-  filmId?: number;
-  supplierId?: number;
-  vendorId?: number;
-  unpurchasedOnly?: boolean;
+export type OrderResourceDemandOnecDocumentsQuery = Omit<OrderResourceDemandFilters, 'onecDocumentId'>;
+
+/** Запрос вариантов фильтров заголовков: фильтры панели, без самих фильтров заголовков. */
+export type OrderResourceDemandFilterOptionsQuery = Omit<
+  OrderResourceDemandFilters,
+  'orderIds' | 'orderDates' | 'sheetMaterialTypeIds' | 'filmIds' | 'supplierKeys'
+>;
+
+/** Варианты фильтров заголовков по всей выборке (`GET orders/resource-demands/filter-options`). */
+export interface OrderResourceDemandFilterOptionsResponse {
+  orders: Array<{ orderId: number; orderName: string; projectCode: string; clientName: string | null }>;
+  ordersTruncated: boolean;
+  dates: DateOnlyString[];
+  hasEmptyDate: boolean;
+  sheetMaterials: Array<{ id: number; name: string }>;
+  hasNoSheetMaterials: boolean;
+  films: Array<{ id: number; name: string }>;
+  hasNoFilms: boolean;
+  suppliers: Array<{ key: string; name: string }>;
 }
 
 /** Документ 1С, встречающийся среди заказов текущей выборки списка потребностей. */

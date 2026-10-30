@@ -7,7 +7,9 @@ import { useNavigate } from 'react-router-dom';
 import { can } from '../../utils/permissions';
 import { sheetMaterialsApi, type SheetMaterialTypeInput } from '../../api/sheetMaterialsApi';
 import { NomenclatureFormItems, nomenclaturePayload } from '../../components/NomenclatureFields';
-import { useSheetMaterialNomenclature } from './useSheetMaterialNomenclature';
+import { useSheetMaterialCapabilities, useSheetMaterialNomenclature } from './useSheetMaterialNomenclature';
+import { sheetSupplierPayload } from './editSource';
+import { SuppliersSelect } from '../../components/materialSuppliers/SuppliersSelect';
 import { OnecItemField } from './OnecItemField';
 import { fillNomenclatureFromOnec } from './onecItemFill';
 import { useQueryClient } from '@tanstack/react-query';
@@ -15,10 +17,12 @@ import { useQueryClient } from '@tanstack/react-query';
 export const SheetMaterialCreate: React.FC<IResourceComponentsProps> = () => {
   const canManage = can('sheet_materials.manage');
   const navigate = useNavigate();
-  const [form] = Form.useForm<SheetMaterialTypeInput>();
+  const [form] = Form.useForm<SheetMaterialTypeInput & { supplierIds?: number[] }>();
   const [saving, setSaving] = useState(false);
   const queryClient = useQueryClient();
   const nomenclature = useSheetMaterialNomenclature(canManage);
+  // Список поставщиков — только если backend его умеет (migr 280); иначе прежнее поле одного поставщика.
+  const supplierList = useSheetMaterialCapabilities(canManage).supplierList;
 
   const { selectProps: typeSelectProps } = useSelect({
     resource: 'material_types',
@@ -48,8 +52,12 @@ export const SheetMaterialCreate: React.FC<IResourceComponentsProps> = () => {
   const submit = async () => {
     setSaving(true);
     try {
-      const { nomenclatureType, nomenclatureCategory, note, ...values } = await form.validateFields();
-      await sheetMaterialsApi.create({ ...values, ...nomenclaturePayload({ nomenclatureType, nomenclatureCategory, note }, nomenclature.supported) });
+      const { nomenclatureType, nomenclatureCategory, note, supplierIds, supplierId, ...values } = await form.validateFields();
+      await sheetMaterialsApi.create({
+        ...values,
+        ...sheetSupplierPayload({ supplierId, supplierIds }, supplierList),
+        ...nomenclaturePayload({ nomenclatureType, nomenclatureCategory, note }, nomenclature.supported),
+      });
       await queryClient.invalidateQueries({ queryKey: ['sheet-materials'] });
       message.success('Листовой материал создан');
       navigate('/sheet-material-types');
@@ -97,9 +105,15 @@ export const SheetMaterialCreate: React.FC<IResourceComponentsProps> = () => {
             </Form.Item>
           </Col>
           <Col xs={24} sm={12} md={8}>
-            <Form.Item name="supplierId" label="Поставщик">
-              <Select {...supplierSelectProps} allowClear />
-            </Form.Item>
+            {supplierList ? (
+              <Form.Item name="supplierIds" label="Поставщики" extra="Первый — основной">
+                <SuppliersSelect />
+              </Form.Item>
+            ) : (
+              <Form.Item name="supplierId" label="Поставщик">
+                <Select {...supplierSelectProps} allowClear />
+              </Form.Item>
+            )}
           </Col>
           <Col xs={24} sm={12} md={8}>
             <Form.Item name="vendorId" label="Производитель">

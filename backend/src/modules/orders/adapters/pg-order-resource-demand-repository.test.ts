@@ -68,6 +68,7 @@ describe('buildOrderResourceDemandProjection', () => {
         hasCutData: true,
         vendorId: 41,
         vendorName: 'Плёнка ООО',
+        supplierName: null,
       }],
     }]);
   });

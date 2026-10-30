@@ -1166,6 +1166,40 @@ paths:
         '404': {description: 'Owner not found'}
         '409': {description: 'PARTY_CONTACTS_VERSION_CONFLICT'}
         '422': {description: 'PARTY_CONTACT_INVALID, PARTY_CONTACT_DUPLICATE or VALIDATION_ERROR'}
+  /api/v1/films/suppliers:
+    get:
+      tags: [Material suppliers]
+      operationId: listFilmSuppliers
+      summary: 'Suppliers of films: the chosen list and the suppliers seen in 1C receipts'
+      security: [{bearerAuth: []}]
+      x-permissions: [references.view]
+      parameters:
+        - {name: ids, in: query, required: false, schema: {type: string, description: 'Comma-separated film ids, at most 500'}}
+      responses:
+        '200': {description: Suppliers per film, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/FilmSuppliers'}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {description: 'VALIDATION_ERROR'}
+  /api/v1/films/{id}/suppliers:
+    put:
+      tags: [Material suppliers]
+      operationId: replaceFilmSuppliers
+      summary: 'Replace the chosen suppliers of a film'
+      description: 'Ordered list (the first is the main supplier), at most 20, no repeats. Compare-and-swap on expectedSupplierIds (the list the user saw). New suppliers must be active. Audited as film.suppliers_changed with every touched supplier as a related entity; the same list is a no-op.'
+      security: [{bearerAuth: []}]
+      x-permissions: [references.manage]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, additionalProperties: false, required: [supplierIds, expectedSupplierIds], properties: {supplierIds: {type: array, maxItems: 20, items: {type: integer, minimum: 1}}, expectedSupplierIds: {type: array, maxItems: 20, items: {type: integer, minimum: 1}}}}}}
+      responses:
+        '200': {description: Suppliers of the film, content: {application/json: {schema: {$ref: '#/components/schemas/FilmSuppliers'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: 'FILM_NOT_FOUND'}
+        '409': {description: 'FILM_SUPPLIERS_STALE'}
+        '422': {description: 'MATERIAL_SUPPLIER_INVALID or VALIDATION_ERROR'}
   /api/v1/supplier-contacts:
     get:
       tags: [Party contacts]
@@ -4797,6 +4831,15 @@ paths:
           schema:
             type: integer
             minimum: 1
+        - { name: orderIds, in: query, required: false, description: 'Фильтр «Заказ»: id через запятую (до 500).', schema: { type: string } }
+        - { name: orderDates, in: query, required: false, description: 'Фильтр «Дата заказа»: YYYY-MM-DD через запятую; none — заказы без даты; ведущий ! — «все, кроме».', schema: { type: string } }
+        - { name: sheetMaterialTypeIds, in: query, required: false, description: 'Фильтр «Листовые материалы»: id через запятую; none — заказы без листовых; ведущий ! — «все, кроме».', schema: { type: string } }
+        - { name: filmIds, in: query, required: false, description: 'Фильтр «Плёнка»: id через запятую; none — заказы без плёнки; ведущий ! — «все, кроме».', schema: { type: string } }
+        - { name: supplierKeys, in: query, required: false, description: 'Фильтр «Поставщик»: ключи основного поставщика (s:<id>, c:<ключ 1С>, n:<хэш>, none) через запятую; в ответе остаются только материалы этих поставщиков; ведущий ! — «все, кроме».', schema: { type: string } }
+        - { name: readyCutsOnly, in: query, required: false, description: 'Только заказы с готовым раскроем плёнки на ванне.', schema: { type: boolean } }
+        - { name: payment, in: query, required: false, description: 'any_paid — частично или полностью оплачен; fully_paid — только оплачен.', schema: { type: string, enum: [any_paid, fully_paid] } }
+        - { name: sort, in: query, required: false, description: 'Сортировка по всем страницам: order — номер заказа, date — дата, sheetMaterials / films — имена материалов; пустые — в конце. Без sort — дата заказа, новые сверху.', schema: { type: string, enum: [order, date, sheetMaterials, films] } }
+        - { name: sortOrder, in: query, required: false, description: 'Направление сортировки (по умолчанию asc); только вместе с sort.', schema: { type: string, enum: [asc, desc] } }
       responses:
         '200':
           description: Live order resource demand projection
@@ -15432,6 +15475,7 @@ paths:
       tags: [ProductionTechSettings]
       operationId: createExtraResource
       summary: Create independent extra resource directory item
+      description: 'Optional vendorId (manufacturer) and supplierIds (ordered, first = main, at most 20); absent = unchanged, null = clear (migr 280).'
       security: [{ bearerAuth: [] }]
       x-permission: settings.manage
       parameters:
@@ -15454,6 +15498,7 @@ paths:
       tags: [ProductionTechSettings]
       operationId: updateExtraResource
       summary: Update independent extra resource directory item
+      description: 'Optional vendorId (manufacturer) and supplierIds (ordered, first = main, at most 20); absent = unchanged, null = clear (migr 280).'
       security: [{ bearerAuth: [] }]
       x-permission: settings.manage
       parameters:
@@ -16711,6 +16756,7 @@ paths:
         - SheetMaterials
       operationId: createSheetMaterialType
       summary: Create a sheet material type
+      description: 'supplierId is the main supplier (legacy field: absent = none). Optional additionalSupplierIds (ordered, at most 20; the main one is dropped from them); absent = unchanged (migr 280). Responses carry suppliers (main first) and additionalSupplierIds.'
       security:
         - bearerAuth: []
       x-permission: sheet_materials.manage
@@ -16759,6 +16805,7 @@ paths:
         - SheetMaterials
       operationId: updateSheetMaterialType
       summary: Update a sheet material type
+      description: 'supplierId is the main supplier (legacy field: absent = none). Optional additionalSupplierIds (ordered, at most 20; the main one is dropped from them); absent = unchanged (migr 280). Responses carry suppliers (main first) and additionalSupplierIds.'
       security:
         - bearerAuth: []
       x-permission: sheet_materials.manage
@@ -18976,6 +19023,13 @@ paths:
           in: query
           required: false
           schema: { type: integer, minimum: 1 }
+        - { name: orderIds, in: query, required: false, description: 'Фильтр «Заказ»: id через запятую (до 500).', schema: { type: string } }
+        - { name: orderDates, in: query, required: false, description: 'Фильтр «Дата заказа»: YYYY-MM-DD через запятую; none — заказы без даты; ведущий ! — «все, кроме».', schema: { type: string } }
+        - { name: sheetMaterialTypeIds, in: query, required: false, description: 'Фильтр «Листовые материалы»: id через запятую; none — заказы без листовых; ведущий ! — «все, кроме».', schema: { type: string } }
+        - { name: filmIds, in: query, required: false, description: 'Фильтр «Плёнка»: id через запятую; none — заказы без плёнки; ведущий ! — «все, кроме».', schema: { type: string } }
+        - { name: supplierKeys, in: query, required: false, description: 'Фильтр «Поставщик»: ключи основного поставщика (s:<id>, c:<ключ 1С>, n:<хэш>, none) через запятую; в ответе остаются только материалы этих поставщиков; ведущий ! — «все, кроме».', schema: { type: string } }
+        - { name: readyCutsOnly, in: query, required: false, description: 'Только заказы с готовым раскроем плёнки на ванне.', schema: { type: boolean } }
+        - { name: payment, in: query, required: false, description: 'any_paid — частично или полностью оплачен; fully_paid — только оплачен.', schema: { type: string, enum: [any_paid, fully_paid] } }
       responses:
         '200':
           description: Aggregated demand by material with participants
@@ -19006,6 +19060,13 @@ paths:
         - { name: dateFrom, in: query, required: false, schema: { type: string, format: date } }
         - { name: dateTo, in: query, required: false, schema: { type: string, format: date } }
         - { name: unpurchasedOnly, in: query, required: false, schema: { type: boolean } }
+        - { name: orderIds, in: query, required: false, description: 'Фильтр «Заказ»: id через запятую (до 500).', schema: { type: string } }
+        - { name: orderDates, in: query, required: false, description: 'Фильтр «Дата заказа»: YYYY-MM-DD через запятую; none — заказы без даты; ведущий ! — «все, кроме».', schema: { type: string } }
+        - { name: sheetMaterialTypeIds, in: query, required: false, description: 'Фильтр «Листовые материалы»: id через запятую; none — заказы без листовых; ведущий ! — «все, кроме».', schema: { type: string } }
+        - { name: filmIds, in: query, required: false, description: 'Фильтр «Плёнка»: id через запятую; none — заказы без плёнки; ведущий ! — «все, кроме».', schema: { type: string } }
+        - { name: supplierKeys, in: query, required: false, description: 'Фильтр «Поставщик»: ключи основного поставщика (s:<id>, c:<ключ 1С>, n:<хэш>, none) через запятую; в ответе остаются только материалы этих поставщиков; ведущий ! — «все, кроме».', schema: { type: string } }
+        - { name: readyCutsOnly, in: query, required: false, description: 'Только заказы с готовым раскроем плёнки на ванне.', schema: { type: boolean } }
+        - { name: payment, in: query, required: false, description: 'any_paid — частично или полностью оплачен; fully_paid — только оплачен.', schema: { type: string, enum: [any_paid, fully_paid] } }
       responses:
         '200':
           description: Document options
@@ -19013,6 +19074,65 @@ paths:
             application/json:
               schema:
                 type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/orders/resource-demands/filter-options:
+    get:
+      tags:
+        - Orders
+      operationId: listOrderResourceDemandFilterOptions
+      summary: Варианты фильтров заголовков списка потребностей
+      description: По всем заказам выборки (все страницы; scope, поиск, период, «незакупленное», документ 1С, готовые раскрои, оплата), без учёта самих фильтров заголовков. Заказы — до 300 самых свежих (ordersTruncated). Поставщики — основные поставщики материалов, none — «Без поставщика».
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - { name: search, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: dateFrom, in: query, required: false, schema: { type: string, format: date } }
+        - { name: dateTo, in: query, required: false, schema: { type: string, format: date } }
+        - { name: unpurchasedOnly, in: query, required: false, schema: { type: boolean } }
+        - { name: onecDocumentId, in: query, required: false, schema: { type: integer, minimum: 1 } }
+        - { name: readyCutsOnly, in: query, required: false, schema: { type: boolean } }
+        - { name: payment, in: query, required: false, schema: { type: string, enum: [any_paid, fully_paid] } }
+      responses:
+        '200':
+          description: Header filter values
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orders, ordersTruncated, dates, hasEmptyDate, sheetMaterials, hasNoSheetMaterials, films, hasNoFilms, suppliers]
+                properties:
+                  orders:
+                    type: array
+                    items:
+                      type: object
+                      required: [orderId, orderName, projectCode, clientName]
+                      properties:
+                        orderId: { type: integer }
+                        orderName: { type: string }
+                        projectCode: { type: string }
+                        clientName: { type: string, nullable: true }
+                  ordersTruncated: { type: boolean }
+                  dates: { type: array, items: { type: string, format: date } }
+                  hasEmptyDate: { type: boolean }
+                  sheetMaterials:
+                    type: array
+                    items: { type: object, required: [id, name], properties: { id: { type: integer }, name: { type: string } } }
+                  hasNoSheetMaterials: { type: boolean }
+                  films:
+                    type: array
+                    items: { type: object, required: [id, name], properties: { id: { type: integer }, name: { type: string } } }
+                  hasNoFilms: { type: boolean }
+                  suppliers:
+                    type: array
+                    items: { type: object, required: [key, name], properties: { key: { type: string }, name: { type: string } } }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -21602,6 +21722,20 @@ components:
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   schemas:
+    MaterialSupplierRef:
+      type: object
+      required: [id, name, isActive]
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        isActive: {type: boolean}
+    FilmSuppliers:
+      type: object
+      required: [filmId, suppliers, onecSuppliers]
+      properties:
+        filmId: {type: integer}
+        suppliers: {type: array, items: {$ref: '#/components/schemas/MaterialSupplierRef'}}
+        onecSuppliers: {type: array, items: {type: object, required: [key, name], properties: {key: {type: string}, name: {type: string}}}}
     ClientScreenSettings:
       type: object
       required: [enabled, visibleCodes, version, updatedAt]
