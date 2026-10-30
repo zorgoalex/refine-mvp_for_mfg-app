@@ -2204,6 +2204,17 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Pieces beyond the order (re-cut duplicates, repeated files): never part of the counters above. */
+.cnc-order-card__readiness .cnc-order-card__readiness-excess {
+  color: #ad4e00;
+  font-weight: 500;
+}
+
+:root[data-theme="dark"] .cnc-order-card__readiness .cnc-order-card__readiness-excess,
+[data-theme="dark"] .cnc-order-card__readiness .cnc-order-card__readiness-excess {
+  color: #ffa940;
+}
+
 .cnc-order-card__missing {
   margin-top: 7px;
   width: 100%;

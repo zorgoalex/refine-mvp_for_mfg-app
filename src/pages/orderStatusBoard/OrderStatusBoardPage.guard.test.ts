@@ -54,6 +54,19 @@ const pdfPreview = readFileSync(
   'utf8',
 );
 
+describe('MDF order card counters', () => {
+  it('shows counters within the order, the excess on its own coloured line, and «Без МДФ» for non-MDF orders', () => {
+    expect(page).toContain('{cncReadinessExcessText(cncReadiness) && (');
+    expect(page).toContain('className="cnc-order-card__readiness-excess"');
+    expect(page).toContain('{cncOrderCard && cncReadiness?.withoutMdfWork && !cncNumberOnly && (');
+    expect(page).toContain('<span>Без МДФ</span>');
+    expect(page).toContain('const shownRolled = details.length > 0 ? creditedQuantities.rolled');
+    expect(page).toContain('...collectCncMdfOrderIds(readinessColumns),');
+    expect(page).toContain('{ mdfWorkOrderIds },');
+    expect(page).toContain('missingDetails: withoutMdfWork ? [] :');
+  });
+});
+
 describe('OrderStatusBoardPage UX guards', () => {
   it('applies planned-today visibility after MDF lifecycle placement with complete order statuses', () => {
     const activeColumns = page.match(/const cncActiveColumns = useMemo\([\s\S]*?\n  \);/)?.[0] ?? '';
@@ -70,7 +83,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(memo('cncOrderIds')).toContain('collectCncOrderIds(cncPeriodColumns)');
     expect(memo('cncActiveColumns')).not.toContain('cncFilteredColumns');
     expect(memo('cncOrderFilteredColumns')).toContain('filterCncTodayColumnsByOrders(cncActiveColumns, cncOrderFilters)');
-    expect(memo('cncVisibleOrderIds')).toContain('collectCncMdfOrderIds(cncFilteredColumns)');
+    expect(memo('cncVisibleOrderIds')).toContain('collectCncOrderIds(cncFilteredColumns)');
     expect(memo('cncVisibleOrderStatusCards')).toContain('cncVisibleOrderIds');
     expect(memo('cncDisplayOrderStatusCards')).toContain('cncVisibleOrderStatusCards');
     expect(memo('cncHistoricalBathReadiness')).toContain('cncToday?.historicalBathReadiness');
