@@ -3,7 +3,7 @@ import type { DatabaseClient } from '../../../database/database.types';
 import type { OutboxEventRecord } from '../../notifications-engine/domain/outbox-event.types';
 import type { ClaimedCrmSyncOutboxEvent } from '../adapters/pg-crm-sync-outbox-repository';
 import {
-  CrmSyncTargetError,
+  CrmSyncAuditOnlyError, CrmSyncTargetError,
   type SyncIntent,
 } from './bitrix24-sync-consumer';
 import { CrmSyncRelayService } from './crm-sync-relay.service';
@@ -492,6 +492,81 @@ describe('CrmSyncRelayService', () => {
         relatedPaymentId: 7,
       }),
     );
+  });
+
+  it('an audit-only failure (merged client alias, merge comment) is audited on the client and touches no mapping', async () => {
+    const event = makeClaimedEvent({
+      eventType: 'crm.sync.client.merged',
+      payload: { mergeId: 12, mergedClientId: 7, survivorId: 9 },
+    });
+    const outboxRepo = makeOutboxRepo({
+      claimBatch: vi.fn().mockResolvedValue([event]),
+      markRetry: vi.fn().mockResolvedValue(1),
+    });
+    const consumer = { sync: vi.fn().mockRejectedValue(new CrmSyncAuditOnlyError({
+      erpId: '7',
+      relatedEntities: [{ entityType: 'client', entityId: 9 }, { entityType: 'client_merge', entityId: 12 }],
+      metadata: { mergeId: 12, survivorId: 9 },
+    }, new Error('timeline could not be read in full'))) };
+    const mapping = makeMappingRepo();
+    const audit = makeAudit();
+    const { db, fakeTxClient } = makeDb();
+    const relay = makeRelay({ outboxRepo, consumer: consumer as never, mapping, audit, db });
+
+    expect(await relay.runTick()).toEqual({ claimed: 1, processed: 0, failed: 1 });
+    expect(mapping.markFailed).not.toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(fakeTxClient, expect.objectContaining({
+      event: 'crm_sync.failed',
+      entityType: 'client',
+      entityId: '7',
+      relatedClientId: 7,
+      relatedEntities: [{ entityType: 'client', entityId: 9 }, { entityType: 'client_merge', entityId: 12 }],
+      metadata: expect.objectContaining({ eventType: 'crm.sync.client.merged', mergeId: 12, error: 'timeline could not be read in full' }),
+    }));
+  });
+
+  it('a failure of a client merged meanwhile keeps its alias mapping: read under the merge key, audited only', async () => {
+    const event = makeClaimedEvent({ payload: { entity: 'client', id: '7', op: 'upsert' } });
+    const outboxRepo = makeOutboxRepo({
+      claimBatch: vi.fn().mockResolvedValue([event]),
+      markRetry: vi.fn().mockResolvedValue(1),
+    });
+    // Any error, e.g. a timeout of the assignment ownership query or a 5xx of the update.
+    const consumer = { sync: vi.fn().mockRejectedValue(new Error('statement timeout')) };
+    const mapping = makeMappingRepo();
+    const audit = makeAudit();
+    const txQuery = vi.fn(async (sql: string) =>
+      sql.includes('client_merge_redirects') ? { rows: [{ survivor_id: '9' }], rowCount: 1 } : { rows: [], rowCount: 0 });
+    const { db, fakeTxClient } = makeDb({ query: txQuery } as unknown as DatabaseClient);
+    const relay = makeRelay({ outboxRepo, consumer: consumer as never, mapping, audit, db });
+
+    expect(await relay.runTick()).toEqual({ claimed: 1, processed: 0, failed: 1 });
+    expect(txQuery).toHaveBeenCalledWith(
+      'SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))',
+      ['bitrix24-reverse:client:erp:7'],
+    );
+    expect(mapping.markFailed).not.toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(fakeTxClient, expect.objectContaining({
+      event: 'crm_sync.failed',
+      entityType: 'client',
+      entityId: '7',
+      relatedEntities: [{ entityType: 'client', entityId: 9 }],
+      metadata: expect.objectContaining({ mergedClient: true, error: 'statement timeout' }),
+    }));
+  });
+
+  it('a failure of a client that is not merged still marks its mapping failed', async () => {
+    const event = makeClaimedEvent({ payload: { entity: 'client', id: '7', op: 'upsert' } });
+    const outboxRepo = makeOutboxRepo({
+      claimBatch: vi.fn().mockResolvedValue([event]),
+      markRetry: vi.fn().mockResolvedValue(1),
+    });
+    const consumer = { sync: vi.fn().mockRejectedValue(new Error('busy')) };
+    const mapping = makeMappingRepo();
+    const { db, fakeTxClient } = makeDb();
+    const relay = makeRelay({ outboxRepo, consumer: consumer as never, mapping, db });
+    await relay.runTick();
+    expect(mapping.markFailed).toHaveBeenCalledWith(fakeTxClient, 'client', '7', 'contact', 'busy');
   });
 
   // ── (c3) RACE COVERAGE: markRetry + markFailed share ONE tx, markRetry FIRST ──

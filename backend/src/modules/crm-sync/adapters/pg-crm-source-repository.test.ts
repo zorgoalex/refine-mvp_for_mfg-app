@@ -72,6 +72,7 @@ describe('PgCrmSourceRepository Bitrix24 projection reads', () => {
       personType: 'legal',
       notes: 'Важно',
       isActive: true,
+      mergedIntoClientId: null,
       phones: [
         { phoneNumber: '+77001112233', phoneType: 'work', isPrimary: true },
         { phoneNumber: '+77004445566', phoneType: 'mobile', isPrimary: false },

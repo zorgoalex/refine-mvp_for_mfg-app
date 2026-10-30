@@ -54,4 +54,51 @@ describe('persistSyncIntent', () => {
       metadata: { bitrixId: '20', conflictCode: 'BITRIX24_DEAL_REMOTE_DELETED' },
     });
   });
+
+  it('an intent without a mapping (client merge comment) writes only its audit', async () => {
+    const { mapping, audit } = deps(true);
+    await persistSyncIntent(tx, mapping, audit, { audit: { ...intent.audit, event: 'crm_sync.client_merge_comment' } });
+    expect(mapping.upsertSuccess).not.toHaveBeenCalled();
+    expect(vi.mocked(audit.record).mock.calls.map(([, event]) => event.event)).toEqual(['crm_sync.client_merge_comment']);
+  });
+
+  const clientIntent: SyncIntent = {
+    mapping: {
+      entityType: 'client', erpId: '7', bitrixObject: 'contact', bitrixId: '88',
+      parentErpId: null, status: 'active', lastHash: 'h',
+    },
+    audit: {
+      event: 'crm_sync.upsert', entityType: 'client', entityId: '7', requestId: 'event-1',
+      source: 'crm-sync', actorUserId: null, relatedClientId: 7,
+    },
+  };
+  const txWith = (row: Record<string, unknown> | null) => ({
+    query: vi.fn(async (sql: string) => ({ rows: sql.includes('client_merge_redirects') && row ? [row] : [] })),
+  }) as unknown as DatabaseClient;
+
+  it('a client merged meanwhile keeps its stored counterparty: the replacement is audited, not written', async () => {
+    const { mapping, audit } = deps(true);
+    const client = txWith({ survivor_id: '9', bitrix_object: 'contact', bitrix_id: '55' });
+    await persistSyncIntent(client, mapping, audit, clientIntent);
+    expect(vi.mocked(client.query).mock.calls[0]).toEqual([
+      'SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))',
+      ['bitrix24-reverse:client:erp:7'],
+    ]);
+    expect(mapping.upsertSuccess).not.toHaveBeenCalled();
+    expect(vi.mocked(audit.record).mock.calls[0][1]).toMatchObject({
+      event: 'crm_sync.merged_client_skipped',
+      entityId: '7',
+      relatedEntities: [{ entityType: 'client', entityId: 9 }],
+      metadata: { reason: 'replacement_after_merge', keptBitrixId: '55', createdBitrixId: '88' },
+    });
+  });
+
+  it('a client mapping is written when the client is not merged or keeps the same counterparty', async () => {
+    for (const row of [null, { survivor_id: '9', bitrix_object: 'contact', bitrix_id: '88' }, { survivor_id: '9', bitrix_object: null, bitrix_id: null }]) {
+      const { mapping, audit } = deps(true);
+      await persistSyncIntent(txWith(row), mapping, audit, clientIntent);
+      expect(mapping.upsertSuccess).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(audit.record).mock.calls[0][1]).toMatchObject({ event: 'crm_sync.upsert' });
+    }
+  });
 });
