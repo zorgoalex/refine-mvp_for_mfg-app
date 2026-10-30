@@ -1,4 +1,4 @@
-import { Tooltip } from '../../ui/tooltipDelay';
+import { Popover, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Space } from 'antd';
 import { CheckCircleFilled, FullscreenExitOutlined, FullscreenOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons';
@@ -124,7 +124,8 @@ function OverlayLayer({
         const warningIconSize = Math.max(10, Math.min(16, Math.min(boxWpx || 12, boxHpx || 12) * 0.22));
 
         return (
-          <Tooltip key={overlay.key} title={renderOverlayTooltip(overlay)}>
+          // the parts list beside each sheet names the details; the full detail card opens on a right click
+          <Popover key={overlay.key} content={renderOverlayTooltip(overlay)} trigger="contextMenu" placement="right" destroyTooltipOnHide>
             <span
               aria-label={`Заказ ${overlay.orderId ?? '—'}, позиция ${overlay.detailNumber ?? '—'}`}
               onClick={onPickKey ? () => { onPickKey(overlay.key); onClick?.(); } : onClick}
@@ -140,7 +141,7 @@ function OverlayLayer({
                 top: `${overlay.topPct}%`,
                 width: `${overlay.widthPct}%`,
                 height: `${overlay.heightPct}%`,
-                cursor: onPickKey ? 'pointer' : 'help',
+                cursor: onPickKey ? 'pointer' : 'default',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
@@ -229,7 +230,7 @@ function OverlayLayer({
                 })}
               </span>}
             </span>
-          </Tooltip>
+          </Popover>
         );
       })}
     </>
