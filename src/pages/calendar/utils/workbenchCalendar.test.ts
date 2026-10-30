@@ -24,9 +24,13 @@ describe('workbench calendar weeks', () => {
   });
 
   it('columns follow the zoom: wider cards, fewer days in a row; weeks only when seven fit', () => {
-    expect(workbenchLayout(1176, 1)).toEqual({ columnWidth: 187, perRow: 5, weekRows: false });
-    expect(workbenchLayout(1404, 1)).toEqual({ columnWidth: 187, perRow: 6, weekRows: false });
+    // the roomier 187px column where a week fits
     expect(workbenchLayout(1405, 1)).toEqual({ columnWidth: 187, perRow: 7, weekRows: true });
+    // narrower: the column shrinks to keep the whole week (not below the former 170px)
+    expect(workbenchLayout(1350, 1)).toEqual({ columnWidth: 179, perRow: 7, weekRows: true });
+    expect(workbenchLayout(1286, 1)).toEqual({ columnWidth: 170, perRow: 7, weekRows: true });
+    // a week does not fit even at 170px: the roomier column, fewer days in a row
+    expect(workbenchLayout(1176, 1)).toEqual({ columnWidth: 187, perRow: 5, weekRows: false });
     expect(workbenchLayout(1176, 1.5)).toEqual({ columnWidth: 281, perRow: 3, weekRows: false });
     expect(workbenchLayout(1176, 0.7)).toEqual({ columnWidth: 131, perRow: 7, weekRows: true });
     expect(workbenchLayout(200, 1).perRow).toBe(1);

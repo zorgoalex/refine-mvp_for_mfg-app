@@ -30,9 +30,10 @@ export function buildWorkbenchWeeks(center: Date, periodDays: 7 | 14 | 30, today
   });
 }
 
-/** Default width of a day column (its cards) at 100% zoom: roomier cards (was 170, +10%); a whole week still fits a
- * row from ~1405px of calendar width. */
+/** Preferred width of a day column (its cards) at 100% zoom: roomier cards (+10% over the former 170). */
 export const WORKBENCH_COLUMN_BASE_WIDTH = 187;
+/** The narrowest a column gets to keep a whole week in a row (the former width). */
+export const WORKBENCH_COLUMN_MIN_WIDTH = 170;
 
 export interface WorkbenchLayout {
   /** day column width in px, proportional to the zoom */
@@ -45,9 +46,16 @@ export interface WorkbenchLayout {
 
 /** Columns follow the zoom: a larger card makes a wider column and fewer columns in a row. */
 export function workbenchLayout(containerWidth: number, scale: number): WorkbenchLayout {
-  const columnWidth = Math.round(WORKBENCH_COLUMN_BASE_WIDTH * scale);
   const available = Math.max(0, containerWidth - WORKBENCH_GRID_PADDING);
-  const perRow = Math.max(1, Math.floor((available + WORKBENCH_DAY_GAP) / (columnWidth + WORKBENCH_DAY_GAP)));
+  const fitting = (width: number) => Math.max(1, Math.floor((available + WORKBENCH_DAY_GAP) / (width + WORKBENCH_DAY_GAP)));
+  const preferred = Math.round(WORKBENCH_COLUMN_BASE_WIDTH * scale);
+  const narrowest = Math.round(WORKBENCH_COLUMN_MIN_WIDTH * scale);
+  // the roomier column, unless it would break the week: then as wide as a whole week allows (never below the former)
+  let columnWidth = preferred;
+  if (fitting(preferred) < 7 && fitting(narrowest) >= 7) {
+    columnWidth = Math.max(narrowest, Math.floor((available + WORKBENCH_DAY_GAP) / 7) - WORKBENCH_DAY_GAP);
+  }
+  const perRow = fitting(columnWidth);
   return { columnWidth, perRow: Math.min(perRow, 7), weekRows: perRow >= 7 };
 }
 
