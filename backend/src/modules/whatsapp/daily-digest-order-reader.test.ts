@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../common/errors/api-error';
 import type { DatabaseService } from '../../database/database.service';
 import type { TransactionClient } from '../../database/database.types';
-import { DailyDigestOrderReader } from './daily-digest-order-reader';
+import { DailyDigestOrderReader, insertMissingStatusCodes } from './daily-digest-order-reader';
 
 const orders = [
   {
@@ -137,5 +137,23 @@ describe('DailyDigestOrderReader', () => {
     const { reader, query } = makeReader();
     await expect(reader.read(date)).rejects.toMatchObject({ code: 'DAILY_DIGEST_DATE_INVALID' });
     expect(query).not.toHaveBeenCalled();
+  });
+
+  it('puts «Базис» right after «Отрисован» — missing from the stored order or saved elsewhere', () => {
+    const status = (id: number, code: string, sortOrder: number) => ({ id, code, name: code, sortOrder, isActive: true });
+    expect(insertMissingStatusCodes(['new', 'drawn', 'film_purchase', 'cut', 'issued'], [
+      status(16, 'new', 5), status(1, 'drawn', 10), status(32, 'saw', 10), status(9, 'film_purchase', 15),
+      status(2, 'cut', 20), status(8, 'issued', 90),
+    ])).toEqual(['new', 'drawn', 'saw', 'film_purchase', 'cut', 'issued']);
+    // other stages reordered by hand: still right after «Отрисован»
+    expect(insertMissingStatusCodes(['drawn', 'cut', 'new', 'film_purchase', 'issued', 'saw'], [
+      status(16, 'new', 5), status(1, 'drawn', 10), status(32, 'saw', 10), status(9, 'film_purchase', 15),
+      status(2, 'cut', 20), status(8, 'issued', 90),
+    ])).toEqual(['drawn', 'saw', 'cut', 'new', 'film_purchase', 'issued']);
+    // saved at the end by an earlier version: moved to its step as well
+    expect(insertMissingStatusCodes(['new', 'drawn', 'film_purchase', 'cut', 'issued', 'saw'], [
+      status(16, 'new', 5), status(1, 'drawn', 10), status(32, 'saw', 10), status(9, 'film_purchase', 15),
+      status(2, 'cut', 20), status(8, 'issued', 90),
+    ])).toEqual(['new', 'drawn', 'saw', 'film_purchase', 'cut', 'issued']);
   });
 });

@@ -75,7 +75,7 @@ interface DigestDetail {
   materialName: string | null;
 }
 
-interface ProductionStatus {
+export interface ProductionStatus {
   id: number;
   code: string;
   name: string;
@@ -303,6 +303,38 @@ function mapStatus(row: StatusRow): ProductionStatus {
   };
 }
 
+/** Codes always placed by their step (as in the web app): «Базис» (saw) right after «Отрисован». */
+const STEP_PLACED_STATUS_CODES: readonly string[] = ['saw'];
+const STEP_PLACED_ANCHORS: Readonly<Record<string, string>> = { saw: 'drawn' };
+
+/**
+ * Active statuses missing from the stored display order (a status added later) and the step-placed codes go to their
+ * place by sort_order — after the last stored code of the same or an earlier step — as in the web app.
+ */
+export function insertMissingStatusCodes(storedOrder: string[], statuses: ProductionStatus[]): string[] {
+  const stored = storedOrder.filter((code) => !STEP_PLACED_STATUS_CODES.includes(code));
+  const sortByCode = new Map(statuses.filter((status) => status.code).map((status) => [status.code, status.sortOrder ?? 0]));
+  const result = [...stored];
+  statuses
+    .filter((status) => status.isActive && status.code && !stored.includes(status.code))
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.id - b.id)
+    .forEach((status) => {
+      const anchor = STEP_PLACED_ANCHORS[status.code];
+      if (anchor && result.includes(anchor)) {
+        result.splice(result.indexOf(anchor) + 1, 0, status.code);
+        return;
+      }
+      const sort = status.sortOrder ?? 0;
+      let at = 0;
+      result.forEach((code, index) => {
+        const known = sortByCode.get(code);
+        if (known !== undefined && known <= sort) at = index + 1;
+      });
+      result.splice(at, 0, status.code);
+    });
+  return result;
+}
+
 function resolveWorkflowDisplay(
   statuses: ProductionStatus[],
   setting?: WorkflowSettingRow,
@@ -311,12 +343,7 @@ function resolveWorkflowDisplay(
   const storedOrder = isRecord(raw) && Array.isArray(raw.status_codes_order)
     ? raw.status_codes_order.filter((code): code is string => typeof code === 'string')
     : statuses.map((status) => status.code).filter(Boolean);
-  const displayOrderCodes = [
-    ...storedOrder,
-    ...statuses
-      .filter((status) => status.isActive && status.code && !storedOrder.includes(status.code))
-      .map((status) => status.code),
-  ];
+  const displayOrderCodes = insertMissingStatusCodes(storedOrder, statuses);
 
   const codeToName: Record<string, string> = {};
   const idToCode = new Map<number, string>();
