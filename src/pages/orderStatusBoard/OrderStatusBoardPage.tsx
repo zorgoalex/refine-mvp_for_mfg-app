@@ -1714,7 +1714,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     [cncBathsRequireMachineFiles, cncOrderFilteredColumns, cncOriginalView, preservedCncBathCardId],
   );
   const cncVisibleOrderIds = useMemo(
-    () => new Set(collectCncMdfOrderIds(cncFilteredColumns)),
+    // every order with work on the board, MDF or not (a non-MDF order has a card without MDF counters)
+    () => new Set(collectCncOrderIds(cncFilteredColumns)),
     [cncFilteredColumns],
   );
   const cncVisibleOrderStatusCards = useMemo(
@@ -3531,6 +3532,11 @@ export interface CncOrderReadiness {
   positionQuantities?: ReadonlyMap<string, CncPositionQuantities>;
   // Capped per-position credit is separate from fact totals, which may exceed demand.
   creditedQuantities?: CncPositionQuantities;
+  // Facts beyond the order (a piece in several files/baths after a re-cut, a repeated file, unmatched rows): shown
+  // apart from the counters, which never exceed the order.
+  excessQuantities?: CncPositionQuantities;
+  // The order reaches the board only through non-MDF work (a cream machine file, non-MDF Базис rows): no MDF counters.
+  withoutMdfWork?: boolean;
 }
 
 interface CncPositionQuantities {
@@ -3981,6 +3987,13 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     () => buildCncOrderMissingDetails(orderCards, readinessColumns, historicalReadinessSources),
     [orderCards, readinessColumns, historicalReadinessSources],
   );
+  // MDF work in the window, or only in the compact history: either way not «Без МДФ»
+  const mdfWorkOrderIds = useMemo(() => new Set([
+    ...collectCncMdfOrderIds(readinessColumns),
+    ...[...(historicalReadinessSources ?? []), ...historicalBathReadiness]
+      .flatMap((source) => source.items.map((item) => item.orderId))
+      .filter((orderId): orderId is number => Number.isInteger(orderId) && (orderId ?? 0) > 0),
+  ]), [historicalBathReadiness, historicalReadinessSources, readinessColumns]);
   // An unchanged order keeps its entry (card, readiness, missing details): only changed order cards re-render.
   const stableCurrentOrderDisplayCardsRef = useRef<ReturnType<typeof splitCncOrderCardsByManualColumn> | null>(null);
   const currentOrderDisplayCards = useMemo(() => {
@@ -3990,10 +4003,11 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       manualMoves,
       orderSort,
       orderMissingDetailsByOrderId,
+      { mdfWorkOrderIds },
     ));
     stableCurrentOrderDisplayCardsRef.current = split;
     return split;
-  }, [manualMoves, orderCards, orderMissingDetailsByOrderId, orderReadinessByOrderId, orderSort]);
+  }, [manualMoves, mdfWorkOrderIds, orderCards, orderMissingDetailsByOrderId, orderReadinessByOrderId, orderSort]);
   // order cards need the columns only as status options (not their cards)
   const stableOrderStatusOptionsRef = useRef<OrderStatusBoardColumn[] | null>(null);
   const orderStatusOptions = useMemo(() => {
@@ -8344,7 +8358,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
       }
     },
   }), [card, destinations, onMove]);
-  const readinessProgress = cncReadiness
+  const readinessProgress = cncReadiness && !cncReadiness.withoutMdfWork
     ? cncOrderReadinessProgress(cncReadiness)
     : null;
 
@@ -8542,11 +8556,23 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         </div>
       )}
 
-      {cncOrderCard && cncReadiness && !cncNumberOnly && (
+      {cncOrderCard && cncReadiness?.withoutMdfWork && !cncNumberOnly && (
+        <div className="cnc-order-card__readiness" title="На доске только работы не по МДФ (файлы других материалов)">
+          <span>Без МДФ</span>
+        </div>
+      )}
+
+      {cncOrderCard && cncReadiness && !cncReadiness.withoutMdfWork && !cncNumberOnly && (
         <div className="cnc-order-card__readiness">
           <span>Распилено {cncReadiness.cutDetails}</span>
           <span>Закатано {cncReadiness.rolledDetails}</span>
           <span>Осталось {cncReadiness.remainingDetails}</span>
+          {cncReadinessExcessText(cncReadiness) && (
+            <span className="cnc-order-card__readiness-excess"
+              title="Сверх заказа: одни и те же детали в нескольких файлах станка, наборах или ваннах (перераскрой, повторный файл) или строки без привязки к составу заказа">
+              {cncReadinessExcessText(cncReadiness)}
+            </span>
+          )}
         </div>
       )}
 
@@ -9376,6 +9402,8 @@ export function splitCncOrderCardsByManualColumn(
   options: {
     forceOriginal?: boolean;
     sourceCreatedAtByOrderId?: ReadonlyMap<number, string>;
+    /** Orders with MDF (or not proven non-MDF) work on the board; the others are marked «Без МДФ». Absent: none. */
+    mdfWorkOrderIds?: ReadonlySet<number>;
   } = {},
 ): Record<'orders' | 'orders_ready' | 'orders_issued', CncOrderBoardCard[]> {
   const result: Record<'orders' | 'orders_ready' | 'orders_issued', CncOrderBoardCard[]> = {
@@ -9384,10 +9412,9 @@ export function splitCncOrderCardsByManualColumn(
     orders_issued: [],
   };
   for (const card of cards) {
-    const readiness = normalizeCncOrderReadiness(
-      card,
-      readinessByOrderId.get(card.orderId),
-    );
+    const withoutMdfWork = options.mdfWorkOrderIds !== undefined && !options.mdfWorkOrderIds.has(card.orderId);
+    const normalized = normalizeCncOrderReadiness(card, readinessByOrderId.get(card.orderId));
+    const readiness = withoutMdfWork ? { ...normalized, withoutMdfWork: true } : normalized;
     const statusColumn = resolveCncOrderStatusColumn(card);
     const readinessColumn: CncTelegramTodayDisplayColumnKey =
       readiness.totalDetails > 0 && readiness.remainingDetails === 0
@@ -9406,7 +9433,8 @@ export function splitCncOrderCardsByManualColumn(
     result[orderColumn].push({
       card,
       readiness,
-      missingDetails: missingDetailsByOrderId.get(card.orderId) ?? [],
+      // the missing-detail check is about MDF sources: not for an order without MDF work
+      missingDetails: withoutMdfWork ? [] : missingDetailsByOrderId.get(card.orderId) ?? [],
     });
   }
   for (const columnCards of Object.values(result)) {
@@ -9581,13 +9609,35 @@ function normalizeCncOrderReadiness(
     cutDetails = nonNegativeInteger(source.cutDetails);
     rolledDetails = nonNegativeInteger(source.rolledDetails);
   }
+  // A piece is shown once, however many machine files, Базис sets or baths carry it (re-cut, a repeated file): with
+  // a known composition the counters are the credited quantities, each detail capped at its ordered quantity, so
+  // «Распилено» + «Закатано» + «Осталось» is the order's total. Without one, the raw facts capped by the total.
+  const shownRolled = details.length > 0 ? creditedQuantities.rolled : Math.min(rolledDetails, totalDetails);
+  const shownCut = details.length > 0
+    ? creditedQuantities.cut
+    : Math.min(cutDetails, Math.max(0, totalDetails - shownRolled));
   return {
     totalDetails,
-    cutDetails,
-    rolledDetails,
+    cutDetails: shownCut,
+    rolledDetails: shownRolled,
     remainingDetails: Math.max(0, totalDetails - creditedQuantities.cut - creditedQuantities.rolled),
     creditedQuantities,
+    excessQuantities: {
+      cut: Math.max(0, cutDetails - shownCut),
+      rolled: Math.max(0, rolledDetails - shownRolled),
+    },
   };
+}
+
+/** «Излишек: распил +N · закатка +M» when the board holds more than the order, else null. */
+export function cncReadinessExcessText(readiness: CncOrderReadiness): string | null {
+  const excess = readiness.excessQuantities;
+  if (!excess) return null;
+  const parts = [
+    excess.cut > 0 ? `распил +${excess.cut}` : null,
+    excess.rolled > 0 ? `закатка +${excess.rolled}` : null,
+  ].filter(Boolean);
+  return parts.length ? `Излишек: ${parts.join(' · ')}` : null;
 }
 
 export function cncOrderReadinessProgress(readiness: CncOrderReadiness): {
