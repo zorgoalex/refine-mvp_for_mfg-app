@@ -81,16 +81,27 @@ export const CalendarPrintButton: React.FC<CalendarPrintButtonProps> = ({
   // preview: copies of the calendar weeks, after the dialog has opened
   useEffect(() => {
     if (!open) return undefined;
-    const frame = requestAnimationFrame(() => {
+    let timer = 0;
+    let attempts = 0;
+    // the dialog mounts its body a moment after it opens: wait for the preview holder
+    const draw = () => {
       const holder = previewRef.current;
-      if (!holder) return;
+      if (!holder) {
+        attempts += 1;
+        if (attempts < 40) timer = window.setTimeout(draw, 50);
+        return;
+      }
       holder.replaceChildren();
       for (const sheet of buildSheets()) {
         holder.append(sheet);
         fitCalendarPrintSheet(sheet);
       }
-    });
-    return () => cancelAnimationFrame(frame);
+    };
+    const frame = requestAnimationFrame(draw);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
   }, [open, paper, now, viewLabel, filterLine]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {

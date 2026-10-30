@@ -61,9 +61,13 @@ export const MdfPrintDialog: React.FC<MdfPrintDialogProps> = ({ columns, printDa
       setPreviewReady(false);
       return undefined;
     }
-    return afterCardsDrawn(() => {
+    let retry = 0;
+    const draw = () => {
       const holder = previewRef.current;
-      if (!holder) return;
+      if (!holder) {
+        retry = window.setTimeout(draw, 50);
+        return;
+      }
       holder.replaceChildren();
       const sheet = sheetFor();
       if (sheet) {
@@ -71,7 +75,12 @@ export const MdfPrintDialog: React.FC<MdfPrintDialogProps> = ({ columns, printDa
         fitMdfPrintSheet(sheet);
       }
       setPreviewReady(true);
-    });
+    };
+    const cancel = afterCardsDrawn(draw);
+    return () => {
+      cancel();
+      window.clearTimeout(retry);
+    };
   }, [open, paper, chosenKey, modeLabel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
