@@ -1,5 +1,5 @@
 import type { OutboxEventRecord } from '../../notifications-engine/domain/outbox-event.types';
-import type { AuditEvent } from '../../../common/audit/audit-event.types';
+import type { AuditEvent, AuditRelatedEntity } from '../../../common/audit/audit-event.types';
 import type { DatabaseService } from '../../../database/database.service';
 import type {
   ClientRow,
@@ -26,10 +26,12 @@ import {
   type Bitrix24RequestGuard,
 } from '../adapters/bitrix24-api-client';
 import type { PgCrmSyncMappingRepository } from '../adapters/pg-crm-sync-mapping-repository';
+import { safeOutboundText } from './bitrix24-safe-text';
 import type { Bitrix24PaidPaymentGuard } from './bitrix24-paid-payment-guard';
 
 export type SyncIntent = {
-  mapping: MappingRow;
+  /** Absent for an event that writes no mapping (client merge comments): only the audit is persisted. */
+  mapping?: MappingRow;
   audit: AuditEvent;
   /** Additional audit rows persisted with the intent (same transaction). */
   extraAudits?: AuditEvent[];
@@ -43,6 +45,24 @@ export interface CrmSyncFailureTarget {
   relatedClientId?: number;
   relatedOrderId?: number;
   relatedPaymentId?: number;
+}
+
+/**
+ * A delivery failure audited on its client that must not mark any mapping failed: the alias of a merged client (an
+ * active mapping that requests of the survivor rely on, migration 268) and client merge comments.
+ */
+export class CrmSyncAuditOnlyError extends Error {
+  constructor(
+    readonly target: {
+      erpId: string;
+      relatedEntities: AuditRelatedEntity[];
+      metadata: Record<string, unknown>;
+    },
+    cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = 'CrmSyncAuditOnlyError';
+  }
 }
 
 export class CrmSyncTargetError extends Error {
@@ -86,6 +106,9 @@ export class Bitrix24SyncConsumer {
   }
 
   private async syncOwned(event: OutboxEventRecord): Promise<SyncIntent[]> {
+    if (event.eventType === CLIENT_MERGED || event.eventType === CLIENT_MERGE_UNDONE) {
+      return this.commentClientMerge(event);
+    }
     const payload = event.payload as {
       entity?: unknown;
       id?: unknown;
@@ -117,6 +140,98 @@ export class Bitrix24SyncConsumer {
     return entity === 'client'
       ? this.syncClient(id, op, event)
       : this.syncOrder(id, op, event);
+  }
+
+  /**
+   * Client merge (migration 268): a comment in the timeline of the merged client's contact/company, no field is
+   * changed. The marker in the text makes the create idempotent: a retry (lost answer included) first looks for it.
+   */
+  private async commentClientMerge(event: OutboxEventRecord): Promise<SyncIntent[]> {
+    const payload = event.payload as { mergeId?: unknown; mergedClientId?: unknown; survivorId?: unknown };
+    const mergeId = positiveId(payload.mergeId);
+    const mergedId = positiveId(payload.mergedClientId);
+    const survivorId = positiveId(payload.survivorId);
+    if (mergeId === null || mergedId === null || survivorId === null || mergedId === survivorId) {
+      throw new Error(`crm-sync: invalid client merge payload in event ${event.outboxEventId}`);
+    }
+    const undone = event.eventType === CLIENT_MERGE_UNDONE;
+    const marker = `${undone ? 'ERP-MERGE-UNDO' : 'ERP-MERGE'}-${mergeId}`;
+    const audit = (outcome: string, extra: Record<string, unknown> = {}): SyncIntent[] => [{
+      audit: {
+        event: 'crm_sync.client_merge_comment',
+        entityType: 'client',
+        entityId: mergedId,
+        requestId: event.outboxEventId,
+        source: 'crm-sync',
+        actorUserId: null,
+        relatedClientId: Number(mergedId),
+        relatedEntities: [
+          { entityType: 'client', entityId: Number(survivorId) },
+          { entityType: 'client_merge', entityId: Number(mergeId) },
+        ],
+        metadata: { mergeId: Number(mergeId), survivorId: Number(survivorId), kind: undone ? 'merge_undone' : 'merged', outcome, ...extra },
+      },
+    }];
+
+    try {
+      return await this.deliverMergeComment(event, { mergeId, mergedId, survivorId, undone, marker }, audit);
+    } catch (error) {
+      throw new CrmSyncAuditOnlyError({
+        erpId: mergedId,
+        relatedEntities: [
+          { entityType: 'client', entityId: Number(survivorId) },
+          { entityType: 'client_merge', entityId: Number(mergeId) },
+        ],
+        metadata: { eventType: event.eventType, mergeId: Number(mergeId), survivorId: Number(survivorId) },
+      }, error);
+    }
+  }
+
+  private async deliverMergeComment(
+    event: OutboxEventRecord,
+    merge: { mergeId: string; mergedId: string; survivorId: string; undone: boolean; marker: string },
+    audit: (outcome: string, extra?: Record<string, unknown>) => SyncIntent[],
+  ): Promise<SyncIntent[]> {
+    const { mergeId, mergedId, survivorId, undone, marker } = merge;
+    const mapping = await this.deps.mapping.get(this.deps.db, 'client', mergedId);
+    if (mapping?.status !== 'active' || !mapping.bitrixId) return audit('no_counterparty');
+    const entity = toCounterpartyObject(mapping.bitrixObject);
+    const target = { bitrixObject: entity, bitrixId: mapping.bitrixId };
+    const { addTimelineComment, listTimelineComments } = this.deps.bitrix;
+    if (!addTimelineComment || !listTimelineComments) return audit('comments_unavailable', target);
+
+    const createdAt = event.createdAt ? new Date(event.createdAt) : null;
+    if (!createdAt || Number.isNaN(createdAt.getTime())) {
+      throw new Error(`crm-sync: client merge event ${event.outboxEventId} has no creation time`);
+    }
+    // A merge comment delivered after its undo would tell a story that is no longer true.
+    if (!undone && await this.deps.source.getClientMergeStatus?.(mergeId) === 'undone') {
+      return audit('superseded', target);
+    }
+    const since = new Date(createdAt.getTime() - MINUTE);
+    const existing = await listTimelineComments.call(this.deps.bitrix, entity, mapping.bitrixId, since);
+    const markerPattern = new RegExp(`${marker}(?![0-9])`);
+    const found = existing.comments.find((comment) => markerPattern.test(comment.comment));
+    if (found) return audit('commented', { ...target, commentId: found.id, recovered: true });
+    if (!existing.complete) {
+      throw new Error(`CRM sync: timeline of ${entity} ${mapping.bitrixId} could not be read in full; merge comment ${marker} waits`);
+    }
+
+    const survivor = await this.deps.source.getClientById(survivorId);
+    const survivorName = safeOutboundText(survivor?.clientName) || 'без названия';
+    const day = createdAt.toLocaleDateString('ru-RU', { timeZone: 'Asia/Almaty' });
+    const comment = undone
+      ? `ERP, ${day}: объединение с клиентом «${survivorName}» (ERP №${survivorId}) отменено, клиент снова отдельный. ` +
+        `Метка: ${marker}`
+      : `ERP, ${day}: клиент объединён с клиентом «${survivorName}» (ERP №${survivorId}). Заказы и сделки этого ` +
+        `клиента в ERP ведутся у него, новые сделки на этом контакте тоже попадут к нему. Метка: ${marker}`;
+    try {
+      const commentId = await addTimelineComment.call(this.deps.bitrix, entity, mapping.bitrixId, comment);
+      return audit('commented', { ...target, commentId });
+    } catch (error) {
+      if (error instanceof Bitrix24ApiError && error.isNotFound) return audit('counterparty_missing', target);
+      throw error;
+    }
   }
 
   private async withoutOwnedAssignment(
@@ -153,6 +268,7 @@ export class Bitrix24SyncConsumer {
   ): Promise<{ id: string; object: Bitrix24CounterpartyObject; intent: SyncIntent | null }> {
     const payload = mapClient(row, this.deps.options.assignedById);
     const mapping = await this.deps.mapping.get(this.deps.db, 'client', row.clientId);
+    if (row.mergedIntoClientId) return this.updateMergedAlias(row, row.mergedIntoClientId, payload, mapping, event);
     const bitrixOwned = mapping?.sourceSystem === 'bitrix24';
     const sameObject = mapping?.bitrixObject === payload.object;
     if (bitrixOwned && (!sameObject || !mapping.bitrixId || mapping.status !== 'active')) {
@@ -167,46 +283,59 @@ export class Bitrix24SyncConsumer {
     const usableId =
       mapping?.status === 'active' && sameObject ? mapping.bitrixId : null;
 
-    if (
-      !bitrixOwned &&
-      mapping?.status === 'active' &&
-      mapping.bitrixId &&
-      mapping.bitrixObject !== payload.object
-    ) {
-      const operationId = await this.deps.mapping.prepareOutboundOperation(
-        this.deps.db,
-        {
-          objectType: toCounterpartyObject(mapping.bitrixObject),
-          bitrixId: mapping.bitrixId,
-          operation: 'delete',
-        },
-      );
-      await this.deps.bitrix.deleteCrmItem(
-        entityTypeIdForObject(mapping.bitrixObject),
-        mapping.bitrixId,
-      );
-      await this.deps.mapping.completeOutboundOperation(
-        this.deps.db,
-        operationId,
-      );
+    let bitrixId: string | null = null;
+    if (usableId) {
+      try {
+        await this.deps.bitrix.updateCrmItem(payload.entityTypeId, usableId, fields);
+        bitrixId = usableId;
+      } catch (error) {
+        if (!(error instanceof Bitrix24ApiError) || !error.isNotFound) throw error;
+      }
     }
-
-    const bitrixId = await this.upsertCrmItem(
-      payload.entityTypeId,
-      payload.originId,
-      fields,
-      usableId,
-    );
+    if (bitrixId === null) {
+      // Creating, finding or replacing a counterparty runs under the key a client merge takes exclusively
+      // (`bitrix24-reverse:client:erp:<id>`, merge-state.ts advisoryKeys), with the redirect read again under it: a
+      // merge that committed meanwhile turns this into the update-only path of its alias, and a merge that starts now
+      // waits for these calls. A merge committing after them is caught when the mapping is persisted
+      // (`persistSyncIntent` keeps the alias). Only an advisory lock is held over the calls, no row.
+      type Locked = { kind: 'merged'; survivorId: string; row: ClientRow } | { kind: 'written'; bitrixId: string };
+      const created = await this.deps.db.transaction(async (tx): Promise<Locked> => {
+        await tx.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))', [`bitrix24-reverse:client:erp:${row.clientId}`]);
+        const current = await this.deps.source.getClientById(row.clientId);
+        if (current && current.mergedIntoClientId) return { kind: 'merged', survivorId: current.mergedIntoClientId, row: current };
+        if (
+          !bitrixOwned &&
+          mapping?.status === 'active' &&
+          mapping.bitrixId &&
+          mapping.bitrixObject !== payload.object
+        ) {
+          const operationId = await this.deps.mapping.prepareOutboundOperation(
+            this.deps.db,
+            {
+              objectType: toCounterpartyObject(mapping.bitrixObject),
+              bitrixId: mapping.bitrixId,
+              operation: 'delete',
+            },
+          );
+          await this.deps.bitrix.deleteCrmItem(
+            entityTypeIdForObject(mapping.bitrixObject),
+            mapping.bitrixId,
+          );
+          await this.deps.mapping.completeOutboundOperation(
+            this.deps.db,
+            operationId,
+          );
+        }
+        return { kind: 'written', bitrixId: await this.upsertCrmItem(payload.entityTypeId, payload.originId, fields, null) };
+      });
+      if (created.kind === 'merged') {
+        const fresh = await this.deps.mapping.get(this.deps.db, 'client', row.clientId);
+        return this.updateMergedAlias(created.row, created.survivorId, mapClient(created.row, this.deps.options.assignedById), fresh, event);
+      }
+      bitrixId = created.bitrixId;
+    }
     const intent: SyncIntent = {
-      mapping: {
-        entityType: 'client',
-        erpId: row.clientId,
-        bitrixObject: payload.object,
-        bitrixId,
-        parentErpId: null,
-        status: 'active',
-        lastHash: nextHash,
-      },
+      mapping: clientMapping(row.clientId, payload.object, bitrixId, nextHash),
       audit: {
         event: 'crm_sync.upsert',
         entityType: 'client',
@@ -219,6 +348,86 @@ export class Bitrix24SyncConsumer {
       },
     };
     return { id: bitrixId, object: payload.object, intent };
+  }
+
+  /**
+   * A merged client (migration 268) keeps its contact/company only as an alias of the survivor: the alias is updated
+   * (the «неактивен» status line reaches Bitrix24), never replaced, recreated or reclassified — a new counterparty
+   * would orphan the alias that requests of the survivor may still point to.
+   */
+  private async updateMergedAlias(
+    row: ClientRow,
+    survivorId: string,
+    payload: ReturnType<typeof mapClient>,
+    mapping: MappingRow | null,
+    event: OutboxEventRecord,
+  ): Promise<{ id: string; object: Bitrix24CounterpartyObject; intent: SyncIntent | null }> {
+    const skipped = (reason: string): { id: string; object: Bitrix24CounterpartyObject; intent: SyncIntent } => ({
+      id: mapping?.bitrixId ?? '',
+      object: payload.object,
+      intent: {
+        audit: {
+          event: 'crm_sync.merged_client_skipped',
+          entityType: 'client',
+          entityId: row.clientId,
+          requestId: event.outboxEventId,
+          source: 'crm-sync',
+          actorUserId: null,
+          relatedClientId: Number(row.clientId),
+          relatedEntities: [{ entityType: 'client', entityId: Number(survivorId) }],
+          metadata: {
+            survivorId: Number(survivorId),
+            reason,
+            bitrixObject: mapping?.bitrixObject ?? null,
+            bitrixId: mapping?.bitrixId ?? null,
+            mappingStatus: mapping?.status ?? null,
+          },
+        },
+      },
+    });
+    // `failed` is the status a delivery failure left before (attempts of older code): the alias is still the same.
+    if ((mapping?.status !== 'active' && mapping?.status !== 'failed') || !mapping.bitrixId || mapping.bitrixObject !== payload.object) {
+      return skipped('no_alias');
+    }
+    const fields = mapping.sourceSystem === 'bitrix24'
+      ? omitFields(payload.fields, ['originatorId', 'originId', 'assignedById'])
+      : await this.withoutOwnedAssignment('client', row.clientId, payload.fields);
+    try {
+      await this.deps.bitrix.updateCrmItem(payload.entityTypeId, mapping.bitrixId, fields);
+    } catch (error) {
+      if (error instanceof Bitrix24ApiError && error.isNotFound) return skipped('alias_missing');
+      // Retried, but the alias mapping is never marked failed: requests of the survivor may need it active (268).
+      throw new CrmSyncAuditOnlyError({
+        erpId: row.clientId,
+        relatedEntities: [{ entityType: 'client', entityId: Number(survivorId) }],
+        metadata: { survivorId: Number(survivorId), bitrixObject: mapping.bitrixObject, bitrixId: mapping.bitrixId },
+      }, error);
+    }
+    return {
+      id: mapping.bitrixId,
+      object: payload.object,
+      intent: {
+        mapping: {
+          entityType: 'client',
+          erpId: row.clientId,
+          bitrixObject: payload.object,
+          bitrixId: mapping.bitrixId,
+          parentErpId: null,
+          status: 'active',
+          lastHash: hash({ object: payload.object, fields }),
+        },
+        audit: {
+          event: 'crm_sync.upsert',
+          entityType: 'client',
+          entityId: row.clientId,
+          requestId: event.outboxEventId,
+          source: 'crm-sync',
+          actorUserId: null,
+          relatedClientId: Number(row.clientId),
+          metadata: { bitrixId: mapping.bitrixId, bitrixObject: payload.object, mergedIntoClientId: Number(survivorId) },
+        },
+      },
+    };
   }
 
   private async deleteClient(
@@ -413,6 +622,10 @@ export class Bitrix24SyncConsumer {
     if (!client) {
       throw new Error(`CRM sync: order cannot be projected — client ${clientId} not found in ERP`);
     }
+    if (client.mergedIntoClientId) {
+      // Merge guards keep orders off merged clients; an order still here would take the alias as its counterparty.
+      throw new Error(`CRM sync: order cannot be projected — client ${clientId} is merged into ${client.mergedIntoClientId}`);
+    }
     const expectedObject: Bitrix24CounterpartyObject =
       client.personType === 'legal' ? 'company' : 'contact';
     const mapping = await this.deps.mapping.get(this.deps.db, 'client', clientId);
@@ -423,7 +636,12 @@ export class Bitrix24SyncConsumer {
     ) {
       return { id: mapping.bitrixId, object: expectedObject, intent: null };
     }
-    return this.upsertClientRow(client, event);
+    const result = await this.upsertClientRow(client, event);
+    if (!result.intent?.mapping) {
+      // The client was merged while this order was projected: the retry reads the order on its survivor.
+      throw new Error(`CRM sync: order cannot be projected — client ${clientId} was merged meanwhile`);
+    }
+    return result;
   }
 
   private async reconcilePayments(
@@ -957,6 +1175,19 @@ export class Bitrix24SyncConsumer {
     }
     return this.deps.bitrix.createCrmItem(entityTypeId, fields);
   }
+}
+
+const CLIENT_MERGED = 'crm.sync.client.merged';
+const CLIENT_MERGE_UNDONE = 'crm.sync.client.merge_undone';
+const MINUTE = 60_000;
+
+function clientMapping(erpId: string, object: Bitrix24CounterpartyObject, bitrixId: string, lastHash: string): MappingRow {
+  return { entityType: 'client', erpId, bitrixObject: object, bitrixId, parentErpId: null, status: 'active', lastHash };
+}
+
+function positiveId(value: unknown): string | null {
+  const text = typeof value === 'number' || typeof value === 'string' ? String(value) : '';
+  return /^[1-9][0-9]{0,18}$/.test(text) ? text : null;
 }
 
 function toCounterpartyObject(value: string | undefined): Bitrix24CounterpartyObject {
