@@ -832,6 +832,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   toolbarActions,
 }, ref) => {
   const { header, details, hdfDetails, updateDetail, deleteDetail, setDetailEditing } = useOrderFormStore();
+  // read when a row opens: cell handlers are memoized and would otherwise see the defaults of an earlier render
+  const newRowDefaultsRef = useRef(newRowDefaults);
+  newRowDefaultsRef.current = newRowDefaults;
+  const latestDetailsRef = useRef(details);
+  latestDetailsRef.current = details;
   const { tabKey } = useKeepAlive();
   const workspaceKey = tabKey || `/orders/edit/${header?.order_id ?? 'new'}`;
   const restored = useRef(
@@ -1562,11 +1567,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     // an untouched prepared row starts from the form's defaults (values, not a background sync of the grid); the
     // price carries its marker in the form, so an unfilled row stays an empty tail (orderDetailRows)
     // the grid hands over a display row (sorting/grouping fields); the store row decides whether it is untouched
-    const storeRecord = details.find((detail) =>
+    const currentDefaults = newRowDefaultsRef.current;
+    const storeRecord = latestDetailsRef.current.find((detail) =>
       (detail.temp_id || detail.detail_id) === (record.temp_id || record.detail_id)) ?? record;
-    if (newRowDefaults && isPristineOrderDetailPlaceholder(storeRecord)) {
+    if (currentDefaults && isPristineOrderDetailPlaceholder(storeRecord)) {
       const rule = initialFormValues.sheet_material_type_id;
-      const defaults = newDetailDefaults(newRowDefaults, typeof rule === 'number' ? rule : undefined);
+      const defaults = newDetailDefaults(currentDefaults, typeof rule === 'number' ? rule : undefined);
       Object.assign(initialFormValues, defaults);
       if (defaults.milling_cost_per_sqm != null) {
         fieldValuesRef.current.milling_cost_per_sqm = defaults.milling_cost_per_sqm;
