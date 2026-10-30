@@ -13,6 +13,8 @@ export interface ClientRow {
   notes: string | null;
   isActive: boolean;
   phones: ClientPhoneRow[];
+  /** Survivor of a merged client (`client_merge_redirects`, migration 268); its counterparty is only an alias. */
+  mergedIntoClientId?: string | null;
 }
 
 export interface OrderRow {
@@ -50,6 +52,8 @@ export interface CrmSourcePort {
   getOrderById(id: string): Promise<OrderRow | null>;
   getPaymentsByOrderId(orderId: string): Promise<PaymentRow[]>;
   hasOrdersForClient(clientId: string): Promise<boolean>;
+  /** Current status of a client merge (`client_merges`), null when unknown. */
+  getClientMergeStatus?(mergeId: string): Promise<'done' | 'undone' | null>;
   listClientIds(afterId: string, limit: number): Promise<string[]>;
   listOrderIds(afterId: string, limit: number): Promise<string[]>;
 }

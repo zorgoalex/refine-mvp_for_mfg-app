@@ -468,6 +468,21 @@ resolve <object:id> keep|apply | complete`; `BACKEND_BITRIX24_ASSIGNMENT=true`
 ручные правки показываются и решаются `resolve`. Итог — аудит
 `bitrix24.assignment.changed` и журнал `bitrix24_assignment_change`.
 
+Объединённые клиенты (миграция `268_client_merges.sql`, до backend). Контакт
+или компания объединённого клиента остаётся его алиасом: обратная синхронизация
+находит клиента по сопоставлению и перечитывает перенаправление
+`client_merge_redirects` под ключом контрагента. Сделка на таком контакте
+(в том числе новая) относится к остающемуся клиенту (аудит
+`crm_sync.reverse.merged_client_redirected`); правки самого контакта (имя,
+телефоны, строка «неактивен») и его удаление в Bitrix24 не применяются к
+объединённому клиенту (аудит `crm_sync.reverse.merged_client_skipped`).
+Первоначальная выгрузка (`crm-sync:backfill`) объединённых клиентов пропускает.
+События `crm.sync.client.merged` / `crm.sync.client.merge_undone` (флаг
+`BACKEND_CLIENT_MERGE_CRM_EVENTS`) дают комментарий в таймлайне контакта
+объединённого клиента, без правки полей; повтор находит свой комментарий по
+маркеру `ERP-MERGE-<id>` / `ERP-MERGE-UNDO-<id>`. Итог — аудит
+`crm_sync.client_merge_comment`.
+
 Кнопка «Повторить отправку в Bitrix» в настройках интеграции
 (`POST /api/v1/bitrix24/sync-health/retry-failed-outbound`, право
 `bitrix24.integration.manage`) возвращает в очередь последнее событие каждого
