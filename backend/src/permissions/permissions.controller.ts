@@ -1,7 +1,8 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Post, Put, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, Put, Req } from '@nestjs/common';
+import { ApiBearerAuth, ApiHeader, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../common/errors/api-error';
+import { parseIdempotencyKey } from './authorization-idempotency';
 import type { RequestWithCurrentUser } from './current-user';
 import {
   ALLOWED_SCOPE_VALUES,
@@ -18,6 +19,14 @@ const updateMatrixSchema = z.object({
   roleScopes: z.record(z.string(), z.partialRecord(z.enum(ROLE_POLICY_SCOPE_KEYS), scopeValueSchema)),
   confirmDangerous: z.boolean().optional(),
 });
+
+/** Transitional (access groups plan R5 §5.3): optional for the matrix; with a key the repeat replays the stored answer. */
+const optionalIdempotencyHeader = {
+  name: 'Idempotency-Key',
+  required: false,
+  description: 'Optional; a repeat with the same key and body returns the stored response, another body — 409',
+  schema: { type: 'string', minLength: 8, maxLength: 200 },
+} as const;
 
 @ApiTags('Permissions')
 @ApiBearerAuth()
@@ -49,32 +58,40 @@ export class PermissionsController {
   @ApiOperation({ operationId: 'updateRolesMatrix', summary: 'Update role permissions matrix' })
   @ApiResponse({ status: 200, description: 'Updated role permissions matrix' })
   @ApiResponse({ status: 409, description: 'Stale permissions matrix version or lockout denied' })
+  @ApiHeader(optionalIdempotencyHeader)
   @Put('roles-matrix')
   async updateRolesMatrix(
     @Req() request: RequestWithCurrentUser,
     @Body() body: unknown,
+    @Headers('idempotency-key') idempotencyKey?: string | string[],
   ): Promise<RolesMatrixDto> {
+    const currentUser = requireCurrentUser(request);
     const parsed = parseUpdateMatrix(body);
     return this.permissions.updateRolesMatrix(
-      requireCurrentUser(request),
+      currentUser,
       parsed,
       request.requestId,
+      parseIdempotencyKey(idempotencyKey, false),
     );
   }
 
   @ApiOperation({ operationId: 'resetRolePermissionsToDefaults', summary: 'Reset a role to default permissions' })
   @ApiParam({ name: 'roleId', type: Number })
   @ApiResponse({ status: 200, description: 'Updated role permissions matrix' })
+  @ApiHeader(optionalIdempotencyHeader)
   @Post('roles/:roleId/reset-to-defaults')
   @HttpCode(200)
   async resetRoleToDefaults(
     @Req() request: RequestWithCurrentUser,
     @Param('roleId') roleIdParam: string,
+    @Headers('idempotency-key') idempotencyKey?: string | string[],
   ): Promise<RolesMatrixDto> {
+    const currentUser = requireCurrentUser(request);
     return this.permissions.resetRoleToDefaults(
-      requireCurrentUser(request),
+      currentUser,
       parseRoleId(roleIdParam),
       request.requestId,
+      parseIdempotencyKey(idempotencyKey, false),
     );
   }
 }

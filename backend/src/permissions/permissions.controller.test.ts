@@ -63,7 +63,12 @@ describe('PermissionsController', () => {
     };
 
     await expect(controller.updateRolesMatrix(request as never, body)).resolves.toBe(matrix);
-    expect(service.updateRolesMatrix).toHaveBeenCalledWith(request.user, body, 'req-1');
+    expect(service.updateRolesMatrix).toHaveBeenCalledWith(request.user, body, 'req-1', undefined);
+
+    // Transitional idempotency (access groups R5 §5.3): an optional key goes to the command; a malformed one is refused.
+    await controller.updateRolesMatrix(request as never, body, 'matrix-key-1');
+    expect(service.updateRolesMatrix).toHaveBeenLastCalledWith(request.user, body, 'req-1', 'matrix-key-1');
+    await expect(controller.updateRolesMatrix(request as never, body, 'bad key')).rejects.toMatchObject({ statusCode: 422 });
   });
 
   it('rejects invalid scope values before service mutation', async () => {

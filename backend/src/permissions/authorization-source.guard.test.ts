@@ -16,6 +16,8 @@ const ALLOWED: Record<string, string> = {
   'permissions/permissions.service.ts': 'roles matrix administration and seeding',
   'permissions/policies/role-policies.ts': 'static scope defaults',
   'permissions/policies/scope.ts': 'fallback for tokens without scopes (role defaults)',
+  'permissions/authorization-command-guard.ts': 'lockout: an administrator by role alone while access groups are on',
+  'permissions/access-groups/pg-access-groups.repository.ts': 'sources of the user card: which grant comes from the role',
   'modules/auth/auth.service.ts': 'fallback only when no database is configured (unit tests)',
   'modules/auth/adapters/pg-auth-session-manager.ts': 'fallback only when no database is configured',
   'modules/users/adapters/pg-user-repository.ts': 'fallback only when no database is configured',

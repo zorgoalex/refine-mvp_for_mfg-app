@@ -50,10 +50,12 @@ export async function bumpAuthorizationVersion(client: DatabaseClient): Promise<
 
 /**
  * Lockout protection (§5.2), checked on the state the command is about to commit: at least one active, non-service
- * user must keep every administration permission in his effective grants. Otherwise 409 and the command rolls back.
+ * user must keep every administration permission in his effective grants. While access groups are on, also by the
+ * base role alone (access groups plan R7 §4.2): switching the groups off — the rollback — must never lock everybody out,
+ * so an administrator may not exist only through a group. Otherwise 409 and the command rolls back.
  */
 export async function assertAdministrationRemains(client: DatabaseClient): Promise<void> {
-  const result = await client.query<{ remains: boolean }>(
+  const result = await client.query<{ remains: boolean; by_role: boolean }>(
     `
     SELECT EXISTS (
       SELECT 1
@@ -63,10 +65,27 @@ export async function assertAdministrationRemains(client: DatabaseClient): Promi
         AND p.permission_name = ANY($1::text[])
       GROUP BY u.user_id
       HAVING count(DISTINCT p.permission_name) = cardinality($1::text[])
-    ) AS remains
+    ) AS remains,
+    NOT COALESCE((SELECT (to_jsonb(ps) ->> 'access_groups_enabled')::boolean FROM permissions_state ps WHERE ps.id), false)
+    OR EXISTS (
+      SELECT 1
+      FROM users u
+      JOIN role_permissions rp ON rp.role_id = u.role_id AND rp.is_enabled
+      JOIN permissions_catalog pc ON pc.permission_name = rp.permission_name AND pc.is_active
+      WHERE u.is_active AND NOT u.is_service_account
+        AND rp.permission_name = ANY($1::text[])
+      GROUP BY u.user_id
+      HAVING count(DISTINCT rp.permission_name) = cardinality($1::text[])
+    ) AS by_role
     `,
     [ADMINISTRATION_PERMISSIONS],
   );
+  if (result.rows[0]?.remains === true && result.rows[0]?.by_role === false) {
+    throw new ApiError(409, 'PERMISSIONS_LOCKOUT_DENIED',
+      'Пока группы доступа включены, должен остаться активный администратор по роли (без групп)', {
+        requiredPermissions: ADMINISTRATION_PERMISSIONS, byRole: true,
+      });
+  }
   if (result.rows[0]?.remains !== true) {
     throw new ApiError(409, 'PERMISSIONS_LOCKOUT_DENIED', 'Нельзя оставить систему без активного администратора', {
       requiredPermissions: ADMINISTRATION_PERMISSIONS,
