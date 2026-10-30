@@ -339,72 +339,70 @@ export function SheetPreview({
           />
         </div>
       ) : null}
-      <Tooltip title="Двойной клик — свернуть до превью">
-        {/* padding leaves room for the side-dimension labels */}
-        <div style={{ position: 'relative', display: 'inline-block', padding: '22px 56px', cursor: 'zoom-out' }}>
-          {/* Enlarged view ~2× the previous size: cap doubled (900 → 1800); the
-              open sheet's wrapper in CutPage spans the full previews row so the
-              image can actually grow to this width. */}
+      {/* padding leaves room for the side-dimension labels; a double click collapses the sheet (zoom-out cursor, no hover hint over the details) */}
+      <div style={{ position: 'relative', display: 'inline-block', padding: '22px 56px', cursor: 'zoom-out' }}>
+        {/* Enlarged view ~2× the previous size: cap doubled (900 → 1800); the
+            open sheet's wrapper in CutPage spans the full previews row so the
+            image can actually grow to this width. */}
+        <span
+          style={{
+            position: 'relative',
+            display: 'inline-block',
+            maxWidth: 1800,
+            width: '100%',
+            // «− 100% +»: the sheet gets an explicit width (100% = the width it had without the zoom)
+            ...(zoomControls && baseWidth > 0 ? { maxWidth: 'none', width: Math.round(baseWidth * zoom) } : null),
+          }}
+        >
+          <img
+            ref={imgRef}
+            className="app-image-outline"
+            src={src}
+            alt={alt}
+            onDoubleClick={onCollapse}
+            onLoad={(e) => {
+              const img = e.currentTarget;
+              setFullImgSize({ w: img.clientWidth, h: img.clientHeight });
+              setHeadingShare(sheetImageHeadingShare(img.naturalWidth, img.naturalHeight, horizontalMm, verticalMm));
+            }}
+            style={{ width: '100%', display: 'block' }}
+          />
+          {/* overlays cover the sheet itself: the heading band above it is not part of the sheet */}
           <span
             style={{
-              position: 'relative',
-              display: 'inline-block',
-              maxWidth: 1800,
+              position: 'absolute',
+              left: 0,
+              top: `${headingShare * 100}%`,
               width: '100%',
-              // «− 100% +»: the sheet gets an explicit width (100% = the width it had without the zoom)
-              ...(zoomControls && baseWidth > 0 ? { maxWidth: 'none', width: Math.round(baseWidth * zoom) } : null),
+              height: `${(1 - headingShare) * 100}%`,
+              pointerEvents: 'none',
             }}
           >
-            <img
-              ref={imgRef}
-              className="app-image-outline"
-              src={src}
-              alt={alt}
+            <OverlayLayer
+              overlays={overlays}
+              labelsInImage={labelsInImage}
+              imgWidthPx={fullImgSize.w}
+              imgHeightPx={fullImgSize.h * (1 - headingShare)}
               onDoubleClick={onCollapse}
-              onLoad={(e) => {
-                const img = e.currentTarget;
-                setFullImgSize({ w: img.clientWidth, h: img.clientHeight });
-                setHeadingShare(sheetImageHeadingShare(img.naturalWidth, img.naturalHeight, horizontalMm, verticalMm));
-              }}
-              style={{ width: '100%', display: 'block' }}
+              activeKey={activeOverlayKey}
+              onHoverKey={onOverlayHover}
+              onPickKey={onOverlayPick}
             />
-            {/* overlays cover the sheet itself: the heading band above it is not part of the sheet */}
-            <span
-              style={{
-                position: 'absolute',
-                left: 0,
-                top: `${headingShare * 100}%`,
-                width: '100%',
-                height: `${(1 - headingShare) * 100}%`,
-                pointerEvents: 'none',
-              }}
-            >
-              <OverlayLayer
-                overlays={overlays}
-                labelsInImage={labelsInImage}
-                imgWidthPx={fullImgSize.w}
-                imgHeightPx={fullImgSize.h * (1 - headingShare)}
-                onDoubleClick={onCollapse}
-                activeKey={activeOverlayKey}
-                onHoverKey={onOverlayHover}
-                onPickKey={onOverlayPick}
-              />
-            </span>
           </span>
-          <span style={{ ...sideLabelStyle, top: 2, left: '50%', transform: 'translateX(-50%)' }}>
-            {formatSheetSide(horizontalMm)}
-          </span>
-          <span style={{ ...sideLabelStyle, bottom: 2, left: '50%', transform: 'translateX(-50%)' }}>
-            {formatSheetSide(horizontalMm)}
-          </span>
-          <span style={{ ...sideLabelStyle, left: 4, top: '50%', transform: 'translateY(-50%) rotate(-90deg)', transformOrigin: 'left center' }}>
-            {formatSheetSide(verticalMm)}
-          </span>
-          <span style={{ ...sideLabelStyle, right: 4, top: '50%', transform: 'translateY(-50%) rotate(90deg)', transformOrigin: 'right center' }}>
-            {formatSheetSide(verticalMm)}
-          </span>
-        </div>
-      </Tooltip>
+        </span>
+        <span style={{ ...sideLabelStyle, top: 2, left: '50%', transform: 'translateX(-50%)' }}>
+          {formatSheetSide(horizontalMm)}
+        </span>
+        <span style={{ ...sideLabelStyle, bottom: 2, left: '50%', transform: 'translateX(-50%)' }}>
+          {formatSheetSide(horizontalMm)}
+        </span>
+        <span style={{ ...sideLabelStyle, left: 4, top: '50%', transform: 'translateY(-50%) rotate(-90deg)', transformOrigin: 'left center' }}>
+          {formatSheetSide(verticalMm)}
+        </span>
+        <span style={{ ...sideLabelStyle, right: 4, top: '50%', transform: 'translateY(-50%) rotate(90deg)', transformOrigin: 'right center' }}>
+          {formatSheetSide(verticalMm)}
+        </span>
+      </div>
     </div>
   );
 }

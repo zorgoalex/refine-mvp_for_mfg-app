@@ -45,5 +45,6 @@ describe('Sheet pieces: detail info on a right click, not on hover', () => {
   it('each piece opens its detail card on contextMenu (the parts list beside the sheet names the details)', () => {
     expect(sheetPreview).toMatch(/<Popover key=\{overlay\.key\} content=\{renderOverlayTooltip\(overlay\)\} trigger="contextMenu"/);
     expect(sheetPreview).not.toMatch(/<Tooltip key=\{overlay\.key\}/);
+    expect(sheetPreview).not.toMatch(/Двойной клик — свернуть до превью/);
   });
 });
