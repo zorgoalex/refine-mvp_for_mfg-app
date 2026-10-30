@@ -1787,6 +1787,42 @@ describe('order status board model', () => {
       .toBe(false);
   });
 
+  it('counts a detail done by its production status, once, without a bath or file, and without a false excess', () => {
+    const order = { ...card(2705), partsCount: 6, orderStatusName: 'В производстве', details: [
+      // packed without a bath: rolled by status
+      { ...orderDetail(101, 2), statusCut: true, statusRolled: true },
+      // cut by its file and rolled by status: one piece, no excess
+      { ...orderDetail(102, 1), statusCut: true, statusRolled: true },
+      // «Распилен» without any file on the board
+      { ...orderDetail(103, 3), statusCut: true, statusRolled: false },
+    ] };
+    const packet = cncPacket('file-102', ['2705'], [2705], [2705], [102]);
+    packet.items[0] = { ...packet.items[0], quantity: 1 };
+    const columns: CncTelegramTodayColumn[] = [
+      { key: 'completed', title: 'Распилено', total: 1, packets: [packet], baths: [] },
+    ];
+    const split = splitCncOrderCardsByManualColumn([order], buildCncOrderReadiness(columns, {}), {},
+      undefined, buildCncOrderMissingDetails([order], columns));
+    const entry = [...split.orders, ...split.orders_ready][0]!;
+    expect(entry.readiness).toMatchObject({ totalDetails: 6, cutDetails: 3, rolledDetails: 3, remainingDetails: 0,
+      excessQuantities: { cut: 0, rolled: 0 } });
+    expect(cncReadinessExcessText(entry.readiness)).toBeNull();
+    // proven by status: not listed as missing
+    expect(entry.missingDetails).toEqual([]);
+  });
+
+  it('a status never lowers what the board facts show, and facts beyond the order stay excess', () => {
+    const order = { ...card(2705), partsCount: 1, orderStatusName: 'В производстве',
+      details: [{ ...orderDetail(101, 1), statusCut: true, statusRolled: false }] };
+    const bath = cncBath('bath-101', ['2705'], [2705]);
+    bath.items[0] = { ...bath.items[0], detailId: 101, detailNumber: 1, quantity: 2 };
+    const split = splitCncOrderCardsByManualColumn([order], buildCncOrderReadiness([
+      { key: 'baths_laminated', title: 'Закатано', total: 1, packets: [], baths: [bath] },
+    ], {}), {});
+    expect([...split.orders, ...split.orders_ready][0]!.readiness).toMatchObject({
+      cutDetails: 0, rolledDetails: 1, remainingDetails: 0, excessQuantities: { cut: 0, rolled: 1 } });
+  });
+
   it('keeps excess cut apart while using ordered quantity as the denominator', () => {
     const split = splitCncOrderCardsByManualColumn(
       [{ ...card(2705), partsCount: 34, details: [orderDetail(101, 34)] }],
