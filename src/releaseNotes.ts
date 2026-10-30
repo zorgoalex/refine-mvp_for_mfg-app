@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-10-30", title: "Буква «Б» сразу после «О»; детали в картах «Базис раскрой» — «Базис»",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Буква «Б» (статус «Базис») везде стоит сразу после «О»: календарь, меню букв по правой кнопке, список и карточка заказа, WhatsApp-сводка. Раньше «Б» могла оказаться последней.",
+      "Детали «Новый», которые уже стояли в карточках «Базис раскрой» до появления статуса «Базис», один раз переведены в «Базис» (с записью в журнал по каждому заказу). Детали, назначенные в задание ЧПУ, не меняются.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-31", title: "Таблица деталей: чистые пустые строки",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [
