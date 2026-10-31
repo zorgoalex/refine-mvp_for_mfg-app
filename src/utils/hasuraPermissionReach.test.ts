@@ -40,5 +40,9 @@ describe('HASURA_PERMISSION_REACH (access groups: limits of the base Hasura role
     expect(hasuraReachGaps(['clients.create'], 'manager')).toEqual([]);
     // A role without any Hasura profile (service roles) cannot use any Hasura-backed permission.
     expect(hasuraReachGaps(['clients.view'], 'onec_operator')[0]?.targets.length).toBeGreaterThan(0);
+    // A partial reach is not a gap: the viewer reads orders_view though not the orders table.
+    expect(hasuraReachGaps(['orders.view'], 'viewer')).toEqual([]);
+    // What the user already holds (from the role) is never reported.
+    expect(hasuraReachGaps(['clients.create'], 'viewer', new Set(['clients.create']))).toEqual([]);
   });
 });

@@ -97,9 +97,17 @@ export interface MemberHasuraWarning {
  * Members whose base role cannot use some of the group's permissions in Hasura (plan v6 §6): a group never adds Hasura
  * permissions, the base role's profile stays. Backend-only permissions give no warning.
  */
-export function memberHasuraWarnings(permissions: readonly string[], members: readonly Pick<AccessGroupMemberDto, 'userId' | 'username' | 'roleCode'>[]): MemberHasuraWarning[] {
+export function memberHasuraWarnings(
+  permissions: readonly string[],
+  members: ReadonlyArray<Pick<AccessGroupMemberDto, 'userId' | 'username' | 'roleCode'> & { held?: readonly string[] }>,
+): MemberHasuraWarning[] {
   return members
-    .map((member) => ({ userId: member.userId, username: member.username, roleCode: member.roleCode, gaps: hasuraReachGaps(permissions, member.roleCode) }))
+    .map((member) => ({
+      userId: member.userId,
+      username: member.username,
+      roleCode: member.roleCode,
+      gaps: hasuraReachGaps(permissions, member.roleCode, new Set(member.held ?? [])),
+    }))
     .filter((warning) => warning.gaps.length > 0);
 }
 

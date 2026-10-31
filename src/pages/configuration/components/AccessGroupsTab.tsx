@@ -224,7 +224,7 @@ export function AccessGroupsTab() {
       )}
 
       <Row gutter={[16, 16]}>
-        <Col xs={24} xl={9}>
+        <Col xs={24} xxl={9}>
           <Card
             size="small"
             title="Группы доступа"
@@ -248,7 +248,7 @@ export function AccessGroupsTab() {
             />
           </Card>
         </Col>
-        <Col xs={24} xl={15}>
+        <Col xs={24} xxl={15}>
           {selectedId != null && catalog ? (
             <AccessGroupEditor
               key={selectedId}
@@ -387,7 +387,13 @@ function AccessGroupEditor({ groupId, refreshSignal, catalog, users, editable, o
     () => memberIds.map((userId) => {
       const known = group?.members.find((member) => member.userId === userId);
       const user = usersById.get(userId);
-      return { userId, username: user?.fullName || user?.username || known?.username || String(userId), roleCode: user?.role ?? known?.roleCode ?? null };
+      // `held`: what the user already has (role, while groups are off) — the group adds nothing there.
+      return {
+        userId,
+        username: user?.fullName || user?.username || known?.username || String(userId),
+        roleCode: user?.role ?? known?.roleCode ?? null,
+        held: user?.permissions ?? [],
+      };
     }),
     [group, memberIds, usersById],
   );

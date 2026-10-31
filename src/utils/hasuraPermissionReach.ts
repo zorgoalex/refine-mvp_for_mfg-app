@@ -222,19 +222,29 @@ export function hasuraRoleForErpRole(role: string): string {
 
 export interface HasuraReachGap {
   permission: string;
-  /** `table.operation` that the permission opens but the role's Hasura profile does not have. */
+  /** Every `table.operation` the permission opens — the role's Hasura profile has none of them. */
   targets: string[];
 }
 
-/** Permissions of `permissions` that cannot work in Hasura for a user with the base role `roleCode`. */
-export function hasuraReachGaps(permissions: readonly string[], roleCode: string | null | undefined): HasuraReachGap[] {
+/**
+ * Permissions of `permissions` that cannot work in Hasura at all for a user with the base role `roleCode`: the role has
+ * none of the operations the permission opens. Permissions the user already holds (`held`, e.g. from the role) are not
+ * reported — a group adds nothing there.
+ */
+export function hasuraReachGaps(
+  permissions: readonly string[],
+  roleCode: string | null | undefined,
+  held: ReadonlySet<string> = new Set(),
+): HasuraReachGap[] {
   const hasuraRole = hasuraRoleForErpRole(roleCode ?? '');
   const gaps: HasuraReachGap[] = [];
   for (const permission of permissions) {
+    if (held.has(permission)) continue;
     const reach = HASURA_PERMISSION_REACH[permission as PermissionName];
     if (!reach) continue;
-    const targets = Object.entries(reach).filter(([, roles]) => !roles.includes(hasuraRole)).map(([target]) => target);
-    if (targets.length > 0) gaps.push({ permission, targets });
+    const entries = Object.entries(reach);
+    if (entries.some(([, roles]) => roles.includes(hasuraRole))) continue;
+    gaps.push({ permission, targets: entries.map(([target]) => target) });
   }
   return gaps;
 }

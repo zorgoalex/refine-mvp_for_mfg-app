@@ -123,7 +123,9 @@ export function UserAccessGroupsCard({ userId, onVersionAdvanced, reloadKey = 0 
   );
   const gaps = useMemo(() => {
     const permissions = [...new Set(groupKeys.flatMap(({ key }) => groupPermissions.get(key) ?? []))];
-    return hasuraReachGaps(permissions, authorization?.roleCode);
+    // Permissions the user has from the role are not reported: the group adds nothing there.
+    const fromRole = new Set((authorization?.permissions ?? []).filter((row) => row.sources.includes('role')).map((row) => row.permission));
+    return hasuraReachGaps(permissions, authorization?.roleCode, fromRole);
   }, [authorization, groupKeys, groupPermissions]);
 
   if (!canViewUserAccessGroups()) return null;
