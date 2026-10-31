@@ -14,7 +14,7 @@ import {
   Select,
 } from "antd";
 import { authStorage } from "../../utils/auth";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createActionKeyStore } from "../../api/actionIdempotency";
 import { advanceOwnVersion, formRowVersion } from "./userFormVersion";
 import { usersApi } from "../../api/usersApi";
@@ -23,6 +23,7 @@ import { featureFlags } from "../../config/featureFlags";
 import type { UserIdentity } from "../../types/auth";
 import { can } from "../../utils/permissions";
 import { WorkosAdminLinksCard } from "./WorkosAdminLinksCard";
+import { UserAccessGroupsCard, canViewUserAccessGroups } from "./UserAccessGroupsCard";
 import {
   isCreationOnlyRole,
   mapBackendUpdateUserRequest,
@@ -43,6 +44,7 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
     // Преобразуем данные при сохранении: role → role_id
     onMutationSuccess: () => {
       message.success('Данные пользователя обновлены');
+      setAuthorizationReload((value) => value + 1);
     },
   });
 
@@ -61,9 +63,21 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
   // Row version advanced by this form's own confirmed commands (see userFormVersion): the next command compares with
   // it without reloading the form, which would drop unsaved fields.
   const [ownRowVersion, setOwnRowVersion] = useState<number | undefined>(undefined);
+  const [authorizationReload, setAuthorizationReload] = useState(0);
   const currentVersion = () => formRowVersion(queryResult?.data?.data?.row_version, ownRowVersion);
 
   const userId = queryResult?.data?.data?.user_id ?? queryResult?.data?.data?.id;
+  // The same route shows another user: versions confirmed for the previous one say nothing about this one, and an
+  // answer to a command sent for the previous one must not advance them (shownUserId is compared on every answer).
+  const shownUserId = useRef(userId);
+  shownUserId.current = userId;
+  useEffect(() => {
+    setOwnRowVersion(undefined);
+  }, [userId]);
+  const advanceFor = (requestUserId: unknown, sent: number | undefined, returned: number | undefined) => {
+    if (String(shownUserId.current) !== String(requestUserId)) return;
+    setOwnRowVersion((own) => advanceOwnVersion(own, sent, returned));
+  };
   // «Оператор интеграции 1С» назначается только при создании: у такой учётки роль не меняется, другим не предлагается.
   const roleLocked = isCreationOnlyRole(queryResult?.data?.data?.role);
   const canManageSso = can("users.manage_sso", identity);
@@ -79,9 +93,10 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
           ...(typeof expectedVersion === 'number' ? { expectedVersion } : {}),
         };
         const key = passwordKeys.keyFor(request);
-        const response = await usersApi.changePassword(Number(userId), request, key);
+        const requestUserId = userId;
+        const response = await usersApi.changePassword(Number(requestUserId), request, key);
         passwordKeys.succeeded(key);
-        setOwnRowVersion((own) => advanceOwnVersion(own, expectedVersion, response.rowVersion));
+        advanceFor(requestUserId, expectedVersion, response.rowVersion);
 
         message.success('Пароль успешно изменён');
         passwordForm.resetFields();
@@ -130,9 +145,12 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
       const expectedVersion = currentVersion();
       const request = mapBackendUpdateUserRequest(values, expectedVersion);
       const key = saveKeys.keyFor(request);
-      usersApi.update(Number(userId), request, key).then((response) => {
+      const requestUserId = userId;
+      usersApi.update(Number(requestUserId), request, key).then((response) => {
         saveKeys.succeeded(key);
-        setOwnRowVersion((own) => advanceOwnVersion(own, expectedVersion, response.user.rowVersion));
+        advanceFor(requestUserId, expectedVersion, response.user.rowVersion);
+        // Role or activity may have changed the effective rights shown in the access groups card.
+        setAuthorizationReload((value) => value + 1);
         message.success('Данные пользователя обновлены');
       }).catch((error) => {
         console.error('Update user error:', error);
@@ -219,6 +237,19 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
           </Col>
         </Row>
       </Form>
+
+      {canViewUserAccessGroups() && userId != null && (
+        <UserAccessGroupsCard
+          key={String(userId)}
+          userId={Number(userId)}
+          // Only a group command sent from this form's own baseline moves it: one sent from a newer version (after a
+          // conflict) must leave the form stale, or its old fields (role, activity) would pass the next check.
+          onVersionAdvanced={(sent, returned) => {
+            if (sent === currentVersion()) advanceFor(userId, sent, returned);
+          }}
+          reloadKey={authorizationReload}
+        />
+      )}
 
       <Divider />
 
