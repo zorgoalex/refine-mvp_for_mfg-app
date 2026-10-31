@@ -201,7 +201,7 @@ describe('VPS compose backend runtime flags', () => {
     const compose = readTemplate('ops/templates/docker-compose.vps.yml');
     const envExample = readTemplate('ops/templates/env.vps.example');
     for (const flag of ['SHADOW_INTAKE', 'SHADOW_COMPARE', 'PINNED_DISPATCH', 'JOB_WORKER', 'PUBLISHED_READS', 'BAZIS_REFILL',
-      'ORDER_CORRECTIONS']) {
+      'ORDER_CORRECTIONS', 'BATH_DUPLICATES_READ', 'BATH_DUPLICATES_WRITE']) {
       expect(compose).toContain(`BACKEND_MDF_${flag}: \${BACKEND_MDF_${flag}:-false}`);
       expect(envExample).toContain(`BACKEND_MDF_${flag}=false`);
     }

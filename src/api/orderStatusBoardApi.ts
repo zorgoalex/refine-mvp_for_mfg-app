@@ -9,6 +9,10 @@ import type {
   MdfBoardManualMoveUpsertResponse,
   OrderStatusBoardQuery,
   OrderStatusBoardResponse,
+  MdfBathDuplicatesOfBath,
+  MdfBathDuplicatesResponse,
+  ResolveMdfBathDuplicateRequest,
+  ResolveMdfBathDuplicateResponse,
 } from './types/orderStatusBoardApi.types';
 import { withQuery } from './ordersApi';
 
@@ -135,6 +139,33 @@ export const orderStatusBoardApi = {
     return httpClient.put<MdfBoardManualMoveUpsertResponse>(
       apiRoutes.orders.statusBoardMdfManualMove(cardKind, normalizedCardId),
       { targetColumn, expectedColumn },
+      { skipAuthRefresh: true, headers: { 'Idempotency-Key': idempotencyKey } },
+    );
+  },
+  /** «Разобрать дубль» facts of hybrid-board engine baths outside the legacy read; ≤ 100 ids per request. */
+  async listMdfBathDuplicates(bathCardIds: readonly string[], options?: RequestOptions): Promise<MdfBathDuplicatesOfBath[]> {
+    const ids = [...new Set(bathCardIds)].filter(id => /^cut-result:[1-9][0-9]{0,15}$/.test(id)).sort();
+    const chunks: string[][] = [];
+    for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+    const responses = await Promise.all(chunks.map(chunk => httpClient.get<MdfBathDuplicatesResponse>(
+      withQuery(apiRoutes.orders.statusBoardMdfBathDuplicates, { bathCardIds: chunk.join(',') }), options)));
+    return responses.flatMap(response => response.baths);
+  },
+  /** «Разобрать дубль»: keep both baths or mark this bath's shared details as rework. The key makes an explicit
+   * retry the same decision; never replayed by auth refresh under another actor. */
+  resolveMdfBathDuplicate(
+    request: ResolveMdfBathDuplicateRequest,
+    idempotencyKey: string,
+  ): Promise<ResolveMdfBathDuplicateResponse> {
+    if (!/^[A-Za-z0-9._:-]{8,200}$/.test(idempotencyKey)) throw new Error('Invalid MDF command idempotency key');
+    if (!/^cut-result:[1-9][0-9]{0,15}$/.test(request.bathCardId)
+      || !/^cut-result:[1-9][0-9]{0,15}$/.test(request.otherBathCardId)
+      || !/^[a-f0-9]{64}$/.test(request.expectedDigest)) {
+      throw new Error('Invalid MDF bath duplicate request');
+    }
+    return httpClient.post<ResolveMdfBathDuplicateResponse>(
+      apiRoutes.orders.statusBoardMdfBathDuplicatesResolve,
+      request,
       { skipAuthRefresh: true, headers: { 'Idempotency-Key': idempotencyKey } },
     );
   },

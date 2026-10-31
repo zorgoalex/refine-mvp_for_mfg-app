@@ -210,6 +210,35 @@ export interface CncTelegramBathCard {
   itemQuantityTotal: number;
   items: CncTelegramBathItem[];
   sheets: CncTelegramBathSheet[];
+  /** Backend BACKEND_MDF_BATH_DUPLICATES_READ only: other ACTIVE baths sharing details («Разобрать дубль»). */
+  duplicates?: CncTelegramBathDuplicate[];
+  /** Backend BACKEND_MDF_BATH_DUPLICATES_READ only: valid «rework» marks of this bath. */
+  reworkMarks?: CncTelegramBathReworkMark[];
+  /** Distinct details of this bath under a valid rework mark (server union over its marked pairs). */
+  reworkDetailCount?: number;
+}
+
+export type CncTelegramBathDuplicateBlockedReason =
+  | 'scope' | 'engine' | 'not_covered' | 'production' | 'composition' | 'linked_cards';
+
+export interface CncTelegramBathDuplicate {
+  otherBathCardId: string;
+  /** null when the user cannot see every order of the other bath. */
+  otherJobLabel: string | null;
+  shared: Array<{ orderId: number; detailId: number; detailNumber: number | null; here: number; there: number }>;
+  sharedCount: number;
+  coveredBy: boolean;
+  /** Hint only: this bath's job may be archived in «Раскрой». */
+  archivable: boolean;
+  blockedReason: CncTelegramBathDuplicateBlockedReason | null;
+  /** Server pair digest, passed back to the resolve command as is. */
+  digest: string;
+  resolvedAction: 'rework_mark' | null;
+}
+
+export interface CncTelegramBathReworkMark {
+  otherBathCardId: string;
+  detailCount: number;
 }
 
 export interface CncTelegramBazisCutSetItem {

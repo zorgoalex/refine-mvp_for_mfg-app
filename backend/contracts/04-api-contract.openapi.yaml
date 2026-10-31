@@ -5238,6 +5238,147 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/orders/status-board/mdf-bath-duplicates:
+    get:
+      tags:
+        - Orders
+      operationId: listMdfBathDuplicates
+      summary: Дубли и пометки переделки выбранных ванн (карточки движка вне чтения доски)
+      description: >-
+        Для гибридной доски: ванны движка, которых нет в /cnc-telegram/today (поиск, фокус, старые карточки).
+        Возвращает только ванны, все заказы которых видны пользователю (неактивная ванна — с пустыми списками); пары — по тем же правилам, что
+        duplicates[] чтения доски (redaction, подсказка, решения). Включается BACKEND_MDF_BATH_DUPLICATES_READ
+        (выключено ⇒ 503).
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - name: bathCardIds
+          in: query
+          required: true
+          description: До 100 значений cut-result:<id> через запятую.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Пары и пометки запрошенных ванн
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [generatedAt, baths]
+                properties:
+                  generatedAt: { type: string, format: date-time }
+                  baths:
+                    type: array
+                    items:
+                      type: object
+                      required: [bathCardId, duplicates, reworkMarks, reworkDetailCount]
+                      properties:
+                        bathCardId: { type: string }
+                        duplicates: { type: array, items: { type: object } }
+                        reworkMarks: { type: array, items: { type: object } }
+                        reworkDetailCount: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/status-board/mdf-bath-duplicates/resolve:
+    post:
+      tags:
+        - Orders
+      operationId: resolveMdfBathDuplicate
+      summary: Разобрать дубль ванн МДФ-доски — «Оставить обе» или пометить общие детали ванны как переделку
+      description: >-
+        Две активные ванны разных заданий раскроя с общими деталями (duplicates[] карточки ванны в
+        /cnc-telegram/today). Записывает решение keep_both или rework_mark (только метка, круг переделки не
+        открывается); данные раскроя не меняются, архивация — существующей командой «Раскроя». Решение действует,
+        пока серверный digest пары тот же (expectedDigest из чтения доски): пересчёт, архивация или изменение состава
+        любой стороны снимает решение. Требует cut.manage и orders.view и scope просмотра каждого заказа обеих ванн.
+        Аудит mdf_board.bath_duplicate_resolved и событие outbox — в той же транзакции. Повтор с тем же
+        Idempotency-Key и телом возвращает сохранённое решение (replayed=true) без новых записей; тот же ключ с
+        другим телом — 409. Включается BACKEND_MDF_BATH_DUPLICATES_WRITE (выключено ⇒ 503).
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Уникальный ключ действия пользователя; сохранять при сетевом повторе той же команды.
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 200
+            pattern: '^[A-Za-z0-9._:-]{8,200}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [bathCardId, otherBathCardId, action, expectedDigest]
+              properties:
+                bathCardId:
+                  type: string
+                  description: Ванна, на которой открыто окно; для rework_mark — помечаемая ванна.
+                  pattern: '^cut-result:[1-9][0-9]{0,15}$'
+                otherBathCardId:
+                  type: string
+                  pattern: '^cut-result:[1-9][0-9]{0,15}$'
+                action:
+                  type: string
+                  enum: [keep_both, rework_mark]
+                expectedDigest:
+                  type: string
+                  pattern: '^[a-f0-9]{64}$'
+      responses:
+        '200':
+          description: Решение записано или повтор той же команды
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [generatedAt, resolution, auditId, replayed]
+                properties:
+                  generatedAt: { type: string, format: date-time }
+                  auditId: { type: string, nullable: true }
+                  replayed: { type: boolean }
+                  resolution:
+                    type: object
+                    required: [resolutionId, action, bathA, bathB, targetBath, otherBathCardId, digest, sharedCount, orderIds, createdAt]
+                    properties:
+                      resolutionId: { type: integer }
+                      action: { type: string, enum: [keep_both, rework_mark] }
+                      bathA: { type: string }
+                      bathB: { type: string }
+                      targetBath: { type: string }
+                      otherBathCardId: { type: string }
+                      digest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                      sharedCount: { type: integer }
+                      orderIds: { type: array, items: { type: integer } }
+                      createdAt: { type: string, format: date-time }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: MDF_BATH_DUPLICATE_STALE (ванны изменились, digest не совпал) или IDEMPOTENCY_KEY_REUSED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/orders/status-board/mdf-drift:
     get:
       tags:

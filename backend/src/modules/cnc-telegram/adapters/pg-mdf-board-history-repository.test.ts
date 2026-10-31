@@ -148,3 +148,25 @@ describe('MDF board history: legacy and engine return events (§5.6)', () => {
   });
 });
 
+
+describe('MDF board history: «Разобрать дубль»', () => {
+  const order = { orderId: 7, orderName: 'A', fullNumber: 'A' } as MdfBoardHistoryOrderOptionDto;
+  const diagnosis = { relatedCurrentCards: [] } as never;
+  const row = (metadata: Record<string, unknown>) => ({ audit_id: 'a9', event: 'mdf_board.bath_duplicate_resolved',
+    entity_type: 'mdf_bath_duplicate', entity_id: '15', username: 'u', source: 'backend-mdf-board', request_id: 'r',
+    status_name: null, status_code: metadata.action, before_json: {}, after_json: {}, diff_json: {}, metadata_json: metadata,
+    created_at: '2026-10-30T00:00:00Z', provenance: null }) as never;
+
+  it('shows the decision on its target bath as progress', () => {
+    expect(mapAuditEvent(row({ action: 'keep_both', targetBath: 'cut-result:868', otherBath: 'cut-result:854' }),
+      order, diagnosis)).toMatchObject({ subjectKind: 'bath', subjectId: 'cut-result:868', eventKind: 'progress',
+      reasonCode: 'BATH_DUPLICATE_KEEP_BOTH', reason: 'Разобран дубль ванн: оставлены обе' });
+    expect(mapAuditEvent(row({ action: 'rework_mark', targetBath: 'cut-result:854', otherBath: 'cut-result:868' }),
+      order, diagnosis)).toMatchObject({ subjectKind: 'bath', subjectId: 'cut-result:854', eventKind: 'progress',
+      reasonCode: 'BATH_DUPLICATE_REWORK_MARK', reason: 'Разобран дубль ванн: общие детали помечены как переделка' });
+  });
+
+  it('drops a row without a target bath', () => {
+    expect(mapAuditEvent(row({ action: 'keep_both' }), order, diagnosis)).toBeNull();
+  });
+});

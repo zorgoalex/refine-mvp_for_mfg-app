@@ -1,3 +1,4 @@
+import type { CncTelegramBathDuplicate, CncTelegramBathReworkMark } from './cncTelegramApi.types';
 export type OrderStatusBoardType = 'order' | 'production';
 export type OrderStatusBoardSortBy =
   | 'priority'
@@ -143,4 +144,44 @@ export interface OrderStatusBoardResponse {
   filterKey: string;
   financialsVisible: boolean;
   columns: OrderStatusBoardColumn[];
+}
+
+export type MdfBathDuplicateAction = 'keep_both' | 'rework_mark';
+
+export interface MdfBathDuplicatesOfBath {
+  bathCardId: string;
+  duplicates: CncTelegramBathDuplicate[];
+  reworkMarks: CncTelegramBathReworkMark[];
+  reworkDetailCount: number;
+}
+
+export interface MdfBathDuplicatesResponse {
+  generatedAt: string;
+  /** Requested baths whose orders are all visible (others omitted); an inactive bath has empty lists. */
+  baths: MdfBathDuplicatesOfBath[];
+}
+
+export interface ResolveMdfBathDuplicateRequest {
+  bathCardId: string;
+  otherBathCardId: string;
+  action: MdfBathDuplicateAction;
+  expectedDigest: string;
+}
+
+export interface ResolveMdfBathDuplicateResponse {
+  generatedAt: string;
+  resolution: {
+    resolutionId: number;
+    action: MdfBathDuplicateAction;
+    bathA: string;
+    bathB: string;
+    targetBath: string;
+    otherBathCardId: string;
+    digest: string;
+    sharedCount: number;
+    orderIds: number[];
+    createdAt: string;
+  };
+  auditId: string | null;
+  replayed: boolean;
 }

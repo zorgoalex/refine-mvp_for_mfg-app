@@ -2901,6 +2901,61 @@
   line-height: 1.6;
 }
 
+/* «Разобрать дубль»: badges on bath cards and the dialog. */
+.cnc-bath-card__duplicate-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.cnc-bath-card__duplicate-badge.ant-btn {
+  height: auto;
+  padding: 0 6px;
+  font-size: 0.84em;
+  line-height: 1.6;
+}
+
+.cnc-bath-card__rework-badge.ant-tag {
+  margin: 0;
+  font-size: 0.84em;
+}
+
+.mdf-bath-duplicates__baths {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.mdf-bath-duplicates__label {
+  color: var(--app-text-secondary, rgba(0, 0, 0, 0.55));
+  font-size: 0.85em;
+}
+
+.mdf-bath-duplicates__table {
+  width: 100%;
+  margin-bottom: 12px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.mdf-bath-duplicates__table th,
+.mdf-bath-duplicates__table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--app-border, #f0f0f0);
+  text-align: left;
+}
+
+.mdf-bath-duplicates__short {
+  color: var(--ant-color-error, #cf1322);
+  font-weight: 600;
+}
+
+.mdf-bath-duplicates__hint.ant-alert {
+  margin-top: 8px;
+}
+
 .cnc-bath-card__sheet-figure {
   margin: 0;
   display: grid;

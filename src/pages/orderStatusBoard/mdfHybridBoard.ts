@@ -13,6 +13,7 @@ import type {
 import type { OrderStatusBoardCard } from '../../api/types/orderStatusBoardApi.types';
 import { cncMaterialNameIsMdf, cncPacketCountsForMdfReadiness } from './cncDetailedMachine';
 import { cncOrderDetailSourceKeys, indexCncOrderComposition } from './model';
+import { withLegacyBathDuplicates } from './mdfBathDuplicates';
 import type { CncBoardManualMoveState, CncOrderReadiness } from './OrderStatusBoardPage';
 
 /**
@@ -47,6 +48,8 @@ export interface MdfHybridCardMeta {
 export interface MdfHybridBoard {
   columns: CncTelegramTodayColumn[];
   meta: ReadonlyMap<string, MdfHybridCardMeta>;
+  /** Engine baths without a legacy card (search, focus, old cards): their «Разобрать дубль» facts are read apart. */
+  engineOnlyBathIds: string[];
 }
 
 export const MDF_HYBRID_COLUMN_ORDER: readonly ColumnKey[] = ['parsed', 'completed', 'baths', 'baths_ready',
@@ -144,15 +147,18 @@ export function buildMdfHybridBoard(input: {
       const card = cards.get(key);
       if (!card) continue; // Baths are always MDF and registered by the baseline: the engine decides.
       const isBound = bound(key, bath.mdfPresentationDigest);
-      place(key, engineMeta(card, !isBound),
+      // «Разобрать дубль»: the pair facts of the legacy read reach the card in both presentations (same cut-result id).
+      place(key, engineMeta(card, !isBound), withLegacyBathDuplicates(
         withEngineBathCoverage(isBound ? publishedBathRows(bath, card, snapshot) : minimalBath(card, presentation.get(key), snapshot),
-          card, snapshot));
+          card, snapshot), bath));
     }
   }
   // Engine cards the legacy read did not return (window/filters differ): minimal engine presentation.
+  const engineOnlyBathIds: string[] = [];
   for (const card of snapshot.cards) {
     const key = mdfHybridCardKey(card.kind, card.id);
     if (seen.has(key)) continue;
+    if (card.kind === 'bath') engineOnlyBathIds.push(card.id);
     const p = presentation.get(key);
     const minimal = card.kind === 'packet' ? minimalPacket(card, p, snapshot)
       : card.kind === 'bath' ? withEngineBathCoverage(minimalBath(card, p, snapshot), card, snapshot)
@@ -169,6 +175,7 @@ export function buildMdfHybridBoard(input: {
 
   return {
     meta,
+    engineOnlyBathIds,
     columns: MDF_HYBRID_COLUMN_ORDER.map(key => {
       const column = out.get(key)!;
       // The board re-titles columns by key when it projects them (`cncColumnTitleByKey`).

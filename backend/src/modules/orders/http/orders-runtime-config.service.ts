@@ -19,6 +19,10 @@ export interface OrdersHttpFeatureFlags {
   supplierTextTemplatesEnabled?: boolean;
   /** BACKEND_ORDER_REWORK_ENABLED: команды «Переделки» (круги производства). */
   orderReworkEnabled?: boolean;
+  /** BACKEND_MDF_BATH_DUPLICATES_WRITE: команда «Разобрать дубль» МДФ-доски (keep_both / rework_mark). */
+  mdfBathDuplicatesWriteEnabled?: boolean;
+  /** BACKEND_MDF_BATH_DUPLICATES_READ: дубли ванн в чтении доски и GET mdf-bath-duplicates. */
+  mdfBathDuplicatesReadEnabled?: boolean;
 }
 
 @Injectable()
@@ -37,6 +41,8 @@ export class OrdersRuntimeConfigService {
       procurementNotificationsEnabled: this.config.get('BACKEND_PROCUREMENT_NOTIFICATIONS_ENABLED', { infer: true }),
       supplierTextTemplatesEnabled: this.config.get('BACKEND_SUPPLIER_TEXT_TEMPLATES_ENABLED', { infer: true }),
       orderReworkEnabled: this.config.get('BACKEND_ORDER_REWORK_ENABLED', { infer: true }),
+      mdfBathDuplicatesWriteEnabled: this.config.get('BACKEND_MDF_BATH_DUPLICATES_WRITE', { infer: true }),
+      mdfBathDuplicatesReadEnabled: this.config.get('BACKEND_MDF_BATH_DUPLICATES_READ', { infer: true }),
     };
   }
 }

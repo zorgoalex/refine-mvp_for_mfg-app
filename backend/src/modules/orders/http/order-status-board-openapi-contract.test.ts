@@ -129,6 +129,35 @@ describe('order status board OpenAPI contract', () => {
     expect(route).toContain('dateTo минус 6 дней');
   });
 
+  it('documents the bath duplicates read of explicit baths (≤ 100 ids, read flag)', () => {
+    const route = sectionBetween(
+      contract,
+      '  /api/v1/orders/status-board/mdf-bath-duplicates:',
+      '  /api/v1/orders/status-board/mdf-bath-duplicates/resolve:',
+    );
+    expect(route).toContain('operationId: listMdfBathDuplicates');
+    expect(route).toContain('x-permission: orders.view');
+    expect(route).toContain('До 100 значений cut-result:<id>');
+    expect(route).toContain('BACKEND_MDF_BATH_DUPLICATES_READ');
+    expect(route).toContain('reworkDetailCount');
+  });
+
+  it('documents the bath duplicate resolve command (keep_both / rework_mark, digest, idempotency, gate)', () => {
+    const route = sectionBetween(
+      contract,
+      '  /api/v1/orders/status-board/mdf-bath-duplicates/resolve:',
+      '  /api/v1/orders/status-board/mdf-drift:',
+    );
+    expect(route).toContain('operationId: resolveMdfBathDuplicate');
+    expect(route).toContain('x-permission: cut.manage');
+    expect(route).toContain('required: [bathCardId, otherBathCardId, action, expectedDigest]');
+    expect(route).toContain('enum: [keep_both, rework_mark]');
+    expect(route).toContain("pattern: '^[A-Za-z0-9._:-]{8,200}$'");
+    expect(route).toContain('MDF_BATH_DUPLICATE_STALE');
+    expect(route).toContain('BACKEND_MDF_BATH_DUPLICATES_WRITE');
+    for (const status of ["'403':", "'409':", "'422':", "'503':"]) expect(route).toContain(status);
+  });
+
   it('documents the demand-drift conflicts list/confirm routes (§5.8 reconciler)', () => {
     const listRoute = sectionBetween(
       contract,

@@ -551,6 +551,20 @@ export function mapAuditEvent(
     reasonCode='PRODUCTION_RETURN';
     reason=`Подтверждён возврат в «${columnTitle(toColumn)}»`;
     consequence='Исправлены производственные статусы позиций карточки; связанные карточки и заказы пересчитаны.';
+  } else if (row.event === 'mdf_board.bath_duplicate_resolved') {
+    // «Разобрать дубль»: the decision is shown on the bath it was taken on (rework_mark: the marked bath).
+    const targetBath = textValue(metadata.targetBath) ?? textValue(after.targetBath);
+    if (!targetBath) return null;
+    const action = textValue(metadata.action) ?? textValue(after.action);
+    subjectKind = 'bath';
+    subjectId = targetBath;
+    subjectLabel = subjectLabelFor(subjectKind, subjectId, order);
+    eventKind = 'progress';
+    reasonCode = action === 'rework_mark' ? 'BATH_DUPLICATE_REWORK_MARK' : 'BATH_DUPLICATE_KEEP_BOTH';
+    reason = action === 'rework_mark'
+      ? 'Разобран дубль ванн: общие детали помечены как переделка'
+      : 'Разобран дубль ванн: оставлены обе';
+    consequence = 'Раскрой не изменён; решение действует, пока состав обеих ванн тот же.';
   } else if (row.event.startsWith('mdf_board.manual_move.')) {
     const cardKind = historySubjectKind(textValue(metadata.cardKind));
     if (!cardKind) return null;

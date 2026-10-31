@@ -3189,6 +3189,14 @@ probe_file() {
     288_client_merge_cards_guard*) probe_all \
       "SELECT to_regprocedure('public.trg_client_merges_cards_guard()') IS NOT NULL;" \
       "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_client_merges_cards_guard' AND tgrelid = 'public.client_merges'::regclass AND tgenabled <> 'D' AND NOT tgisinternal);" ;;
+    # МДФ-доска «Разобрать дубль»: решения по паре ванн (keep_both / rework_mark), уникальный ключ команды.
+    287_mdf_bath_duplicate_resolutions*) probe_all \
+      "$(q_tbl mdf_bath_duplicate_resolutions)" \
+      "$(q_con_on mdf_bath_duplicate_resolutions uq_mdf_bath_duplicate_resolutions_command_key)" \
+      "$(q_con_on mdf_bath_duplicate_resolutions chk_mdf_bath_duplicate_resolutions_action)" \
+      "$(q_con_on mdf_bath_duplicate_resolutions chk_mdf_bath_duplicate_resolutions_target)" \
+      "$(q_idx idx_mdf_bath_duplicate_resolutions_bath_a)" \
+      "$(q_idx idx_mdf_bath_duplicate_resolutions_bath_b)" ;;
     # «Базис» for «Новый» details already in «Базис раскрой» cards before 282: one-time backfill, its summary audit row.
     286_saw_status_backfill*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event='orders.saw_status_backfill' AND entity_type='migration' AND entity_id='286');" ;;
@@ -3449,6 +3457,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     288_client_merge_cards_guard*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    287_mdf_bath_duplicate_resolutions*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     286_saw_status_backfill*)

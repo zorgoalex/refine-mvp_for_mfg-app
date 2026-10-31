@@ -15,6 +15,10 @@ import {
   type MdfCorrectionReturnIntent,
 } from './MdfCorrectionReturnDialog';
 import { MdfBoardUnavailable } from './MdfBoardUnavailable';
+import { MdfBathDuplicateBadges, MdfBathDuplicatesContext, MdfBathDuplicatesDialog } from './MdfBathDuplicatesDialog';
+import { applyBathDuplicates, createEngineBathDuplicatesRefresher } from './mdfBathDuplicates';
+import type { MdfBathDuplicatesOfBath } from '../../api/types/orderStatusBoardApi.types';
+
 import { MdfPublishedBoardView } from './MdfPublishedBoardView';
 import { prepareMdfPublishedCommand } from './mdfPublishedCommand';
 import type { MdfPublishedBoardCard } from './mdfPublishedBoard';
@@ -626,6 +630,8 @@ function useWorkspaceTabsHeight(): number {
   return height;
 }
 
+const NO_ENGINE_BATH_DUPLICATES: ReadonlyMap<string, MdfBathDuplicatesOfBath> = new Map();
+
 export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   active = true,
   defaultCncOrderSearchPeriod = DEFAULT_CNC_ORDER_SEARCH_PERIOD,
@@ -640,6 +646,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   // §5.6 finding 9: literal permission check for moving MDF published-board cards, separate from
   // engine/card readiness.
   const canMoveMdfPublishedCards = can('production.tasks.update');
+  // «Разобрать дубль»: same authority as the cut (literal cut.manage + orders.view); the backend adds the order scope.
+  const canResolveBathDuplicates = can('cut.manage') && can('orders.view');
+  const [bathDuplicatesBathId, setBathDuplicatesBathId] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   // «NewLine»: «Печать» of the MDF board in any card mode (column ticks, A4/A3) — mdfPrint/*
@@ -1717,6 +1726,44 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   );
   const mdfHybridBoardRef = useRef<MdfHybridBoard | null>(null);
   mdfHybridBoardRef.current = mdfHybridBoard;
+  // «Разобрать дубль»: engine baths without a legacy card (search, focus, old cards) get their pair facts by id, on
+  // every board cycle — the poll, a refresh (new legacy read or snapshot), a decision — since another user's decision
+  // changes neither the ids nor the engine publication. One refresher for the page: the context is the engine-only id
+  // set (empty when none / feature off / board hidden); signals only ask for a read — a read in flight is awaited and
+  // followed by one coalesced re-read, an answer is dropped only when the id set changed.
+  const [engineBathDuplicateList, setEngineBathDuplicateList] = useState<MdfBathDuplicatesOfBath[]>([]);
+  const [bathDuplicatesRevision, setBathDuplicatesRevision] = useState(0);
+  const engineOnlyBathKey = featureFlags.mdfBathDuplicates && mdfHybridBoard
+    ? [...mdfHybridBoard.engineOnlyBathIds].sort().join(',') : '';
+  const engineBathDuplicatesCycle = `${mdfHybridSnapshot?.revision ?? ''}|${mdfHybridSnapshot?.generatedAt ?? ''}`
+    + `|${cncToday?.generatedAt ?? ''}|${bathDuplicatesRevision}`;
+  const engineBathDuplicatesRefresherRef = useRef<ReturnType<typeof createEngineBathDuplicatesRefresher> | null>(null);
+  if (!engineBathDuplicatesRefresherRef.current) {
+    engineBathDuplicatesRefresherRef.current = createEngineBathDuplicatesRefresher(
+      (ids) => orderStatusBoardApi.listMdfBathDuplicates(ids, { cache: 'no-store' }),
+      (facts) => setEngineBathDuplicateList((current) => reuseIfSameData(current, facts)),
+    );
+  }
+  const engineBathDuplicatesContext = active ? engineOnlyBathKey : '';
+  useEffect(() => {
+    void engineBathDuplicatesRefresherRef.current!.setContext(engineBathDuplicatesContext);
+  }, [engineBathDuplicatesContext]);
+  useEffect(() => () => { void engineBathDuplicatesRefresherRef.current!.setContext(''); }, []);
+  useEffect(() => {
+    void engineBathDuplicatesRefresherRef.current!.request();
+  }, [engineBathDuplicatesCycle]);
+  useEffect(() => {
+    if (!engineBathDuplicatesContext) return undefined;
+    const timer = window.setInterval(() => {
+      void engineBathDuplicatesRefresherRef.current!.request();
+    }, CNC_ORDER_STATUS_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [engineBathDuplicatesContext]);
+  const engineBathDuplicates = useMemo<ReadonlyMap<string, MdfBathDuplicatesOfBath>>(
+    () => engineBathDuplicateList.length
+      ? new Map(engineBathDuplicateList.map((bath) => [bath.bathCardId, bath])) : NO_ENGINE_BATH_DUPLICATES,
+    [engineBathDuplicateList],
+  );
   // Placement projection: in the hybrid board only non-MDF machine files keep client-side manual moves.
   const cncBoardManualMoves = useMemo(
     () => mdfHybridBoard ? mdfHybridManualMoves(cncManualMoves, mdfHybridBoard.meta) : cncManualMoves,
@@ -1728,11 +1775,28 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncPeriodColumns = useMemo(() => {
     const columns = cncOriginalView
       ? buildCncOriginalSourceColumns(cncOriginalBoard)
-      : mdfHybridBoard?.columns ?? cncToday?.columns ?? [];
+      : (mdfHybridBoard ? applyBathDuplicates(mdfHybridBoard.columns, engineBathDuplicates) : null)
+        ?? cncToday?.columns ?? [];
     const stable = reuseUnchangedCncColumns(stableCncPeriodColumnsRef.current, columns);
     stableCncPeriodColumnsRef.current = stable;
     return stable;
-  }, [cncOriginalBoard, cncOriginalView, cncToday?.columns, mdfHybridBoard]);
+  }, [cncOriginalBoard, cncOriginalView, cncToday?.columns, engineBathDuplicates, mdfHybridBoard]);
+  // «Разобрать дубль» (RUNTIME_CONFIG_MDF_BATH_DUPLICATES): the dialog follows the bath by id, so a refresh shows
+  // the fresh pair facts (or closes when the bath left the board).
+  const cncBoardBaths = useMemo(() => cncPeriodColumns.flatMap((column) => column.baths), [cncPeriodColumns]);
+  const bathDuplicatesBath = bathDuplicatesBathId
+    ? cncBoardBaths.find((bath) => bath.bathCardId === bathDuplicatesBathId) ?? null
+    : null;
+  const bathDuplicatesContext = useMemo(() => ({
+    enabled: featureFlags.mdfBathDuplicates && !cncOriginalView,
+    open: (bath: CncTelegramBathCard) => setBathDuplicatesBathId(bath.bathCardId),
+  }), [cncOriginalView]);
+  const closeBathDuplicates = useCallback(() => setBathDuplicatesBathId(null), []);
+  const refreshAfterBathDuplicate = useCallback(() => {
+    setBathDuplicatesRevision((revision) => revision + 1);
+    if (mdfHybridActive) mdfPublishedBoard.refresh();
+    void fetchInitial({ mutationRefetch: true, preserveLoading: true });
+  }, [fetchInitial, mdfHybridActive, mdfPublishedBoard]);
   const cncOrderFilterOptions = useMemo(
     () =>
       buildCncOrderFilterOptions(cncPeriodColumns).map((orderName) => ({
@@ -3611,6 +3675,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                   message="Не учтённых новым учётом файлов больше, чем показано: показаны файлы выбранной карточки, искомых заказов и самые новые. Уточните период или найдите заказ."
                 />
               )}
+              <MdfBathDuplicatesContext.Provider value={bathDuplicatesContext}>
               <CncTelegramTodayColumns
                 columns={cncRenderColumns}
                 readinessColumns={cncActiveColumns}
@@ -3655,6 +3720,16 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 onMove={stableMoveCncCard}
                 showFinancials={canViewFinancials}
               />
+              </MdfBathDuplicatesContext.Provider>
+              {bathDuplicatesBath && (
+                <MdfBathDuplicatesDialog
+                  bath={bathDuplicatesBath}
+                  boardBaths={cncBoardBaths}
+                  canResolve={canResolveBathDuplicates}
+                  onClose={closeBathDuplicates}
+                  onResolved={refreshAfterBathDuplicate}
+                />
+              )}
               </>
             )
           ) : columns.length === 0 ? (
@@ -7514,12 +7589,15 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
       onClick={interactive ? onSelect : undefined}
     >
       {minimal ? (
+          <>
           <span
             className="cnc-compact-card__number"
             aria-label={`Номер карты раскроя ${bathCutNumber}`}
           >
             {bathCutNumber}
           </span>
+          <MdfBathDuplicateBadges bath={bath} />
+          </>
       ) : (
         <>
       <div className="status-board-card__top">
@@ -7556,6 +7634,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
               />
             </Tooltip>
           )}
+          <MdfBathDuplicateBadges bath={bath} />
           <Tag
             className="cnc-bath-card__cut-result-badge"
             aria-label={`Номер карты раскроя ${bathCutNumber}`}

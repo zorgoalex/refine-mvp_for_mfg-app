@@ -39,6 +39,8 @@ export interface FrontendRuntimeConfigResponse {
     inventory: boolean;
     /** Hybrid MDF board (legacy screen on the engine's data); false = the engine's own view (rollback). */
     mdfHybridBoard: boolean;
+    /** «Разобрать дубль» on MDF board bath cards (badges + dialog); off until the backend flags are on. */
+    mdfBathDuplicates: boolean;
   };
   observability: {
     performanceRum: boolean;
@@ -110,6 +112,7 @@ export function buildFrontendRuntimeConfig(
       filmCatalogImport: readBooleanEnv(env.RUNTIME_CONFIG_FILM_CATALOG_IMPORT, false),
       inventory: readBooleanEnv(env.RUNTIME_CONFIG_INVENTORY, false),
       mdfHybridBoard: readBooleanEnv(env.RUNTIME_CONFIG_MDF_HYBRID_BOARD, true),
+      mdfBathDuplicates: readBooleanEnv(env.RUNTIME_CONFIG_MDF_BATH_DUPLICATES, false),
     },
     observability: {
       performanceRum: readBooleanEnv(env.RUNTIME_CONFIG_PERFORMANCE_RUM, false),

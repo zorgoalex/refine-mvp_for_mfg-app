@@ -438,6 +438,30 @@ The snapshot also carries, from the same read-only transaction:
 `searchOrderIds` selects the (old, completed) cards of requested visible orders; `orderIds` keeps adding only position
 totals of the board's order cards. Reading never writes and runs no automation.
 
+### Bath duplicates («Разобрать дубль»)
+
+After a re-cut one detail can sit in ACTIVE baths of several cut jobs (one active bath per job: its latest non-archived
+vacuum result, current first, not hidden). With `BACKEND_MDF_BATH_DUPLICATES_READ=true` the two-month
+`GET /cnc-telegram/today` read adds to every shown bath `duplicates[]` — pairs with other active baths sharing
+`(order, detail)` by effective MDF placements: shared details with quantities here/there, `coveredBy`, an archive hint
+(`archivable`, `blockedReason`: `scope`, `engine`, `not_covered`, `production`, `composition`, `linked_cards`) and the
+server pair `digest` (sides by `cut_result_id`, each with result/revision numbers, `cut_job.version` and the active job
+composition, plus the shared quantities; equal from either side) — and `reworkMarks[]`. Under the engine
+(`active`/`read_only`) the hint is never given (`engine`); other orders out of the user's view scope redact the other
+bath (`otherJobLabel = null`, shared details of visible orders only). `reworkDetailCount` is the number of distinct
+marked details of the bath. The hybrid board copies the lists onto the engine bath card of the same `cut-result:<id>`;
+engine baths without a legacy card (search, focus, old cards) are read by
+`GET /orders/status-board/mdf-bath-duplicates?bathCardIds=…` (≤ 100 ids, same flag, `orders.view`, only baths whose
+orders are all visible).
+
+`POST /orders/status-board/mdf-bath-duplicates/resolve` (`BACKEND_MDF_BATH_DUPLICATES_WRITE`, off ⇒ 503; literal
+`cut.manage` + `orders.view` and the view scope of every order of both baths) records `keep_both` or `rework_mark`
+(a mark only, no rework round) in `mdf_bath_duplicate_resolutions` (migration 287) with the audit event
+`mdf_board.bath_duplicate_resolved` and an outbox event in one transaction. It never changes cut data and takes only
+the per-bath advisory lock `hashtext('mdf-bath:' || cut_result_id)` (both baths ascending). A decision applies while the
+pair digest is the same: a re-cut, archive or item change shows the duplicate again. Archiving stays in «Раскрой»: the
+dialog only links to the job. Frontend: `RUNTIME_CONFIG_MDF_BATH_DUPLICATES` (off by default).
+
 Board history (migration 141 triggers, redefined by 192) also resolves engine events: entity `<kind>:<id>` of type
 `mdf_source`/`mdf_board_card`, bath ids of `mdf_bath`, and admits `mdf.order_correction.requested`.
 

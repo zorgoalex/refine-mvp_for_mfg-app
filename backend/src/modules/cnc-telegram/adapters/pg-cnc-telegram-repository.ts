@@ -18,6 +18,7 @@ import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { mdfCutReadinessCtes } from '../../../shared/cnc-material/cut-readiness-sql';
+import { loadBoardBathDuplicates, mdfBathDuplicatesReadEnabled } from '../../orders/adapters/mdf-bath-duplicate-facts';
 import { productionBoardReadScopeSql } from '../../orders/adapters/pg-order-status-board-repository';
 import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
 import { assertMdfManualSvgMatchScope, assertMdfManualSvgReplayScope, captureNewMdfManualSvgSource, lockMdfManualSvgOwners,
@@ -66,6 +67,8 @@ import type {
 import type {
   CncAutoCutStatusConfigureResponseDto,
   CncTelegramBathCardDto,
+  CncTelegramBathDuplicateDto,
+  CncTelegramBathReworkMarkDto,
   CncTelegramBathItemDto,
   CncTelegramBathSheetDto,
   CncTelegramBazisCutSetCardDto,
@@ -496,7 +499,8 @@ export class PgCncTelegramRepository
     const requestedFrom = command.workdayFrom ?? workday;
     if (command.operationalWindow === 'two_months') {
       if (!await mdfEngineOwnsBoard(this.database)) {
-        return loadBoundedToday(this.database, command.currentUser, workdayTo, requestedFrom, command.focusBathCardId);
+        return loadBoundedToday(this.database, command.currentUser, workdayTo, requestedFrom, command.focusBathCardId,
+          { engineOwnsBoard: false });
       }
       // Hybrid board: each MDF card's presentation and its digest come from ONE snapshot, so the board can bind it to
       // the engine's accepted revision (equal digest ⇒ the shown composition is the one the command token acts on).
@@ -504,7 +508,7 @@ export class PgCncTelegramRepository
       // independent reads run in parallel instead of queueing on one connection.
       return this.database.readSnapshot(async (snapshot) => {
         return loadBoundedToday(snapshot, command.currentUser, workdayTo, requestedFrom, command.focusBathCardId,
-          { presentationDigests: true });
+          { presentationDigests: true, engineOwnsBoard: true });
       }, { parallelism: MDF_BOARD_SNAPSHOT_PARALLELISM });
     }
     const monthStart = mdfOperationalMonthStart(workdayTo);
@@ -7418,7 +7422,7 @@ async function enqueueOutbox(
 /** Bounded calculation history is separate from display cards and their order scope. */
 async function loadBoundedToday(
   database: DatabaseClient, currentUser: CurrentUser, dateTo: string, requestedFrom: string, focusBathCardId?: string,
-  options: { presentationDigests?: boolean } = {},
+  options: { presentationDigests?: boolean; engineOwnsBoard?: boolean } = {},
 ): Promise<CncTelegramTodayResponseDto> {
   const dateFrom = mdfOperationalTwoMonthStart(dateTo);
   const displayFrom = requestedFrom < dateFrom ? dateFrom : requestedFrom;
@@ -7445,6 +7449,13 @@ async function loadBoundedToday(
   // alongside the history instead of after it.
   const digestsPromise = options.presentationDigests ? loadMdfPresentationDigests(database, columns) : null;
   digestsPromise?.catch(() => undefined); // a failing history read must not leave this rejection unhandled
+  // «Разобрать дубль» (flag): bounded to the active baths of the shown baths' orders, read alongside the history.
+  const duplicatesPromise = mdfBathDuplicatesReadEnabled() ? loadBoardBathDuplicates(database, currentUser, {
+    shown: columns.flatMap(column => column.baths.map(card => ({ bathCardId: card.bathCardId, column: column.key,
+      orderIds: card.items.map(item => item.orderId) }))),
+    engineOwnsBoard: options.engineOwnsBoard === true,
+  }) : null;
+  duplicatesPromise?.catch(() => undefined);
   const cutQuantities = (await cutQuantitiesPromise).rows;
   const orderIds = sourceOrderIds(columns);
   let historicalReadinessSources: CncHistoricalReadinessSourceDto[] = [];
@@ -7518,7 +7529,20 @@ async function loadBoundedToday(
   }
   const today: CncTelegramTodayResponseDto = { workday: dateTo, generatedAt: new Date().toISOString(), columns,
     operationalWindow: { dateFrom, dateTo }, historicalBathReadiness: [], historicalReadinessSources };
-  return digestsPromise ? withMdfPresentationDigests(today, await digestsPromise) : today;
+  const withDigests = digestsPromise ? withMdfPresentationDigests(today, await digestsPromise) : today;
+  return duplicatesPromise ? withBathDuplicates(withDigests, await duplicatesPromise) : withDigests;
+}
+
+/** Every shown bath gets both lists (empty when none) while the duplicates read is on. */
+export function withBathDuplicates(today: CncTelegramTodayResponseDto, duplicates: ReadonlyMap<string, {
+  duplicates: CncTelegramBathDuplicateDto[]; reworkMarks: CncTelegramBathReworkMarkDto[]; reworkDetailCount: number;
+}>): CncTelegramTodayResponseDto {
+  return { ...today, columns: today.columns.map(column => ({ ...column,
+    baths: column.baths.map(card => ({ ...card,
+      duplicates: duplicates.get(card.bathCardId)?.duplicates ?? [],
+      reworkMarks: duplicates.get(card.bathCardId)?.reworkMarks ?? [],
+      reworkDetailCount: duplicates.get(card.bathCardId)?.reworkDetailCount ?? 0 })),
+  })) };
 }
 
 /** Sessions sharing the hybrid board's read snapshot (spare pool capacity permitting). */

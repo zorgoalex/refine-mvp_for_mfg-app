@@ -41,6 +41,7 @@ describe('frontend runtime config delivery', () => {
         filmCatalogImport: false,
         inventory: false,
         mdfHybridBoard: true,
+        mdfBathDuplicates: false,
       },
       observability: { performanceRum: false },
       rollouts: {
@@ -127,6 +128,7 @@ describe('frontend runtime config delivery', () => {
         filmCatalogImport: true,
         inventory: true,
         mdfHybridBoard: true,
+        mdfBathDuplicates: false,
       },
       observability: { performanceRum: true },
       rollouts: {
@@ -253,5 +255,10 @@ describe('frontend runtime config delivery', () => {
   it('keeps the hybrid MDF board on unless RUNTIME_CONFIG_MDF_HYBRID_BOARD switches it off (rollback)', () => {
     expect(buildFrontendRuntimeConfig({}).features.mdfHybridBoard).toBe(true);
     expect(buildFrontendRuntimeConfig({ RUNTIME_CONFIG_MDF_HYBRID_BOARD: 'false' }).features.mdfHybridBoard).toBe(false);
+  });
+
+  it('keeps «Разобрать дубль» off unless RUNTIME_CONFIG_MDF_BATH_DUPLICATES switches it on', () => {
+    expect(buildFrontendRuntimeConfig({}).features.mdfBathDuplicates).toBe(false);
+    expect(buildFrontendRuntimeConfig({ RUNTIME_CONFIG_MDF_BATH_DUPLICATES: 'true' }).features.mdfBathDuplicates).toBe(true);
   });
 });

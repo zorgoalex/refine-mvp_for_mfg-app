@@ -2005,7 +2005,7 @@ describe('hybrid MDF board wiring (engine active/read_only)', () => {
     expect(page).toContain('buildMdfHybridBoard({ legacyColumns: cncToday.columns, snapshot: mdfHybridSnapshot,');
     expect(page).toContain('searchOrderIds: mdfPublishedBoard.searchOrderIds })');
     expect(page.split('mdfHybridSnapshot?.unregisteredTruncated &&').length - 1).toBe(2);
-    expect(page).toContain(': mdfHybridBoard?.columns ?? cncToday?.columns ?? [];');
+    expect(page).toContain(': (mdfHybridBoard ? applyBathDuplicates(mdfHybridBoard.columns, engineBathDuplicates) : null)\n        ?? cncToday?.columns ?? [];');
     expect(page).toContain('mdfHybrid={mdfHybridBoard && mdfHybridSnapshot ? { board: mdfHybridBoard, snapshot: mdfHybridSnapshot } : null}');
   });
 

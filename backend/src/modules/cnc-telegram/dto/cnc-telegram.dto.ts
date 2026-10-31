@@ -222,6 +222,33 @@ export interface CncTelegramBathCardDto {
   itemQuantityTotal: number;
   items: CncTelegramBathItemDto[];
   sheets: CncTelegramBathSheetDto[];
+  /** BACKEND_MDF_BATH_DUPLICATES_READ only: other ACTIVE baths sharing details with this one («Разобрать дубль»). */
+  duplicates?: CncTelegramBathDuplicateDto[];
+  /** BACKEND_MDF_BATH_DUPLICATES_READ only: «rework» marks of this bath that are still valid (same pair digest). */
+  reworkMarks?: CncTelegramBathReworkMarkDto[];
+  /** BACKEND_MDF_BATH_DUPLICATES_READ only: distinct details of this bath under a valid rework mark. */
+  reworkDetailCount?: number;
+}
+
+export interface CncTelegramBathDuplicateDto {
+  otherBathCardId: string;
+  /** null when the user cannot see every order of the other bath. */
+  otherJobLabel: string | null;
+  /** Shared details of the orders the user may see; here/there — placements in this / the other bath. */
+  shared: Array<{ orderId: number; detailId: number; detailNumber: number | null; here: number; there: number }>;
+  sharedCount: number;
+  coveredBy: boolean;
+  /** Hint only: archive this bath's job in «Раскрой» (the cut command makes the final checks). */
+  archivable: boolean;
+  blockedReason: 'scope' | 'engine' | 'not_covered' | 'production' | 'composition' | 'linked_cards' | null;
+  /** Server-computed canonical pair digest; passed back to the resolve command as is. */
+  digest: string;
+  resolvedAction: 'rework_mark' | null;
+}
+
+export interface CncTelegramBathReworkMarkDto {
+  otherBathCardId: string;
+  detailCount: number;
 }
 
 export interface CncTelegramBazisCutSetItemDto {

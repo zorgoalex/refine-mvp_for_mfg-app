@@ -268,3 +268,39 @@ describe('hybrid MDF board: order readiness from engine positions', () => {
       members: [{ kind: 'packet', id: 'p1', orderId: 7, detailId: 70, quantity: 4 }] }))).toEqual([]);
   });
 });
+
+describe('hybrid MDF board: «Разобрать дубль» facts reach the engine bath card', () => {
+  const duplicates = [{ otherBathCardId: 'cut-result:4', otherJobLabel: 'Раскрой №3 · Старая', shared: [],
+    sharedCount: 1, coveredBy: true, archivable: false, blockedReason: 'engine' as const, digest: DIGEST,
+    resolvedAction: null }];
+  const reworkMarks = [{ otherBathCardId: 'cut-result:4', detailCount: 1 }];
+  const engine = { cards: [engineCard('bath', 'cut-result:9')],
+    members: [{ kind: 'bath' as const, id: 'cut-result:9', orderId: 7, detailId: 70, quantity: 10 }] };
+
+  it('in the bound and in the minimal presentation (matched by cut-result id)', () => {
+    for (const presentation of [[bound('bath', 'cut-result:9')], [bound('bath', 'cut-result:9', null)]]) {
+      const board = buildMdfHybridBoard({ legacyColumns: columns([], [bath('cut-result:9', { duplicates, reworkMarks })]),
+        snapshot: snapshot({ ...engine, presentation }) });
+      const card = board.columns.flatMap(c => c.baths).find(b => b.bathCardId === 'cut-result:9')!;
+      expect(card.duplicates).toEqual(duplicates);
+      expect(card.reworkMarks).toEqual(reworkMarks);
+    }
+  });
+
+  it('lists engine baths without a legacy card for the separate read; bound ones are not listed', () => {
+    const board = buildMdfHybridBoard({ legacyColumns: columns([], [bath('cut-result:9', { duplicates, reworkMarks })]),
+      snapshot: snapshot({ cards: [engineCard('bath', 'cut-result:9'), engineCard('bath', 'cut-result:12')],
+        presentation: [bound('bath', 'cut-result:9')],
+        members: [{ kind: 'bath', id: 'cut-result:9', orderId: 7, detailId: 70, quantity: 10 },
+          { kind: 'bath', id: 'cut-result:12', orderId: 7, detailId: 70, quantity: 10 }] }) });
+    expect(board.engineOnlyBathIds).toEqual(['cut-result:12']);
+    const engineOnly = board.columns.flatMap(c => c.baths).find(b => b.bathCardId === 'cut-result:12')!;
+    expect(engineOnly).not.toHaveProperty('duplicates');
+  });
+
+  it('adds nothing when the legacy read has no duplicates (flag off)', () => {
+    const board = buildMdfHybridBoard({ legacyColumns: columns([], [bath('cut-result:9')]),
+      snapshot: snapshot({ ...engine, presentation: [bound('bath', 'cut-result:9', null)] }) });
+    expect(board.columns.flatMap(c => c.baths)[0]).not.toHaveProperty('duplicates');
+  });
+});
