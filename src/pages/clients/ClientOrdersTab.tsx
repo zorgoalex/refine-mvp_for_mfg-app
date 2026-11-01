@@ -43,7 +43,8 @@ export function ClientOrdersTab({ clientId }: { clientId: number | null }) {
   const response = load.status === 'ready' ? load.response : null;
   const showMoney = Boolean(response?.summary);
   const scopeNote = response ? clientOrdersScopeNote(response.scope) : null;
-  // Every column sorts on the server over all pages; money columns exist (and sort) only with the right to see money.
+  // Every column sorts on the server over all pages; the payment status and money columns exist (and sort) only with the
+  // right to see order financials.
   const sortable = (key: ClientOrderSortKey) => ({ key, sorter: true, sortOrder: columnSortOrder(sort, key) });
   const columns = [
     { title: 'Заказ', ...sortable('number'), render: (_: unknown, order: ClientOrder) => (
@@ -52,8 +53,8 @@ export function ClientOrdersTab({ clientId }: { clientId: number | null }) {
     { title: 'Дата', ...sortable('date'), width: 110, render: (_: unknown, order: ClientOrder) => formatDate(order.orderDate) },
     { title: 'Статус', ...sortable('status'), render: (_: unknown, order: ClientOrder) => order.orderStatusName ?? '' },
     { title: 'Производство', ...sortable('production'), render: (_: unknown, order: ClientOrder) => order.productionStatusName ?? '' },
-    { title: 'Оплата', ...sortable('payment'), render: (_: unknown, order: ClientOrder) => order.paymentStatusName ?? '' },
     ...(showMoney ? [
+      { title: 'Оплата', ...sortable('payment'), render: (_: unknown, order: ClientOrder) => order.paymentStatusName ?? '' },
       { title: 'Сумма', ...sortable('final'), align: 'right' as const, render: (_: unknown, order: ClientOrder) => clientOrderMoney(order.finalAmount) },
       { title: 'Оплачено', ...sortable('paid'), align: 'right' as const, render: (_: unknown, order: ClientOrder) => clientOrderMoney(order.paidAmount) },
       { title: 'Долг', ...sortable('debt'), align: 'right' as const, render: (_: unknown, order: ClientOrder) => clientOrderMoney(order.debtAmount) },

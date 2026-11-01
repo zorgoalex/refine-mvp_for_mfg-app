@@ -100,7 +100,7 @@ describe.skipIf(!databaseUrl)('orders of a client for the client card (PostgreSQ
     expect((await service.list(user(12, 'manager'), 2, 1, 20, 'req-c2')).data.map((order) => order.orderId)).toEqual([300]);
   });
 
-  it('money is absent — not zero — without the right to see order financials', async () => {
+  it('money and the payment status are absent — not zero — without the right to see order financials', async () => {
     const result = await service.list(user(12, 'manager', ['clients.view', 'orders.view']), 1, 1, 5, 'req-no-money');
     expect(result).not.toHaveProperty('summary');
     expect(result.pagination.total).toBe(26);
@@ -108,6 +108,7 @@ describe.skipIf(!databaseUrl)('orders of a client for the client card (PostgreSQ
       expect(order).not.toHaveProperty('finalAmount');
       expect(order).not.toHaveProperty('paidAmount');
       expect(order).not.toHaveProperty('debtAmount');
+      expect(order).not.toHaveProperty('paymentStatusName');
     }
   });
 
@@ -158,6 +159,10 @@ describe.skipIf(!databaseUrl)('orders of a client for the client card (PostgreSQ
     // Ordering by money reveals it: without the right, refused and audited; non-money columns still sort.
     const noMoney = user(12, 'manager', ['clients.view', 'orders.view']);
     expect(await code(service.list(noMoney, 3, 1, 20, 'req-sort-paid', { key: 'paid', direction: 'asc' }))).toBe('PERMISSION_DENIED');
+    // The payment status is financial too (as in the orders list).
+    expect(await code(service.list(noMoney, 3, 1, 20, 'req-sort-payment', { key: 'payment', direction: 'asc' }))).toBe('PERMISSION_DENIED');
+    expect((await service.list(user(11, 'admin'), 3, 1, 20, 'req-sort-payment-ok', { key: 'payment', direction: 'asc' })).data[0])
+      .toHaveProperty('paymentStatusName', 'Частично');
     expect(await ids({ key: 'number', direction: 'asc' }, noMoney)).toEqual([402, 401, 403, 405]);
     const denied = (await pool.query(`SELECT status_code, metadata_json->>'action' action, metadata_json->>'sort' sort FROM "${schema}".audit_log
       WHERE event = 'clients.orders_denied' AND request_id = 'req-sort-paid'`)).rows;

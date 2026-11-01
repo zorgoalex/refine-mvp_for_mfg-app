@@ -68,9 +68,12 @@ export class ClientOrdersService {
         const paidAmount = money(Number(row.paid_amount ?? 0));
         return {
           orderId: Number(row.order_id), orderName: row.order_name, fullNumber: row.full_number, orderDate: row.order_date,
-          orderStatusName: row.order_status_name, productionStatusName: row.production_status_name, paymentStatusName: row.payment_status_name,
-          // Without the right the money is absent, not zero: a zero would read as «nothing is owed».
-          ...(financials ? { finalAmount, paidAmount, debtAmount: money(finalAmount - paidAmount) } : {}),
+          orderStatusName: row.order_status_name, productionStatusName: row.production_status_name,
+          // Without the right the money and the payment status are absent, not zero/empty: a zero would read as «nothing
+          // is owed». The payment status is financial, as in the orders list (FINANCIAL_ORDER_SORT_FIELDS there).
+          ...(financials ? {
+            paymentStatusName: row.payment_status_name, finalAmount, paidAmount, debtAmount: money(finalAmount - paidAmount),
+          } : {}),
         };
       }),
       pagination: { page, pageSize, total: result.total, totalPages: Math.max(1, Math.ceil(result.total / pageSize)) },
