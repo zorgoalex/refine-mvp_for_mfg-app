@@ -7,11 +7,17 @@ import { ClientListFactsController } from './http/client-list-facts.controller';
 import { PgClientsAnalyticsRepository } from './adapters/pg-clients-analytics-repository';
 import { ClientsAnalyticsService } from './application/clients-analytics.service';
 import { ClientsAnalyticsController } from './http/clients-analytics.controller';
+import { PgClientOrdersRepository } from './adapters/pg-client-orders-repository';
+import { ClientOrdersService } from './application/client-orders.service';
+import { ClientOrdersController } from './http/client-orders.controller';
+import { PgClientPaymentsRepository } from './adapters/pg-client-payments-repository';
+import { ClientPaymentsService } from './application/client-payments.service';
+import { ClientPaymentsController } from './http/client-payments.controller';
 
 /** Read models of the clients screens that the reference data source does not provide. */
 @Module({
   imports: [DatabaseModule],
-  controllers: [ClientListFactsController, ClientsAnalyticsController],
+  controllers: [ClientListFactsController, ClientsAnalyticsController, ClientOrdersController, ClientPaymentsController],
   providers: [
     {
       provide: ClientListFactsService,
@@ -23,6 +29,18 @@ import { ClientsAnalyticsController } from './http/clients-analytics.controller'
       provide: ClientsAnalyticsService,
       useFactory: (database: DatabaseService) =>
         new ClientsAnalyticsService({ read: new PgClientsAnalyticsRepository(database), auditClient: database }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: ClientOrdersService,
+      useFactory: (database: DatabaseService) =>
+        new ClientOrdersService({ read: new PgClientOrdersRepository(database), auditClient: database }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: ClientPaymentsService,
+      useFactory: (database: DatabaseService) =>
+        new ClientPaymentsService({ read: new PgClientPaymentsRepository(database), auditClient: database }),
       inject: [DatabaseService],
     },
   ],
