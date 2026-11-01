@@ -112,6 +112,8 @@ describe.skipIf(!enabled)(
         await client.query(
           `CREATE TABLE ${schema}.${table} AS TABLE public.${table} WITH NO DATA`
         );
+      // CREATE TABLE AS drops defaults; order_details.production_round is NOT NULL DEFAULT 1 («Переделка»).
+      await client.query('ALTER TABLE order_details ALTER COLUMN production_round SET DEFAULT 1');
       await client.query(`ALTER TABLE cnc_telegram_packets ADD COLUMN IF NOT EXISTS mdf_completion_returned boolean NOT NULL DEFAULT false;
       ALTER TABLE audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();
       ALTER TABLE mdf_board_manual_moves ALTER COLUMN move_id SET DEFAULT 1;
@@ -523,6 +525,32 @@ describe.skipIf(!enabled)(
           "ALTER TABLE audit_log DROP CONSTRAINT e2e_reject_return"
         );
       }
+    });
+
+    // «Переделка» (plan §5.5, variant B): details of production round > 1 stay manual.
+    it("mixed card returns only first-round details and warns about skipped rework details", async () => {
+      await client.query(`INSERT INTO cnc_telegram_packet_items(packet_item_id,packet_id,match_order_id,match_detail_id,quantity,
+        order_name,detail_number,width_mm,height_mm,source,match_status)
+        VALUES(gen_random_uuid(),'${packetId}',1,13,1,'E2E-Тест 1',3,100,200,'svg','matched');
+        UPDATE order_details SET production_round=2 WHERE detail_id=11`);
+      const p = await repository.preview(user, source, { targetColumn: "parsed" });
+      expect(p.details.map((d) => d.detailId)).toEqual([13]);
+      expect(p.warnings.join(" ")).toContain("Детали в переделке пропущены (1)");
+      await confirm(p);
+      expect(await production()).toEqual([
+        { detail_id: "11", production_status_id: 8 },
+        { detail_id: "12", production_status_id: null },
+        { detail_id: "13", production_status_id: 1 },
+        { detail_id: "21", production_status_id: 1 },
+      ]);
+    });
+
+    it("card with only rework details is rejected without any effect", async () => {
+      await client.query("UPDATE order_details SET production_round=2 WHERE detail_id=11");
+      const before = await facts();
+      await expect(repository.preview(user, source, { targetColumn: "parsed" }))
+        .rejects.toMatchObject({ code: "MDF_RETURN_REWORK_DETAILS_MANUAL" });
+      expect(await facts()).toEqual(before);
     });
 
     it("whole-order chat claim includes its ordinary positions and excludes HDF", async () => {

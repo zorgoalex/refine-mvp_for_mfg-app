@@ -26,6 +26,8 @@ export interface OrderDetailLiveState {
 
 export interface OrderDetailLiveSnapshot {
   orderId: number;
+  /** orders.version: the client re-reads the order when it is newer than the one it shows. */
+  orderVersion: number;
   streamEnabled: boolean;
   streamCursor: string;
   cutRefsAccess: 'allowed' | 'denied';

@@ -70,11 +70,12 @@ describe.skipIf(!url)('production order/detail locks on PostgreSQL', () => {
         planned_completion_date date, order_status_id int DEFAULT 1, payment_status_id int DEFAULT 1,
         production_status_id int DEFAULT 4, production_status_from_details_enabled boolean DEFAULT true,
         version int DEFAULT 3, created_by bigint DEFAULT 1, manager_id bigint,
-        delete_flag boolean DEFAULT false, order_kind text DEFAULT 'production_order'
+        delete_flag boolean DEFAULT false, order_kind text DEFAULT 'production_order',
+        production_round smallint NOT NULL DEFAULT 1
       );
       CREATE TABLE ${schema}.order_details (
         detail_id bigint PRIMARY KEY, order_id bigint, production_status_id int DEFAULT 4,
-        delete_flag boolean DEFAULT false
+        delete_flag boolean DEFAULT false, production_round smallint NOT NULL DEFAULT 1
       );
       CREATE TABLE ${schema}.production_statuses (
         production_status_id int PRIMARY KEY, production_status_name text,
@@ -83,10 +84,12 @@ describe.skipIf(!url)('production order/detail locks on PostgreSQL', () => {
       CREATE TABLE ${schema}.production_status_events (
         event_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
         order_id bigint, detail_id bigint, production_status_id int, event_by bigint,
-        note text, payload jsonb
+        note text, payload jsonb, round_no smallint NOT NULL DEFAULT 1
       );
-      CREATE UNIQUE INDEX ON ${schema}.production_status_events (detail_id, production_status_id)
+      CREATE UNIQUE INDEX ON ${schema}.production_status_events (detail_id, production_status_id, round_no)
         WHERE detail_id IS NOT NULL;
+      CREATE UNIQUE INDEX ON ${schema}.production_status_events (order_id, production_status_id, round_no)
+        WHERE order_id IS NOT NULL;
       CREATE TABLE ${schema}.command_idempotency_keys (LIKE public.command_idempotency_keys INCLUDING ALL);
       CREATE TABLE ${schema}.audit_log (LIKE public.audit_log INCLUDING ALL);
       CREATE TABLE ${schema}.outbox_events (LIKE public.outbox_events INCLUDING ALL);

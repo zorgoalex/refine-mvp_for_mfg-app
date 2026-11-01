@@ -297,6 +297,10 @@ export const AUDIT_EVENT_TITLES: Record<string, string> = {
   'orders.restore': 'Восстановлен заказ',
   'orders.detail_transfer': 'Перенесены детали заказа',
   'orders.status_change': 'Изменён статус заказа',
+  'order.rework_started': 'Переделка: запущен круг',
+  'order.rework_details_added': 'Переделка: добавлены детали в круг',
+  'order.rework_reason_clarified': 'Переделка: уточнена причина',
+  'order.rework_closed': 'Переделка: круг закрыт',
   'orders.production_status_change': 'Изменён производственный статус заказа',
   'orders.detail_production_status_change': 'Изменён производственный статус детали',
   'orders.detail_production_status_batch_change':

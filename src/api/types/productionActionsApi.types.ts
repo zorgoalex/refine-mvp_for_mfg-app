@@ -46,6 +46,8 @@ export interface ProductionActionOrderResponse {
   paymentStatusId?: number;
   productionStatusId?: number;
   productionStatusFromDetailsEnabled?: boolean;
+  /** «Переделка»: the order's production round a stage command acted in. */
+  productionRound?: number;
   version: number;
 }
 

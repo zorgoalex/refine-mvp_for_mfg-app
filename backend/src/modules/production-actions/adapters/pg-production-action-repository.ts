@@ -5,6 +5,7 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { AuditRelatedEntity } from '../../../common/audit/related-entities';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
+import { markStageEventWriter } from '../../../shared/production-status/stage-event-writer';
 import { mdfCutReadinessCtes } from '../../../shared/cnc-material/cut-readiness-sql';
 import type { MdfBoardDetailScope } from '../../status-automation/application/mdf-board-event.types';
 import type { CurrentUser } from '../../../permissions/current-user';
@@ -1542,6 +1543,11 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       ], requestId, { tx, allowAssignedProductionWorker: true });
       const productionStatus = await loadProductionStatus(tx, command.productionStatusId);
       assertVersion(order, command.dto.version);
+      // «Переделка»: the production round the stage mark belongs to (the order row is locked above). The UI keeps an
+      // optimistic answer only for this round.
+      const productionRound = Number((await tx.query<{ production_round: string | number }>(
+        'SELECT production_round FROM orders WHERE order_id = $1', [order.orderId],
+      )).rows[0]?.production_round ?? 1);
 
       const existingEventId = await findProductionEventId(
         tx,
@@ -1553,6 +1559,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           order: {
             orderId: order.orderId,
             version: order.version,
+            productionRound,
           },
           event: {
             ...(existingEventId === null ? {} : { productionEventId: existingEventId }),
@@ -1651,6 +1658,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         order: {
           orderId: order.orderId,
           version: nextVersion,
+          productionRound,
         },
         event: {
           ...(productionEventId === null ? {} : { productionEventId }),
@@ -2162,6 +2170,15 @@ export async function changeOrderStatusFromAutomationInTransaction(
   if (order.orderStatusId === targetStatusId) {
     return { status: 'skipped', skipReason: 'same_status' };
   }
+  // «Переделка» is entered only by the rework command; a legacy rule targeting it is
+  // skipped instead of failing (and rolling back) the source command.
+  const targetIsRework = await tx.query(
+    "SELECT 1 FROM order_statuses WHERE order_status_id = $1 AND order_status_code = 'rework'",
+    [targetStatusId],
+  );
+  if (targetIsRework.rows.length > 0) {
+    return { status: 'skipped', skipReason: 'rework_requires_command' };
+  }
 
   const status = await loadOrderStatus(tx, targetStatusId);
   const nextVersion = await updateOrderStatus(tx, order.orderId, status.orderStatusId);
@@ -2362,8 +2379,11 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
   if (ctx.mdfBoardScope) detailTransitionMode = 'advance_only';
   const order = await loadOrderForUpdate(tx, orderId);
   const status = await loadProductionStatus(tx, targetStatusId);
+  // «Переделка» (plan §5.5): MDF-sourced effects never move details of production round > 1.
+  const mdfSourced = ctx.eventType.startsWith('mdf.') || ctx.mdfBoardScope !== undefined;
   const currentDetails = await loadOrderDetailsForBatch(tx, order.orderId,
-    ctx.mdfBoardScope?.details.filter(d => d.requiredQuantity > 0 && d.eligibleQuantity >= d.requiredQuantity).map(d => d.detailId));
+    ctx.mdfBoardScope?.details.filter(d => d.requiredQuantity > 0 && d.eligibleQuantity >= d.requiredQuantity).map(d => d.detailId),
+    { firstRoundOnly: mdfSourced });
   if (currentDetails.length === 0) {
     return { status: 'skipped', skipReason: 'no_details' };
   }
@@ -3242,6 +3262,7 @@ async function loadOrderDetailsForBatch(
   tx: TransactionClient,
   orderId: number,
   selectedDetailIds?: number[],
+  options: { firstRoundOnly?: boolean } = {},
 ): Promise<Array<{
   detailId: number;
   productionStatusId: number | null;
@@ -3263,6 +3284,7 @@ async function loadOrderDetailsForBatch(
     WHERE detail.order_id = $1
       AND COALESCE(detail.delete_flag, false) = false
       ${selectedDetailIds === undefined ? '' : 'AND detail.detail_id = ANY($2::bigint[])'}
+      ${options.firstRoundOnly ? 'AND detail.production_round = 1' : ''}
     ORDER BY detail.detail_id
     FOR UPDATE OF detail
     `,
@@ -3399,6 +3421,7 @@ async function findProductionEventId(
     SELECT event_id
     FROM production_status_events
     WHERE order_id = $1 AND production_status_id = $2
+      AND round_no = (SELECT production_round FROM orders WHERE order_id = $1)
     FOR UPDATE
     `,
     [orderId, productionStatusId],
@@ -3417,6 +3440,7 @@ async function findDetailProductionEventId(
     SELECT event_id
     FROM production_status_events
     WHERE detail_id = $1 AND production_status_id = $2
+      AND round_no = (SELECT production_round FROM order_details WHERE detail_id = $1)
     FOR UPDATE
     `,
     [detailId, productionStatusId],
@@ -3434,13 +3458,15 @@ async function insertProductionEvent(
     requestId: string;
   },
 ): Promise<number> {
+  await markStageEventWriter(tx);
   const result = await tx.query<ProductionEventRow>(
     `
     INSERT INTO production_status_events (
-      order_id, detail_id, production_status_id, event_by, note, payload
+      order_id, detail_id, production_status_id, event_by, note, payload, round_no
     )
-    VALUES ($1, NULL, $2, $3, NULL, $4::jsonb)
-    ON CONFLICT (order_id, production_status_id) WHERE order_id IS NOT NULL
+    VALUES ($1, NULL, $2, $3, NULL, $4::jsonb,
+      (SELECT production_round FROM orders WHERE order_id = $1))
+    ON CONFLICT (order_id, production_status_id, round_no) WHERE order_id IS NOT NULL
     DO UPDATE SET payload = production_status_events.payload
     RETURNING event_id
     `,
@@ -3468,13 +3494,15 @@ async function insertDetailProductionEvent(
     requestId: string;
   },
 ): Promise<number> {
+  await markStageEventWriter(tx);
   const result = await tx.query<ProductionEventRow>(
     `
     INSERT INTO production_status_events (
-      order_id, detail_id, production_status_id, event_by, note, payload
+      order_id, detail_id, production_status_id, event_by, note, payload, round_no
     )
-    VALUES (NULL, $1, $2, $3, $4, $5::jsonb)
-    ON CONFLICT (detail_id, production_status_id) WHERE detail_id IS NOT NULL
+    VALUES (NULL, $1, $2, $3, $4, $5::jsonb,
+      (SELECT production_round FROM order_details WHERE detail_id = $1))
+    ON CONFLICT (detail_id, production_status_id, round_no) WHERE detail_id IS NOT NULL
     DO UPDATE SET payload = production_status_events.payload
     RETURNING event_id
     `,
@@ -3494,6 +3522,7 @@ async function insertDetailProductionEvent(
 }
 
 async function deleteProductionEvent(tx: TransactionClient, eventId: number): Promise<void> {
+  await markStageEventWriter(tx);
   await tx.query('DELETE FROM production_status_events WHERE event_id = $1', [eventId]);
 }
 
@@ -3702,7 +3731,9 @@ export async function loadMdfLaminatedBathAutomationRows(
             AND laminated_status.sort_order IS NOT NULL
             THEN detail_status.sort_order >= laminated_status.sort_order
           ELSE false
-        END AS laminated_or_later
+        END AS laminated_or_later,
+        -- «Переделка» (plan §5.5): a production round > 1 member neither blocks nor completes the bath.
+        detail.production_round > 1 AS excluded
       FROM result_details result_detail
       JOIN cut_result_placement placement
         ON placement.cut_result_id = result_detail.cut_result_id
@@ -3722,14 +3753,16 @@ export async function loadMdfLaminatedBathAutomationRows(
         placement.order_detail_id,
         completed.completed_quantity,
         detail_status.sort_order,
-        laminated_status.sort_order
+        laminated_status.sort_order,
+        detail.production_round
     )
     SELECT DISTINCT state.cut_result_id, state.order_id
     FROM detail_state state
-    WHERE NOT EXISTS (
+    WHERE NOT state.excluded AND NOT EXISTS (
       SELECT 1
       FROM detail_state candidate
       WHERE candidate.cut_result_id = state.cut_result_id
+        AND NOT candidate.excluded
         AND (
           candidate.completed_quantity < candidate.quantity
           OR candidate.laminated_or_later = false

@@ -86,6 +86,8 @@ interface OrderHeaderRow extends QueryResultRow, ProductionSummaryRow {
   production_status_id: string | number | null;
   production_status_name: string | null;
   production_status_from_details_enabled: boolean;
+  production_round?: string | number | null;
+  last_round_no?: string | number | null;
   planned_completion_date: string | Date | null;
   completion_date: string | Date | null;
   issue_date: string | Date | null;
@@ -143,6 +145,7 @@ interface OrderHeaderRow extends QueryResultRow, ProductionSummaryRow {
 
 interface OrderDetailRow extends QueryResultRow {
   detail_id: string | number;
+  production_round?: string | number | null;
   order_id: string | number;
   detail_number: string | number;
   detail_name: string | null;
@@ -518,6 +521,7 @@ export class PgOrderReadRepository
           o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,
           o.total_amount, o.final_amount, o.paid_amount, o.parts_count, o.total_area,
           o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
+          o.production_round,
           ${headerSheetSelect}${deletedSelect}
         FROM orders o
         LEFT JOIN projects mp ON mp.project_id = o.project_id
@@ -680,6 +684,7 @@ export class PgOrderReadRepository
             SELECT pse.production_status_id
             FROM production_status_events pse
             WHERE pse.order_id = o.order_id
+              AND pse.round_no = o.production_round
           ) actual_statuses
           INNER JOIN production_statuses ps ON ps.production_status_id = actual_statuses.production_status_id AND ps.is_active = true
           GROUP BY ps.production_status_code
@@ -786,6 +791,7 @@ export class PgOrderReadRepository
         o.production_status_id, prod_s.production_status_name,
         o.production_detail_count, o.production_unassigned_count, o.production_distinct_status_count,
         o.production_status_from_details_enabled,
+        o.production_round, o.last_round_no,
         (
           SELECT ARRAY_AGG(statuses.production_status_code ORDER BY statuses.sort_order, statuses.production_status_code)
           FROM (
@@ -796,6 +802,7 @@ export class PgOrderReadRepository
               SELECT pse.production_status_id
               FROM production_status_events pse
               WHERE pse.order_id = o.order_id
+                AND pse.round_no = o.production_round
             ) actual_statuses
             INNER JOIN production_statuses ps ON ps.production_status_id = actual_statuses.production_status_id AND ps.is_active = true
             GROUP BY ps.production_status_code
@@ -1660,6 +1667,8 @@ function mapOrderDto(
       productionStatusName: row.production_status_name,
       productionStatusFromDetailsEnabled: row.production_status_from_details_enabled,
       passedProductionStatusCodes: toStringArray(row.passed_production_status_codes),
+      productionRound: toNullableNumber(row.production_round) ?? 1,
+      lastRoundNo: toNullableNumber(row.last_round_no) ?? 1,
       plannedCompletionDate: toDateOnly(row.planned_completion_date),
       completionDate: toDateOnly(row.completion_date),
       issueDate: toDateOnly(row.issue_date),
@@ -1798,6 +1807,7 @@ function mapDetail(row: OrderDetailRow) {
   return {
     id: toNumber(row.detail_id),
     orderId: toNumber(row.order_id),
+    productionRound: toNullableNumber(row.production_round) ?? 1,
     detailNumber: toNumber(row.detail_number),
     detailName: row.detail_name,
     height: toNumber(row.height),

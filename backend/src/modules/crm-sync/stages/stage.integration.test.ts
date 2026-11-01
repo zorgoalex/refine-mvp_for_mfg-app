@@ -399,6 +399,23 @@ describe.skipIf(!optIn)('stages real PostgreSQL + stub Bitrix', () => {
     await tick();
     expect(remote.stageId).toBe('WON');
   });
+  // «Переделка» (plan D4): rework follows the «В производстве» (legacy_4) stage; unmapped → explicit skip.
+  it('syncs «Переделка» to the «В производстве» stage; without that mapping it is skipped, not blocked', async () => {
+    await client.query(`INSERT INTO order_statuses VALUES(4,'В производстве','legacy_4','#ffffff',true,40),(45,'Переделка','rework','#ffffff',true,45)`);
+    await client.query("INSERT INTO orders(order_id,order_name,order_status_id,order_kind) VALUES(11,'E2E-Order',45,'production_order')");
+    await client.query("INSERT INTO crm_sync_mapping VALUES('order','11','deal','700','active','erp')");
+    await tick();
+    expect((await state())).toMatchObject({ status: 'waiting_mapping' });
+    expect((await state()).last_error).toContain('SKIP_REWORK_UNMAPPED');
+    expect(writes).not.toHaveBeenCalled();
+    await client.query("INSERT INTO bitrix24_stage_mapping VALUES('E2E',0,4,'WORK',1,now())");
+    await client.query("UPDATE bitrix24_stage_work SET status='pending' WHERE order_id=11");
+    await tick();
+    expect((await state()).status).toBe('processed');
+    expect(writes).toHaveBeenCalledWith('700', 'WORK');
+    expect((await admin.state() as { statuses?: Array<{ code: string }> }).statuses?.map((s) => s.code) ?? []).not.toContain('rework');
+  });
+
   it('holds missing mapping, wakes on mapping insertion, rejects foreign category', async () => {
     await seed();
     await client.query('DELETE FROM crm_sync_mapping');

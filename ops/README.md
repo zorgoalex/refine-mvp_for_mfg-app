@@ -297,6 +297,62 @@ extend the conversion map. Selection excludes the manual Variant-B side files
 (`*_preflight/_verify/_rollback.sql`) and `*.test.ts`. Override the target with
 `--container`, `--user`, `--db`, `--dir`.
 
+### Migrations 274–276 — production rounds («Переделка»): order of rollout
+
+`274_order_rework_rounds` is additive and safe with the previous backend.
+`275_order_rework_rounds_stage_boundary` must be applied **only after**:
+
+1. the backend that writes round-aware stage events (commit
+   «round-aware stage events», migration A) runs on every instance;
+2. the frontend writes production stages through the backend:
+   `backendProductionActions` is `true` in the runtime config (check
+   `/api/runtime-config`); after 275 direct Hasura writes to
+   `production_status_events` are rejected (`STAGE_EVENT_WRITE_REQUIRES_BACKEND`)
+   and the Hasura insert/update/delete permissions on that table are removed.
+
+After 275 do not roll the backend back below migration A: the old
+`ON CONFLICT (detail_id|order_id, production_status_id)` no longer has an index.
+
+`276_order_rework_round_closure` (closes an open round when the order reaches
+«Готов к выдаче»/«Выдан»/«Завершен») goes with 274/275, before the rework flag is enabled.
+
+`281_order_rework_round_deadline` (round deadline, additive) is read by the new backend (round history, order JSON
+snapshot), so it must exist **before** that backend starts. Release order on a database at the previous main:
+
+1. backup; with the old backend running apply only the old-backend-safe files 274, 276 and 281 — run the runner
+   with `--dir` pointing at a directory that holds just those three files (copied from `backend/db/migrations`;
+   the ledger records them with their real checksums);
+2. deploy the new backend on every instance (`BACKEND_ORDER_REWORK_ENABLED` stays `false`), frontend with
+   `backendProductionActions: true`;
+3. apply the rest normally (`apply` → 275);
+4. Hasura: `ops/hasura/production-status-events-current-round.sh --dry-run`, then without `--dry-run` — every role
+   reads an order's stage marks of its current production round only (rollback: `--revert`). Without it the screens
+   fall back to the client-side round filter (exact unless the current round has no order marks yet).
+
+274 also replaces `apply_detail_stage_mark` (order stage marks from detail
+statuses, migration 266): marks are written to and cleared from the order's
+current round only, as a backend stage-event writer; marks of earlier rounds
+stay as history. While a snapshot with rounds is imported
+(`erp.pse_writer = historical_import`) the automation is off — the snapshot
+carries the marks of every round. A later migration that redefines
+`apply_detail_stage_mark` must keep `round_no` and the writer marker.
+
+Deferred realtime drain (production-round commands queue their realtime
+emissions in `order_realtime_deferred`; the backend delivers them with a
+non-waiting drain and a 5 s sweeper). **Before any migration or manual DB
+maintenance** (`REINDEX`, `CREATE INDEX`, `VACUUM FULL`, `CLUSTER`, `ALTER`,
+long `LOCK TABLE`) set `BACKEND_ORDER_REALTIME_DEFERRED_DRAIN=false` and
+restart **every** backend instance — each waits for its active attempt and logs
+`drain stopped` — or stop the backend; set it back to `true` afterwards. The
+queue is kept meanwhile and delivered after re-enabling (SSE invalidation of
+round commands is only delayed). `ops/apply-migrations.sh apply` warns while a
+drain connection (`application_name = 'erp-order-realtime-drain'`) is active.
+
+Rollback of 275 (only while no production round > 1 exists; otherwise it refuses):
+`psql -v ON_ERROR_STOP=1 -f backend/db/rollback/275_order_rework_rounds_stage_boundary.down.sql`
+— one transaction: drops the stage-event boundary, restores the «stage once»
+indexes and removes the 275 ledger row. Hasura write permissions are not restored.
+
 ### auto — one command for a freshly restored prod dump
 
 `auto` replaces the whole manual "path 1b" chain (detect dump level →
