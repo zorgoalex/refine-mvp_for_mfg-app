@@ -58,11 +58,11 @@ export async function loadMdfBoardEvents(
       SELECT 'packet'::text AS kind, p.packet_id::text AS card_id, i.order_id, i.detail_id,
         p.visually_cut AS cut FROM mdf_packet_columns p
       JOIN mdf_resolved_packet_items i USING(packet_id)
-      WHERE p.mdf_relevant AND i.detail_id IS NOT NULL AND i.quantity > 0
+      WHERE p.mdf_relevant AND i.detail_id IS NOT NULL AND i.quantity > 0 AND NOT i.excluded
       UNION ALL
       SELECT 'bazisCutSet', i.bazis_cut_set_id::text, i.order_id, i.detail_id, c.visually_cut
       FROM mdf_bazis_items i JOIN mdf_bazis_columns c USING(bazis_cut_set_id)
-      WHERE i.mdf_relevant AND i.quantity > 0
+      WHERE i.mdf_relevant AND i.quantity > 0 AND NOT i.excluded
     ), direct_machine_details AS (
       SELECT DISTINCT order_id, detail_id FROM machine_members WHERE kind = $1 AND card_id = $2
     ), latest_baths AS (
@@ -89,7 +89,9 @@ export async function loadMdfBoardEvents(
         COALESCE(s.sort_order >= (SELECT packed FROM mdf_cut_thresholds), false) AS packed,
         COALESCE((COALESCE(smt.name, material.material_name, '') ~* '${CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE}'
           OR allocated.quantity > 0)
-          AND COALESCE(smt.name, material.material_name, '') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}', false) AS mdf_relevant
+          AND COALESCE(smt.name, material.material_name, '') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}', false) AS mdf_relevant,
+        -- «Переделка» (plan §5.5): a production round > 1 member neither blocks nor completes the bath.
+        COALESCE(d.production_round, 1) > 1 AS excluded
       FROM latest_baths b JOIN cut_result_placement p ON p.cut_result_id = b.cut_result_id
         AND p.order_hdf_detail_id IS NULL
       JOIN cut_result_sheet_map sheet ON sheet.cut_result_sheet_map_id = p.cut_result_sheet_map_id
@@ -102,13 +104,14 @@ export async function loadMdfBoardEvents(
       LEFT JOIN mdf_cut_quantities c ON c.order_id = p.order_id AND c.detail_id = p.order_detail_id
       LEFT JOIN allocated_quantities allocated ON allocated.order_id = p.order_id AND allocated.detail_id = p.order_detail_id
       GROUP BY b.cut_result_id, p.order_id, p.order_detail_id, c.completed_quantity,
-        s.sort_order, smt.name, material.material_name, allocated.quantity
+        s.sort_order, smt.name, material.material_name, allocated.quantity, d.production_round
     ), bath_states AS (
       SELECT m.cut_result_id,
-        CASE WHEN BOOL_AND(m.resolved AND m.packed) THEN 'completed_baths'
+        CASE WHEN BOOL_AND(m.resolved AND m.packed) FILTER (WHERE NOT m.excluded) THEN 'completed_baths'
           WHEN MIN(move.target_column) IS NOT NULL THEN MIN(move.target_column)
-          WHEN BOOL_AND(m.resolved AND m.cut_quantity >= m.quantity) AND BOOL_AND(m.laminated) THEN 'baths_laminated'
-          WHEN BOOL_AND(m.resolved AND m.cut_quantity >= m.quantity) THEN 'baths_ready'
+          WHEN BOOL_AND(m.resolved AND m.cut_quantity >= m.quantity) FILTER (WHERE NOT m.excluded)
+            AND BOOL_AND(m.laminated) FILTER (WHERE NOT m.excluded) THEN 'baths_laminated'
+          WHEN BOOL_AND(m.resolved AND m.cut_quantity >= m.quantity) FILTER (WHERE NOT m.excluded) THEN 'baths_ready'
           ELSE 'baths' END AS column_key
       FROM bath_members m LEFT JOIN mdf_board_manual_moves move
         ON move.card_kind = 'bath' AND move.card_id = ('cut-result:' || m.cut_result_id::text)
@@ -118,7 +121,7 @@ export async function loadMdfBoardEvents(
         SUM(CASE WHEN s.column_key IN ('baths_ready','baths_laminated','completed_baths') THEN m.quantity ELSE 0 END) AS ready_quantity,
         SUM(CASE WHEN s.column_key IN ('baths_laminated','completed_baths') THEN m.quantity ELSE 0 END) AS laminated_quantity
       FROM bath_members m JOIN bath_states s USING(cut_result_id)
-      WHERE m.resolved AND m.mdf_relevant GROUP BY m.order_id, m.detail_id
+      WHERE m.resolved AND m.mdf_relevant AND NOT m.excluded GROUP BY m.order_id, m.detail_id
     ), events AS (
       SELECT DISTINCT m.kind, m.card_id, m.order_id, m.detail_id,
         CASE WHEN m.cut THEN 'mdf.board.completed' ELSE 'mdf.order_machine_files_present' END AS event_type,
@@ -145,7 +148,7 @@ export async function loadMdfBoardEvents(
     )
     SELECT e.*, GREATEST(COALESCE(d.quantity,1),1) AS required_quantity
     FROM events e JOIN order_details d ON d.detail_id=e.detail_id AND d.order_id=e.order_id
-    WHERE d.delete_flag=false
+    WHERE d.delete_flag=false AND d.production_round=1
     ORDER BY e.kind, e.card_id, e.order_id, e.detail_id
   `, [source.kind, source.id, orderIds]);
   const events = new Map<string, MdfBoardResolvedEvent>();

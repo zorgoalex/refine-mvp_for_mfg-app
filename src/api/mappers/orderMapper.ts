@@ -208,6 +208,8 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
     production_unassigned_count: order.header.productionUnassignedCount,
     production_distinct_status_count: order.header.productionDistinctStatusCount,
     passed_production_status_codes: order.header.passedProductionStatusCodes ?? [],
+    production_round: order.header.productionRound ?? 1,
+    last_round_no: order.header.lastRoundNo ?? 1,
     production_status_from_details_enabled: normalizeBoolean(
       order.header.productionStatusFromDetailsEnabled,
       true,
@@ -606,6 +608,7 @@ function mapDetailsFromDto(details: OrderDetailDto[], orderId: number): OrderDet
     note: detail.note ?? null,
     priority: normalizeNumber(detail.priority, 100),
     production_status_id: detail.productionStatusId ?? null,
+    production_round: detail.productionRound ?? 1,
     joint_order_id: detail.jointOrderId ?? null,
     basis_project: detail.basisProject ?? null,
     bazis_project_id: detail.bazisProjectId ?? null,

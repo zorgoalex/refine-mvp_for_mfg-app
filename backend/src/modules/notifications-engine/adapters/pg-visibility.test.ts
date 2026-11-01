@@ -51,9 +51,27 @@ describe('PgVisibilityAdapter (fail-closed guards)', () => {
       : { rows: [{ user_id: '1', username: 'u1', role_id: 1, order_id: 500, created_by: 1, manager_id: 1 }] }));
     const client = { query } as unknown as DatabaseClient;
     const result = await new PgVisibilityAdapter().filterByBaseVisibility(client, [1, 2], buildContext({ orderId: 500 }));
-    // One order/users query plus one batch snapshot query for the users found.
-    expect(query).toHaveBeenCalledTimes(2);
+    // One order/users query, one batch snapshot query for the users found, one query of the assigned users.
+    expect(query).toHaveBeenCalledTimes(3);
     expect(result).toContain(1);
     expect(result).not.toContain(2); // user 2 absent from the visibility query result -> dropped
+  });
+
+  it('`assigned` scope: a worker sees the order only as the responsible employee of a live order workshop', async () => {
+    const run = async (assigned: string[]) => {
+      const query = vi.fn(async (text: string, params: readonly unknown[]) => {
+        if (text.includes('user_authorization_snapshot')) return { rows: fakeSnapshotRows(params, () => 20) }; // worker
+        if (text.includes('order_workshops')) {
+          expect(text).toContain('assigned_ow.delete_flag = false');
+          expect(text).toContain('assigned_user.is_active = true');
+          expect(params.map(String)).toEqual(['500']);
+          return { rows: assigned.map((user_id) => ({ user_id })) };
+        }
+        return { rows: ['7', '8'].map((id) => ({ user_id: id, username: `u${id}`, role_id: 20, order_id: 500, created_by: 1, manager_id: 1 })) };
+      });
+      return new PgVisibilityAdapter().filterByBaseVisibility({ query } as unknown as DatabaseClient, [7, 8], buildContext({ orderId: 500 }));
+    };
+    expect(await run(['7'])).toEqual([7]);
+    expect(await run([])).toEqual([]);
   });
 });

@@ -47,7 +47,8 @@ suite('production composition automation — real PostgreSQL', () => {
           order_date date DEFAULT CURRENT_DATE, planned_completion_date date,
           final_amount numeric DEFAULT 0, paid_amount numeric DEFAULT 0, updated_at timestamptz DEFAULT now());
         CREATE TABLE order_details (detail_id bigint PRIMARY KEY, order_id bigint,
-          production_status_id smallint, delete_flag boolean DEFAULT false, updated_at timestamptz);
+          production_status_id smallint, delete_flag boolean DEFAULT false, updated_at timestamptz,
+          production_round integer NOT NULL DEFAULT 1);
         CREATE TABLE order_hdf_details (hdf_detail_id bigint, order_id bigint, production_status_id smallint);
         CREATE TABLE production_statuses (production_status_id smallint PRIMARY KEY, sort_order integer,
           production_status_name text, production_status_code text, is_active boolean DEFAULT true);

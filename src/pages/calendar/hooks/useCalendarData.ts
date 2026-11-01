@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from 'react';
+import { currentRoundStageEvents } from '../../../utils/currentRoundStageEvents';
 import { useList } from '@refinedev/core';
 import { CalendarOrder, CalendarOrderDetail, CalendarDataResult, CalendarFilters, CalendarFilterOption } from '../types/calendar';
 import { groupOrdersByDate } from '../utils/groupOrdersByDate';
@@ -276,7 +277,8 @@ export const useCalendarData = (
   // Группируем события по order_id и получаем коды пройденных этапов
   const passedCodesByOrderId = useMemo(() => {
     const map: Record<number, string[]> = {};
-    (productionEventsData?.data || []).forEach((event: any) => {
+    // «Переделка»: only the marks of each order's current round (earlier rounds are history).
+    currentRoundStageEvents((productionEventsData?.data || []) as any[]).forEach((event: any) => {
       if (event.order_id) {
         if (!map[event.order_id]) {
           map[event.order_id] = [];
