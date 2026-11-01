@@ -41,7 +41,7 @@ import {
 import { authSession } from '../../../api/authSession';
 import { DragItem, CalendarOrder, ViewMode, CalendarFilters, CalendarFilterOption } from '../types/calendar';
 import { requestReworkStart } from '../../orders/components/rework/reworkStartRequests';
-import { REWORK_STATUSES_LOADING_TEXT, useReworkOrderStatusIds } from '../../orders/components/rework/useReworkOrderStatusIds';
+import { useReworkOrderStatusIds } from '../../orders/components/rework/useReworkOrderStatusIds';
 import {
   applyKnownCalendarOrderVersion,
   reserveCalendarOrderVersion,
@@ -579,7 +579,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
 
     const order = contextMenu.order;
     if (fieldName === 'order_status' && !reworkStatuses.ready) {
-      message.info(REWORK_STATUSES_LOADING_TEXT);
+      reworkStatuses.explainNotReady();
       return;
     }
     if (fieldName === 'order_status' && reworkStatuses.ids.has(Number(statusId))) {

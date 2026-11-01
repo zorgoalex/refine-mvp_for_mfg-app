@@ -2,11 +2,11 @@
 // Contains: Order Status, Payment Status
 
 import React from 'react';
-import { Form, Row, Col, Select, message } from 'antd';
+import { Form, Row, Col, Select } from 'antd';
 import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { useOrderFormReworkPick } from '../rework/useOrderFormReworkPick';
-import { REWORK_STATUSES_LOADING_TEXT, useReworkOrderStatusIds } from '../rework/useReworkOrderStatusIds';
+import { useReworkOrderStatusIds } from '../rework/useReworkOrderStatusIds';
 
 export const OrderStatusSection: React.FC = () => {
   const { header, updateHeaderField } = useOrderFormStore();
@@ -46,7 +46,7 @@ export const OrderStatusSection: React.FC = () => {
               {...orderStatusProps}
               value={header.order_status_id}
               onChange={(value) => {
-                if (!reworkStatuses.ready) { message.info(REWORK_STATUSES_LOADING_TEXT); return; }
+                if (!reworkStatuses.ready) { reworkStatuses.explainNotReady(); return; }
                 if (reworkStatuses.ids.has(Number(value))) pickRework(header.order_id);
                 else updateHeaderField('order_status_id', value);
               }}

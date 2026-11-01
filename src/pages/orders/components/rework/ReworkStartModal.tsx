@@ -118,7 +118,7 @@ export const ReworkStartModal: React.FC<{
   busy: boolean;
   setBusy: (busy: boolean) => void;
   onCancel: () => void;
-  onDone: (text: string) => Promise<void>;
+  onDone: (text: string, result: { version: number }) => Promise<void>;
   onFailed: (error: unknown) => Promise<void>;
 }> = ({ orderId, version, action, openRoundNo, roundNo, details, stages, reasons, busy, setBusy, onCancel, onDone, onFailed }) => {
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -191,7 +191,7 @@ export const ReworkStartModal: React.FC<{
     setBusy(true);
     try {
       const result = await orderReworkApi.startOrExtend(orderId, version, request.body);
-      await onDone(result.action === 'extended' ? 'Детали добавлены в переделку' : `Переделка ·${result.roundNo} начата`);
+      await onDone(result.action === 'extended' ? 'Детали добавлены в переделку' : `Переделка ·${result.roundNo} начата`, result);
     } catch (error) {
       await onFailed(error);
     } finally {

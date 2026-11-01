@@ -1,6 +1,6 @@
 import { Popover, Tooltip } from '../../ui/tooltipDelay';
 import { requestReworkStart } from '../orders/components/rework/reworkStartRequests';
-import { REWORK_STATUSES_LOADING_TEXT, useReworkOrderStatusIds } from '../orders/components/rework/useReworkOrderStatusIds';
+import { useReworkOrderStatusIds } from '../orders/components/rework/useReworkOrderStatusIds';
 import { MdfProductionReturnDialog, isMdfBackwardMove, type MdfReturnIntent } from './MdfProductionReturnDialog';
 import { keepsShownMdfBoard, mdfShownDataKey, resetMdfBoardForNewSession } from './mdfBoardSessionData';
 import {
@@ -1352,7 +1352,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       if (!canMove) return;
       // «Переделка» is set by the rework command (it moves the details too): the drop opens its form instead.
       if (viewState.view === 'order' && !reworkStatuses.ready) {
-        message.info(REWORK_STATUSES_LOADING_TEXT);
+        reworkStatuses.explainNotReady();
         return;
       }
       if (viewState.view === 'order' && reworkStatuses.ids.has(Number(targetStatusId))) {

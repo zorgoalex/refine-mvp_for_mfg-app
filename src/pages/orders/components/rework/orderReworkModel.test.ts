@@ -216,7 +216,7 @@ describe('«Переделка»: picking the status «Переделка» open
     expect(src('../OrderHeaderContextMenu.tsx')).toContain("if (reworkStatusIds.has(Number(status.id))) pickRework(header.order_id);");
     // While the status reference loads, a picker applies nothing («Переделка» could go unrecognised).
     for (const path of ['../sections/OrderStatusSection.tsx', '../sections/OrderBasicInfo.tsx']) {
-      expect(src(path)).toContain('if (!reworkStatuses.ready) { message.info(REWORK_STATUSES_LOADING_TEXT); return; }');
+      expect(src(path)).toContain('if (!reworkStatuses.ready) { reworkStatuses.explainNotReady(); return; }');
       expect(src(path)).toContain('if (reworkStatuses.ids.has(Number(value))) pickRework(header.order_id);');
     }
     const calendar = src('../../../calendar/components/CalendarBoard.tsx');
@@ -229,13 +229,16 @@ describe('«Переделка»: picking the status «Переделка» open
     // The order form opens it only without unsaved edits and re-reads the order afterwards.
     const pick = src('useOrderFormReworkPick.ts');
     expect(pick).toContain('if (storeApi.getState().isDirty) {');
-    expect(pick).toContain('void loadOrderViaBackend(orderId, {');
-    expect(pick).toContain('getOrderById: (id) => fetchOrderAfterRework(id),');
+    expect(pick).toContain('void refresh(orderId, result.version)');
+    expect(pick).toContain('getOrder: (orderId) => fetchOrderAfterRework(orderId),');
     // The host: one form instance per opening, late answers dropped (see loadReworkForm.test.ts).
     const host = src('ReworkStartHost.tsx');
-    expect(host).toContain('key={loaded.ticket}');
+    expect(host).toContain('key={ticket}');
     expect(host).toContain('isCurrent: () => gate.isLatest(ticket),');
-    expect(host).toContain("const close = () => { gate.begin(); setLoaded(null); };");
+    // Closing and busy belong to the form's ticket: a late command answer never closes or blocks a newer form.
+    expect(host).toContain('if (!gate.isLatest(ticket)) return;');
+    expect(host).toContain('busy={busyTicket === ticket}');
+    expect(host).toContain('request.onDone?.(result);');
   });
 
   it('the status is recognised by its code, and the code is read with the status reference', () => {
