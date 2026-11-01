@@ -197,11 +197,19 @@ export const KeepAliveOutlet: React.FC = () => {
     plan,
   ]);
 
-  const renderedCacheEntries = namespaceChanged
+  const cachedEntries = namespaceChanged
     ? outlet
       ? [[activeKey, outlet] as const]
       : []
     : Array.from(cacheRef.current.entries());
+  // A workspace this render evicts that has never rendered (it entered the cache
+  // while its lazy route was still suspended) is not mounted at all: mounting it
+  // just to unmount it would run its first render and effects against an address
+  // it no longer owns (a Refine list would query the next route's resource, or
+  // `syncWithLocation` would navigate back to it).
+  const renderedCacheEntries = cachedEntries.filter(([key]) => (
+    key === activeKey || plan.keep.has(key) || deliveredLocationContextsRef.current.has(key)
+  ));
   const locationContextFor = (key: string): LocationContextValue => (
     key === activeKey || plan.keep.has(key)
       ? activeLocationContext
