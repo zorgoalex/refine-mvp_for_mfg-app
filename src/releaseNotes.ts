@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-01", title: "МДФ-доска: строка «Переделка» на карточке заказа",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "Если МДФ-детали заказа идут по кругу переделки, на карточке заказа появляется отдельная строка «Переделка ·N: распилено X из M · закатано Y» — по статусам деталей последнего круга. Основные счётчики карточки не меняются.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-30", title: "МДФ-доска: точные счётчики на карточках заказов",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: [

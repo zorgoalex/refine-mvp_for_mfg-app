@@ -14,10 +14,14 @@ export interface OrderStatusBoardCardDetailDto {
   detailNumber: number | null;
   quantity: number;
   bazisCutQuantity: number;
+  /** The detail's material (sheet type, else legacy material) is MDF and not another material. */
+  mdfEligible: boolean;
   /** The detail's production status is «Распилен» (code `cut`) or later: evidence of cutting for the MDF board. */
   statusCut: boolean;
   /** The detail's production status is «Закатан» (code `laminated`) or later: evidence of rolling for the MDF board. */
   statusRolled: boolean;
+  /** Production round of the detail: 1, or N for a «Переделка» round; its status then describes round N. */
+  productionRound: number;
 }
 
 export interface OrderStatusBoardCardDto {

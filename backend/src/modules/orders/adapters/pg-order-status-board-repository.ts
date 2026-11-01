@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { mapProductionSummary, type ProductionSummaryRow } from '../../../shared/production-status/production-summary';
 import { ApiError } from '../../../common/errors/api-error';
+import { mdfDemandMaterialSql } from '../../../shared/cnc-material';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { Scope } from '../../../permissions/policies/role-policies';
@@ -277,12 +278,16 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
             'detailNumber', od.detail_number,
             'quantity', GREATEST(od.quantity, 0),
             'bazisCutQuantity', ${command.query.includeBazisAllocation === false ? '0' : 'COALESCE(bazis_cut.quantity, 0)'},
+            'mdfEligible', ${mdfDemandMaterialSql('mt', 'm')},
             'statusCut', COALESCE(detail_status.sort_order >= stage_marks.cut_sort_order, false),
-            'statusRolled', COALESCE(detail_status.sort_order >= stage_marks.rolled_sort_order, false)
+            'statusRolled', COALESCE(detail_status.sort_order >= stage_marks.rolled_sort_order, false),
+            'productionRound', GREATEST(COALESCE(od.production_round, 1), 1)
           )
           ORDER BY od.detail_number ASC NULLS LAST, od.detail_id ASC
         ) AS details_json
         FROM order_details od
+        LEFT JOIN sheet_material_types mt ON mt.sheet_material_type_id = od.sheet_material_type_id
+        LEFT JOIN materials m ON m.material_id = od.material_id
         LEFT JOIN production_statuses detail_status
           ON detail_status.production_status_id = od.production_status_id
         -- the stages a detail status proves on the MDF board: «Распилен» and «Закатан», by code or name
@@ -738,6 +743,12 @@ function mapBoardCard(row: BoardRow, currentUser: CurrentUser): OrderStatusBoard
   };
 }
 
+/** A detail's production round («Переделка» opens round 2, 3…); 1 when absent (an older read). */
+function positiveRound(value: unknown): number {
+  const round = numberFromUnknown(value);
+  return round !== null && Number.isSafeInteger(round) && round > 1 ? round : 1;
+}
+
 function mapBoardCardDetails(value: unknown): OrderStatusBoardCardDetailDto[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item): OrderStatusBoardCardDetailDto[] => {
@@ -758,8 +769,10 @@ function mapBoardCardDetails(value: unknown): OrderStatusBoardCardDetailDto[] {
       bazisCutQuantity: Number.isFinite(bazisCutQuantity)
         ? Math.max(0, Math.trunc(bazisCutQuantity))
         : 0,
+      mdfEligible: record.mdfEligible === true,
       statusCut: record.statusCut === true || record.statusRolled === true,
       statusRolled: record.statusRolled === true,
+      productionRound: positiveRound(record.productionRound),
     }];
   });
 }

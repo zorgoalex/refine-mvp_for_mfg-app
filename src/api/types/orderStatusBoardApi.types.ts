@@ -84,10 +84,14 @@ export interface OrderStatusBoardCardDetail {
   detailNumber: number | null;
   quantity: number;
   bazisCutQuantity: number;
+  /** MDF material (an older backend omits it). */
+  mdfEligible?: boolean;
   /** Production status «Распилен» or later (an older backend omits it). */
   statusCut?: boolean;
   /** Production status «Закатан» or later (an older backend omits it). */
   statusRolled?: boolean;
+  /** Production round (1, or N in a «Переделка» round); an older backend omits it. */
+  productionRound?: number;
 }
 
 export interface OrderStatusBoardCard {
