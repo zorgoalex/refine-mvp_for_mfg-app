@@ -4,6 +4,15 @@ export const CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE =
 export const CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE =
   '(^|[^a-zа-яё])(hdf|хдф|лдсп|ldsp|lдсп|дсп|dsp|двп|dvp|osb|осп|fanera|фанера|plywood|акрил|acrylic|пластик|plastic|khdf|xdf|osp|akril|plastik)([^a-zа-яё]|$)';
 
+
+// MDF demand of an order detail: the material of its sheet type (or legacy
+// material) is MDF and not another material. The engine's demand loader and
+// the order board classify details with this one fragment.
+export function mdfDemandMaterialSql(sheetTypeAlias: 'mt', materialAlias: 'm'): string {
+  const material = `COALESCE(${sheetTypeAlias}.name, ${materialAlias}.material_name, '')`;
+  return `(${material} ~* '${CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE}' AND ${material} !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}')`;
+}
+
 // Shared by board reads and detail-status automation. program_name is the CNC
 // filename; a non-MDF marker overrides even the worker's default MDF material.
 // Aliases are internal SQL identifiers, never request input.
