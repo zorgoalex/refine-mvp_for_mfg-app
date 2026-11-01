@@ -9,7 +9,10 @@ export interface SheetMaterialTypeInput {
   thicknessMm: number;
   widthMm: number;
   heightMm: number;
+  /** Основной поставщик. */
   supplierId?: number | null;
+  /** Дополнительные поставщики по порядку (backend с миграции 280); не передано — не менять. */
+  additionalSupplierIds?: number[] | null;
   vendorId?: number | null;
   supplierArticle?: string | null;
   texture?: boolean | null;
@@ -32,6 +35,9 @@ export interface SheetMaterialTypeDto {
   widthMm: number;
   heightMm: number;
   supplierId: number | null;
+  /** Нет у backend до миграции 280: все поставщики (основной первым) и дополнительные. */
+  suppliers?: Array<{ id: number; name: string; isActive: boolean }>;
+  additionalSupplierIds?: number[];
   vendorId: number | null;
   supplierArticle: string | null;
   texture: boolean | null;
@@ -68,8 +74,8 @@ export const sheetMaterialsApi = {
   },
 
   /** Возможности backend; прежний backend отвечает ошибкой («capabilities» как id) — поля считаются неподдержанными. */
-  capabilities(): Promise<{ nomenclatureFields?: boolean; onecItemPicker?: boolean }> {
-    return httpClient.get<{ nomenclatureFields?: boolean; onecItemPicker?: boolean }>(apiRoutes.sheetMaterials.capabilities);
+  capabilities(): Promise<{ nomenclatureFields?: boolean; onecItemPicker?: boolean; supplierList?: boolean }> {
+    return httpClient.get<{ nomenclatureFields?: boolean; onecItemPicker?: boolean; supplierList?: boolean }>(apiRoutes.sheetMaterials.capabilities);
   },
 
   /** Позиции номенклатуры 1С для поля «Позиция 1С»; `available: false` — данных 1С нет, ключ вводится вручную. */

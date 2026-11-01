@@ -61,6 +61,7 @@ export const apiRoutes = {
     resourceDemands: backendApiPath('/orders/resource-demands'),
     resourceDemandsByMaterial: backendApiPath('/orders/resource-demands/by-material'),
     resourceDemandsOnecDocuments: backendApiPath('/orders/resource-demands/onec-documents'),
+    resourceDemandsFilterOptions: backendApiPath('/orders/resource-demands/filter-options'),
     resourceDemandCard: (orderId: number) => backendApiPath(`/orders/${orderId}/resource-demands`),
     resourceProcurement: (orderId: number, resourceKey: string) =>
       backendApiPath(`/orders/${orderId}/resource-procurement/${encodeURIComponent(resourceKey)}`),
@@ -118,6 +119,8 @@ export const apiRoutes = {
   },
   clientsRead: {
     listFacts: backendApiPath('/clients/list-facts'),
+    orders: (clientId: number) => backendApiPath(`/clients/${clientId}/orders`),
+    payments: (clientId: number) => backendApiPath(`/clients/${clientId}/payments`),
     analyticsDashboard: backendApiPath('/clients-analytics/dashboard'),
     analyticsCard: (clientId: number) => backendApiPath(`/clients-analytics/clients/${clientId}`),
   },

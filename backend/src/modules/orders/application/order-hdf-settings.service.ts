@@ -5,6 +5,16 @@ import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { PermissionsService } from '../../../permissions/permissions.service';
+import {
+  sameIds,
+  supplierRelatedEntities,
+  type MaterialSupplierRef,
+} from '../../material-suppliers/application/material-suppliers';
+import {
+  assertSuppliersSelectable,
+  loadMaterialSuppliers,
+  replaceMaterialSuppliers,
+} from '../../material-suppliers/adapters/pg-material-suppliers';
 
 const SOURCE = 'backend-production-tech-settings';
 const HDF_THRESHOLD_KEY = 'production.hdf.min_side_threshold_mm';
@@ -66,6 +76,10 @@ export interface ExtraResourceDto {
   isActive: boolean;
   sortOrder: number;
   version: number;
+  /** Производитель (migr 280). */
+  vendorId?: number | null;
+  /** Поставщики по порядку (первый — основной; migr 280). */
+  suppliers?: MaterialSupplierRef[];
 }
 
 export interface UpdateHdfSettingsCommand {
@@ -124,6 +138,10 @@ export interface UpsertExtraResourceCommand {
   comment?: string;
   isActive?: boolean;
   sortOrder?: number;
+  /** Не передано — не менять (старые клиенты); null — очистить. */
+  vendorId?: number | null;
+  /** Не передано — не менять; null/[] — очистить. */
+  supplierIds?: number[] | null;
   idempotencyKey: string;
   requestId?: string;
 }
@@ -140,7 +158,7 @@ export class OrderHdfSettingsService {
 
   async getExtraResources(currentUser: CurrentUser): Promise<ExtraResourceDto[]> {
     this.requireAny(currentUser, ['settings.view', 'settings.manage']);
-    return readExtraResources(this.database);
+    return withVendorAndSuppliers(this.database, await readExtraResources(this.database));
   }
 
   async createExtraResource(command: UpsertExtraResourceCommand): Promise<ExtraResourceDto> {
@@ -151,9 +169,12 @@ export class OrderHdfSettingsService {
       const replay = await reconcileIdempotency(tx, command.idempotencyKey, 'settings.extra_resource_create', {
         actorUserId: command.currentUser.id,
         resource,
+        ...supplierFingerprint(command),
       }, command.currentUser.id);
       if (replay.completedResponse) return parseExtraResourceResponse(replay.completedResponse);
-      const created = await insertExtraResource(tx, resource);
+      const inserted = await insertExtraResource(tx, resource);
+      await writeVendorAndSuppliers(tx, inserted.id, command, null, []);
+      const [created] = await withVendorAndSuppliers(tx, [inserted]);
       await bumpHdfRevision(tx);
       await auditService.record(tx, {
         event: 'settings.extra_resource_created',
@@ -168,7 +189,11 @@ export class OrderHdfSettingsService {
         after: created as unknown as Record<string, unknown>,
         diff: {},
         metadata: { action: 'extra_resource_created' },
-        relatedEntities: [{ entityType: 'extra_resource', entityId: created.id }],
+        relatedEntities: [
+          { entityType: 'extra_resource', entityId: created.id },
+          ...supplierRelatedEntities([], supplierIdsOf(created)),
+          ...vendorRelatedEntities(null, created.vendorId ?? null),
+        ],
       });
       await completeIdempotency(tx, command.idempotencyKey, created);
       return created;
@@ -189,17 +214,21 @@ export class OrderHdfSettingsService {
         id,
         version,
         resource,
+        ...supplierFingerprint(command),
       }, command.currentUser.id);
       if (replay.completedResponse) return parseExtraResourceResponse(replay.completedResponse);
-      const before = await readExtraResourceForUpdate(tx, id);
-      if (!before) throw new ApiError(404, 'EXTRA_RESOURCE_NOT_FOUND', 'Extra resource not found');
+      const locked = await readExtraResourceForUpdate(tx, id);
+      if (!locked) throw new ApiError(404, 'EXTRA_RESOURCE_NOT_FOUND', 'Extra resource not found');
+      const [before] = await withVendorAndSuppliers(tx, [locked]);
       if (before.version !== version) {
         throw new ApiError(409, 'EXTRA_RESOURCE_VERSION_CONFLICT', 'Extra resource changed', {
           currentVersion: before.version,
           expectedVersion: version,
         });
       }
-      const updated = await updateExtraResourceRow(tx, id, resource);
+      const row = await updateExtraResourceRow(tx, id, resource);
+      await writeVendorAndSuppliers(tx, id, command, before.vendorId ?? null, supplierIdsOf(before));
+      const [updated] = await withVendorAndSuppliers(tx, [row]);
       await refreshMillingLinksForExtraResource(tx, updated);
       await bumpHdfRevision(tx);
       await auditService.record(tx, {
@@ -215,7 +244,11 @@ export class OrderHdfSettingsService {
         after: updated as unknown as Record<string, unknown>,
         diff: {},
         metadata: { action: 'extra_resource_changed' },
-        relatedEntities: [{ entityType: 'extra_resource', entityId: id }],
+        relatedEntities: [
+          { entityType: 'extra_resource', entityId: id },
+          ...supplierRelatedEntities(supplierIdsOf(before), supplierIdsOf(updated)),
+          ...vendorRelatedEntities(before.vendorId ?? null, updated.vendorId ?? null),
+        ],
       });
       await completeIdempotency(tx, command.idempotencyKey, updated);
       return updated;
@@ -1377,6 +1410,67 @@ function parseHdfSettingsResponse(value: unknown): HdfSettingsDto {
   };
 }
 
+/** Поля производителя/поставщиков в отпечатке идемпотентности: тот же ключ с другим списком — конфликт, а не повтор. */
+function supplierFingerprint(command: UpsertExtraResourceCommand): Record<string, unknown> {
+  return {
+    ...(command.vendorId === undefined ? {} : { vendorId: command.vendorId }),
+    ...(command.supplierIds === undefined ? {} : { supplierIds: command.supplierIds }),
+  };
+}
+
+function supplierIdsOf(resource: ExtraResourceDto): number[] {
+  return (resource.suppliers ?? []).map((supplier) => supplier.id);
+}
+
+function vendorRelatedEntities(before: number | null, after: number | null): Array<{ entityType: string; entityId: number }> {
+  return [...new Set([before, after].filter((id): id is number => id !== null))].map((entityId) => ({ entityType: 'vendor', entityId }));
+}
+
+/** Производитель и поставщики доп. ресурса из команды (не переданное поле не меняется); вызывается под блокировкой строки. */
+async function writeVendorAndSuppliers(
+  tx: TransactionClient,
+  id: number,
+  command: UpsertExtraResourceCommand,
+  previousVendorId: number | null,
+  previousSupplierIds: number[],
+): Promise<void> {
+  if (command.vendorId !== undefined && command.vendorId !== previousVendorId) {
+    if (command.vendorId !== null) {
+      const vendor = await tx.query('SELECT 1 FROM vendors WHERE vendor_id = $1', [command.vendorId]);
+      if (vendor.rowCount === 0) throw new ApiError(422, 'MATERIAL_SUPPLIER_INVALID', 'Производитель не найден', { field: 'vendorId' });
+    }
+    await tx.query('UPDATE extra_resources SET vendor_id = $2 WHERE extra_resource_id = $1', [id, command.vendorId]);
+  }
+  if (command.supplierIds !== undefined) {
+    const next = command.supplierIds ?? [];
+    if (!sameIds(next, previousSupplierIds)) {
+      await assertSuppliersSelectable(tx, next, previousSupplierIds);
+      await replaceMaterialSuppliers(tx, 'extra_resource', id, next, Number(command.currentUser.id) || null);
+    }
+  }
+}
+
+/** Производитель и поставщики для строк справочника доп. ресурсов. */
+async function withVendorAndSuppliers(
+  client: { query: TransactionClient['query'] },
+  resources: ExtraResourceDto[],
+): Promise<ExtraResourceDto[]> {
+  if (resources.length === 0) return resources;
+  const ids = resources.map((resource) => resource.id);
+  const vendors = new Map(
+    (await client.query<{ extra_resource_id: string | number; vendor_id: string | number | null }>(
+      'SELECT extra_resource_id, vendor_id FROM extra_resources WHERE extra_resource_id = ANY($1::bigint[])',
+      [ids],
+    )).rows.map((row) => [Number(row.extra_resource_id), row.vendor_id === null ? null : Number(row.vendor_id)]),
+  );
+  const suppliers = await loadMaterialSuppliers(client, 'extra_resource', ids);
+  return resources.map((resource) => ({
+    ...resource,
+    vendorId: vendors.get(resource.id) ?? null,
+    suppliers: suppliers.get(resource.id) ?? [],
+  }));
+}
+
 function parseExtraResourceResponse(value: unknown): ExtraResourceDto {
   const parsed = parseExtraResources([value])[0];
   if (!parsed) {
@@ -1404,6 +1498,9 @@ function parseExtraResources(value: unknown): ExtraResourceDto[] {
       isActive: item.isActive !== false,
       sortOrder: Number(item.sortOrder ?? 100),
       version: Number(item.version ?? 1),
+      // Ответ команды, сохранённый для повтора по ключу идемпотентности, несёт и производителя/поставщиков.
+      ...(item.vendorId === undefined ? {} : { vendorId: toNullableNumber(item.vendorId) }),
+      ...(Array.isArray(item.suppliers) ? { suppliers: item.suppliers } : {}),
     };
   }).filter((resource) => Number.isInteger(resource.id) && resource.id > 0);
 }

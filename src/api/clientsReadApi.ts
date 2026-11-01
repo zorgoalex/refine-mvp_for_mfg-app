@@ -20,6 +20,72 @@ export const clientsReadApi = {
   },
 };
 
+/** Заказ клиента во вкладке «Заказы»; денег нет, если у пользователя нет права видеть финансы заказов. */
+export interface ClientOrder {
+  orderId: number;
+  orderName: string;
+  fullNumber: string | null;
+  orderDate: string | null;
+  orderStatusName: string | null;
+  productionStatusName: string | null;
+  /** Absent without the right to see order financials, as the money. */
+  paymentStatusName?: string | null;
+  finalAmount?: number;
+  paidAmount?: number;
+  debtAmount?: number;
+}
+
+export interface ClientOrdersResponse {
+  data: ClientOrder[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  /** Какие заказы показаны: все заказы клиента или только свои (автор или менеджер). */
+  scope: 'all' | 'own';
+  /** Итог по всем страницам; нет без права видеть финансы. */
+  summary?: { finalAmount: number; paidAmount: number; debtAmount: number };
+}
+
+/** Карточка клиента, «Заказы»: область видимости заказов применяет backend. */
+/** Sorting of a client card tab over all pages (the server sorts; ties — the newest first). */
+export interface ClientTabSort<K extends string> { key: K; direction: 'asc' | 'desc' }
+export type ClientOrderSortKey = 'number' | 'date' | 'status' | 'production' | 'payment' | 'final' | 'paid' | 'debt';
+export type ClientPaymentSortKey = 'date' | 'amount' | 'type' | 'order' | 'notes';
+
+export const clientOrdersApi = {
+  list(clientId: number, page: number, pageSize: number, sort?: ClientTabSort<ClientOrderSortKey>): Promise<ClientOrdersResponse> {
+    return httpClient.get<ClientOrdersResponse>(withQuery(apiRoutes.clientsRead.orders(clientId), {
+      page, pageSize, ...(sort ? { sort: sort.key, order: sort.direction } : {}),
+    }));
+  },
+};
+
+/** One payment of an order of the client («Платежи» of the client card). */
+export interface ClientPayment {
+  paymentId: number;
+  paymentDate: string;
+  amount: number;
+  typePaidName: string | null;
+  notes: string | null;
+  /** The payment came from 1C. */
+  fromOnec: boolean;
+  order: { orderId: number; orderName: string; fullNumber: string | null };
+}
+
+export interface ClientPaymentsResponse {
+  data: ClientPayment[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  /** «own»: only payments of the user's own orders; «restricted»: of the orders the user otherwise has access to. */
+  scope: 'all' | 'own' | 'restricted';
+  summary: { amount: number };
+}
+
+export const clientPaymentsApi = {
+  list(clientId: number, page: number, pageSize: number, sort?: ClientTabSort<ClientPaymentSortKey>): Promise<ClientPaymentsResponse> {
+    return httpClient.get<ClientPaymentsResponse>(withQuery(apiRoutes.clientsRead.payments(clientId), {
+      page, pageSize, ...(sort ? { sort: sort.key, order: sort.direction } : {}),
+    }));
+  },
+};
+
 export type ClientPersonTypeCode = 'individual' | 'legal';
 export type ClientRecencySegment = 'active' | 'sleeping' | 'lost' | 'no_orders';
 export type ClientFrequencyBucket = '1' | '2-3' | '4-9' | '10+';

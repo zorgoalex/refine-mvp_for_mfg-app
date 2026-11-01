@@ -7,6 +7,7 @@ import type { CatalogNameHistoryDto } from '../../api/types/filmCatalogImportApi
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 import { ReferenceSortOrderShow } from "../../components/ReferenceSortOrder";
+import { FilmSuppliersBlock } from "../../components/materialSuppliers/FilmSuppliersBlock";
 
 const { Title } = Typography;
 
@@ -67,12 +68,14 @@ export const FilmShow: React.FC<IResourceComponentsProps> = () => {
           <TextField value={typeOne?.data?.film_type_name} />
         </Col>
         <Col span={8}>
-          <Title level={5}>Поставщик плёнки</Title>
+          <Title level={5}>Производитель</Title>
           <TextField value={vendorOne?.data?.vendor_name} />
         </Col>
         <Col span={8}><Title level={5}>Тип номенклатуры</Title><TextField value={record?.nomenclature_type} /></Col>
         <Col span={8}><Title level={5}>Категория номенклатуры</Title><TextField value={record?.nomenclature_category} /></Col>
       </Row>
+      <FilmSuppliersBlock filmId={record?.film_id} />
+      <Divider />
       <Title level={5}>Примечание</Title>
       <Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>{record?.note || '—'}</Typography.Paragraph>
 

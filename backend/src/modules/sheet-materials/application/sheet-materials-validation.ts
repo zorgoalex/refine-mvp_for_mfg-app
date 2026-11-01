@@ -32,6 +32,14 @@ export function validateSheetMaterialTypeInput(input: SheetMaterialTypeInput): v
   if (input.supplierId != null && (!Number.isInteger(input.supplierId) || input.supplierId <= 0)) {
     errors.push({ field: 'supplierId', message: 'supplierId must be a positive integer' });
   }
+  if (input.additionalSupplierIds != null) {
+    const ids = input.additionalSupplierIds;
+    if (!Array.isArray(ids) || ids.length > 20 || !ids.every((id) => Number.isInteger(id) && id > 0)) {
+      errors.push({ field: 'additionalSupplierIds', message: 'additionalSupplierIds must be up to 20 positive integers' });
+    } else if (new Set(ids).size !== ids.length) {
+      errors.push({ field: 'additionalSupplierIds', message: 'additionalSupplierIds must not repeat a supplier' });
+    }
+  }
   if (input.vendorId != null && (!Number.isInteger(input.vendorId) || input.vendorId <= 0)) {
     errors.push({ field: 'vendorId', message: 'vendorId must be a positive integer' });
   }

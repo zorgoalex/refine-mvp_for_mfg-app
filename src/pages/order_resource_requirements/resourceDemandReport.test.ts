@@ -34,6 +34,7 @@ const rows: OrderResourceDemandDto[] = [
         hasCutData: true,
         vendorId: 3,
         vendorName: 'Фокус прайм',
+        supplierName: 'Фокус прайм',
       },
     ],
   },
@@ -57,6 +58,7 @@ const rows: OrderResourceDemandDto[] = [
         hasCutData: true,
         vendorId: 4,
         vendorName: 'Кира',
+        supplierName: 'Кира',
       },
     ],
   },
@@ -77,6 +79,19 @@ describe('buildResourceDemandReport', () => {
     expect(report.content).toContain('Фокус прайм\n2712-Слоновая кость - 5,2');
     expect(report.content).toContain('Кира\n2717-Олива JS9060 - 6,2');
     expect(report.content).not.toContain('PRJ-2712');
+  });
+
+  it('группирует плёнки по поставщику, а не по производителю', () => {
+    const report = buildResourceDemandReport({
+      rows: rows.map((row) => ({ ...row, films: row.films.map((film) => ({ ...film, supplierName: film.filmId === 20 ? 'ИП Алер' : null })) })),
+      material: 'films',
+      reportFormat: 'brief',
+      fileFormat: 'txt',
+      generatedAt,
+    });
+    expect(report.content).toContain('ИП Алер\n2712-Слоновая кость - 5,2');
+    expect(report.content).toContain('Без поставщика\n2717-Олива JS9060 - 6,2');
+    expect(report.content).not.toContain('Фокус прайм');
   });
 
   it('в подробном отчете добавляет клиента, дату заказа и единицы', () => {

@@ -47,6 +47,6 @@ describe('SheetMaterialsService RBAC', () => {
     const denied = new SheetMaterialsService({ repo: repo as any, permissions: deny, onecItems: source });
     await expect(denied.onecItems(ctx)).rejects.toMatchObject({ statusCode: 403 });
     expect(source).not.toHaveBeenCalled();
-    await expect(svc.capabilities(ctx)).resolves.toEqual({ nomenclatureFields: true, onecItemPicker: true });
+    await expect(svc.capabilities(ctx)).resolves.toEqual({ nomenclatureFields: true, onecItemPicker: true, supplierList: true });
   });
 });

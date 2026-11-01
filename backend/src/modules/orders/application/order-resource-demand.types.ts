@@ -15,7 +15,53 @@ export interface OrderResourceDemandQuery {
   unpurchasedOnly?: boolean;
   /** Только заказы, на которые распределён этот документ 1С (активные распределения). */
   onecDocumentId?: number;
+  /** Фильтр заголовка «Заказ»: только эти заказы. */
+  orderIds?: number[];
+  /** Фильтр заголовка «Дата заказа»: эти даты и/или заказы без даты. */
+  orderDates?: ResourceDemandValueFilter<string>;
+  /** Фильтр заголовка «Листовые материалы»: заказы с любым из материалов и/или без листовых. */
+  sheetMaterialTypeIds?: ResourceDemandValueFilter<number>;
+  /** Фильтр заголовка «Плёнка»: заказы с любой из плёнок и/или без плёнки. */
+  filmIds?: ResourceDemandValueFilter<number>;
+  /**
+   * Фильтр заголовка «Поставщик»: ключи основного поставщика позиции (`s:<id>`, `c:…`, `n:…`, `none` — без поставщика).
+   * Заказ подходит, если хоть один его материал — от выбранного поставщика; в ответе остаются только такие материалы.
+   */
+  supplierKeys?: string[];
+  /** `supplierKeys` — исключённые поставщики («все, кроме»: длинный выбор передаётся дополнением). */
+  supplierKeysExclude?: boolean;
+  /** Только заказы, у которых есть готовый раскрой плёнки на ванне (метры посчитаны). */
+  readyCutsOnly?: boolean;
+  /** Оплата: `any_paid` — частично или полностью оплачен, `fully_paid` — только полностью. */
+  payment?: OrderResourcePaymentFilter;
+  /** Сортировка списка по всем страницам; без неё — дата заказа, новые сверху. */
+  sort?: OrderResourceDemandSort;
 }
+
+export type OrderResourceDemandSortKey = 'order' | 'date' | 'sheetMaterials' | 'films';
+
+export interface OrderResourceDemandSort {
+  key: OrderResourceDemandSortKey;
+  direction: 'asc' | 'desc';
+}
+
+export interface ResourceDemandValueFilter<T> {
+  /** Выбранные значения; при `exclude` — исключённые («все, кроме»). */
+  values: T[];
+  /** Включить заказы без значения (без даты / без листовых / без плёнки). */
+  includeEmpty: boolean;
+  /** «Все, кроме `values`»: длинный выбор передаётся дополнением, чтобы уложиться в лимит значений. */
+  exclude?: boolean;
+}
+
+export type OrderResourcePaymentFilter = 'any_paid' | 'fully_paid';
+
+/** Ключ «без поставщика» в фильтре и в `supplierKey` строки. */
+export const RESOURCE_SUPPLIER_NONE_KEY = 'none';
+/** Лимит значений в одном фильтре заголовка. */
+export const RESOURCE_HEADER_FILTER_VALUES_LIMIT = 500;
+/** Лимит заказов в вариантах фильтра «Заказ». */
+export const RESOURCE_FILTER_ORDER_OPTIONS_LIMIT = 300;
 
 export interface OrderSheetMaterialDemandDto {
   sheetMaterialTypeId: number;
@@ -36,6 +82,8 @@ export interface OrderFilmDemandDto {
   hasCutData: boolean;
   vendorId: number | null;
   vendorName: string | null;
+  /** Основной поставщик плёнки (первый выбранный, иначе по приходам 1С); производитель — vendorName, справочно. */
+  supplierName: string | null;
 }
 
 export type OrderResourceKind = 'sheet_material' | 'film';
@@ -61,7 +109,17 @@ export interface OrderResourceDemandLineDto {
   kind: OrderResourceKind;
   refId: number;
   name: string;
+  /**
+   * Прежний смысл (его читает прежний интерфейс): листовой — поставщик, плёнка — производитель, у «сироты»-плёнки null.
+   * Поставщик позиции — `mainSupplierName`.
+   */
   supplierName: string | null;
+  /** Основной поставщик позиции (с migr 280; правило «Экрана снабжения»); null — не указан. */
+  mainSupplierName: string | null;
+  /** Есть `mainSupplierName` — поставщик позиции (признак backend с migr 280). */
+  supplierRole: 'supplier';
+  /** Ключ основного поставщика (как в фильтре «Поставщик»); `none` — поставщик не указан. */
+  supplierKey: string;
   /** null — количество не посчитано (нет готового раскроя у плёнки). */
   quantity: number | null;
   unit: OrderResourceUnit;
@@ -107,6 +165,13 @@ export interface OrderResourceCapabilitiesDto {
   onecDocuments: boolean;
   /** Вкладка «Экран снабжения»: BACKEND_PROCUREMENT_WORKSPACE_ENABLED и флаг закупа. */
   supplyWorkspace: boolean;
+  /**
+   * Backend сам применяет фильтры заголовков, «Готовые раскрои», «Оплату» и «Поставщика» (по всем страницам).
+   * Без признака (прежний backend) интерфейс эти фильтры не показывает: их параметры были бы молча проигнорированы.
+   */
+  serverFilters: boolean;
+  /** Сервер сортирует список по `sort`/`sortOrder` (по всем страницам). */
+  serverSort: boolean;
 }
 
 export interface OrderResourceDemandDto {
@@ -172,7 +237,10 @@ export interface OrderResourceMaterialAggregateDto {
   kind: OrderResourceKind;
   refId: number;
   name: string;
+  /** Как у строки: прежний смысл (у плёнки — производитель); поставщик — `mainSupplierName`. */
   supplierName: string | null;
+  mainSupplierName: string | null;
+  supplierRole: 'supplier';
   unit: OrderResourceUnit;
   totalQuantity: number;
   ordersCount: number;
@@ -207,6 +275,24 @@ export interface OrderResourceOnecDocumentOptionsResponseDto {
 /** Лимит вариантов фильтра «Документ 1С». */
 export const RESOURCE_ONEC_DOCUMENT_OPTIONS_LIMIT = 200;
 
+/**
+ * Варианты фильтров заголовков: по всем заказам выборки (все страницы, фильтры панели и scope), без учёта самих
+ * фильтров заголовков — список значений не сужается от выбора в соседней колонке.
+ */
+export interface OrderResourceFilterOptionsResponseDto {
+  orders: Array<{ orderId: number; orderName: string; projectCode: string; clientName: string | null }>;
+  /** Заказов больше лимита — показаны самые свежие. */
+  ordersTruncated: boolean;
+  dates: string[];
+  hasEmptyDate: boolean;
+  sheetMaterials: Array<{ id: number; name: string }>;
+  hasNoSheetMaterials: boolean;
+  films: Array<{ id: number; name: string }>;
+  hasNoFilms: boolean;
+  /** Основные поставщики материалов выборки; `none` — есть материалы без поставщика. */
+  suppliers: Array<{ key: string; name: string }>;
+}
+
 export interface ListOrderResourceDemandsCommand {
   currentUser: CurrentUser;
   query: OrderResourceDemandQuery;
@@ -237,6 +323,10 @@ export interface OrderResourceDemandRepositoryPort {
     command: ListOrderResourceDemandsCommand,
     options: OrderResourceReadOptions,
   ): Promise<OrderResourceOnecDocumentOptionsResponseDto>;
+  listFilterOptions(
+    command: ListOrderResourceDemandsCommand,
+    options: OrderResourceReadOptions,
+  ): Promise<OrderResourceFilterOptionsResponseDto>;
 }
 
 /** Лимит заказов для агрегата «по материалам» (R1-8). */

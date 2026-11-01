@@ -1,4 +1,5 @@
 import type { CurrentUser } from '../../../permissions/current-user';
+import type { MaterialSupplierRef } from '../../material-suppliers/application/material-suppliers';
 
 export interface SheetMaterialTypeDto {
   sheetMaterialTypeId: number;
@@ -8,7 +9,12 @@ export interface SheetMaterialTypeDto {
   thicknessMm: number;
   widthMm: number;
   heightMm: number;
+  /** Основной поставщик (первый в списке `suppliers`). */
   supplierId: number | null;
+  /** Дополнительные поставщики по порядку (без основного; migr 280). */
+  additionalSupplierIds: number[];
+  /** Все поставщики: основной первым, затем дополнительные. */
+  suppliers: MaterialSupplierRef[];
   vendorId: number | null;
   supplierArticle: string | null;
   texture: boolean | null;
@@ -32,6 +38,8 @@ export interface SheetMaterialTypeInput {
   widthMm: number;
   heightMm: number;
   supplierId?: number | null;
+  /** Не передано — дополнительные не менять; null/[] — очистить. Основной из них исключается. */
+  additionalSupplierIds?: number[] | null;
   vendorId?: number | null;
   supplierArticle?: string | null;
   texture?: boolean | null;

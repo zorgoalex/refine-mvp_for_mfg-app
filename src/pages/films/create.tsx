@@ -49,10 +49,10 @@ export const FilmCreate: React.FC<IResourceComponentsProps> = () => {
         <Form.Item label="Film Type" name="film_type_id">
           <Select {...typeSelectProps} />
         </Form.Item>
-        <Form.Item label="Поставщик" name="vendor_id" rules={[{ required: true, message: 'Выберите поставщика' }, {
+        <Form.Item label="Производитель" name="vendor_id" extra="Поставщиков плёнки можно указать в карточке после сохранения" rules={[{ required: true, message: 'Выберите производителя' }, {
           validator: async (_, value: number | undefined) => {
             const vendor = vendorOptions.find((item) => item.value === value);
-            if (typeof vendor?.label === 'string' && vendor.label.trim().toLowerCase() === 'нд') throw new Error('Поставщик «нд» недопустим');
+            if (typeof vendor?.label === 'string' && vendor.label.trim().toLowerCase() === 'нд') throw new Error('Производитель «нд» недопустим');
           },
         }]}>
           <Select {...vendorSelectProps} />

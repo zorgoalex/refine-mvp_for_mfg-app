@@ -12,6 +12,7 @@ import {
   linesOfKind,
   positionsLabel,
   resourceKindTotal,
+  supplierColumnText,
   type ResourceDemandLine,
   type ResourceKind,
   type ResourceSource,
@@ -297,8 +298,8 @@ export function ResourceLinesTable({
       {!compact && (
         <Table.Column<ResourceDemandLine>
           key="supplier"
-          title="Поставщик / производитель"
-          render={(_, line) => <Typography.Text type="secondary">{line.supplierLabel?.replace(/^[^:]+:\s*/, '') ?? '—'}</Typography.Text>}
+          title="Поставщик"
+          render={(_, line) => <Typography.Text type="secondary">{supplierColumnText(line.supplierLabel)}</Typography.Text>}
         />
       )}
       <Table.Column<ResourceDemandLine>

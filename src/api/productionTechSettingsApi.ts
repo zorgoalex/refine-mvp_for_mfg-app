@@ -58,6 +58,9 @@ export interface ExtraResourceDto {
   isActive: boolean;
   sortOrder: number;
   version: number;
+  /** Нет у backend до миграции 280: производитель и поставщики (первый — основной). */
+  vendorId?: number | null;
+  suppliers?: Array<{ id: number; name: string; isActive: boolean }>;
 }
 
 export interface UpdateHdfProductionTechSettingsRequest {
@@ -107,6 +110,9 @@ export interface UpsertExtraResourceRequest {
   comment?: string;
   isActive?: boolean;
   sortOrder?: number;
+  /** Только для backend с миграцией 280 (иначе строгая схема ответит 422); не передано — не менять. */
+  vendorId?: number | null;
+  supplierIds?: number[] | null;
 }
 
 export const productionTechSettingsApi = {
