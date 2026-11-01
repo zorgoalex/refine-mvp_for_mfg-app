@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DatePicker, Input, Select, Space, Tag, Typography, message } from 'antd';
-import type { Dayjs } from 'dayjs';
+import dayjs, { type Dayjs } from 'dayjs';
 import { Table } from '../../ui/tooltipDelay';
 import { Segmented } from '../../ui/Segmented';
 import { ApiError } from '../../api/apiError';
@@ -27,25 +27,46 @@ import {
   viaLabel,
 } from './duplicatesModel';
 import { DuplicateDrawer } from './DuplicateDrawer';
+import { readJournalState, writeJournalState } from './duplicatesJournalState';
+import { getWorkspaceStateNamespace } from '../../workspace/workspaceStateNamespace';
 
 const { Text } = Typography;
 const { RangePicker } = DatePicker;
 const PAGE_SIZE = 50;
 
 export function DuplicatesTab({ canResolve }: { canResolve: boolean }) {
-  const [status, setStatus] = useState<DuplicateStatusFilter>('open');
-  const [entityKind, setEntityKind] = useState<string | undefined>();
-  const [ruleCode, setRuleCode] = useState<string | undefined>();
-  const [system, setSystem] = useState<DuplicateSystem | undefined>();
-  const [range, setRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
+  // The journal returns to where the user left it (filters, search, page, the open case) — e.g. after a client's card.
+  const [namespace] = useState(getWorkspaceStateNamespace);
+  const [saved] = useState(() => readJournalState(namespace));
+  const [status, setStatus] = useState<DuplicateStatusFilter>(saved.status);
+  const [entityKind, setEntityKind] = useState<string | undefined>(saved.entityKind ?? undefined);
+  const [ruleCode, setRuleCode] = useState<string | undefined>(saved.ruleCode ?? undefined);
+  const [system, setSystem] = useState<DuplicateSystem | undefined>(saved.system ?? undefined);
+  const [range, setRange] = useState<[Dayjs | null, Dayjs | null] | null>(
+    saved.from || saved.to ? [saved.from ? dayjs(saved.from) : null, saved.to ? dayjs(saved.to) : null] : null,
+  );
+  const [searchInput, setSearchInput] = useState(saved.search);
+  const [search, setSearch] = useState(saved.search);
+  const [page, setPage] = useState(saved.page);
   const [rules, setRules] = useState<DuplicateRule[]>([]);
   const [data, setData] = useState<DuplicateListResult>({ items: [], total: 0, counts: {} });
   const [loading, setLoading] = useState(true);
-  const [openCaseId, setOpenCaseId] = useState<number | null>(null);
+  const [openCaseId, setOpenCaseId] = useState<number | null>(saved.openCaseId);
   const requestSeq = useRef(0);
+
+  useEffect(() => {
+    writeJournalState(namespace, {
+      status,
+      entityKind: entityKind ?? null,
+      ruleCode: ruleCode ?? null,
+      system: system ?? null,
+      from: range?.[0] ? range[0].format('YYYY-MM-DD') : null,
+      to: range?.[1] ? range[1].format('YYYY-MM-DD') : null,
+      search,
+      page,
+      openCaseId,
+    });
+  }, [namespace, status, entityKind, ruleCode, system, range, search, page, openCaseId]);
 
   useEffect(() => {
     integrationDuplicatesApi.rules().then(setRules).catch(() => setRules([]));
