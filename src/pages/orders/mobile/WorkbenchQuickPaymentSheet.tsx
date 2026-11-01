@@ -239,7 +239,8 @@ export const WorkbenchQuickPaymentSheet: React.FC<WorkbenchQuickPaymentSheetProp
               const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
               return frac && Number(frac) !== 0 ? `${grouped},${frac}` : grouped;
             }}
-            parser={(value) => Number(String(value ?? '').replace(/\s/g, '').replace(',', '.'))}
+            // строка, как у парсера по умолчанию: пустое поле остаётся пустым (Number('') = 0 поднимался до минимума 0,01)
+            parser={(value) => String(value ?? '').replace(/\s/g, '').replace(',', '.') as unknown as number}
             addonAfter="₸"
           />
           {presets.length > 0 ? (

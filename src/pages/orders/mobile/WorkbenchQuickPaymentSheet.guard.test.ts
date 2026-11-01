@@ -38,6 +38,9 @@ describe('workbench quick payment sheet wiring', () => {
     expect(sheetSource).toContain('wrapClassName="wb-paysheet wb-paysheet--dialog"');
     expect(sheetSource).not.toMatch(/<Modal[^>]*rootClassName/);
     expect(mobileCss).toContain('.wb-paysheet--dialog .ant-modal-content');
+    // an emptied amount stays empty (no 0 → min 0,01 on blur, which also shifted the buttons under the cursor)
+    expect(sheetSource).not.toMatch(/parser=\{\(value\) => Number\(/);
+    expect(sheetSource).toContain("parser={(value) => String(value ?? '').replace(/\\s/g, '').replace(',', '.') as unknown as number}");
     expect(showSource).toMatch(/const openAddPaymentForm = record\?\.order_id && canCreatePayment/);
     expect(showSource).toContain('const openAddPayment = openAddPaymentForm && quickPaymentAvailable');
   });
