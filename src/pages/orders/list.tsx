@@ -39,7 +39,13 @@ import {
   DownOutlined,
   ProjectOutlined,
   TableOutlined,
+  ImportOutlined,
+  FileExcelOutlined,
+  FilePdfOutlined,
+  CameraOutlined,
+  ApartmentOutlined,
 } from "@ant-design/icons";
+import { requestOrderImport, type PendingOrderImportKind } from "./components/import/pendingOrderImport";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -1571,6 +1577,43 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     : null;
   const groupedListColumns = listGroupingActive ? withGroupHeaderColumns(visibleOrderListColumns as any) : null;
   const quickViewEnabled = isWorkbench && !isMobile && !isTablet;
+  const importItemLabel = (title: string, hint: string) => (
+    <span className="wb-orders-import__item">{title}<span className="wb-orders-import__hint">{hint}</span></span>
+  );
+  const createOrderWithImport = (kind: PendingOrderImportKind) => {
+    requestOrderImport(kind);
+    setCreateModalOpen(true);
+  };
+  const workbenchImportItems: NonNullable<React.ComponentProps<typeof Dropdown>['menu']>['items'] = [
+    ...(canCreateOrders ? [
+      { type: 'group' as const, key: 'from-file', label: 'Создать заказ из файла', children: [
+        { key: 'excel', icon: <FileExcelOutlined style={{ color: '#217346' }} />, label: importItemLabel('Таблица Excel', '.xlsx'), onClick: () => createOrderWithImport('excel') },
+        { key: 'pdf', icon: <FilePdfOutlined style={{ color: '#f5222d' }} />, label: importItemLabel('PDF из Базиса', '.pdf'), onClick: () => createOrderWithImport('pdf') },
+        { key: 'vlm', icon: <CameraOutlined style={{ color: '#1890ff' }} />, label: importItemLabel('Фото эскиза — распознать', 'ИИ'), onClick: () => createOrderWithImport('vlm') },
+      ] },
+    ] : []),
+    ...(featureFlags.useBackendBazis && can('bazis.manage') ? [
+      { key: 'xml', icon: <ApartmentOutlined />, label: importItemLabel('Проект Базис — в Базис-проекты', '.xml'), onClick: () => routerNavigate('/bazis?import=xml') },
+    ] : []),
+    ...(canViewFinancials ? [
+      { type: 'divider' as const, key: 'json-divider' },
+      {
+        key: 'json',
+        label: (
+          <Upload
+            accept=".erp-order.json,.json,.erp-order-batch.zip,.zip,application/json,application/zip"
+            showUploadList={false}
+            beforeUpload={(file) => {
+              void handleSnapshotImport(file);
+              return false;
+            }}
+          >
+            <span><UploadOutlined /> Снимок заказа JSON</span>
+          </Upload>
+        ),
+      },
+    ] : []),
+  ];
 
   return (
     <>
@@ -1655,6 +1698,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                 {filtersVisible ? "Скрыть фильтры" : hasActiveOrderFilters ? "Фильтры активны" : "Фильтры"}
               </Button>
             </Badge>
+            {isWorkbench && !isMobile && !isTablet && workbenchImportItems.length > 0 ? (
+              // «Импорт» (мокап 03): создать заказ из файла — открывается форма нового заказа с нужным импортом
+              <Dropdown trigger={["click"]} menu={{ items: workbenchImportItems }}>
+                <Button className="wb-orders-import" icon={<ImportOutlined />}>
+                  Импорт <DownOutlined style={{ fontSize: 10 }} />
+                </Button>
+              </Dropdown>
+            ) : null}
             {canCreateOrders && (
               <Button
                 type="primary"

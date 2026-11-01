@@ -1,7 +1,7 @@
 import { Tooltip } from '../../../../ui/tooltipDelay';
 // Dropdown button with Excel, PDF and VLM image import options
 
-import React, { useState, useRef, useCallback, Suspense, lazy } from 'react';
+import React, { useEffect, useState, useRef, useCallback, Suspense, lazy } from 'react';
 import { Dropdown, Button, Spin, message } from 'antd';
 import type { MenuProps } from 'antd';
 import { ImportOutlined, FileExcelOutlined, FilePdfOutlined, CameraOutlined, DownOutlined } from '@ant-design/icons';
@@ -9,6 +9,7 @@ import { OrderToolbarLabel } from '../OrderDetailsToolbar';
 import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
 import { useWorkspaceCheckpointAdapter } from '../../../../workspace/workspaceCheckpointReact';
 import { readWorkspaceCheckpointAdapterState } from '../../../../workspace/workspaceCheckpointRegistry';
+import { takePendingOrderImport } from './pendingOrderImport';
 
 const ExcelImportModal = lazy(async () => ({
   default: (await import('./ExcelImportModal')).ExcelImportModal,
@@ -25,9 +26,11 @@ const VlmImportModal = lazy(async () => ({
 interface ImportDropdownButtonProps {
   disabled?: boolean;
   beforeImport?: () => Promise<boolean>;
+  /** форма нового заказа: открыть импорт, выбранный в «Импорт» списка заказов (один раз) */
+  acceptPendingImport?: boolean;
 }
 
-export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disabled, beforeImport }) => {
+export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disabled, beforeImport, acceptPendingImport = false }) => {
   const importPreparing = useRef(false);
   const { tabKey } = useKeepAlive();
   const workspaceKey = tabKey || '/orders/create';
@@ -73,6 +76,18 @@ export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disa
   const handleVlmClose = useCallback(() => {
     setVlmModalOpen(false);
   }, []);
+
+  useEffect(() => {
+    if (!acceptPendingImport || disabled) return undefined;
+    const kind = takePendingOrderImport();
+    if (!kind) return undefined;
+    // таблица деталей формы монтируется рядом; окно импорта — когда она готова принять детали
+    const timer = window.setTimeout(() => {
+      if (kind === 'vlm') setVlmModalOpen(true);
+      else void handleImportOpen(kind);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- once, when the new order's form mounts
 
   const menuItems: MenuProps['items'] = [
     {

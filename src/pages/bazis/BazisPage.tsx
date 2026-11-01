@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Drawer, Empty, Input, Popconfirm, Space, Tag, Typography, message } from 'antd';
 import { DeleteOutlined, FolderOpenOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisProjectCard, BazisProjectListItem } from '../../api/types/bazisApi.types';
 import { OrderDeletedTag, hasDeletedOrderReference, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
@@ -423,6 +423,19 @@ export const BazisPage: React.FC = () => {
     [isWorkbench, linkChoice, listQuery, rows],
   );
   const lastImport = useMemo(() => latestBazisImport(rows), [rows]);
+
+  // «Импорт → Проект Базис .xml» в шапке списка заказов: открыть мастер импорта XML сразу
+  const [searchParams, setSearchParams] = useSearchParams();
+  const importRequested = searchParams.get('import') === 'xml';
+  useEffect(() => {
+    if (!importRequested) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('import');
+    setSearchParams(next, { replace: true });
+    if (!canManage) return;
+    setImportOpen(true);
+    setImportRestoreSignal((value) => value + 1);
+  }, [importRequested]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!can('bazis.view')) {
     return <Alert type="error" message="Недостаточно прав" showIcon />;

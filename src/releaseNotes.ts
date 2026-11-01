@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-01", title: "Список заказов: меню «Импорт»",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "NewLine, список заказов: кнопка «Импорт» рядом с «Создать заказ» — создать заказ из таблицы Excel, PDF из Базиса или фото эскиза (открывается форма нового заказа сразу с нужным окном импорта), перейти к импорту проекта Базис (.xml) в «Базис-проектах», загрузить снимок заказа JSON.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-01", title: "Вкладки называются именами записей, а не номерами",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: [

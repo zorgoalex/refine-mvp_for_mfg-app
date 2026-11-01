@@ -997,9 +997,10 @@ export const OrderDetailsTab = forwardRef<
                   <OrderToolbarLabel>Групповые действия</OrderToolbarLabel>
                 </Button>
               </AccessibleToolbarTooltip>
-              <ImportDropdownButton beforeImport={async () =>
-                tableRef.current ? tableRef.current.prepareFileImport() : false
-              } />
+              <ImportDropdownButton
+                beforeImport={async () => (tableRef.current ? tableRef.current.prepareFileImport() : false)}
+                acceptPendingImport={header?.order_id == null}
+              />
               <AccessibleToolbarTooltip
                 title={`Удалить выбранные (${selectedRowKeys.length})`}
                 disabled={selectedRowKeys.length === 0}

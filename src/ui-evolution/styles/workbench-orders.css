@@ -2896,3 +2896,18 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* «Импорт» в шапке списка заказов: тип файла справа, приглушённо */
+:root[data-ui-variant="workbench"] .wb-orders-import__item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 18px;
+  justify-content: space-between;
+  min-width: 220px;
+}
+
+:root[data-ui-variant="workbench"] .wb-orders-import__hint {
+  margin-left: auto;
+  color: var(--evo-text-secondary, #8c8c8c);
+  font-size: 12px;
+}
