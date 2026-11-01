@@ -52,7 +52,7 @@ export class UnavailableBazisRepository implements BazisRepositoryPort {
     return unavailable();
   }
 
-  listProjects(_filter: { projectId?: number }): Promise<BazisProjectListItemDto[]> {
+  listProjects(_filter: { projectId?: number; dowelingOrderId?: number }): Promise<BazisProjectListItemDto[]> {
     return unavailable();
   }
 

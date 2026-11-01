@@ -19,6 +19,8 @@ export interface BazisImportResponse {
   }>;
   warnings: string[];
   requestId: string;
+  /** The Bazis project card of the XML project; null — none (no design engineer or no right to create). */
+  dowelingOrderId?: number | null;
 }
 
 export interface BazisOrderRef {
@@ -48,6 +50,8 @@ export interface BazisProjectListItem {
   designEngineerSource: 'xml' | 'manual' | null;
   linkedOrderIds: number[];
   linkedOrders: BazisOrderRef[];
+  /** The Bazis project card (only for a reader of the card); absent from an older backend. */
+  card?: { dowelingOrderId: number; name: string } | null;
 }
 
 export interface BazisProjectNameResponse {

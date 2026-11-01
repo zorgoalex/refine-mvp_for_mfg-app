@@ -110,6 +110,8 @@ describe.skipIf(!url)('Bitrix24 reverse / merged client / real PostgreSQL, rollb
     pool = new Pool({ connectionString: url, max: 2, statement_timeout: 20000, connectionTimeoutMillis: 5000 });
     client = await pool.connect();
     await client.query('BEGIN');
+    // The fixtures write the merge journal as the card-aware merge does (migration 288 refuses it otherwise).
+    await client.query("SELECT set_config('erp.client_merge_cards', 'on', true)");
     db = new FixtureDatabase(client);
     repository = new PgBitrix24ReverseRepository(db, auditService);
     // The reverse sync service actor (materialization refuses any other).

@@ -43,6 +43,7 @@ const createDowelingRequestSchema = z.object({
   linkCadFile: z.string().trim().max(2000).nullish(),
   linkPdfFile: z.string().trim().max(2000).nullish(),
   orderId: z.number().int().positive().nullish(),
+  clientId: z.number().int().positive().nullish(),
   idempotencyKey: z.string().trim().min(8).max(200),
 });
 
@@ -89,6 +90,7 @@ const updateDowelingRequestSchema = z
     isActive: z.boolean(),
     orderIds: z.array(z.number().int().positive()).max(MAX_LINKED_ORDERS),
     baseOrderIds: z.array(z.number().int().positive()).max(MAX_LINKED_ORDERS * 4),
+    clientId: z.number().int().positive().optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -121,6 +123,7 @@ const createDowelingRequestSwaggerSchema = {
     linkCadFile: { type: 'string', maxLength: 2000, nullable: true },
     linkPdfFile: { type: 'string', maxLength: 2000, nullable: true },
     orderId: { type: 'integer', nullable: true, description: 'Link to this production order in the same transaction' },
+    clientId: { type: 'integer', nullable: true, description: 'Client of the Bazis project; with orderId — the order\'s client' },
     idempotencyKey: { type: 'string', minLength: 8, maxLength: 200 },
   },
 } as const;
@@ -157,6 +160,7 @@ const updateDowelingRequestSwaggerSchema = {
     isActive: { type: 'boolean' },
     orderIds: { type: 'array', maxItems: 50, items: { type: 'integer' }, description: 'Orders linked after the save; empty when inactive' },
     baseOrderIds: { type: 'array', maxItems: 200, items: { type: 'integer' }, description: 'Orders the card showed; 409 DOWELING_LINKS_CONFLICT when they are no longer the current ones' },
+    clientId: { type: 'integer', description: 'Client of the Bazis project; absent = unchanged. 409 BAZIS_PROJECT_CLIENT_MISMATCH when its orders or XML projects belong to another client' },
   },
 } as const;
 
@@ -278,6 +282,48 @@ export class DowelingController {
     }
 
     return request.user;
+  }
+}
+
+/**
+ * «Базис-проекты»: quick-create of a Bazis project card (the former doweling order) with its client. A new route, so
+ * an open tab of the new frontend talking to a previous backend gets 404 instead of a card that silently lost its
+ * client. The client is mandatory: given, or the client of `orderId`.
+ */
+@ApiTags('Bazis projects')
+@ApiBearerAuth()
+@Controller('bazis/cards')
+export class BazisCardsController {
+  constructor(
+    @Inject(DowelingService)
+    private readonly doweling: DowelingService,
+    @Inject(DowelingRuntimeConfigService)
+    private readonly runtimeConfig: DowelingRuntimeConfigService,
+  ) {}
+
+  @ApiOperation({ operationId: 'createBazisProjectCard', summary: 'Create a Bazis project card (quick-create, client required)' })
+  @ApiBody({ schema: swaggerSchema({ ...createDowelingRequestSwaggerSchema, required: [...createDowelingRequestSwaggerSchema.required] }) })
+  @ApiResponse({ status: 201, description: 'Created Bazis project card', schema: swaggerSchema(dowelingResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 409, description: 'Idempotency conflict or the client differs from the order client' })
+  @ApiResponse({ status: 422, description: 'Invalid payload or no client' })
+  @ApiResponse({ status: 503, description: 'Doweling commands API is disabled or database unavailable' })
+  @Post()
+  @HttpCode(201)
+  async create(@Req() request: RequestWithCurrentUser, @Body() body: unknown): Promise<CreateDowelingOrderResponseDto> {
+    if (!this.runtimeConfig.getFeatureFlags().dowelingCommandsEnabled) {
+      throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Doweling commands API is disabled', { feature: 'dowelingCommands' });
+    }
+    if (!request.user) {
+      throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication required');
+    }
+    return this.doweling.createDowelingOrder({
+      currentUser: request.user,
+      dto: parseCreateDowelingRequest(body),
+      requestId: request.requestId,
+      clientRequired: true,
+    });
   }
 }
 

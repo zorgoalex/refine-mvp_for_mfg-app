@@ -46,8 +46,16 @@ const importFieldsSchema = z.object({
   bazisProjectId: optionalNumericIdSchema,
 });
 
+/** POST /bazis/cards/imports: the XML of a Bazis project card; the key is mandatory (a retry gives the same answer). */
+const cardImportFieldsSchema = importFieldsSchema.extend({
+  dowelingOrderId: optionalNumericIdSchema,
+  idempotencyKey: z.string().trim().min(8).max(200),
+});
+
 const listProjectsQuerySchema = z.object({
   projectId: optionalNumericIdSchema,
+  /** XML projects of one Bazis project card (the «XML Базиса» block of the card). */
+  dowelingOrderId: optionalNumericIdSchema,
 });
 
 const treeQuerySchema = z
@@ -415,6 +423,64 @@ export class BazisController {
         bazisProjectId: fields.bazisProjectId ?? null,
         fileName: fields.fileName ?? decodeUploadedFileName(file.originalname ?? 'bazis.xml'),
         filePath: file.path,
+      });
+    } finally {
+      await unlink(file.path).catch(() => undefined);
+    }
+  }
+
+  @ApiOperation({
+    operationId: 'importBazisXmlIntoCard',
+    summary: 'Import a Bazis XML revision into a Bazis project card (the given one, the single candidate or a new one)',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: swaggerSchema(importRequestSwaggerSchema) })
+  @ApiResponse({ status: 201, description: 'Imported Bazis revision with its card (dowelingOrderId)' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions (bazis.manage; doweling.update and scope of the card)' })
+  @ApiResponse({ status: 409, description: 'Import conflict, idempotency conflict or another card of the XML project' })
+  @ApiResponse({ status: 422, description: 'Invalid import payload' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Post('cards/imports')
+  @HttpCode(201)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({ destination: tmpdir() }),
+      limits: { fileSize: 20 * 1024 * 1024 },
+    }),
+  )
+  async importXmlIntoCard(
+    @Req() request: RequestWithCurrentUser,
+    @UploadedFile() uploadedFile: unknown,
+    @Body() body: unknown,
+  ): Promise<BazisImportResponseDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    const file = uploadedFile as UploadedBazisFile | undefined;
+
+    if (!file?.path || !file.size) {
+      throw new ApiError(422, 'VALIDATION_ERROR', 'Файл не передан');
+    }
+
+    try {
+      const parsed = cardImportFieldsSchema.safeParse(body);
+      if (!parsed.success) {
+        throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректные поля импорта', {
+          errors: parsed.error.issues.map((issue) => ({ field: issue.path.join('.') || 'body', message: issue.message })),
+        });
+      }
+      const fields = parsed.data;
+      if (fields.projectId == null && fields.bazisProjectId == null) {
+        throw new ApiError(422, 'VALIDATION_ERROR', 'Нужен projectId или bazisProjectId');
+      }
+      return await this.bazis.importXml({
+        currentUser,
+        requestId: request.requestId,
+        projectId: fields.projectId ?? null,
+        bazisProjectId: fields.bazisProjectId ?? null,
+        fileName: fields.fileName ?? decodeUploadedFileName(file.originalname ?? 'bazis.xml'),
+        filePath: file.path,
+        cards: { dowelingOrderId: fields.dowelingOrderId ?? null, idempotencyKey: fields.idempotencyKey },
       });
     } finally {
       await unlink(file.path).catch(() => undefined);
@@ -876,7 +942,7 @@ export function parseBazisImportFields(body: unknown): { projectId?: number; baz
 
 export function parseListProjectsQuery(
   query: Record<string, string | string[] | undefined>,
-): { projectId?: number } {
+): { projectId?: number; dowelingOrderId?: number } {
   return parseWithZod(listProjectsQuerySchema, flattenQuery(query), 'Bazis projects query validation failed');
 }
 

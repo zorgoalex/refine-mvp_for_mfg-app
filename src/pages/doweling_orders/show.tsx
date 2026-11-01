@@ -6,6 +6,7 @@ import { formatNumber } from "../../utils/numberFormat";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
+import { CardXmlBlock } from "./CardXmlBlock";
 
 const { Text } = Typography;
 
@@ -52,13 +53,13 @@ export const DowelOrderShow: React.FC<IResourceComponentsProps> = () => {
   const descProps = { column: 1 as const, size: "small" as const, bordered: true };
 
   return (
-    <Show isLoading={isLoading} title="Просмотр присадки">
+    <Show isLoading={isLoading} title="Просмотр Базис-проекта">
       {record && (
         <Row gutter={[16, 16]}>
           <Col xs={24} lg={12}>
             <Descriptions title="Основная информация" {...descProps}>
               <Descriptions.Item label="ID">{record.doweling_order_id}</Descriptions.Item>
-              <Descriptions.Item label="Присадка">{record.doweling_order_name || "—"}</Descriptions.Item>
+              <Descriptions.Item label="Базис-проект">{record.doweling_order_name || "—"}</Descriptions.Item>
               <Descriptions.Item label="Заказ">{record.order_name || "—"}</Descriptions.Item>
               <Descriptions.Item label="Клиент">{record.client_name || "—"}</Descriptions.Item>
             </Descriptions>
@@ -112,6 +113,8 @@ export const DowelOrderShow: React.FC<IResourceComponentsProps> = () => {
               <Descriptions.Item label="CAD-файл">{fileLink(record.link_cad_file)}</Descriptions.Item>
               <Descriptions.Item label="PDF-файл">{fileLink(record.link_pdf_file)}</Descriptions.Item>
             </Descriptions>
+
+            <CardXmlBlock dowelingOrderId={Number(record.doweling_order_id)} />
 
             <Descriptions title="Служебная информация" {...descProps} style={{ marginTop: 16 }}>
               <Descriptions.Item label="Версия">{record.version ?? "—"}</Descriptions.Item>

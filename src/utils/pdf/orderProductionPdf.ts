@@ -266,7 +266,7 @@ export function buildOrderProductionPdfDocument({
           <td data-excel-range="A1" class="excel-order-year excel-top-cell">${escapeHtml(orderYear)}</td>
           <td data-excel-range="B1" class="excel-top-cell"></td>
           <td data-excel-range="C1:C3" class="excel-order-name excel-top-cell excel-bottom-rule" rowspan="3">${formatExcelCell(order.orderName)}</td>
-          <th data-excel-range="D1" class="excel-prisadka-label excel-top-cell" scope="row">№ присадки</th>
+          <th data-excel-range="D1" class="excel-prisadka-label excel-top-cell" scope="row">№ Базис-проекта</th>
           <th data-excel-range="E1:I1" class="excel-client-label excel-top-cell" colspan="5" scope="row">Заказчик</th>
           <th data-excel-range="J1:K1" class="excel-financial-label excel-top-cell" colspan="2" scope="row">общая сумма</th>
           <th data-excel-range="L1:M1" class="excel-financial-label excel-top-cell" colspan="2" scope="row">скидка</th>

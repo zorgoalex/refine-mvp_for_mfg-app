@@ -51,7 +51,7 @@ function draw(doc: PDFKit.PDFDocument, data: OrderFormData, financial: boolean) 
   doc.font(REGULAR).fontSize(8).fillColor('#111').text(year, MARGIN.left, y, { width: 24, align: 'right' });
   doc.font(BOLD).fontSize(14).text(data.orderName, MARGIN.left + 30, y - 2, { width: 150, lineBreak: false, ellipsis: true });
   const x0 = MARGIN.left + 185;
-  cell(x0, y, 60, 26, '№ присадки', data.prisadkaName ?? '', { color: '#c00' });
+  cell(x0, y, 60, 26, '№ Базис-проекта', data.prisadkaName ?? '', { color: '#c00' });
   cell(x0 + 60, y, 170, 26, 'Заказчик', data.clientName ?? 'Не указан', { size: 10 });
   cell(x0 + 230, y, 75, 26, 'общая сумма', financial ? money(data.totalAmount) : '');
   cell(x0 + 305, y, 56.28, 26, 'скидка', financial ? money(data.discount) : '');

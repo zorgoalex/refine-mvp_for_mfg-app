@@ -508,7 +508,7 @@ const ThemedApp = () => {
                         name: "bazis",
                         list: "/bazis",
                         meta: {
-                          label: "Базис-проекты",
+                          label: "XML Базиса",
                         },
                       },
                     ]
@@ -810,7 +810,7 @@ const ThemedApp = () => {
                   list: "/doweling-orders",
                   edit: "/doweling-orders/edit/:id",
                   show: "/doweling-orders/show/:id",
-                  meta: { idColumnName: "doweling_order_id", label: "Присадка" },
+                  meta: { idColumnName: "doweling_order_id", label: "Базис-проекты" },
                 },
                 {
                   name: "doweling_orders",

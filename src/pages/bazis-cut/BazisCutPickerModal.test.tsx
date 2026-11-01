@@ -20,7 +20,7 @@ describe('Basis-cut detail picker UI', () => {
   it('renders every requested dynamic multi-select and 25-row search contract', () => {
     for (const label of [
       'Номер заказа', 'Клиент', 'Материал', 'Фрезеровка', 'Базис-проект / Базис-заказ',
-      'Конструктор', 'Присадка',
+      'Конструктор', 'Базис-проект',
     ]) expect(source).toContain(`label="${label}"`);
     expect(source).toContain('mode="multiple"');
     expect(source).toContain('const PAGE_SIZE = 25');

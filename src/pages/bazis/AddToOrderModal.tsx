@@ -37,7 +37,7 @@ export const AddToOrderModal: React.FC<AddToOrderModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  // Клиент Базис-проекта определяется initial draft-запросом (без targetOrderId):
+  // Клиент XML-проекта определяется initial draft-запросом (без targetOrderId):
   // карточка проекта клиента не отдаёт, а server-filtered поиск заказов обязан
   // быть ограничен клиентом проекта. Заодно unmapped-материалы ловятся ДО выбора заказа.
   const [projectClient, setProjectClient] = useState<{ clientId: number; clientName: string | null } | null>(null);
@@ -431,7 +431,7 @@ export const AddToOrderModal: React.FC<AddToOrderModalProps> = ({
           <Text type="secondary">
             {projectClient != null
               ? `Показываю заказы клиента ${projectClient.clientName?.trim() || `#${projectClient.clientId}`}`
-              : 'Определяю клиента Базис-проекта…'}
+              : 'Определяю клиента XML-проекта…'}
           </Text>
           <Select<number>
             showSearch

@@ -293,7 +293,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
 
     // Show success message with doweling info if available
     const dowelingInfo = pdfParser.result?.metadata.orderNumber
-      ? ` (Присадка №${pdfParser.result.metadata.orderNumber})`
+      ? ` (Базис-проект №${pdfParser.result.metadata.orderNumber})`
       : '';
     message.success(`Импортировано ${importedDetails} деталей${dowelingInfo}`);
 
@@ -378,7 +378,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
             <span>Импорт деталей из PDF</span>
             {pdfParser.result?.metadata.orderNumber && (
               <span style={{ fontWeight: 'normal', color: '#666' }}>
-                — Присадка №{pdfParser.result.metadata.orderNumber}
+                — Базис-проект №{pdfParser.result.metadata.orderNumber}
               </span>
             )}
           </Space>

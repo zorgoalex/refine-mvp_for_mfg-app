@@ -13,8 +13,9 @@ import type {
  * httpClient.
  */
 export const dowelingApi = {
+  /** Bazis project card quick-create (`POST /bazis/cards`): the client goes with it (given or the order's). */
   create(request: CreateDowelingOrderRequest): Promise<CreateDowelingOrderResponse> {
-    return httpClient.post<CreateDowelingOrderResponse>(apiRoutes.dowelingOrders.create, request);
+    return httpClient.post<CreateDowelingOrderResponse>(apiRoutes.dowelingOrders.createCard, request);
   },
   update(dowelingOrderId: number, request: UpdateDowelingOrderRequest): Promise<UpdateDowelingOrderResponse> {
     return httpClient.patch<UpdateDowelingOrderResponse>(apiRoutes.dowelingOrders.update(dowelingOrderId), request);
@@ -39,6 +40,8 @@ export interface BuildCreateDowelingInput {
   idempotencyKey: string;
   /** Quick-create from an order: the order the new doweling order is linked to (same transaction). */
   orderId?: number | null;
+  /** Client of the Bazis project (a new, unsaved order: the client chosen in the form). */
+  clientId?: number | null;
   dowelingOrderDate?: string | null;
   productionStatusId?: number | null;
   operatorId?: number | null;
@@ -56,6 +59,7 @@ export function buildCreateDowelingRequest(input: BuildCreateDowelingInput): Cre
   };
   if (input.paymentStatusId) request.paymentStatusId = input.paymentStatusId;
   if (input.orderId) request.orderId = input.orderId;
+  if (input.clientId) request.clientId = input.clientId;
   if (input.dowelingOrderDate) request.dowelingOrderDate = input.dowelingOrderDate;
   if (input.productionStatusId) request.productionStatusId = input.productionStatusId;
   if (input.operatorId) request.operatorId = input.operatorId;
@@ -83,6 +87,7 @@ export interface DowelingCardValues {
   ref_key_1c?: string | null;
   is_active?: boolean | null;
   order_ids?: Array<number | string> | null;
+  client_id?: number | string | null;
 }
 
 const toNumberOrNull = (value: unknown): number | null => {
@@ -137,5 +142,20 @@ export function buildUpdateDowelingRequest(
     isActive,
     orderIds,
     baseOrderIds: [...new Set(context.baseOrderIds)].sort((a, b) => a - b),
+    ...(toNumberOrNull(values.client_id) ? { clientId: toNumberOrNull(values.client_id) as number } : {}),
   };
 }
+
+/**
+ * An answer of a backend older than this frontend (an open tab after a backend rollback): the new route is missing
+ * (404 on `POST /bazis/cards`, `/bazis/cards/imports`) or a strict contract rejects a new field (422 unrecognized key).
+ * The form keeps its data and asks to reload instead of losing the client silently.
+ */
+export function isOutdatedBackendError(error: unknown): boolean {
+  const e = error as { status?: number; code?: string; details?: unknown } | null;
+  // A missing Nest route: 404 with the generic HTTP code (domain «not found» answers carry their own code).
+  if (e?.status === 404 && (e.code === 'HTTP_ERROR' || e.code === 'HTTP_404')) return true;
+  return e?.status === 422 && /unrecognized key/i.test(JSON.stringify(e.details ?? ''));
+}
+
+export const OUTDATED_BACKEND_MESSAGE = 'Версия сервера изменилась — обновите страницу (данные формы не потеряны)';

@@ -10,7 +10,7 @@ import { ArrowLeftOutlined, CheckOutlined, CloseOutlined, DownloadOutlined, Edit
 import { Alert, Button, Card, Col, Descriptions, Empty, Input, Row, Select, Space, Spin, Tabs, Typography, message } from 'antd';
 import { useSelect } from '../../ui/refineSelect';
 import type { BazisProjectCard } from '../../api/types/bazisApi.types';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
 import { featureFlags } from '../../config/featureFlags';
 import { useTabStore } from '../../stores/tabStore';
@@ -41,6 +41,7 @@ export const BazisProjectViewPage: React.FC = () => {
   const isOperational = useOperationalUi();
   const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
   const { bazisProjectId: bazisProjectIdParam } = useParams();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [projectCard, setProjectCard] = useState<BazisProjectCard | null>(null);
   const [renaming, setRenaming] = useState(false);
@@ -52,7 +53,7 @@ export const BazisProjectViewPage: React.FC = () => {
 
   useEffect(() => {
     if (projectCard?.name) {
-      // Префикс отличает карточку Базис-проекта от заказа/проекта с тем же именем.
+      // Префикс отличает карточку XML-проекта от заказа/проекта с тем же именем.
       setTabTitle(`/bazis/projects/${projectCard.bazisProjectId}`, `БП ${projectCard.name.trim()}`);
     }
   }, [projectCard, setTabTitle]);
@@ -106,7 +107,7 @@ export const BazisProjectViewPage: React.FC = () => {
         }
       } catch (error) {
         if (!cancelled) {
-          setErrorText(error instanceof Error ? error.message : 'Не удалось загрузить Базис-проект');
+          setErrorText(error instanceof Error ? error.message : 'Не удалось загрузить XML-проект');
         }
       } finally {
         if (!cancelled) {
@@ -272,7 +273,7 @@ export const BazisProjectViewPage: React.FC = () => {
       ]).catch(error => console.error('Could not refresh order project labels', error));
       setProjectCard((current) => current ? { ...current, name: renamed.name } : current);
       setRenaming(false);
-      message.success('Название Базис-проекта обновлено');
+      message.success('Название XML-проекта обновлено');
     } catch (error) {
       setRenameErrorText(error instanceof Error ? error.message : 'Не удалось изменить название');
     } finally {
@@ -335,7 +336,7 @@ export const BazisProjectViewPage: React.FC = () => {
   }
 
   if (!Number.isFinite(bazisProjectId) || bazisProjectId <= 0) {
-    return <Alert type="error" message="Некорректный идентификатор Базис-проекта" showIcon />;
+    return <Alert type="error" message="Некорректный идентификатор XML-проекта" showIcon />;
   }
 
   if (loading) {
@@ -367,7 +368,7 @@ export const BazisProjectViewPage: React.FC = () => {
     <Space.Compact>
       <Input
         autoFocus
-        aria-label="Название Базис-проекта"
+        aria-label="Название XML-проекта"
         value={renameDraft}
         style={{ width: 'min(420px, 48vw)', height: 40 }}
         onChange={(event) => setRenameDraft(event.target.value)}
@@ -407,7 +408,7 @@ export const BazisProjectViewPage: React.FC = () => {
       {canManage ? (
         <Tooltip title="Изменить название">
           <Button
-            aria-label="Изменить название Базис-проекта"
+            aria-label="Изменить название XML-проекта"
             type="text"
             icon={<EditOutlined />}
             style={{ width: 40, height: 40 }}
@@ -447,7 +448,7 @@ export const BazisProjectViewPage: React.FC = () => {
     <Space direction="vertical" size={2} style={{ width: 'min(420px, 100%)' }}>
       <Select<number>
         {...employeeSelectProps}
-        aria-label="Конструктор Базис-проекта"
+        aria-label="Конструктор XML-проекта"
         allowClear
         showSearch
         optionFilterProp="label"
@@ -468,7 +469,7 @@ export const BazisProjectViewPage: React.FC = () => {
   );
   const revisionSelect = selectedRevision ? (
     <Select<number>
-      aria-label="Ревизия Базис-проекта"
+      aria-label="Ревизия XML-проекта"
       style={{ width: '100%', minWidth: 0 }}
       value={selectedRevision.bazisRevisionId}
       options={revisionOptions}
@@ -478,7 +479,7 @@ export const BazisProjectViewPage: React.FC = () => {
   const workbenchHeader = isWorkbench ? (
     <header className="wb-bz-proj__head">
       <nav className="wb-bz-proj__crumbs" aria-label="Навигация">
-        <Link to="/bazis">Базис-проекты</Link>
+        <Link to="/bazis">XML-проекты</Link>
         <span aria-hidden="true">›</span>
         <span aria-current="page">{projectCard.name}</span>
       </nav>
@@ -535,14 +536,19 @@ export const BazisProjectViewPage: React.FC = () => {
           breadcrumbs={(
             <Space split={<span>›</span>} size={6}>
               <Link to="/orders">Заказы</Link>
-              <Link to="/bazis">Базис-проекты</Link>
+              <Link to="/bazis">XML-проекты</Link>
               <span>{projectCard.name}</span>
             </Space>
           )}
-          title={`Базис-проект ${projectCard.name}`}
+          title={`XML-проект ${projectCard.name}`}
           description="Ревизия, панели и производственная готовность проекта в одном рабочем пространстве."
           actions={(
             <>
+              {projectCard.card ? (
+                <Button onClick={() => navigate(`/doweling-orders/show/${projectCard.card!.dowelingOrderId}`)}>
+                  Базис-проект {projectCard.card.name}
+                </Button>
+              ) : null}
               <Button
                 icon={<HistoryOutlined />}
                 onClick={() => document.querySelector('.bazis-project-modern-card')?.scrollIntoView({ behavior: 'smooth' })}
