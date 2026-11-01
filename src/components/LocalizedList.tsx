@@ -4,6 +4,8 @@ import { useResource } from "@refinedev/core";
 import { ReferenceTableContext } from "../ui/tooltipDelay";
 import { useOptionalUiVariant } from "../ui-variant/UiVariantProvider";
 import { REFERENCE_DESCRIPTIONS, referenceGroupLabel } from "../utils/referenceCatalog";
+import { ReferenceDrawerHost } from "./referenceDrawer/ReferenceDrawerHost";
+import { useReferenceDrawerOpener } from "./referenceDrawer/ReferenceDrawerContext";
 
 type ListProps = React.ComponentProps<typeof List>;
 
@@ -32,9 +34,19 @@ export const LocalizedList: React.FC<ListProps> = (props) => {
 
   return (
     <ReferenceTableContext.Provider value={true}>
+    {/* «NewLine»: запись справочника правится и добавляется в боковой панели над списком */}
+    <ReferenceDrawerHost resource={resource?.name} title={props.title ?? resource?.meta?.label} enabled={!!group}>
+      <LocalizedListBody listProps={{ ...props, ...workbenchProps }} panel={panel} />
+    </ReferenceDrawerHost>
+    </ReferenceTableContext.Provider>
+  );
+};
+
+const LocalizedListBody: React.FC<{ listProps: ListProps; panel: boolean }> = ({ listProps, panel }) => {
+  const drawer = useReferenceDrawerOpener();
+  return (
     <List
-      {...props}
-      {...workbenchProps}
+      {...listProps}
       headerButtons={(headerProps) => {
         const { defaultButtons } = headerProps;
 
@@ -56,13 +68,19 @@ export const LocalizedList: React.FC<ListProps> = (props) => {
           }
 
           if (panel) {
-            return React.cloneElement(child, { ...child.props, type: "primary" }, "Добавить");
+            // в панели — та же кнопка refine (проверка прав сохраняется), щелчок открывает форму справа
+            const onClick = drawer?.canOpen("create")
+              ? (event: React.MouseEvent) => {
+                  event.preventDefault();
+                  drawer?.open("create");
+                }
+              : child.props.onClick;
+            return React.cloneElement(child, { ...child.props, type: "primary", onClick }, "Добавить");
           }
 
           return React.cloneElement(child, child.props, "Создать");
         });
       }}
     />
-    </ReferenceTableContext.Provider>
   );
 };

@@ -1,5 +1,5 @@
 import { nameRule } from '../../utils/nameRules';
-import { Edit } from "@refinedev/antd";
+import { ReferenceEdit } from "../../components/referenceDrawer/ReferenceFormShell";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, Checkbox } from "antd";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
@@ -12,7 +12,7 @@ export const PaymentTypeEdit: React.FC<IResourceComponentsProps> = () => {
   });
 
   return (
-    <Edit saveButtonProps={saveButtonProps}>
+    <ReferenceEdit saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical">
         <Form.Item label="Name" name="type_paid_name" rules={[...([{ required: true }]), nameRule("type_paid_name")]}>
           <Input />
@@ -27,6 +27,6 @@ export const PaymentTypeEdit: React.FC<IResourceComponentsProps> = () => {
           <Input />
         </Form.Item>
       </Form>
-    </Edit>
+    </ReferenceEdit>
   );
 };

@@ -1,15 +1,16 @@
 import { nameRule } from '../../utils/nameRules';
-import { Create, useForm } from "@refinedev/antd";
+import { ReferenceCreate } from "../../components/referenceDrawer/ReferenceFormShell";
+import { useReferenceForm } from "../../components/referenceDrawer/useReferenceForm";
 import type { BaseRecord, HttpError, IResourceComponentsProps } from "@refinedev/core";
 import type { UnitFormValues } from "./formValues";
 import { Form, Input, InputNumber, message } from "antd";
 import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
 
 export const UnitCreate: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useForm<BaseRecord, HttpError, UnitFormValues>();
+  const { formProps, saveButtonProps } = useReferenceForm<BaseRecord, HttpError, UnitFormValues>();
 
   return (
-    <Create saveButtonProps={saveButtonProps}>
+    <ReferenceCreate saveButtonProps={saveButtonProps}>
       <Form
         {...formProps}
         layout="vertical"
@@ -52,6 +53,6 @@ export const UnitCreate: React.FC<IResourceComponentsProps> = () => {
         </Form.Item>
         <ReferenceSortOrderFormItem />
       </Form>
-    </Create>
+    </ReferenceCreate>
   );
 };

@@ -1,11 +1,13 @@
 import { nameRule } from '../../utils/nameRules';
-import { Create, useForm, useSelect } from "@refinedev/antd";
+import { useSelect } from "@refinedev/antd";
+import { ReferenceCreate } from "../../components/referenceDrawer/ReferenceFormShell";
+import { useReferenceForm } from "../../components/referenceDrawer/useReferenceForm";
 import type { BaseRecord, HttpError, IResourceComponentsProps } from "@refinedev/core";
 import type { MaterialTransactionTypeFormValues } from "./formValues";
 import { Form, Input, InputNumber, Checkbox, Select, message } from "antd";
 
 export const MaterialTransactionTypeCreate: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useForm<BaseRecord, HttpError, MaterialTransactionTypeFormValues>();
+  const { formProps, saveButtonProps } = useReferenceForm<BaseRecord, HttpError, MaterialTransactionTypeFormValues>();
 
   const { selectProps: directionSelectProps } = useSelect({
     resource: "transaction_direction",
@@ -14,7 +16,7 @@ export const MaterialTransactionTypeCreate: React.FC<IResourceComponentsProps> =
   });
 
   return (
-    <Create saveButtonProps={saveButtonProps}>
+    <ReferenceCreate saveButtonProps={saveButtonProps}>
       <Form
         {...formProps}
         layout="vertical"
@@ -70,6 +72,6 @@ export const MaterialTransactionTypeCreate: React.FC<IResourceComponentsProps> =
           <Input.TextArea rows={3} />
         </Form.Item>
       </Form>
-    </Create>
+    </ReferenceCreate>
   );
 };

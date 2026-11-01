@@ -4,17 +4,20 @@ const mocks = vi.hoisted(() => ({
   form: vi.fn(),
   go: vi.fn(),
   title: vi.fn(),
+  drawer: null as null | { resource: string; action: 'edit' | 'create'; id?: number; onSaved: () => void },
   result: { queryResult: { data: { data: { vendor_id: 17 } } }, id: 17 },
 }));
 vi.mock('@refinedev/antd', () => ({ useForm: mocks.form }));
 vi.mock('@refinedev/core', () => ({ useGo: () => mocks.go }));
 vi.mock('../utils/recordTitle', () => ({ useRecordTabTitle: mocks.title }));
 vi.mock('../utils/tabLabels', () => ({ RESOURCE_LABELS: { vendors: 'Поставщики' } }));
+vi.mock('../components/referenceDrawer/ReferenceDrawerContext', () => ({ useReferenceDrawerForm: () => mocks.drawer }));
 
 import { useFormWithHighlight } from './useFormWithHighlight';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.drawer = null;
   mocks.form.mockReturnValue(mocks.result);
 });
 
@@ -64,5 +67,20 @@ describe('useFormWithHighlight form contract', () => {
     expect(mocks.go).toHaveBeenCalledExactlyOnceWith({
       to: { resource: 'vendors', action: 'list' }, query: { highlightId: '17' }, type: 'replace',
     });
+  });
+});
+
+describe('useFormWithHighlight in the NewLine reference side panel', () => {
+  it('takes the record and action from the panel, closes it on save and never navigates', () => {
+    const onSaved = vi.fn();
+    mocks.drawer = { resource: 'vendors', action: 'edit', id: 17, onSaved };
+    useFormWithHighlight({ resource: 'vendors', idField: 'vendor_id', action: 'edit' });
+    const options = mocks.form.mock.calls[0][0];
+    expect(options).toMatchObject({ resource: 'vendors', action: 'edit', id: 17, redirect: false });
+    options.onMutationSuccess({ data: { vendor_id: 17 } }, {}, undefined, false);
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(mocks.go).not.toHaveBeenCalled();
+    // вкладку списка панель не переименовывает
+    expect(mocks.title).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
   });
 });

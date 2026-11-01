@@ -1,0 +1,41 @@
+/* «NewLine», справочники: форма записи в боковой панели — без карточки страницы вокруг неё */
+.wb-ref-drawer__title {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.wb-ref-drawer__title small {
+  color: var(--evo-text-secondary, #8c8c8c);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.wb-ref-drawer .wb-ref-drawer__form .ant-card {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.wb-ref-drawer .wb-ref-drawer__form .ant-card-body {
+  padding: 0;
+}
+
+.wb-ref-drawer .wb-ref-drawer__form .ant-page-header {
+  padding: 0;
+  background: transparent;
+}
+
+.wb-ref-drawer .wb-ref-drawer__form .ant-page-header-heading:empty,
+.wb-ref-drawer .wb-ref-drawer__form .ant-page-header-heading-left:empty {
+  display: none;
+}
+
+.wb-ref-drawer .wb-ref-drawer__form .ant-card-actions {
+  position: sticky;
+  bottom: -24px;
+  margin: 0 -24px -24px;
+  padding: 0 8px;
+  border-top: 1px solid var(--evo-border, #f0f0f0);
+  background: var(--evo-surface, #fff);
+}

@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-01", title: "Справочники: правка в боковой панели",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "NewLine, справочники: «Изменить» и «Добавить» открывают ту же форму справа над списком, без перехода на отдельную страницу; после сохранения панель закрывается, список обновляется. Панель открывается только при праве на изменение справочника. Пока на страницах остаются: пользователи, сотрудники, плёнки, поставщики, производители, листовые материалы и цеха заказа.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-01", title: "Карточка клиента: сортировка во вкладках «Заказы» и «Платежи»",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

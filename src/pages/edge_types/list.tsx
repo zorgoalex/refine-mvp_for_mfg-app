@@ -1,6 +1,7 @@
 import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
-import { ShowButton, EditButton } from "@refinedev/antd";
+import { ShowButton } from "@refinedev/antd";
+import { ReferenceEditButton } from "../../components/referenceDrawer/ReferenceEditButton";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
@@ -71,7 +72,7 @@ export const EdgeTypeList: React.FC<IResourceComponentsProps> = () => {
                 size="small"
                 recordItemId={record.edge_type_id}
               />
-              <EditButton
+              <ReferenceEditButton
                 hideText
                 size="small"
                 recordItemId={record.edge_type_id}

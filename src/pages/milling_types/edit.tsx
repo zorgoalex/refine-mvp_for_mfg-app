@@ -1,14 +1,17 @@
 import { nameRule } from '../../utils/nameRules';
-import { Edit } from "@refinedev/antd";
+import { ReferenceEdit } from "../../components/referenceDrawer/ReferenceFormShell";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, Checkbox, Card } from "antd";
 import { useParams } from "react-router-dom";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
+import { useReferenceDrawerForm } from "../../components/referenceDrawer/ReferenceDrawerContext";
 import { MillingTypeExtraResourceSelector } from "./MillingTypeExtraResourceSelector";
 
 export const MillingTypeEdit: React.FC<IResourceComponentsProps> = () => {
   const { id } = useParams();
-  const millingTypeId = Number(id);
+  // в боковой панели NewLine запись — из панели, на своей странице — из адреса
+  const drawer = useReferenceDrawerForm();
+  const millingTypeId = Number(drawer?.id ?? id);
   const { formProps, saveButtonProps } = useFormWithHighlight({
     resource: "milling_types",
     idField: "milling_type_id",
@@ -16,7 +19,7 @@ export const MillingTypeEdit: React.FC<IResourceComponentsProps> = () => {
   });
 
   return (
-    <Edit saveButtonProps={saveButtonProps}>
+    <ReferenceEdit saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical">
         <Form.Item
           label="Name"
@@ -56,6 +59,6 @@ export const MillingTypeEdit: React.FC<IResourceComponentsProps> = () => {
           <MillingTypeExtraResourceSelector millingTypeId={millingTypeId} />
         </Card>
       ) : null}
-    </Edit>
+    </ReferenceEdit>
   );
 };

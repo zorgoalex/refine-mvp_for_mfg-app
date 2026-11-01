@@ -1,11 +1,13 @@
 import { nameRule } from '../../utils/nameRules';
-import { Create, useForm, useSelect } from "@refinedev/antd";
+import { useSelect } from "@refinedev/antd";
+import { ReferenceCreate } from "../../components/referenceDrawer/ReferenceFormShell";
+import { useReferenceForm } from "../../components/referenceDrawer/useReferenceForm";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Select, Checkbox } from "antd";
 import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
 
 export const WorkCenterCreate: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useForm();
+  const { formProps, saveButtonProps } = useReferenceForm();
 
   const { selectProps: workshopSelectProps } = useSelect({
     resource: "workshops",
@@ -14,7 +16,7 @@ export const WorkCenterCreate: React.FC<IResourceComponentsProps> = () => {
   });
 
   return (
-    <Create saveButtonProps={saveButtonProps}>
+    <ReferenceCreate saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical" initialValues={{ is_active: true }}>
         <Form.Item label="Код" name="workcenter_code" rules={[{ required: true, message: 'Пожалуйста, введите код участка' }]}>
           <Input placeholder="РС-1, ФР-2..." />
@@ -33,6 +35,6 @@ export const WorkCenterCreate: React.FC<IResourceComponentsProps> = () => {
         </Form.Item>
         <ReferenceSortOrderFormItem />
       </Form>
-    </Create>
+    </ReferenceCreate>
   );
 };

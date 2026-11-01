@@ -1,5 +1,6 @@
 import { nameRule } from '../../utils/nameRules';
-import { Create, useSelect } from "@refinedev/antd";
+import { useSelect } from "@refinedev/antd";
+import { ReferenceCreate } from "../../components/referenceDrawer/ReferenceFormShell";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Select, Checkbox } from "antd";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
@@ -32,7 +33,7 @@ export const MaterialCreate: React.FC<IResourceComponentsProps> = () => {
   });
 
   return (
-    <Create saveButtonProps={saveButtonProps}>
+    <ReferenceCreate saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical">
         <Form.Item
           label="Название"
@@ -73,6 +74,6 @@ export const MaterialCreate: React.FC<IResourceComponentsProps> = () => {
         </Form.Item>
         <ReferenceSortOrderFormItem />
       </Form>
-    </Create>
+    </ReferenceCreate>
   );
 };

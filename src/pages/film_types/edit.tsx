@@ -1,5 +1,5 @@
 import { nameRule } from '../../utils/nameRules';
-import { Edit } from "@refinedev/antd";
+import { ReferenceEdit } from "../../components/referenceDrawer/ReferenceFormShell";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Checkbox } from "antd";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
@@ -13,7 +13,7 @@ export const FilmTypeEdit: React.FC<IResourceComponentsProps> = () => {
   });
 
   return (
-    <Edit saveButtonProps={saveButtonProps}>
+    <ReferenceEdit saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical">
         <Form.Item label="Name" name="film_type_name" rules={[...([{ required: true }]), nameRule("film_type_name")]}>
           <Input />
@@ -26,7 +26,7 @@ export const FilmTypeEdit: React.FC<IResourceComponentsProps> = () => {
         </Form.Item>
         <ReferenceSortOrderFormItem />
       </Form>
-    </Edit>
+    </ReferenceEdit>
   );
 };
 

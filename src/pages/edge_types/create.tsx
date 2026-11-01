@@ -1,5 +1,5 @@
 import { nameRule } from '../../utils/nameRules';
-import { Create } from "@refinedev/antd";
+import { ReferenceCreate } from "../../components/referenceDrawer/ReferenceFormShell";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, Checkbox } from "antd";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
@@ -11,7 +11,7 @@ export const EdgeTypeCreate: React.FC<IResourceComponentsProps> = () => {
   });
 
   return (
-    <Create saveButtonProps={saveButtonProps}>
+    <ReferenceCreate saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical" initialValues={{ is_active: true, sort_order: 100 }}>
         <Form.Item label="Name" name="edge_type_name" rules={[...([{ required: true }]), nameRule("edge_type_name")]}>
           <Input />
@@ -29,6 +29,6 @@ export const EdgeTypeCreate: React.FC<IResourceComponentsProps> = () => {
           <Input />
         </Form.Item>
       </Form>
-    </Create>
+    </ReferenceCreate>
   );
 };

@@ -1,5 +1,5 @@
 import { nameRule } from '../../utils/nameRules';
-import { Create } from "@refinedev/antd";
+import { ReferenceCreate } from "../../components/referenceDrawer/ReferenceFormShell";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, Checkbox } from "antd";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
@@ -11,7 +11,7 @@ export const PaymentTypeCreate: React.FC<IResourceComponentsProps> = () => {
   });
 
   return (
-    <Create saveButtonProps={saveButtonProps}>
+    <ReferenceCreate saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical" initialValues={{ sort_order: 100, is_active: true }}>
         <Form.Item label="Name" name="type_paid_name" rules={[...([{ required: true }]), nameRule("type_paid_name")]}>
           <Input />
@@ -26,6 +26,6 @@ export const PaymentTypeCreate: React.FC<IResourceComponentsProps> = () => {
           <Input />
         </Form.Item>
       </Form>
-    </Create>
+    </ReferenceCreate>
   );
 };

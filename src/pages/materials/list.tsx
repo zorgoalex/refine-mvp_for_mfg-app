@@ -1,6 +1,7 @@
 import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
-import { ShowButton, EditButton } from "@refinedev/antd";
+import { ShowButton } from "@refinedev/antd";
+import { ReferenceEditButton } from "../../components/referenceDrawer/ReferenceEditButton";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
 import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
@@ -207,7 +208,7 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
                 size="small"
                 recordItemId={record.material_id}
               />
-              <EditButton
+              <ReferenceEditButton
                 hideText
                 size="small"
                 recordItemId={record.material_id}

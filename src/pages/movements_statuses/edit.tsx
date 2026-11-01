@@ -1,14 +1,15 @@
 import { nameRule } from '../../utils/nameRules';
-import { Edit, useForm } from "@refinedev/antd";
+import { ReferenceEdit } from "../../components/referenceDrawer/ReferenceFormShell";
+import { useReferenceForm } from "../../components/referenceDrawer/useReferenceForm";
 import type { BaseRecord, HttpError, IResourceComponentsProps } from "@refinedev/core";
 import type { MovementStatusFormValues } from "./formValues";
 import { Form, Input, InputNumber, Checkbox, message } from "antd";
 
 export const MovementStatusEdit: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useForm<BaseRecord, HttpError, MovementStatusFormValues>();
+  const { formProps, saveButtonProps } = useReferenceForm<BaseRecord, HttpError, MovementStatusFormValues>();
 
   return (
-    <Edit saveButtonProps={saveButtonProps}>
+    <ReferenceEdit saveButtonProps={saveButtonProps}>
       <Form
         {...formProps}
         layout="vertical"
@@ -50,6 +51,6 @@ export const MovementStatusEdit: React.FC<IResourceComponentsProps> = () => {
           <Input.TextArea rows={3} />
         </Form.Item>
       </Form>
-    </Edit>
+    </ReferenceEdit>
   );
 };

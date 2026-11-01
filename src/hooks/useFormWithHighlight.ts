@@ -2,6 +2,7 @@ import { useForm as useRefineForm, UseFormProps, UseFormReturnType } from "@refi
 import { BaseRecord, HttpError, useGo } from "@refinedev/core";
 import { RESOURCE_LABELS } from "../utils/tabLabels";
 import { useRecordTabTitle } from "../utils/recordTitle";
+import { useReferenceDrawerForm } from "../components/referenceDrawer/ReferenceDrawerContext";
 
 /**
  * Extended useForm hook that adds automatic navigation with highlight support
@@ -32,14 +33,22 @@ export const useFormWithHighlight = <
     formProps: additionalProps,
   } = props;
   const go = useGo();
+  // «NewLine»: форма открыта в боковой панели справочника — запись и действие из панели, без переходов
+  const drawer = useReferenceDrawerForm();
 
   const formReturn = useRefineForm<TQueryFnData, TError, TVariables>({
     ...additionalProps,
     resource,
     redirect: false,
+    ...(drawer ? { action: drawer.action, id: drawer.action === "edit" ? drawer.id : undefined } : {}),
     onMutationSuccess: (data, variables, context, isAutoSave) => {
       // Call original onMutationSuccess if provided
       additionalProps?.onMutationSuccess?.(data, variables, context, isAutoSave);
+
+      if (drawer) {
+        drawer.onSaved();
+        return;
+      }
 
       if (!navigateOnSuccess) {
         return;
@@ -71,7 +80,7 @@ export const useFormWithHighlight = <
     actionLabel: "Редактирование",
     record: formReturn.queryResult?.data?.data,
     fallbackId: formReturn.id,
-    enabled: action === "edit",
+    enabled: action === "edit" && !drawer,
   });
 
   return formReturn;

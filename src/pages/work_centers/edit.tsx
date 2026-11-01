@@ -1,11 +1,13 @@
 import { nameRule } from '../../utils/nameRules';
-import { Edit, useForm, useSelect } from "@refinedev/antd";
+import { useSelect } from "@refinedev/antd";
+import { ReferenceEdit } from "../../components/referenceDrawer/ReferenceFormShell";
+import { useReferenceForm } from "../../components/referenceDrawer/useReferenceForm";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, Select, Checkbox } from "antd";
 import { ReferenceSortOrderFormItem } from "../../components/ReferenceSortOrder";
 
 export const WorkCenterEdit: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useForm();
+  const { formProps, saveButtonProps } = useReferenceForm();
 
   const { selectProps: workshopSelectProps } = useSelect({
     resource: "workshops",
@@ -15,7 +17,7 @@ export const WorkCenterEdit: React.FC<IResourceComponentsProps> = () => {
   });
 
   return (
-    <Edit saveButtonProps={saveButtonProps}>
+    <ReferenceEdit saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical">
         <Form.Item label="Код" name="workcenter_code" rules={[{ required: true, message: 'Пожалуйста, введите код участка' }]}>
           <Input placeholder="РС-1, ФР-2..." />
@@ -34,6 +36,6 @@ export const WorkCenterEdit: React.FC<IResourceComponentsProps> = () => {
         </Form.Item>
         <ReferenceSortOrderFormItem />
       </Form>
-    </Edit>
+    </ReferenceEdit>
   );
 };

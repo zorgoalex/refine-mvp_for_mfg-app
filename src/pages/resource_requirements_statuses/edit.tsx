@@ -1,13 +1,14 @@
 import { nameRule } from '../../utils/nameRules';
-import { Edit, useForm } from "@refinedev/antd";
+import { ReferenceEdit } from "../../components/referenceDrawer/ReferenceFormShell";
+import { useReferenceForm } from "../../components/referenceDrawer/useReferenceForm";
 import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, Checkbox } from "antd";
 
 export const ResourceRequirementStatusEdit: React.FC<IResourceComponentsProps> = () => {
-  const { formProps, saveButtonProps } = useForm();
+  const { formProps, saveButtonProps } = useReferenceForm();
 
   return (
-    <Edit saveButtonProps={saveButtonProps}>
+    <ReferenceEdit saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical">
         <Form.Item label="Code" name="requirement_status_code" rules={[{ required: true }]}>
           <Input />
@@ -28,6 +29,6 @@ export const ResourceRequirementStatusEdit: React.FC<IResourceComponentsProps> =
           <Input />
         </Form.Item>
       </Form>
-    </Edit>
+    </ReferenceEdit>
   );
 };
