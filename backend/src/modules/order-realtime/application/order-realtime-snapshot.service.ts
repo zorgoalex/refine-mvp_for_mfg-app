@@ -35,6 +35,7 @@ export class OrderRealtimeSnapshotService {
     const cutRefsAccess = authorization.cutRefsAllowed ? 'allowed' : 'denied';
     const etag = createSnapshotEtag({
       orderId: input.orderId,
+      orderVersion: state.orderVersion,
       streamEnabled,
       cutRefsAccess,
       permissionVariant: authorization.permissionVariant,
@@ -43,6 +44,7 @@ export class OrderRealtimeSnapshotService {
 
     return {
       orderId: input.orderId,
+      orderVersion: state.orderVersion,
       streamEnabled,
       streamCursor,
       cutRefsAccess,

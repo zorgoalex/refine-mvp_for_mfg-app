@@ -9,6 +9,7 @@ import {
 
 const snapshot: OrderDetailLiveStateSnapshot = {
   orderId: 42,
+  orderVersion: 5,
   streamEnabled: true,
   streamCursor: 'cursor-1',
   cutRefsAccess: 'allowed',
@@ -47,6 +48,14 @@ describe('order detail live state projection', () => {
     expect(areOrderDetailLiveStateMapsEqual(left, right)).toBe(true);
     right.statusByDetailId.set(7, 4);
     expect(areOrderDetailLiveStateMapsEqual(left, right)).toBe(false);
+  });
+
+  it('carries the order version: a newer one is a new state even with the same detail stages', () => {
+    const left = buildOrderDetailLiveStateMaps(snapshot);
+    expect(left.orderVersion).toBe(5);
+    const right = buildOrderDetailLiveStateMaps({ ...structuredClone(snapshot), orderVersion: 6 });
+    expect(areOrderDetailLiveStateMapsEqual(left, right)).toBe(false);
+    expect(buildOrderDetailLiveStateMaps({ ...snapshot, orderVersion: null }).orderVersion).toBeNull();
   });
 
   it('invalidates only for matching order events and handles server disable', () => {

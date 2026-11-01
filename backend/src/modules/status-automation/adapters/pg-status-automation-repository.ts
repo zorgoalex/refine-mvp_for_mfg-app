@@ -465,11 +465,13 @@ async function validateRuleStatusReferences(
   }
   if (actionType === 'map_production_status_to_order_status') {
     await validateStatusIds(tx, 'production', actionConfig.statusMapping?.entries.flatMap((entry) => entry.sourceStatusIds) ?? [], actionType);
-    await validateStatusIds(tx, 'order', actionConfig.statusMapping?.entries.map((entry) => entry.targetStatusId) ?? [], actionType);
+    await validateStatusIds(tx, 'order', actionConfig.statusMapping?.entries.map((entry) => entry.targetStatusId) ?? [], actionType, { orderStatusTarget: true });
     return;
   }
   if (targetStatusId === null) return;
-  await validateStatusIds(tx, actionType === 'change_order_status' ? 'order' : 'production', [targetStatusId], actionType);
+  await validateStatusIds(tx, actionType === 'change_order_status' ? 'order' : 'production', [targetStatusId], actionType, {
+    orderStatusTarget: actionType === 'change_order_status',
+  });
 }
 
 async function validateConditionStatusReferences(
@@ -511,6 +513,7 @@ async function validateStatusIds(
   kind: 'order' | 'payment' | 'production',
   statusIds: number[],
   reference: StatusAutomationActionType | 'conditions',
+  options: { orderStatusTarget?: boolean } = {},
 ): Promise<void> {
   const uniqueIds = Array.from(new Set(statusIds));
   if (uniqueIds.length === 0) return;
@@ -541,6 +544,20 @@ async function validateStatusIds(
         statusKind: kind,
       },
     );
+  }
+  // «Переделка» is entered only by the rework command (production rounds): an
+  // automation action may never target it (conditions may still reference it).
+  if (kind === 'order' && options.orderStatusTarget === true) {
+    const rework = await tx.query(
+      "SELECT 1 FROM order_statuses WHERE order_status_id = ANY($1::bigint[]) AND order_status_code = 'rework'",
+      [uniqueIds],
+    );
+    if (rework.rows.length > 0) {
+      throw new ApiError(422, 'TARGET_STATUS_REWORK_FORBIDDEN', 'Статус «Переделка» ставится только командой переделки', {
+        reference,
+        statusIds: uniqueIds,
+      });
+    }
   }
 }
 

@@ -919,7 +919,9 @@ describe('PgProductionActionRepository', () => {
     expect(database.queries[detailLock]?.params).toEqual([99, 15]);
     expect(normalizeSql(database.queries[detailLock]?.text ?? '')).toContain('AND COALESCE(delete_flag, false) = false FOR UPDATE');
     expect(sql).toContain('INSERT INTO production_status_events');
-    expect(sql).toContain('ON CONFLICT (detail_id, production_status_id) WHERE detail_id IS NOT NULL');
+    expect(sql).toContain('ON CONFLICT (detail_id, production_status_id, round_no) WHERE detail_id IS NOT NULL');
+    expect(sql).toContain('(SELECT production_round FROM order_details WHERE detail_id = $1)');
+    expect(sql).toContain("SELECT set_config('erp.pse_writer', $1, true)");
     expect(sql).not.toContain('UPDATE orders SET version = version + 1');
     expect(sql).toContain('INSERT INTO audit_log');
     const params = JSON.stringify(database.queries.map((query) => query.params));
