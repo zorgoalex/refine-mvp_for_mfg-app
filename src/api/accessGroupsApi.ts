@@ -2,6 +2,7 @@ import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import type {
   AccessGroupDto,
+  AccessGroupLookupDto,
   AccessGroupsListDto,
   CreateAccessGroupRequest,
   ReplaceAccessGroupMembersRequest,
@@ -19,6 +20,11 @@ import type {
 export const accessGroupsApi = {
   list(): Promise<AccessGroupsListDto> {
     return httpClient.get<AccessGroupsListDto>(apiRoutes.accessGroups.list);
+  },
+
+  /** Code, name, activity — for pickers (notification rules); readable with notifications.manage_rules too. */
+  lookup(): Promise<AccessGroupLookupDto[]> {
+    return httpClient.get<AccessGroupLookupDto[]>(apiRoutes.accessGroups.lookup);
   },
 
   get(groupId: number): Promise<AccessGroupDto> {

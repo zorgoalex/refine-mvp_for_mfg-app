@@ -7,6 +7,7 @@ import type { CurrentUser, RequestWithCurrentUser } from '../current-user';
 import { PermissionsService } from '../permissions.service';
 import type {
   AccessGroupDto,
+  AccessGroupLookupDto,
   AccessGroupsListDto,
   UserAuthorizationSourcesDto,
 } from './access-groups.types';
@@ -69,6 +70,19 @@ export class AccessGroupsController {
   @Put('settings')
   async settings(@Req() request: RequestWithCurrentUser, @Body() body: unknown, @Headers('idempotency-key') key?: string | string[]): Promise<AccessGroupsListDto> {
     return this.groups.updateSettings(commandContext(this.permissions, request, key), parse(settingsSchema, body));
+  }
+
+  /** Groups to pick in notification rules (stage 4): code, name, activity — readable also by the rules managers. */
+  @ApiOperation({ operationId: 'lookupAccessGroups', summary: 'Access groups for pickers (code, name, active)' })
+  @Get('lookup')
+  async lookup(@Req() request: RequestWithCurrentUser): Promise<AccessGroupLookupDto[]> {
+    const user = currentUserOf(request);
+    if (!['permissions.manage', 'system.superadmin', 'notifications.manage_rules'].some((permission) => this.permissions.canUser(user, permission as never))) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+        requiredPermissions: ['notifications.manage_rules'],
+      });
+    }
+    return this.groups.lookup();
   }
 
   @ApiOperation({ operationId: 'getAccessGroup', summary: 'One access group with permissions, scopes and members' })

@@ -6,7 +6,7 @@ import { ProcurementNotificationsService, type ProcurementNotificationsRepositor
 const user = (id: string): CurrentUser => ({ id, username: id, role: 'manager', roleId: 10, permissions: ['procurement.view', 'procurement.manage'] });
 const MORNING = new Date('2026-10-02T04:00:00Z'); // 09:00 Almaty
 const rule = (ruleCode: string, isEnabled: boolean, recipients: Partial<Pick<ServiceRuleState, 'roleCodes' | 'userIds'>> = {}): ServiceRuleState => ({
-  ruleCode, isEnabled, roleCodes: recipients.roleCodes ?? [], userIds: recipients.userIds ?? [], recipientsHash: `hash-${ruleCode}`,
+  ruleCode, isEnabled, roleCodes: recipients.roleCodes ?? [], groupCodes: [], userIds: recipients.userIds ?? [], recipientsHash: `hash-${ruleCode}`,
 });
 const RECEIPTS = [
   { documentId: 55, number: 'П-1', docDate: '2026-09-10', supplierName: 'Альфа', lines: 2, remainingHash: 'h1' },
@@ -17,6 +17,7 @@ function fakes(rules: Record<string, boolean>, overrides: Partial<ProcurementNot
   const repository: ProcurementNotificationsRepositoryPort = {
     isRuleEnabled: vi.fn(async (code: string) => rules[code] === true),
     loadRule: vi.fn(async (code: string) => rule(code, rules[code] === true)),
+    authorizationVersion: vi.fn(async () => 41),
     loadSettings: vi.fn(async () => ({ digestTime: '08:30', unallocatedAlertDays: 2 })),
     ruleRecipients: vi.fn(async () => [user('7'), user('8')]),
     scanDemandChanges: vi.fn(async () => 2),
@@ -56,7 +57,9 @@ describe('ProcurementNotificationsService.runOnce', () => {
     expect(f.worklist.worklistTotals).toHaveBeenCalledTimes(2);
     expect(f.repository.writeServiceNotification).toHaveBeenCalledWith(expect.objectContaining({
       eventType: 'procurement.deficit_digest', key: 'procurement_digest:7:2026-10-02', userId: 7, entityType: 'procurement_worklist', entityId: null,
-    }), { ruleCode: 'procurement-deficit-digest', recipientsHash: 'hash-procurement-deficit-digest' });
+    }), { ruleCode: 'procurement-deficit-digest', recipientsHash: 'hash-procurement-deficit-digest',
+      // the write re-checks the recipient against the rule and memberships at that moment (access groups)
+      eligibility: { defaultPermission: 'procurement.manage', required: ['procurement.manage'], authorizationVersion: 41 } });
   });
 
   it('before the digest time nothing scheduled runs (both summaries are daily)', async () => {
@@ -78,7 +81,8 @@ describe('ProcurementNotificationsService.runOnce', () => {
       key: 'procurement_unallocated_digest:8:2026-10-02', entityType: 'procurement_receipts', entityId: null,
       title: 'Нераспределённые поступления на 02.10.2026',
       message: 'Не распределены поступления 1С: 2 (строк — 3), из них старше 7 дней — 1. Поступления: № П-1 от 10.09.2026 (Альфа), № П-2 от 28.09.2026. Подробности — экран снабжения, «Приходы».',
-    }), { ruleCode: 'procurement-receipt-unallocated', recipientsHash: 'hash-procurement-receipt-unallocated' });
+    }), { ruleCode: 'procurement-receipt-unallocated', recipientsHash: 'hash-procurement-receipt-unallocated',
+      eligibility: { defaultPermission: 'procurement.manage', required: ['procurement.view'], authorizationVersion: 41 } });
   });
 
   it('unallocated: nothing pending → no summary; no recipients → receipts are not even read', async () => {

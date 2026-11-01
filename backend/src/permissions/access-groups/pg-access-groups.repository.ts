@@ -26,6 +26,7 @@ import {
 } from '../permissions.service';
 import type {
   AccessGroupDto,
+  AccessGroupLookupDto,
   AccessGroupMemberDto,
   AccessGroupScopes,
   AccessGroupSummaryDto,
@@ -101,6 +102,13 @@ export class PgAccessGroupsRepository {
 
   async list(): Promise<AccessGroupsListDto> {
     return this.readList(this.database);
+  }
+
+  async lookup(): Promise<AccessGroupLookupDto[]> {
+    const rows = await this.database.query<{ code: string; name: string; is_active: boolean }>(
+      'SELECT code, name, is_active FROM access_groups ORDER BY name, code',
+    );
+    return rows.rows.map((row) => ({ code: row.code, name: row.name, isActive: row.is_active }));
   }
 
   async get(groupId: number): Promise<AccessGroupDto> {
@@ -306,6 +314,17 @@ export class PgAccessGroupsRepository {
       if (before.isActive || before.members.length > 0) {
         throw new ApiError(409, 'ACCESS_GROUP_NOT_EMPTY', 'Удалить можно только неактивную группу без участников', {
           isActive: before.isActive, memberCount: before.members.length,
+        });
+      }
+      // A notification rule naming the group keeps it (its rule transaction holds the row FOR KEY SHARE until commit,
+      // so this read under FOR UPDATE sees every committed rule): rewrite or delete those rules first.
+      const rules = await tx.query<{ rule_code: string }>(
+        `SELECT rule_code FROM notification_rules WHERE recipients_json -> 'groupCodes' ? $1 ORDER BY rule_code`,
+        [before.code],
+      );
+      if (rules.rows.length > 0) {
+        throw new ApiError(409, 'ACCESS_GROUP_IN_USE', 'Группа указана в правилах уведомлений — сначала уберите её оттуда', {
+          ruleCodes: rules.rows.map((row) => row.rule_code),
         });
       }
       await tx.query('DELETE FROM access_groups WHERE group_id = $1', [groupId]);

@@ -32,6 +32,12 @@ export interface NotificationEventDefinition {
   /** Флаг выключен в момент обработки → событие пропускается (skipped_disabled), уведомлений нет. */
   featureFlag?: NotificationFeatureFlag;
   /**
+   * Access groups (plan v6 §5): `groupCodes` are resolved by the engine and the procurement service; an event delivered
+   * by another path (order-group participants) does not read rule recipients — groups are refused there. Derived in
+   * listConfigurableEventTypes for the editor.
+   */
+  supportsAccessGroups?: boolean;
+  /**
    * Видимость получателей: по умолчанию — базовая видимость заказа; `procurement` — текущие права/scope из матрицы
    * ролей + буквальное procurement.view (4б CR1-1).
    */
@@ -175,6 +181,8 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     eventType: 'GROUP_DEADLINE_OVERDUE',
     aggregateType: 'deadline',
     owner: 'legacy_inline',
+    // Delivered to the order group's participants (group-notification.service), never through rule recipients.
+    supportsAccessGroups: false,
     contextFields: ['orderId', 'deadlineId'],
     supportedResolvers: ['group_participants'],
     supportsOrderConditions: false,
@@ -191,9 +199,13 @@ export function isEngineOwnedEvent(eventType: string): boolean {
 }
 
 export function listConfigurableEventTypes(): NotificationEventDefinition[] {
-  return Object.values(NOTIFICATION_EVENT_REGISTRY).filter(
-    (d) => d.owner === 'engine' || d.owner === 'service' || d.supportsDeadlineConditions,
-  );
+  return Object.values(NOTIFICATION_EVENT_REGISTRY)
+    .filter((d) => d.owner === 'engine' || d.owner === 'service' || d.supportsDeadlineConditions)
+    .map((d) => ({ ...d, supportsAccessGroups: eventSupportsAccessGroups(d) }));
+}
+
+export function eventSupportsAccessGroups(definition: NotificationEventDefinition): boolean {
+  return definition.supportsAccessGroups !== false;
 }
 
 /**

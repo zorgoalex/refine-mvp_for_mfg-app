@@ -29,6 +29,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-01", title: "Уведомления: получатели по группам доступа",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "Правила уведомлений (и сводки закупа): получателями можно выбрать группы доступа — уведомление получают активные участники активных групп, пока группы доступа включены. Правило только с группами при выключенных группах никому не отправляет (не «всем с правом»).",
+    ],
+    changed: [
+      "Группу доступа, указанную в правилах уведомлений, нельзя удалить, пока её не уберут из правил.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-01", title: "Раскрой: без пустого места под заданием",
     services: ["ERP", "Cutting"], repositories: ["repo_erp"],
     fixed: [

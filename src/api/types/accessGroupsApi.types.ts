@@ -14,6 +14,12 @@ export interface AccessGroupSummaryDto {
   permissionCount: number;
 }
 
+export interface AccessGroupLookupDto {
+  code: string;
+  name: string;
+  isActive: boolean;
+}
+
 export interface AccessGroupMemberDto {
   userId: number;
   username: string;

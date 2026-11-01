@@ -433,6 +433,7 @@ export const apiRoutes = {
   accessGroups: {
     list: backendApiPath('/permissions/access-groups'),
     settings: backendApiPath('/permissions/access-groups/settings'),
+    lookup: backendApiPath('/permissions/access-groups/lookup'),
     byId: (groupId: number) => backendApiPath(`/permissions/access-groups/${groupId}`),
     permissions: (groupId: number) => backendApiPath(`/permissions/access-groups/${groupId}/permissions`),
     members: (groupId: number) => backendApiPath(`/permissions/access-groups/${groupId}/members`),

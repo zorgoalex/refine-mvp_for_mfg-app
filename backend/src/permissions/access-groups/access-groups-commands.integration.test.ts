@@ -99,6 +99,7 @@ describe.skipIf(!databaseUrl)('access groups commands (PostgreSQL)', { timeout: 
       await pool.query((await readFile(new URL('../../../db/migrations/285_access_groups.sql', import.meta.url), 'utf8')));
     }
     stateBefore = (await pool.query('SELECT hasura_access_predicates, hasura_financials_state, access_groups_enabled FROM permissions_state WHERE id = true')).rows[0];
+    await removeLeftovers(pool, `${PREFIX}-%`, 'e2e_ag%');
     await permissions.seedDefaults();
     adminId = await insertUser('admin', SUPERADMIN_ROLE);
     viewerId = await insertUser('viewer', VIEWER_ROLE);
@@ -400,3 +401,21 @@ describe.skipIf(!databaseUrl)('access groups commands (PostgreSQL)', { timeout: 
     await expect(permissions.updateRolesMatrix(actor, { ...request, version: keyed.version }, 'it-matrix')).resolves.toMatchObject({ version: keyed.version + 1 });
   });
 });
+
+/**
+ * Fixtures left by a run that was killed before its afterAll (guard abort): removed before this run starts, the same
+ * rows the teardown removes. Runs after the schema check and after the original state was captured; does not touch
+ * shared state (the switch) — each test sets what it needs and afterAll restores the captured state.
+ */
+async function removeLeftovers(pool: Pool, usernamePattern: string, groupPattern: string, rulePattern?: string): Promise<void> {
+  const users = (await pool.query<{ user_id: string }>('SELECT user_id FROM users WHERE username LIKE $1', [usernamePattern])).rows.map((row) => row.user_id);
+  if (rulePattern) await pool.query('DELETE FROM notification_rules WHERE rule_code LIKE $1', [rulePattern]);
+  await pool.query(`DELETE FROM notifications WHERE idempotency_key LIKE 'e2e-ag-notify:%'`);
+  await pool.query(`DELETE FROM outbox_events WHERE idempotency_key LIKE 'e2e-ag-notify:%'`);
+  await pool.query(`DELETE FROM outbox_events WHERE event_type = 'authorization.changed'
+    AND (payload_json ->> 'actorUserId')::bigint = ANY($1::bigint[])`, [users]);
+  await pool.query('DELETE FROM access_groups WHERE code LIKE $1', [groupPattern]);
+  await pool.query('DELETE FROM command_idempotency_keys WHERE actor_user_id = ANY($1::bigint[])', [users]);
+  await pool.query('DELETE FROM audit_log WHERE user_id = ANY($1::bigint[]) OR related_user_id = ANY($1::bigint[])', [users]);
+  await pool.query('DELETE FROM users WHERE user_id = ANY($1::bigint[])', [users]);
+}
