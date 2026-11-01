@@ -578,10 +578,9 @@
   opacity: 0.45;
 }
 
-/* размеры материалов — столбиком вдоль правого края карточки, контрастно */
+/* размеры материалов — отдельной строкой, контрастно */
 :root[data-ui-variant="workbench"] .order-card--wb {
-  grid-template-columns: minmax(0, 1fr) auto;
-  column-gap: 6px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 :root[data-ui-variant="workbench"] .order-card--wb > * {
@@ -589,11 +588,11 @@
 }
 
 :root[data-ui-variant="workbench"] .order-card--wb > .order-card__materials {
-  grid-column: 2;
-  grid-row: 2 / span 3;
-  flex-direction: column;
-  align-items: flex-end;
-  align-self: start;
+  /* своей строкой под клиентом: в колонке справа они урезали фрезеровку до «Нео…» */
+  grid-column: 1 / -1;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
   margin: 0;
 }
 

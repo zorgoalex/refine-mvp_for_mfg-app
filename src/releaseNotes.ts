@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-01", title: "Календарь: материалы отдельной строкой",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "NewLine: на карточке календаря бейджи материалов («18мм», «ЛДСП»…) перенесены на отдельную строку под клиентом — фрезеровка («Неоклассика», «Выборка») и клиент больше не обрезаются в узких колонках.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-31", title: "МДФ-доска: разбор дублей ванн после перераскроя",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
