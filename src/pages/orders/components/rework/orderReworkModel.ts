@@ -101,6 +101,24 @@ export function redoSummary(
   };
 }
 
+/**
+ * The details the outcome is shown for, grouped by their actual «redo from» (own choice, else the common one): one
+ * outcome per group, so a per-detail choice is never hidden behind the common text.
+ */
+export function redoGroups(
+  details: readonly ReworkDetailRow[],
+  perRowRedo: Readonly<Record<number, number | undefined>>,
+  commonRedo: number | undefined,
+): Array<{ redoFrom: number; details: ReworkDetailRow[] }> {
+  const groups = new Map<number, ReworkDetailRow[]>();
+  for (const detail of details) {
+    const redoFrom = perRowRedo[detail.id] ?? commonRedo;
+    if (redoFrom === undefined) continue;
+    groups.set(redoFrom, [...(groups.get(redoFrom) ?? []), detail]);
+  }
+  return [...groups].map(([redoFrom, rows]) => ({ redoFrom, details: rows }));
+}
+
 export type ReworkRequestResult =
   | {
     ok: true;

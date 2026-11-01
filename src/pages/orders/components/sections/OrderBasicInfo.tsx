@@ -6,7 +6,7 @@ import { Table } from '../../../../ui/tooltipDelay';
 // Row 4: Doweling Orders Table (Name, Engineer)
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Popconfirm, notification } from 'antd';
+import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Popconfirm, message, notification } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { OrderLifecycleReadSurface, useSelect } from '../../../../query/orderLifecycleQueries';
 import { useDataProvider, useInvalidate } from '@refinedev/core';
@@ -33,7 +33,7 @@ import type { ReferenceOption } from '../../../../query/orderFormDataReferences'
 import { ORDER_MANAGER_CHANGE_PERMISSION, orderManagerOptions } from './orderManagerOptions';
 import { ordersApi } from '../../../../api/ordersApi';
 import { useOrderFormReworkPick } from '../rework/useOrderFormReworkPick';
-import { useReworkOrderStatusIds } from '../rework/useReworkOrderStatusIds';
+import { REWORK_STATUSES_LOADING_TEXT, useReworkOrderStatusIds } from '../rework/useReworkOrderStatusIds';
 import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
 import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
 import {
@@ -150,7 +150,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
     queryOptions: { enabled: !useBackendReferences },
   });
   // «Переделка» is set by the rework command: picking it opens the rework form, the field keeps its value.
-  const reworkStatusIds = useReworkOrderStatusIds();
+  const reworkStatuses = useReworkOrderStatusIds();
   const pickRework = useOrderFormReworkPick();
   const resolvedOrderStatusProps = useBackendReferences
     ? createBackendSelectProps(orderFormData.references.orderStatuses, orderFormData.isLoading)
@@ -532,9 +532,11 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
               <Select
                 {...resolvedOrderStatusProps}
                 value={header.order_status_id}
-                onChange={(value) => (reworkStatusIds.has(Number(value))
-                  ? pickRework(header.order_id)
-                  : updateHeaderField('order_status_id', value))}
+                onChange={(value) => {
+                  if (!reworkStatuses.ready) { message.info(REWORK_STATUSES_LOADING_TEXT); return; }
+                  if (reworkStatuses.ids.has(Number(value))) pickRework(header.order_id);
+                  else updateHeaderField('order_status_id', value);
+                }}
                 placeholder="Выберите статус"
               />
             </Form.Item>

@@ -1,8 +1,32 @@
 import { useCallback } from 'react';
 import { message } from 'antd';
 import { loadOrderViaBackend } from '../../../../hooks/useOrderBackendRead';
+import { featureFlags } from '../../../../config/featureFlags';
+import { getAuthCacheNamespace } from '../../../../query/authCacheNamespace';
+import {
+  createOrderEditBackendPrimaryIdentity,
+  fetchOrderEditBackendPrimary,
+} from '../../../../query/orderEditPrimaryResource';
+import { getOrdersReadBackendMode } from '../../../../query/orderPrimaryResource';
 import { useOrderDraftStoreApi } from '../../../../stores/orderFormStore';
 import { requestReworkStart } from './reworkStartRequests';
+
+/**
+ * The order after a rework command, read past the order-edit cache (its 15 s stale window would publish the pre-command
+ * status, stages and version back into the form): a forced fetch, which also refreshes that cache entry.
+ */
+export function fetchOrderAfterRework(
+  orderId: number,
+  options: Pick<NonNullable<Parameters<typeof fetchOrderEditBackendPrimary>[1]>, 'queryClient' | 'getOrderById'> = {},
+) {
+  return fetchOrderEditBackendPrimary(
+    createOrderEditBackendPrimaryIdentity({
+      orderId,
+      authCacheNamespace: getAuthCacheNamespace(getOrdersReadBackendMode(featureFlags.useBackendOrdersRead)),
+    }),
+    { ...options, staleTime: 0 },
+  );
+}
 
 /**
  * Picking the status «Переделка» in the order form: the status is set by the rework command, which also moves the
@@ -24,6 +48,7 @@ export function useOrderFormReworkPick(): (orderId: number | null | undefined) =
       orderId,
       onDone: () => {
         void loadOrderViaBackend(orderId, {
+          getOrderById: (id) => fetchOrderAfterRework(id),
           getOrderStore: () => storeApi.getState(),
           // An edit made while the command ran wins; the user re-opens the order to see the round.
           canPublish: () => !storeApi.getState().isDirty,

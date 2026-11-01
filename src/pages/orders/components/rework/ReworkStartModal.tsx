@@ -12,6 +12,7 @@ import {
   buildReworkRequest,
   createLatestGate,
   isRedoFromAllowed,
+  redoGroups,
   redoSummary,
   redoTarget,
   reworkActionLabel,
@@ -63,9 +64,10 @@ const RedoChain: React.FC<{
   chain: ReworkStageOption[];
   redoFrom: number | undefined;
   onPick: (stageId: number) => void;
-  summary: RedoSummary | null;
+  /** One outcome per group of details with the same «redo from» (the label lists them when there is more than one). */
+  outcomes: Array<{ label: string; summary: RedoSummary }>;
   roundNo: number;
-}> = ({ chain, redoFrom, onPick, summary, roundNo }) => {
+}> = ({ chain, redoFrom, onPick, outcomes, roundNo }) => {
   const picked = chain.find((stage) => stage.id === redoFrom);
   return (
     <Space direction="vertical" size={4} style={{ width: '100%' }}>
@@ -91,13 +93,14 @@ const RedoChain: React.FC<{
           );
         })}
       </Space>
-      {summary ? (
-        <Text type="secondary">
+      {outcomes.map(({ label, summary }) => (
+        <Text type="secondary" key={label}>
+          {outcomes.length > 1 ? <Text strong>{label}: </Text> : null}
           {summary.kept.length > 0 ? `Остаётся сделанным: ${summary.kept.join(', ')}. ` : 'Всё делается заново. '}
           {summary.redo.length > 0 ? `Переделать: ${summary.redo.join(', ')}. ` : ''}
-          {`Детали станут «${withRoundSuffix(summary.becomes ?? '', roundNo)}», следующий этап — ${summary.next}.`}
+          {`Станут «${withRoundSuffix(summary.becomes ?? '', roundNo)}», следующий этап — ${summary.next}.`}
         </Text>
-      ) : null}
+      ))}
     </Space>
   );
 };
@@ -213,11 +216,12 @@ export const ReworkStartModal: React.FC<{
           chain={chain}
           redoFrom={commonRedo}
           onPick={setCommonRedo}
-          summary={commonRedo === undefined ? null : redoSummary(
-            commonRedo,
-            stages,
-            (selected.size > 0 ? eligible.filter((d) => selected.has(d.id)) : eligible).map((d) => d.productionStatusId),
-          )}
+          outcomes={redoGroups(selected.size > 0 ? eligible.filter((d) => selected.has(d.id)) : eligible, perRowRedo, commonRedo)
+            .map((group) => ({
+              label: group.details.map((d) => `№${d.detailNumber ?? d.id}`).join(', '),
+              summary: redoSummary(group.redoFrom, stages, group.details.map((d) => d.productionStatusId)),
+            }))
+            .filter((outcome): outcome is { label: string; summary: RedoSummary } => outcome.summary !== null)}
           roundNo={roundNo}
         />
         <Table

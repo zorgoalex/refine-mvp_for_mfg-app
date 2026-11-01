@@ -1,24 +1,19 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { message } from 'antd';
 import { useList } from '@refinedev/core';
-import { orderReworkApi, type OrderReworkReason, type OrderReworkState } from '../../../../api/orderReworkApi';
+import { orderReworkApi } from '../../../../api/orderReworkApi';
 import { ordersApi } from '../../../../api/ordersApi';
 import { can } from '../../../../utils/permissions';
-import type { ReworkDetailRow, ReworkStageOption } from './orderReworkModel';
+import { createLatestGate, type ReworkStageOption } from './orderReworkModel';
+import { loadReworkForm, type ReworkFormData } from './loadReworkForm';
 import { ReworkStartModal } from './ReworkStartModal';
 import { subscribeReworkStart, type ReworkStartRequest } from './reworkStartRequests';
 
-const UNAVAILABLE_TEXT = {
-  disabled_flag: 'Переделка заказов выключена',
-  mdf_engine_unsupported: 'Переделка станет доступна после поддержки кругов в МДФ-движке',
-  mdf_cutover_in_progress: 'Идёт переключение производственного учёта, повторите позже',
-} as const;
 
-interface LoadedRework {
+interface LoadedRework extends ReworkFormData {
+  /** The open request it belongs to: a newer request or a close drops a late answer, and each opening is a new form. */
+  ticket: number;
   request: ReworkStartRequest;
-  state: OrderReworkState;
-  reasons: OrderReworkReason[];
-  details: ReworkDetailRow[];
 }
 
 const errorText = (error: unknown) =>
@@ -31,6 +26,7 @@ const errorText = (error: unknown) =>
 export const ReworkStartHost: React.FC = () => {
   const [loaded, setLoaded] = useState<LoadedRework | null>(null);
   const [busy, setBusy] = useState(false);
+  const gate = useRef(createLatestGate()).current;
   const { data: stagesData } = useList({
     resource: 'production_statuses',
     pagination: { pageSize: 100 },
@@ -51,49 +47,31 @@ export const ReworkStartHost: React.FC = () => {
       message.warning('Статус «Переделка» ставится командой переделки — нужно право «Переделка»');
       return;
     }
+    const ticket = gate.begin();
+    setLoaded(null); // a form of another order closes; this one opens when its data agrees
     try {
-      const [state, availability, reasons, order] = await Promise.all([
-        orderReworkApi.rounds(request.orderId),
-        orderReworkApi.availability(),
-        orderReworkApi.reasons(),
-        ordersApi.getById(request.orderId),
-      ]);
-      if (availability.availability !== 'available') {
-        message.warning(UNAVAILABLE_TEXT[availability.availability]);
-        return;
-      }
-      if (!state.order.canRework) {
-        message.warning('Нет права изменять этот заказ');
-        return;
-      }
-      if (state.order.action === null) {
-        message.info('Для заказа в этом статусе переделка недоступна');
-        return;
-      }
-      setLoaded({
-        request,
-        state,
-        reasons: reasons.data,
-        details: order.details.map((detail) => ({
-          id: Number(detail.id),
-          detailNumber: detail.detailNumber == null ? null : Number(detail.detailNumber),
-          name: String(detail.detailName ?? ''),
-          productionStatusId: detail.productionStatusId == null ? null : Number(detail.productionStatusId),
-          productionRound: Number(detail.productionRound ?? 1),
-        })),
+      const result = await loadReworkForm(request.orderId, {
+        availability: () => orderReworkApi.availability(),
+        reasons: () => orderReworkApi.reasons(),
+        rounds: (orderId) => orderReworkApi.rounds(orderId),
+        getOrder: (orderId) => ordersApi.getById(orderId),
+        isCurrent: () => gate.isLatest(ticket),
       });
+      if (result.kind === 'message') message[result.level](result.text);
+      if (result.kind === 'open') setLoaded({ ticket, request, ...result.data });
     } catch (error) {
-      message.error(errorText(error));
+      if (gate.isLatest(ticket)) message.error(errorText(error));
     }
-  }, []);
+  }, [gate]);
 
   useEffect(() => subscribeReworkStart((request) => { void open(request); }), [open]);
 
   if (!loaded || stages.length === 0) return null;
   const { order } = loaded.state;
-  const close = () => setLoaded(null);
+  const close = () => { gate.begin(); setLoaded(null); };
   return (
     <ReworkStartModal
+      key={loaded.ticket}
       orderId={loaded.request.orderId}
       version={order.version}
       action={order.action!}
