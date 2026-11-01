@@ -38,6 +38,8 @@ export async function fetchOrderAfterRework(
   const inFlight = queryClient.getQueryCache().find({ queryKey, exact: true });
   if (inFlight?.state.fetchStatus === 'fetching') await inFlight.fetch().catch(() => undefined);
   queryClient.removeQueries({ queryKey, exact: true });
+  // The session may have ended while waiting (a logout cancels that read — swallowed above): check again.
+  if (namespace() !== owner) throw new ReworkReadSuperseded();
   return order;
 }
 
@@ -57,13 +59,16 @@ export function createReworkFormRefresh(deps: {
   getOrder: (orderId: number) => Promise<OrderDto>;
   isClean: () => boolean;
   draftVersion: () => number;
+  /** The session the refresh belongs to: a draft cleared by a logout is never refilled with the old session's order. */
+  session: () => string;
   publish: (order: OrderDto) => void;
 }): (orderId: number, commandVersion: number) => Promise<ReworkRefreshOutcome> {
   return async (orderId, commandVersion) => {
     const mine = (refreshGenerations.get(deps.draft) ?? 0) + 1;
     refreshGenerations.set(deps.draft, mine);
+    const owner = deps.session();
     const order = await deps.getOrder(orderId);
-    if (refreshGenerations.get(deps.draft) !== mine) return 'superseded';
+    if (refreshGenerations.get(deps.draft) !== mine || deps.session() !== owner) return 'superseded';
     const version = Number(order.header.version ?? 0);
     if (version < commandVersion || version < deps.draftVersion()) return 'stale';
     if (!deps.isClean()) return 'dirty';
@@ -84,6 +89,7 @@ export function useOrderFormReworkPick(): (orderId: number | null | undefined) =
     getOrder: (orderId) => fetchOrderAfterRework(orderId),
     isClean: () => !storeApi.getState().isDirty,
     draftVersion: () => Number(storeApi.getState().version ?? 0),
+    session: authNamespace,
     publish: (order) => {
       const store = storeApi.getState();
       store.loadOrder(mapOrderDtoToFormValues(order));

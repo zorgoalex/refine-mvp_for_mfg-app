@@ -90,6 +90,34 @@ describe('«Переделка»: the rework form opened from a status picker', 
     expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
   });
 
+  it('a logout while waiting for an in-flight read (which it cancels): the old session\'s order is rejected', async () => {
+    const queryClient = new QueryClient();
+    let session = 'user-a';
+    const key = createOrderEditBackendPrimaryIdentity({ orderId: 42, authCacheNamespace: 'user-a' }).queryKey;
+    let failOld: (error: Error) => void = () => {};
+    void queryClient.fetchQuery({ queryKey: key, queryFn: () => new Promise<OrderDto>((_, reject) => { failOld = reject; }) }).catch(() => undefined);
+    const refreshed = fetchOrderAfterRework(42, { queryClient, namespace: () => session, getOrderById: async () => order(6) });
+    await Promise.resolve();
+    session = 'user-b'; // logout/login while the helper waits for the pre-command read
+    failOld(new Error('cancelled by logout'));
+    await expect(refreshed).rejects.toBeInstanceOf(ReworkReadSuperseded);
+  });
+
+  it('a refresh never publishes into a draft whose session changed meanwhile', async () => {
+    let session = 'user-a';
+    const published: number[] = [];
+    const refresh = createReworkFormRefresh({
+      draft: {},
+      getOrder: async () => { session = 'user-b'; return order(6); }, // the draft was cleared by a logout meanwhile
+      isClean: () => true,
+      draftVersion: () => 0,
+      session: () => session,
+      publish: (dto) => published.push(Number(dto.header.version)),
+    });
+    expect(await refresh(1, 6)).toBe('superseded');
+    expect(published).toEqual([]);
+  });
+
   it('refreshes of one draft from different pickers share a generation: a late older answer never publishes', async () => {
     const draft = {};
     const published: number[] = [];
@@ -100,6 +128,7 @@ describe('«Переделка»: the rework form opened from a status picker', 
       getOrder: read,
       isClean: () => true,
       draftVersion: () => draftVersion,
+      session: () => 'user-a',
       publish: (dto) => { published.push(Number(dto.header.version)); draftVersion = Number(dto.header.version); },
     });
     const fromHeaderMenu = make(() => new Promise<OrderDto>((resolve) => { releaseFirst = resolve; }));
@@ -118,6 +147,7 @@ describe('«Переделка»: the rework form opened from a status picker', 
       getOrder: async () => order(version),
       isClean: () => clean,
       draftVersion: () => draftVersion,
+      session: () => 'user-a',
       publish: (dto) => published.push(Number(dto.header.version)),
     });
     expect(await make(5, 5)(1, 6)).toBe('stale'); // older than the command
