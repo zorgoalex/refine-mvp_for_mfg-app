@@ -119,8 +119,9 @@ describe('Basis-cut UI integration guards', () => {
     expect(card).not.toContain('row.sourceOrderFullNumber || row.sourceOrderName');
   });
 
-  it('shows the set number with the БР prefix in its workspace tab and keeps detail headers visible', () => {
-    expect(card).toContain('`БР #${setId}`');
+  it('names its workspace tab by the set name (never by its id) and keeps detail headers visible', () => {
+    expect(card).toContain('setTabTitle(`/bazis-cut/${setId}`, bazisCutSetTabLabel(name))');
+    expect(card).not.toContain('`БР #${setId}`');
     expect(card).toContain('sticky={{ offsetHeader: tableHeaderOffset }}');
     expect(card).toContain("document.querySelector<HTMLElement>('.workspace-tabs')");
     expect(card).toContain('new ResizeObserver(update)');

@@ -190,7 +190,11 @@ describe('tabStore', () => {
     mod.syncWorkspaceTabsForCurrentUser();
 
     expect(mod.useTabStore.getState().tabs.map((tab) => tab.key)).toEqual(['/cut']);
-    expect(localStorage.getItem(mod.workspaceTabsStorageKey(TEST_USER.id))).toBe(legacy);
+    // перенесено к пользователю и сразу пересохранено текущей версией (миграция названий прошла)
+    expect(JSON.parse(localStorage.getItem(mod.workspaceTabsStorageKey(TEST_USER.id)) ?? 'null')).toEqual({
+      ...JSON.parse(legacy),
+      version: mod.WORKSPACE_TABS_PERSIST_VERSION,
+    });
     expect(sessionStorage.getItem(mod.LEGACY_WORKSPACE_TABS_STORAGE_KEY)).toBeNull();
   });
 
@@ -235,6 +239,35 @@ describe('tabStore', () => {
     ) as { tabs: Array<{ label: string }> };
 
     expect(migrated.tabs.map((tab) => tab.label)).toEqual(['Раскрой', 'Старый заказ']);
+  });
+
+  it('migration to version 2 drops record ids from saved labels once and keeps names', () => {
+    const tab = (key: string, label: string) => ({ key, path: key, label, resource: 'x', dirty: false });
+    const migrated = mod.migrateWorkspaceTabs({
+      tabs: [
+        tab('/clients/show/2606', 'Клиенты · Просмотр #2606'),
+        tab('/materials/show/7', 'Материалы · Просмотр · #7'),
+        tab('/bazis-cut/9', 'БР #9'),
+        tab('/cad/orders/11842', 'CAD · заказ 11842'),
+        tab('/bazis/projects/6', '6'),
+        tab('/clients/show/12', 'Клиенты · Просмотр · Магазин #12'),
+        tab('/orders/show/11842', '3087'),
+        tab('/bazis-cut/10', 'БР Кухня'),
+      ],
+    }, 1) as { tabs: Array<{ label: string }> };
+    expect(migrated.tabs.map((item) => item.label)).toEqual([
+      'Клиенты · Просмотр',
+      'Материалы · Просмотр',
+      'Базис-раскрой',
+      'CAD · заказ',
+      'Базис-проект',
+      'Клиенты · Просмотр · Магазин #12',
+      '3087',
+      'БР Кухня',
+    ]);
+    // сохранённое версией 2 не трогается, даже если имя похоже на прежний формат
+    const current = { tabs: [tab('/clients/show/2606', 'Клиенты · Просмотр · #2606')] };
+    expect(mod.migrateWorkspaceTabs(current, mod.WORKSPACE_TABS_PERSIST_VERSION)).toBe(current);
   });
 });
 

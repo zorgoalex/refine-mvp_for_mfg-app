@@ -9,6 +9,7 @@ import { useIsMobile } from '../../hooks/useDeviceTier';
 import { WorkspaceTabs } from './WorkspaceTabs';
 import { KeepAliveOutlet } from './KeepAliveOutlet';
 import { useTabSync } from '../../hooks/useTabSync';
+import { useWorkspaceTabNames } from '../../hooks/useWorkspaceTabNames';
 import { useGlobalUnloadGuard } from '../../hooks/useTabDirty';
 import { GlobalTableTopScrollbars } from '../GlobalTableTopScrollbars';
 import { PersistentMdfBoardHost } from './PersistentMdfBoardHost';
@@ -42,6 +43,7 @@ export const WorkspaceLayout: React.FC = () => {
   const isMobile = useIsMobile();
 
   useTabSync();
+  useWorkspaceTabNames();
   useGlobalUnloadGuard();
 
   React.useEffect(() => {

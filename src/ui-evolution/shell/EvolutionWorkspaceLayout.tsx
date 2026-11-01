@@ -17,6 +17,7 @@ import { authStorage } from '../../utils/auth';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useSidebarCollapsedPreference } from '../../hooks/useSidebarCollapsedPreference';
 import { useTabSync } from '../../hooks/useTabSync';
+import { useWorkspaceTabNames } from '../../hooks/useWorkspaceTabNames';
 import { useGlobalUnloadGuard } from '../../hooks/useTabDirty';
 import { useUiVariant } from '../../ui-variant/UiVariantProvider';
 import { EvolutionAirNavigation } from './EvolutionAirNavigation';
@@ -128,6 +129,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
   }, [isWorkbenchDesktop]);
 
   useTabSync();
+  useWorkspaceTabNames();
   useGlobalUnloadGuard();
 
   React.useEffect(() => {

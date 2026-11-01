@@ -37,21 +37,10 @@ const stringifyTitleValue = (value: unknown): string | undefined => {
   return text.length > 0 ? text : undefined;
 };
 
-const pickId = (record: RecordLike, fallbackId?: string | number): string | undefined => {
-  const directFallback = stringifyTitleValue(fallbackId);
-  if (record) {
-    const idEntry = Object.entries(record).find(
-      ([key, value]) => (key === 'id' || key.endsWith('_id')) && stringifyTitleValue(value)
-    );
-    const id = stringifyTitleValue(idEntry?.[1]);
-    if (id) return `#${id}`;
-  }
-  return directFallback ? `#${directFallback}` : undefined;
-};
-
+/** Имя записи для вкладки; id записи (ни из записи, ни из адреса) не подставляется никогда. */
 export const pickRecordTitle = (
   record: RecordLike,
-  fallbackId?: string | number,
+  _fallbackId?: string | number,
   preferredFields: string[] = DEFAULT_TITLE_FIELDS
 ): string | undefined => {
   if (record) {
@@ -65,7 +54,7 @@ export const pickRecordTitle = (
       if (value) return value;
     }
   }
-  return pickId(record, fallbackId);
+  return undefined;
 };
 
 export const buildRecordTabTitle = ({

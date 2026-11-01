@@ -6,6 +6,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { useBackToOrigin } from '../../utils/backToOrigin';
+import { useCurrentRecordTabTitle } from '../../utils/recordTitle';
 import { ApiError } from '../../api/apiError';
 import { projectsApi } from '../../api/projectsApi';
 import type { ProjectCard, ProjectDto, ProjectOrderSummary } from '../../api/projectsApi';
@@ -31,6 +32,8 @@ export const ProjectShow: React.FC = () => {
   const isValidProjectId = Number.isInteger(projectId) && projectId > 0;
   const [form] = Form.useForm<ProjectFormValues>();
   const [project, setProject] = useState<ProjectCard | null>(null);
+  // вкладка — по коду проекта («Проекты · Просмотр · МП-5147»), не по его номеру в базе
+  useCurrentRecordTabTitle(project as unknown as Record<string, unknown> | null, ['code', 'name']);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [mergeModalOpen, setMergeModalOpen] = useState(false);

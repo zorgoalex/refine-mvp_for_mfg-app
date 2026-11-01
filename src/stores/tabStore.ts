@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware';
 import { authSession } from '../api/authSession';
 import { authStorage } from '../utils/auth';
-import { resolveTabLabel, shouldPreserveTabLabel } from '../utils/tabLabels';
+import { legacyRecordIdLabel, resolveTabLabel, shouldPreserveTabLabel } from '../utils/tabLabels';
 import { destroyOrderDraftStore } from './orderFormStore';
 import { removeWorkspaceCheckpoint } from '../workspace/workspaceCheckpointRegistry';
 import { releaseWorkspaceAttachments } from '../workspace/workspaceAttachmentRegistry';
@@ -70,8 +70,17 @@ const orderKeyFromTab = (key: string): string | null => {
   return null;
 };
 
+/** Версия сохранённых вкладок: 1 — названия списков по адресу; 2 — без номеров записей в названиях. */
+export const WORKSPACE_TABS_PERSIST_VERSION = 2;
+
+/**
+ * Сохранённые вкладки прежних версий. До 1 — названия вкладок-списков пересчитываются по адресу. До 2 — старые
+ * названия с номером записи в базе («Клиенты · Просмотр #2606», «БР #9», «CAD · заказ 11842», голый номер
+ * Базис-проекта) заменяются названием по адресу один раз; имя записи потом подставит страница или
+ * `useWorkspaceTabNames`. Всё, что сохранено версией 2 и новее, — имена или названия по адресу, их не трогаем.
+ */
 export const migrateWorkspaceTabs = (persistedState: unknown, version: number): unknown => {
-  if (version >= 1 || !persistedState || typeof persistedState !== 'object') {
+  if (version >= WORKSPACE_TABS_PERSIST_VERSION || !persistedState || typeof persistedState !== 'object') {
     return persistedState;
   }
 
@@ -82,10 +91,11 @@ export const migrateWorkspaceTabs = (persistedState: unknown, version: number): 
 
   return {
     ...state,
-    tabs: state.tabs.map((tab) => ({
-      ...tab,
-      label: shouldPreserveTabLabel(tab.key) ? tab.label : resolveTabLabel(tab.key),
-    })),
+    tabs: state.tabs.map((tab) => {
+      if (version < 1 && !shouldPreserveTabLabel(tab.key)) return { ...tab, label: resolveTabLabel(tab.key) };
+      if (legacyRecordIdLabel(tab.key, tab.label) !== null) return { ...tab, label: resolveTabLabel(tab.key) };
+      return tab;
+    }),
   };
 };
 
@@ -197,7 +207,7 @@ export const useTabStore = create<TabState>()(
     }),
     {
       name: workspaceTabsPersistName(activeWorkspaceTabsUserId),
-      version: 1,
+      version: WORKSPACE_TABS_PERSIST_VERSION,
       migrate: migrateWorkspaceTabs,
       storage: createJSONStorage(() => userScopedWorkspaceTabsStorage),
       partialize: (state) => ({

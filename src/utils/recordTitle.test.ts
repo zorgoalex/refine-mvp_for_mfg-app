@@ -7,9 +7,11 @@ describe('pickRecordTitle', () => {
     expect(pickRecordTitle({ material_type_id: 2, material_type_name: 'МДФ' })).toBe('МДФ');
   });
 
-  it('ignores blank values and falls back to a stable id label', () => {
-    expect(pickRecordTitle({ name: '  ', sheet_material_type_id: 7 })).toBe('#7');
-    expect(pickRecordTitle(undefined, '3')).toBe('#3');
+  it('never names a record by its id: blank names give no title', () => {
+    expect(pickRecordTitle({ name: '  ', sheet_material_type_id: 7 })).toBeUndefined();
+    expect(pickRecordTitle(undefined, '3')).toBeUndefined();
+    expect(buildRecordTabTitle({ resourceLabel: 'Клиенты', actionLabel: 'Просмотр', record: { client_id: 2606 }, fallbackId: '2606' }))
+      .toBe('Клиенты · Просмотр');
   });
 });
 

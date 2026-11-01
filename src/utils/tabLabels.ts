@@ -103,11 +103,15 @@ export const resourceFromPath = (pathname: string): string | undefined => {
   return seg ? resourceKeyFromSegment(seg) : undefined;
 };
 
+/** Вкладка набора Базис-раскроя — по его имени («БР-12» как есть, иначе с приставкой «БР»). */
+export const bazisCutSetTabLabel = (name: string): string => (/^БР/i.test(name.trim()) ? name.trim() : `БР ${name.trim()}`);
+
 export const resolveOrderTabLabel = (orderName: unknown): string =>
   typeof orderName === 'string' && orderName.trim() ? orderName.trim() : 'Заказ';
 
 export const shouldPreserveTabLabel = (pathname: string): boolean => {
   if (/^\/cad\/orders\/\d+$/.test(pathname)) return true;
+  if (/^\/procurement\/onec-documents\/show\/\d+$/.test(pathname)) return true;
   const segs = pathname.split('/').filter(Boolean);
   if ((segs[1] === 'show' || segs[1] === 'edit') && Boolean(segs[2])) {
     return true;
@@ -118,9 +122,13 @@ export const shouldPreserveTabLabel = (pathname: string): boolean => {
   return segs[0] === 'bazis-cut' && Boolean(segs[1]);
 };
 
+/**
+ * Название вкладки по адресу, пока страница не назвала её сама. Номер записи из адреса (её id в базе) сюда
+ * не попадает никогда: вкладка записи называется ресурсом и действием, а имя записи подставляет страница
+ * или `useWorkspaceTabNames`.
+ */
 export const resolveTabLabel = (pathname: string): string => {
-  const cadOrder = pathname.match(/^\/cad\/orders\/(\d+)/);
-  if (cadOrder) return `CAD · заказ ${cadOrder[1]}`;
+  if (/^\/cad\/orders\/\d+/.test(pathname)) return 'CAD · заказ';
   const normalizedPath = pathname.replace(/\/+$/, '') || '/';
   const segs = pathname.split('/').filter(Boolean);
   if (normalizedPath === '/orders/trash') {
@@ -134,22 +142,46 @@ export const resolveTabLabel = (pathname: string): string => {
     const resourceLabel = RESOURCE_LABELS.onec_purchase_documents;
     const action = segs[2];
     const actionLabel = action ? ACTION_LABELS[action] : undefined;
-    if (actionLabel) {
-      const id = segs[3];
-      return id ? `${resourceLabel} · ${actionLabel} #${id}` : `${resourceLabel} · ${actionLabel}`;
-    }
+    if (actionLabel) return `${resourceLabel} · ${actionLabel}`;
     return resourceLabel;
   }
+  if (segs[0] === 'bazis' && segs[1] === 'projects' && segs[2]) return 'Базис-проект';
+  if (segs[0] === 'bazis-cut' && segs[1]) return 'Базис-раскрой';
   const resource = resourceFromPath(pathname);
   const resourceLabel = resource ? RESOURCE_LABELS[resource] : undefined;
   if (resourceLabel) {
     const action = segs[1];
     const actionLabel = action ? ACTION_LABELS[action] : undefined;
-    if (actionLabel) {
-      const id = segs[2];
-      return id ? `${resourceLabel} · ${actionLabel} #${id}` : `${resourceLabel} · ${actionLabel}`;
-    }
+    if (actionLabel) return `${resourceLabel} · ${actionLabel}`;
     return resourceLabel;
   }
   return segs[segs.length - 1] ?? 'Заказы';
 };
+
+/**
+ * Название вкладки в формате, который выдавала прежняя версия с номером записи в базе, — только точные прежние
+ * форматы с номером ИМЕННО этой записи из адреса: «Клиенты · Просмотр #2606» (название по адресу),
+ * «Клиенты · Просмотр · #2606» (имя-заглушка), «БР #9» (`'exact'`); «CAD · заказ 11842», голый номер «6» у
+ * Базис-проекта (`'ambiguous'` — так могло бы выглядеть и имя). Применяется только миграцией сохранённых
+ * вкладок прежних версий (`migrateWorkspaceTabs`): то, что сохранено новой версией, не проверяется. Любой другой
+ * текст с «#» или числами — имя записи («Магазин #12»); номер заказа («3087») у вкладок заказа — имя.
+ */
+export const legacyRecordIdLabel = (key: string, label: string): 'exact' | 'ambiguous' | null => {
+  if (!shouldPreserveTabLabel(key)) return null;
+  const id = key.match(/(\d+)$/)?.[1];
+  if (!id) return null;
+  const base = resolveTabLabel(key);
+  const text = label.trim();
+  if (text === `${base} #${id}` || text === `${base} · #${id}` || (/^\/bazis-cut\//.test(key) && text === `БР #${id}`)) {
+    return 'exact';
+  }
+  if (/^\/cad\/orders\/\d+$/.test(key)) return text === `CAD · заказ ${id}` ? 'ambiguous' : null;
+  if (/^\/orders\//.test(key)) return null;
+  return text === id ? 'ambiguous' : null;
+};
+
+export const tabLabelHasRecordId = (key: string, label: string): boolean => legacyRecordIdLabel(key, label) !== null;
+
+/** Вкладке записи ещё нужно имя: у неё название по адресу (старые названия с номером записи убирает миграция). */
+export const tabLabelNeedsName = (key: string, label: string): boolean =>
+  shouldPreserveTabLabel(key) && label === resolveTabLabel(key);

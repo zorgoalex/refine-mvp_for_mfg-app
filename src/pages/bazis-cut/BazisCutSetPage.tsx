@@ -11,6 +11,7 @@ import {
 import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { ExportTemplateSelect } from '../../components/ExportTemplateSelect';
 import { useTabStore } from '../../stores/tabStore';
+import { bazisCutSetTabLabel } from '../../utils/tabLabels';
 import { can } from '../../utils/permissions';
 import { BazisCutCompositionModal, type BazisCutCompositionRequest } from './BazisCutCompositionModal';
 import {
@@ -117,9 +118,11 @@ export const BazisCutSetPage: React.FC = () => {
   const setTabTitle = useTabStore((state) => state.setTabTitle);
   const tableHeaderOffset = useWorkspaceTabsHeight();
 
+  // вкладка — по имени набора, не по его номеру в базе
   useEffect(() => {
-    if (valid) setTabTitle(`/bazis-cut/${setId}`, `БР #${setId}`);
-  }, [setId, setTabTitle, valid]);
+    const name = set?.name?.trim();
+    if (valid && name) setTabTitle(`/bazis-cut/${setId}`, bazisCutSetTabLabel(name));
+  }, [set?.name, setId, setTabTitle, valid]);
 
   const load = useCallback(async () => {
     if (!valid) return; setLoading(true);

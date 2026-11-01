@@ -20,6 +20,7 @@ import { AllocationModal } from './AllocationModal';
 import { AllocationSuggestionPanel } from './AllocationSuggestionPanel';
 import { canAddOnecAllocation, formatOnecAmount, formatOnecQuantity, onecAllocationErrorMessage, onecAllocationOriginLabel, ONEC_MISSING_IN_SOURCE_LABEL } from './onecDocumentsHelpers';
 import { useOnecDocumentsPermissions } from './onecDocumentsPermissions';
+import { useRecordTabTitle } from '../../utils/recordTitle';
 
 type LoadState =
   | { status: 'loading' }
@@ -40,6 +41,12 @@ export const OnecPurchaseDocumentShow: React.FC<IResourceComponentsProps> = () =
   const documentId = Number(documentIdParam);
   const isValidId = Number.isFinite(documentId) && documentId > 0;
   const [state, setState] = useState<LoadState>({ status: isValidId ? 'loading' : 'notfound' });
+  // вкладка — по номеру документа 1С, не по его id
+  useRecordTabTitle({
+    resourceLabel: 'Документы 1С',
+    actionLabel: 'Просмотр',
+    record: state.status === 'ready' ? { name: state.data.number } : null,
+  });
   const [revision, setRevision] = useState(0);
   const { canManage, canSeeAmounts, loading: permissionsLoading } = useOnecDocumentsPermissions();
   const [allocationLineId, setAllocationLineId] = useState<number | null>(null);

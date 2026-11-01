@@ -10,6 +10,7 @@ import type { OrderResourceCapabilitiesDto, OrderResourceCardDto } from '../../a
 import { useProcurementPermission } from './ProcurementParts';
 import { RESOURCE_CARD_MODES, ResourceDemandCard, type ResourceCardMode } from './ResourceDemandCard';
 import { useStoredViewMode } from './useStoredViewMode';
+import { useRecordTabTitle } from '../../utils/recordTitle';
 
 type LoadState =
   | { status: 'loading' }
@@ -30,6 +31,12 @@ export const OrderResourceRequirementShow: React.FC<IResourceComponentsProps> = 
   const orderId = Number(orderIdParam);
   const isValidOrderId = Number.isFinite(orderId) && orderId > 0;
   const [state, setState] = useState<LoadState>({ status: isValidOrderId ? 'loading' : 'invalid' });
+  // вкладка — по номеру заказа, не по его id
+  useRecordTabTitle({
+    resourceLabel: 'Потребности заказов',
+    actionLabel: 'Просмотр',
+    record: state.status === 'ready' ? { order_name: state.data.orderName } : null,
+  });
   const [revision, setRevision] = useState(0);
   const { canManage, manageLoading } = useProcurementPermission();
   const [cardMode, setCardMode] = useStoredViewMode<ResourceCardMode>(
