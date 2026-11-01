@@ -103,11 +103,13 @@ const SEARCH_SQL: Record<DuplicateEntityKind, string> = {
   film: `m.entity_kind = 'film' AND EXISTS (SELECT 1 FROM films x WHERE x.film_id = m.erp_entity_id AND x.film_name ILIKE $P ESCAPE '\\')`,
   sheet_material: `m.entity_kind = 'sheet_material' AND EXISTS (SELECT 1 FROM sheet_material_types x WHERE x.sheet_material_type_id = m.erp_entity_id AND x.name ILIKE $P ESCAPE '\\')`,
   material: `m.entity_kind = 'material' AND EXISTS (SELECT 1 FROM materials x WHERE x.material_id = m.erp_entity_id AND x.material_name ILIKE $P ESCAPE '\\')`,
-  onec_counterparty: `m.entity_kind = 'onec_counterparty' AND EXISTS (SELECT 1 FROM onec_etl_mirror_rows x WHERE x.entity_code = 'counterparties'
-    AND x.source_id || ':' || lower(x.source_key) = m.record_key AND x.data->>'Description' ILIKE $P ESCAPE '\\' AND $CURRENT
+  // 1C members: the keys of mirror rows whose name matches are found once (an uncorrelated set), then members are matched
+  // by key — a correlated lookup by `source_id || ':' || lower(source_key)` has no index and scans the mirror per member.
+  onec_counterparty: `m.entity_kind = 'onec_counterparty' AND $CURRENT AND m.record_key IN (SELECT x.source_id || ':' || lower(x.source_key)
+    FROM onec_etl_mirror_rows x WHERE x.entity_code = 'counterparties' AND x.data->>'Description' ILIKE $P ESCAPE '\\'
     AND ($PERSONS OR COALESCE(x.data->>'ВидКонтрагента', '') NOT IN ('ФизическоеЛицо', 'ИндивидуальныйПредприниматель')))`,
-  onec_item: `m.entity_kind = 'onec_item' AND EXISTS (SELECT 1 FROM onec_etl_mirror_rows x WHERE x.entity_code = 'items'
-    AND x.source_id || ':' || lower(x.source_key) = m.record_key AND x.data->>'Description' ILIKE $P ESCAPE '\\' AND $CURRENT)`,
+  onec_item: `m.entity_kind = 'onec_item' AND $CURRENT AND m.record_key IN (SELECT x.source_id || ':' || lower(x.source_key)
+    FROM onec_etl_mirror_rows x WHERE x.entity_code = 'items' AND x.data->>'Description' ILIKE $P ESCAPE '\\')`,
 };
 
 /** Names of 1C members are searched (as they are shown) only while the 1C data the case rests on is current. */
