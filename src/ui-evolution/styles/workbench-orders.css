@@ -1899,7 +1899,9 @@
   display: grid !important;
   grid-template-columns: 212px minmax(0, 1fr);
   column-gap: 14px;
-  row-gap: 0;
+  /* antd Space ставит свой row-gap инлайном; список заданий растянут на 80 строк, и 79 таких зазоров
+     давали ~1900px пустоты под заданием — зазоры даёт margin-bottom у элементов */
+  row-gap: 0 !important;
   align-items: start;
 }
 

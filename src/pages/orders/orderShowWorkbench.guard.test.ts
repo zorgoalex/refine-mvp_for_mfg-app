@@ -65,4 +65,11 @@ describe('order card under the NewLine variant', () => {
   it('loads the orders stylesheet of the variant with the shell', () => {
     expect(layout).toContain("import '../styles/workbench-orders.css';");
   });
+
+  it('«Раскрой» split: no empty space under the task (the job list spans 80 rows; antd Space sets its row gap inline)', () => {
+    const css = readFileSync('src/ui-evolution/styles/workbench-orders.css', 'utf8');
+    const split = css.slice(css.indexOf(':root[data-ui-variant="workbench"] .cut-page-modern--wb-split {'));
+    expect(split.slice(0, split.indexOf('}'))).toContain('row-gap: 0 !important;');
+    expect(css).toContain('grid-row: span 80;');
+  });
 });

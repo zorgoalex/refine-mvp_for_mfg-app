@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-01", title: "Раскрой: без пустого места под заданием",
+    services: ["ERP", "Cutting"], repositories: ["repo_erp"],
+    fixed: [
+      "NewLine, вкладка «Раскрой» в заказе и страница «Раскрой»: под открытым заданием больше нет пустого поля высотой почти в два экрана.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-01", title: "Переход между разделами без лишней ошибки «GraphQL запрос»",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: [
