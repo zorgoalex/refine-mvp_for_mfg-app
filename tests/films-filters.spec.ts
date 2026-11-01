@@ -88,7 +88,7 @@ for (const mobile of [false, true]) {
     await expect(search).toHaveValue('дУб');
     await expect(suggestions).toHaveCount(0);
     await choose(page, 'Тип плёнки', 'PET');
-    await choose(page, 'Поставщик плёнки', 'E2E Второй');
+    await choose(page, 'Производитель', 'E2E Второй');
     await choose(page, 'Фактура', 'Без фактуры');
     await page.getByLabel('ID', { exact: true }).fill('14');
     await page.getByLabel('Порядок', { exact: true }).fill('0');
