@@ -225,7 +225,8 @@ describe('«Переделка»: picking the status «Переделка» open
     const board = src('../../../orderStatusBoard/OrderStatusBoardPage.tsx');
     expect(board).toContain("if (viewState.view === 'order' && !reworkStatuses.ready) {");
     expect(board).toContain("if (viewState.view === 'order' && reworkStatuses.ids.has(Number(targetStatusId))) {");
-    expect(src('../../../../App.tsx')).toContain('<ReworkStartHost />');
+    expect(src('../../../../ui-variant/shellRegistry.tsx')).toContain('<ReworkStartHost />');
+    expect(src('../../../../App.tsx')).not.toContain('ReworkStartHost'); // App.tsx imports no page module statically
     // The order form opens it only without unsaved edits and re-reads the order afterwards.
     const pick = src('useOrderFormReworkPick.ts');
     expect(pick).toContain('if (storeApi.getState().isDirty) {');
