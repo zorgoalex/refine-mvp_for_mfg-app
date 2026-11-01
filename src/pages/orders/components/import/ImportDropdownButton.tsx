@@ -9,7 +9,7 @@ import { OrderToolbarLabel } from '../OrderDetailsToolbar';
 import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
 import { useWorkspaceCheckpointAdapter } from '../../../../workspace/workspaceCheckpointReact';
 import { readWorkspaceCheckpointAdapterState } from '../../../../workspace/workspaceCheckpointRegistry';
-import { takePendingOrderImport } from './pendingOrderImport';
+import { requestOrderImport, takePendingOrderImport } from './pendingOrderImport';
 
 const ExcelImportModal = lazy(async () => ({
   default: (await import('./ExcelImportModal')).ExcelImportModal,
@@ -81,12 +81,31 @@ export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disa
     if (!acceptPendingImport || disabled) return undefined;
     const kind = takePendingOrderImport();
     if (!kind) return undefined;
-    // таблица деталей формы монтируется рядом; окно импорта — когда она готова принять детали
-    const timer = window.setTimeout(() => {
-      if (kind === 'vlm') setVlmModalOpen(true);
-      else void handleImportOpen(kind);
-    }, 300);
-    return () => window.clearTimeout(timer);
+    let opened = false;
+    let timer = 0;
+    const mountedAt = Date.now();
+    // таблица деталей формы монтируется рядом и не сразу готова принять детали: несколько попыток
+    const tryOpen = async (attempt: number) => {
+      if (kind === 'vlm') {
+        opened = true;
+        setVlmModalOpen(true);
+        return;
+      }
+      const ready = beforeImport ? await beforeImport().catch(() => false) : true;
+      if (ready) {
+        opened = true;
+        if (kind === 'excel') setExcelModalOpen(true);
+        else setPdfModalOpen(true);
+      } else if (attempt < 8) {
+        timer = window.setTimeout(() => void tryOpen(attempt + 1), 400);
+      }
+    };
+    timer = window.setTimeout(() => void tryOpen(1), 300);
+    return () => {
+      window.clearTimeout(timer);
+      // форму пересоздали сразу после открытия (а не закрыли руками): запрос — следующему экземпляру формы
+      if (!opened && Date.now() - mountedAt < 2000) requestOrderImport(kind);
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- once, when the new order's form mounts
 
   const menuItems: MenuProps['items'] = [

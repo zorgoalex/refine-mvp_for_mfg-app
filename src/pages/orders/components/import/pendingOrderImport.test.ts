@@ -25,6 +25,9 @@ describe('«Импорт» in the orders list header → the new order form', ()
     expect(details).toContain('acceptPendingImport={header?.order_id == null}');
     const button = readFileSync('src/pages/orders/components/import/ImportDropdownButton.tsx', 'utf8');
     expect(button).toContain('const kind = takePendingOrderImport();');
+    // форма нового заказа пересоздаётся при открытии: не открытый ещё импорт переходит к новому экземпляру
+    expect(button).toContain('if (!opened && Date.now() - mountedAt < 2000) requestOrderImport(kind);');
+    expect(button).toContain('} else if (attempt < 8) {');
     const bazis = readFileSync('src/pages/bazis/BazisPage.tsx', 'utf8');
     expect(bazis).toContain("const importRequested = searchParams.get('import') === 'xml';");
     expect(bazis).toMatch(/if \(!canManage\) return;\s*setImportOpen\(true\);/);
