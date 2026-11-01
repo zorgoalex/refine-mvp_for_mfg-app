@@ -1,5 +1,12 @@
-import React, { useLayoutEffect, useReducer, useRef, useSyncExternalStore } from 'react';
-import { useOutlet, useLocation } from 'react-router-dom';
+import React, { useLayoutEffect, useMemo, useReducer, useRef, useSyncExternalStore } from 'react';
+import {
+  UNSAFE_LocationContext,
+  useLocation,
+  useNavigationType,
+  useOutlet,
+  type Location,
+  type NavigationType,
+} from 'react-router-dom';
 import { useTabStore } from '../../stores/tabStore';
 import {
   commitKeepAliveEvictions,
@@ -28,6 +35,11 @@ import {
 import { getWorkspaceStateNamespace } from '../../workspace/workspaceStateNamespace';
 import { recordMountedHeavyViewCount } from '../../workspace/workspaceKeepAliveDiagnostics';
 
+interface LocationContextValue {
+  location: Location;
+  navigationType: NavigationType;
+}
+
 interface LocalEvictionCircuit {
   namespace: string;
   open: boolean;
@@ -36,9 +48,21 @@ interface LocalEvictionCircuit {
 export const KeepAliveOutlet: React.FC = () => {
   const outlet = useOutlet();
   const location = useLocation();
+  const navigationType = useNavigationType();
   const tabs = useTabStore((state) => state.tabs);
   const activeKey = location.pathname;
   const cacheRef = useRef<Map<string, React.ReactNode>>(new Map());
+  // A workspace that this render is about to evict still renders once (the
+  // eviction is committed in the layout effect below). It keeps the location it
+  // last received, so nothing it reads changes before it unmounts: otherwise
+  // Refine's useResource/useTable in the page being left resolve the new route's
+  // resource and query it with the old page's fields and sorters. The active and
+  // kept-alive workspaces read the router location as before.
+  const activeLocationContext = useMemo<LocationContextValue>(
+    () => ({ location, navigationType }),
+    [location, navigationType],
+  );
+  const deliveredLocationContextsRef = useRef<Map<string, LocationContextValue>>(new Map());
   const localCircuitRef = useRef<LocalEvictionCircuit>({
     namespace: getWorkspaceStateNamespace(),
     open: false,
@@ -178,6 +202,21 @@ export const KeepAliveOutlet: React.FC = () => {
       ? [[activeKey, outlet] as const]
       : []
     : Array.from(cacheRef.current.entries());
+  const locationContextFor = (key: string): LocationContextValue => (
+    key === activeKey || plan.keep.has(key)
+      ? activeLocationContext
+      : deliveredLocationContextsRef.current.get(key) ?? activeLocationContext
+  );
+  const deliveredLocationContexts = new Map<string, LocationContextValue>();
+  for (const [key] of renderedCacheEntries) {
+    deliveredLocationContexts.set(key, locationContextFor(key));
+  }
+
+  // Runs after every commit (after the eviction effect above): remembers what each
+  // rendered workspace received and forgets evicted ones.
+  useLayoutEffect(() => {
+    deliveredLocationContextsRef.current = deliveredLocationContexts;
+  });
 
   return (
     <>
@@ -190,7 +229,9 @@ export const KeepAliveOutlet: React.FC = () => {
           documentVisible,
           surfaceActive: true,
         }}>
-          <div hidden={key !== activeKey} data-workspace-key={key}>{node}</div>
+          <UNSAFE_LocationContext.Provider value={deliveredLocationContexts.get(key) ?? activeLocationContext}>
+            <div hidden={key !== activeKey} data-workspace-key={key}>{node}</div>
+          </UNSAFE_LocationContext.Provider>
         </KeepAliveContext.Provider>
       ))}
     </>

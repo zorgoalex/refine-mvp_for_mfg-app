@@ -1,6 +1,6 @@
 import React, { StrictMode, useEffect, useRef } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { MemoryRouter, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const harness = vi.hoisted(() => ({
@@ -19,6 +19,7 @@ const harness = vi.hoisted(() => ({
   unmounts: [] as string[],
   mountedOwners: new Set<string>(),
   unmountedOwners: [] as string[],
+  seenLocations: [] as string[],
 }));
 
 vi.mock('../../stores/tabStore', () => ({
@@ -75,6 +76,13 @@ function Page() {
   return <span data-page-owner={ownerAtMount}>{id}</span>;
 }
 
+// Records the address each page renders with (Refine resolves the resource from it).
+function LocationProbe({ page }: { page: string }) {
+  const { pathname, search } = useLocation();
+  harness.seenLocations.push(`${page} ${pathname}${search}`);
+  return <span>{page}</span>;
+}
+
 describe('KeepAliveOutlet bounded lifecycle', () => {
   beforeEach(() => {
     const keys = ['A', 'B', 'C', 'D', 'E'].map((id) => `/orders/show/${id}`);
@@ -95,7 +103,50 @@ describe('KeepAliveOutlet bounded lifecycle', () => {
     harness.unmounts = [];
     harness.mountedOwners.clear();
     harness.unmountedOwners = [];
+    harness.seenLocations = [];
     navigate = null;
+  });
+
+  it('never renders the page being left with the address of the next route', async () => {
+    harness.tabs = [{ key: '/materials', dirty: false }, { key: '/client-contacts', dirty: false }];
+    const renderer = await renderAt('/materials');
+    await navigateTo('/client-contacts');
+
+    expect(readMountedWorkspaceKeys(renderer)).toEqual(['/client-contacts']);
+    expect(harness.seenLocations).toContain('client-contacts /client-contacts');
+    expect(harness.seenLocations.filter((seen) => seen.startsWith('materials '))
+      .every((seen) => seen === 'materials /materials')).toBe(true);
+
+    await unmountRenderer(renderer);
+  });
+
+  it('evicts an already-hidden workspace with the address it last received', async () => {
+    harness.tabs = [{ key: '/materials', dirty: true }, { key: '/client-contacts', dirty: false }];
+    const renderer = await renderAt('/materials?current=2');
+    await navigateTo('/client-contacts?q=7');
+    expect(harness.seenLocations).toContain('materials /client-contacts?q=7');
+
+    harness.tabs = [{ key: '/client-contacts', dirty: false }];
+    harness.seenLocations = [];
+    await navigateTo('/client-contacts?q=8');
+
+    expect(readMountedWorkspaceKeys(renderer)).toEqual(['/client-contacts']);
+    expect(harness.seenLocations).toContain('client-contacts /client-contacts?q=8');
+    expect(harness.seenLocations.filter((seen) => seen.startsWith('materials '))
+      .every((seen) => seen === 'materials /client-contacts?q=7')).toBe(true);
+
+    await unmountRenderer(renderer);
+  });
+
+  it('leaves the router address to a kept-alive hidden workspace (unchanged contract)', async () => {
+    harness.tabs = [{ key: '/materials', dirty: true }, { key: '/client-contacts', dirty: false }];
+    const renderer = await renderAt('/materials?current=2');
+    await navigateTo('/client-contacts?q=7');
+
+    expect(readMountedWorkspaceKeys(renderer)).toEqual(['/client-contacts', '/materials']);
+    expect(harness.seenLocations).toContain('materials /client-contacts?q=7');
+
+    await unmountRenderer(renderer);
   });
 
   it('keeps exact C/D/E mounted after the A/B/C/D/E activation sequence in StrictMode', async () => {
@@ -209,6 +260,8 @@ async function renderAt(path: string): Promise<ReactTestRenderer> {
               <Route path="/orders" element={<span>orders list</span>} />
               <Route path="/orders/show/:id" element={<Page />} />
               <Route path="/orders/edit/:id" element={<Page />} />
+              <Route path="/materials" element={<LocationProbe page="materials" />} />
+              <Route path="/client-contacts" element={<LocationProbe page="client-contacts" />} />
             </Route>
           </Routes>
         </MemoryRouter>

@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-01", title: "Переход между разделами без лишней ошибки «GraphQL запрос»",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "При переходе из одного раздела в другой (например, из «Материалов» в «Контакты клиентов») мог всплыть «GraphQL запрос: not a valid graphql query»: закрывающаяся страница успевала один раз запросить данные уже для нового раздела. Теперь закрывающаяся страница до конца работает со своим адресом.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-01", title: "Платёж по заказу — окном, с быстрыми суммами",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [
