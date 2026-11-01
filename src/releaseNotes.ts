@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-01", title: "Базис-проекты: сортировка номеров и ссылки на заказ и клиента",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "«Базис-проекты»: колонки «Базис-проект» и «Заказ» сортируются как номера — «2» перед «12», «1347» перед «1347-5», по возрастанию и убыванию.",
+      "Заказ и клиент в списке «Базис-проекты» и в карточке Базис-проекта открываются по щелчку; стрелка «назад» в карточке заказа или клиента возвращает обратно.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-01", title: "Заказ: Базис-проект открывается по клику",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

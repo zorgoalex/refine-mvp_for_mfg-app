@@ -7,6 +7,7 @@ import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
 import { CardXmlBlock } from "./CardXmlBlock";
+import { DowelingClientLink, DowelingOrderLink } from "./dowelingRecordLinks";
 
 const { Text } = Typography;
 
@@ -60,8 +61,20 @@ export const DowelOrderShow: React.FC<IResourceComponentsProps> = () => {
             <Descriptions title="Основная информация" {...descProps}>
               <Descriptions.Item label="ID">{record.doweling_order_id}</Descriptions.Item>
               <Descriptions.Item label="Базис-проект">{record.doweling_order_name || "—"}</Descriptions.Item>
-              <Descriptions.Item label="Заказ">{record.order_name || "—"}</Descriptions.Item>
-              <Descriptions.Item label="Клиент">{record.client_name || "—"}</Descriptions.Item>
+              <Descriptions.Item label="Заказ">
+                <DowelingOrderLink
+                  orderId={record.order_id}
+                  orderName={record.order_name}
+                  fromLabel={record.doweling_order_name ? `Базис-проект ${record.doweling_order_name}` : "Базис-проект"}
+                />
+              </Descriptions.Item>
+              <Descriptions.Item label="Клиент">
+                <DowelingClientLink
+                  clientId={record.client_id}
+                  clientName={record.client_name}
+                  fromLabel={record.doweling_order_name ? `Базис-проект ${record.doweling_order_name}` : "Базис-проект"}
+                />
+              </Descriptions.Item>
             </Descriptions>
 
             <Descriptions title="Даты" {...descProps} style={{ marginTop: 16 }}>

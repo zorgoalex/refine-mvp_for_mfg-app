@@ -1845,9 +1845,10 @@ export const dataProvider = (_apiUrl: string) => {
         throw HASURA_NOT_CONFIGURED_ERROR;
       }
 
-      // Handle pagination: mode 'off' means no limit/offset
+      // Handle pagination: mode 'off' means no limit/offset; mode 'client' too — the table pages and sorts the whole
+      // list itself (Refine passes the page size for its own pager, not for the query)
       const paginationMode = pagination?.mode;
-      const limit = paginationMode === 'off' ? null : (pagination?.pageSize ?? 10);
+      const limit = paginationMode === 'off' || paginationMode === 'client' ? null : (pagination?.pageSize ?? 10);
       const page = pagination?.current ?? 1;
       const offset = limit !== null ? (page - 1) * limit : 0;
 

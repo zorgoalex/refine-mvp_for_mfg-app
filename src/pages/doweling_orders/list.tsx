@@ -11,6 +11,8 @@ import { can } from "../../utils/permissions";
 import { QuickCreateDowelingModal } from "./QuickCreateDowelingModal";
 import { useBazisCardsCapability } from "../../hooks/useBazisCardsCapability";
 import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
+import { naturalSorter } from "../../utils/naturalSort";
+import { DowelingClientLink, DowelingOrderLink } from "./dowelingRecordLinks";
 
 export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
@@ -33,13 +35,13 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
         },
       ],
     },
+    // The whole list (a few hundred rows) is loaded and sorted here: numbers of Bazis projects and orders sort
+    // naturally («2» before «12», «1347» before «1347-5»), which a text sort on the server cannot do.
     sorters: {
-      initial: [
-        { field: "doweling_order_id", order: "desc" },
-      ],
+      mode: "off",
     },
     pagination: {
-      mode: "server",
+      mode: "client",
       pageSize: 20,
     },
   });
@@ -125,14 +127,15 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column
           dataIndex="doweling_order_id"
           title="ID"
-          sorter
+          sorter={naturalSorter("doweling_order_id")}
+          defaultSortOrder="descend"
           width={60}
           render={(value) => <span style={{ fontSize: '75%' }}>{value}</span>}
         />
         <Table.Column
           dataIndex="doweling_order_name"
           title="Базис-проект"
-          sorter
+          sorter={naturalSorter("doweling_order_name")}
           width={100}
           render={(value) => <span style={{ color: '#DC2626', letterSpacing: '0.8px' }}>{value || "—"}</span>}
         />
@@ -145,7 +148,7 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column
           dataIndex="delete_flag"
           title="Активен"
-          sorter
+          sorter={naturalSorter("delete_flag")}
           width={110}
           render={(value) => {
             const active = value !== true;
@@ -160,14 +163,21 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column
           dataIndex="order_name"
           title="Заказ"
-          sorter
+          sorter={naturalSorter("order_name")}
           width={100}
-          render={(value) => <span style={{ color: '#1890ff', letterSpacing: '0.5px' }}>{value || "—"}</span>}
+          render={(value, record: any) => (
+            <DowelingOrderLink
+              orderId={record.order_id}
+              orderName={value}
+              fromLabel="Базис-проекты"
+              style={{ color: '#1890ff', letterSpacing: '0.5px' }}
+            />
+          )}
         />
         <Table.Column
           dataIndex="doweling_order_date"
           title="Дата заказа"
-          sorter
+          sorter={naturalSorter("doweling_order_date")}
           width={100}
           render={(value) => formatDate(value)}
         />
@@ -175,6 +185,9 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
           dataIndex="client_name"
           title="Клиент"
           width={120}
+          render={(value, record: any) => (
+            <DowelingClientLink clientId={record.client_id} clientName={value} fromLabel="Базис-проекты" />
+          )}
         />
         <Table.Column
           dataIndex="design_engineer"
@@ -204,7 +217,7 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column
           dataIndex="parts_count"
           title="Кол-во деталей"
-          sorter
+          sorter={naturalSorter("parts_count")}
           width={80}
           align="center"
         />
@@ -244,7 +257,7 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
             key="total_amount"
             dataIndex="total_amount"
             title="Сумма"
-            sorter
+            sorter={naturalSorter("total_amount")}
             width={90}
             align="right"
             render={(value) => formatNumber(value as number, 0)}
@@ -253,7 +266,7 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
             key="discount"
             dataIndex="discount"
             title="Скидка"
-            sorter
+            sorter={naturalSorter("discount")}
             width={70}
             align="right"
             render={(value) => formatNumber(value as number, 0)}
@@ -262,7 +275,7 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
             key="surcharge"
             dataIndex="surcharge"
             title="Наценка"
-            sorter
+            sorter={naturalSorter("surcharge")}
             width={93}
             align="right"
             render={(value) => formatNumber(value as number, 0)}
@@ -271,7 +284,7 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
             key="final_amount"
             dataIndex="final_amount"
             title="Итого"
-            sorter
+            sorter={naturalSorter("final_amount")}
             width={90}
             align="right"
             render={(value) => formatNumber(value as number, 0)}
@@ -280,7 +293,7 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
             key="paid_amount"
             dataIndex="paid_amount"
             title="Оплачено"
-            sorter
+            sorter={naturalSorter("paid_amount")}
             width={90}
             align="right"
             render={(value) => formatNumber(value as number, 0)}
@@ -289,7 +302,7 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column
           dataIndex="issue_date"
           title="Дата выдачи"
-          sorter
+          sorter={naturalSorter("issue_date")}
           width={100}
           render={(value) => formatDate(value)}
         />
