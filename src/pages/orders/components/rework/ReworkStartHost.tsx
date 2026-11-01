@@ -25,7 +25,8 @@ const errorText = (error: unknown) =>
  */
 export const ReworkStartHost: React.FC = () => {
   const [loaded, setLoaded] = useState<LoadedRework | null>(null);
-  const [busy, setBusy] = useState(false);
+  /** The form (by ticket) whose command is in flight. */
+  const [busyTicket, setBusyTicket] = useState<number | null>(null);
   const gate = useRef(createLatestGate()).current;
   const { data: stagesData } = useList({
     resource: 'production_statuses',
@@ -68,11 +69,19 @@ export const ReworkStartHost: React.FC = () => {
 
   if (!loaded || stages.length === 0) return null;
   const { order } = loaded.state;
-  const close = () => { gate.begin(); setLoaded(null); };
+  const ticket = loaded.ticket;
+  const request = loaded.request;
+  // Closing and the busy state belong to this form: a late answer of a form already closed (and maybe replaced by
+  // another one) still refreshes its order but never closes or blocks the newer form.
+  const closeIfCurrent = () => {
+    if (!gate.isLatest(ticket)) return;
+    gate.begin();
+    setLoaded(null);
+  };
   return (
     <ReworkStartModal
-      key={loaded.ticket}
-      orderId={loaded.request.orderId}
+      key={ticket}
+      orderId={request.orderId}
       version={order.version}
       action={order.action!}
       openRoundNo={order.openRoundNo}
@@ -80,20 +89,19 @@ export const ReworkStartHost: React.FC = () => {
       details={loaded.details}
       stages={stages}
       reasons={loaded.reasons}
-      busy={busy}
-      setBusy={setBusy}
-      onCancel={close}
-      onDone={async (text) => {
+      busy={busyTicket === ticket}
+      setBusy={(value) => setBusyTicket((current) => (value ? ticket : current === ticket ? null : current))}
+      onCancel={closeIfCurrent}
+      onDone={async (text, result) => {
         message.success(text);
-        const done = loaded.request.onDone;
-        close();
-        done?.();
+        closeIfCurrent();
+        request.onDone?.(result);
       }}
       onFailed={async (error) => {
         message.error(errorText(error));
         // 409 (the order changed meanwhile): the form was opened on stale data — close it; picking again re-reads.
         if ((error as { status?: number; statusCode?: number } | null)?.status === 409
-          || (error as { statusCode?: number } | null)?.statusCode === 409) close();
+          || (error as { statusCode?: number } | null)?.statusCode === 409) closeIfCurrent();
       }}
     />
   );

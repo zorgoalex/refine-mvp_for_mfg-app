@@ -1,31 +1,59 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
+import type { QueryClient } from '@tanstack/react-query';
 import { message } from 'antd';
-import { loadOrderViaBackend } from '../../../../hooks/useOrderBackendRead';
+import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
+import { ordersApi } from '../../../../api/ordersApi';
+import type { OrderDto } from '../../../../api/types/orderApi.types';
 import { featureFlags } from '../../../../config/featureFlags';
 import { getAuthCacheNamespace } from '../../../../query/authCacheNamespace';
-import {
-  createOrderEditBackendPrimaryIdentity,
-  fetchOrderEditBackendPrimary,
-} from '../../../../query/orderEditPrimaryResource';
+import { createOrderEditBackendPrimaryIdentity } from '../../../../query/orderEditPrimaryResource';
 import { getOrdersReadBackendMode } from '../../../../query/orderPrimaryResource';
+import { appQueryClient } from '../../../../query/appQueryClient';
 import { useOrderDraftStoreApi } from '../../../../stores/orderFormStore';
 import { requestReworkStart } from './reworkStartRequests';
 
 /**
- * The order after a rework command, read past the order-edit cache (its 15 s stale window would publish the pre-command
- * status, stages and version back into the form): a forced fetch, which also refreshes that cache entry.
+ * The order after a rework command: a direct read (never joining an order-edit request already in flight — that one
+ * may predate the command), and the order-edit cache entry is replaced only by a newer version.
  */
-export function fetchOrderAfterRework(
+export async function fetchOrderAfterRework(
   orderId: number,
-  options: Pick<NonNullable<Parameters<typeof fetchOrderEditBackendPrimary>[1]>, 'queryClient' | 'getOrderById'> = {},
-) {
-  return fetchOrderEditBackendPrimary(
-    createOrderEditBackendPrimaryIdentity({
-      orderId,
-      authCacheNamespace: getAuthCacheNamespace(getOrdersReadBackendMode(featureFlags.useBackendOrdersRead)),
-    }),
-    { ...options, staleTime: 0 },
-  );
+  options: { queryClient?: QueryClient; getOrderById?: (orderId: number) => Promise<OrderDto> } = {},
+): Promise<OrderDto> {
+  const order = await (options.getOrderById ?? ((id: number) => ordersApi.getById(id)))(orderId);
+  const queryClient = options.queryClient ?? appQueryClient;
+  const key = createOrderEditBackendPrimaryIdentity({
+    orderId,
+    authCacheNamespace: getAuthCacheNamespace(getOrdersReadBackendMode(featureFlags.useBackendOrdersRead)),
+  }).queryKey;
+  const cached = queryClient.getQueryData<OrderDto>(key);
+  if (!cached || Number(cached.header.version ?? 0) <= Number(order.header.version ?? 0)) {
+    queryClient.setQueryData(key, order);
+  }
+  return order;
+}
+
+export type ReworkRefreshOutcome = 'published' | 'superseded' | 'stale' | 'dirty';
+
+/**
+ * Re-reads the order into the form after each rework command. Only the latest refresh may publish, only a version not
+ * older than the command's, and only into a form without unsaved edits.
+ */
+export function createReworkFormRefresh(deps: {
+  getOrder: (orderId: number) => Promise<OrderDto>;
+  isClean: () => boolean;
+  publish: (order: OrderDto) => void;
+}): (orderId: number, commandVersion: number) => Promise<ReworkRefreshOutcome> {
+  let latest = 0;
+  return async (orderId, commandVersion) => {
+    const mine = ++latest;
+    const order = await deps.getOrder(orderId);
+    if (mine !== latest) return 'superseded';
+    if (Number(order.header.version ?? 0) < commandVersion) return 'stale';
+    if (!deps.isClean()) return 'dirty';
+    deps.publish(order);
+    return 'published';
+  };
 }
 
 /**
@@ -35,6 +63,17 @@ export function fetchOrderAfterRework(
  */
 export function useOrderFormReworkPick(): (orderId: number | null | undefined) => void {
   const storeApi = useOrderDraftStoreApi();
+  const refresh = useMemo(() => createReworkFormRefresh({
+    getOrder: (orderId) => fetchOrderAfterRework(orderId),
+    isClean: () => !storeApi.getState().isDirty,
+    publish: (order) => {
+      const store = storeApi.getState();
+      store.loadOrder(mapOrderDtoToFormValues(order));
+      store.setDirty(false);
+      store.setInitializing(false);
+      store.syncOriginals();
+    },
+  }), [storeApi]);
   return useCallback((orderId) => {
     if (!orderId) {
       message.warning('Сначала сохраните заказ');
@@ -46,17 +85,16 @@ export function useOrderFormReworkPick(): (orderId: number | null | undefined) =
     }
     const opened = requestReworkStart({
       orderId,
-      onDone: () => {
-        void loadOrderViaBackend(orderId, {
-          getOrderById: (id) => fetchOrderAfterRework(id),
-          getOrderStore: () => storeApi.getState(),
-          // An edit made while the command ran wins; the user re-opens the order to see the round.
-          canPublish: () => !storeApi.getState().isDirty,
-        }).then((loaded) => {
-          if (!loaded) message.info('Обновите заказ, чтобы увидеть переделку');
+      onDone: (result) => {
+        if (!featureFlags.useBackendOrdersRead) {
+          message.info('Обновите заказ, чтобы увидеть переделку');
+          return;
+        }
+        void refresh(orderId, result.version).then((outcome) => {
+          if (outcome === 'stale' || outcome === 'dirty') message.info('Обновите заказ, чтобы увидеть переделку');
         }).catch(() => message.info('Обновите заказ, чтобы увидеть переделку'));
       },
     });
     if (!opened) message.warning('Статус «Переделка» ставится командой переделки в карточке заказа (меню «⋯»)');
-  }, [storeApi]);
+  }, [refresh, storeApi]);
 }

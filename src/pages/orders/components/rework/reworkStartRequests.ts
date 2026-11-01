@@ -5,8 +5,8 @@
 
 export interface ReworkStartRequest {
   orderId: number;
-  /** After a successful start/extend — the caller re-reads its data. */
-  onDone?: () => void;
+  /** After a successful start/extend — the caller re-reads its data (at least the command's order version). */
+  onDone?: (result: { version: number }) => void;
 }
 
 type Listener = (request: ReworkStartRequest) => void;
