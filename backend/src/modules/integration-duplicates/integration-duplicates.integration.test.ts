@@ -461,6 +461,8 @@ describe.skipIf(!databaseUrl)('journal of duplicates of integrations (PostgreSQL
       expect(JSON.stringify(card)).not.toContain('Сидоров');
       const base = { status: 'all' as const, entityKind: null, ruleCode: null, system: null, from: null, to: null, page: 1, pageSize: 50 };
       expect((await journal.list(user(ALL), { ...base, search: 'Сидоров' })).total).toBe(1);
+      // A person's name is a value of 1C: without the 1C data right it is not searchable either.
+      expect((await journal.list(user(ALL.filter((p) => p !== 'clients.onec_data.view')), { ...base, search: 'Сидоров' })).total).toBe(0);
       await setState('counterparty_phones', { snapshot: now, revoked: true });
       expect((await journal.list(user(ALL), { ...base, search: 'Сидоров' })).total).toBe(0);
     });
