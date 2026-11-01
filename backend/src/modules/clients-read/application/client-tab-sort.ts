@@ -7,8 +7,11 @@ export type SortDirection = 'asc' | 'desc';
 export const CLIENT_ORDER_SORT_KEYS = ['number', 'date', 'status', 'production', 'payment', 'final', 'paid', 'debt'] as const;
 export type ClientOrderSortKey = typeof CLIENT_ORDER_SORT_KEYS[number];
 
-/** Money columns: ordering by them reveals the amounts, so it needs the right to see order money. */
-export const CLIENT_ORDER_MONEY_SORT_KEYS: readonly ClientOrderSortKey[] = ['final', 'paid', 'debt'];
+/**
+ * Financial columns (the payment status and the money): ordering by them reveals the values, so it needs the right to see
+ * order money — as the payment status sort of the orders list.
+ */
+export const CLIENT_ORDER_MONEY_SORT_KEYS: readonly ClientOrderSortKey[] = ['payment', 'final', 'paid', 'debt'];
 
 export const CLIENT_PAYMENT_SORT_KEYS = ['date', 'amount', 'type', 'order', 'notes'] as const;
 export type ClientPaymentSortKey = typeof CLIENT_PAYMENT_SORT_KEYS[number];

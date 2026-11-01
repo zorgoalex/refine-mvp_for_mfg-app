@@ -28,7 +28,8 @@ export interface ClientOrder {
   orderDate: string | null;
   orderStatusName: string | null;
   productionStatusName: string | null;
-  paymentStatusName: string | null;
+  /** Absent without the right to see order financials, as the money. */
+  paymentStatusName?: string | null;
   finalAmount?: number;
   paidAmount?: number;
   debtAmount?: number;

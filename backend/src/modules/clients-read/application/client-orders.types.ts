@@ -1,4 +1,4 @@
-/** One order of a client in the «Заказы» tab of the client card. Money only for a user who may see order financials. */
+/** One order of a client in the «Заказы» tab of the client card. Money and the payment status only for a user who may see order financials. */
 export interface ClientOrderDto {
   orderId: number;
   orderName: string;
@@ -7,7 +7,7 @@ export interface ClientOrderDto {
   orderDate: string | null;
   orderStatusName: string | null;
   productionStatusName: string | null;
-  paymentStatusName: string | null;
+  paymentStatusName?: string | null;
   finalAmount?: number;
   paidAmount?: number;
   debtAmount?: number;
