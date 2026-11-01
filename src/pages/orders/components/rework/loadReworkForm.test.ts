@@ -7,7 +7,7 @@ import { getAuthCacheNamespace } from '../../../../query/authCacheNamespace';
 import { getOrdersReadBackendMode } from '../../../../query/orderPrimaryResource';
 import { featureFlags } from '../../../../config/featureFlags';
 import { loadReworkForm, type ReworkFormLoadDependencies } from './loadReworkForm';
-import { createReworkFormRefresh, fetchOrderAfterRework } from './useOrderFormReworkPick';
+import { createReworkFormRefresh, fetchOrderAfterRework, ReworkReadSuperseded } from './useOrderFormReworkPick';
 import { reworkStatusesState } from './useReworkOrderStatusIds';
 import { redoGroups } from './orderReworkModel';
 
@@ -66,46 +66,63 @@ describe('«Переделка»: the rework form opened from a status picker', 
       .toMatchObject({ kind: 'message', text: 'Для заказа в этом статусе переделка недоступна' });
   });
 
-  it('after the command the order is read directly and replaces only an older cache entry', async () => {
+  it('after the command the order is read directly; the order-edit cache entry is dropped, not written', async () => {
     const queryClient = new QueryClient();
-    const key = createOrderEditBackendPrimaryIdentity({
-      orderId: 42,
-      authCacheNamespace: getAuthCacheNamespace(getOrdersReadBackendMode(featureFlags.useBackendOrdersRead)),
-    }).queryKey;
-    queryClient.setQueryData(key, order(5)); // fresh within its 15 s stale window
-    expect((await fetchOrderAfterRework(42, { queryClient, getOrderById: async () => order(6, 2) })).header.version).toBe(6);
-    expect((queryClient.getQueryData(key) as OrderDto).header.version).toBe(6);
-    queryClient.setQueryData(key, order(8)); // a newer one already cached: a late read does not roll it back
-    await fetchOrderAfterRework(42, { queryClient, getOrderById: async () => order(7) });
-    expect((queryClient.getQueryData(key) as OrderDto).header.version).toBe(8);
+    const key = createOrderEditBackendPrimaryIdentity({ orderId: 42, authCacheNamespace: 'user-a' }).queryKey;
+    // A pre-command read of this order is still in flight.
+    let releaseOld: (value: OrderDto) => void = () => {};
+    const oldRead = queryClient.fetchQuery({ queryKey: key, queryFn: () => new Promise<OrderDto>((resolve) => { releaseOld = resolve; }) });
+    const refreshed = fetchOrderAfterRework(42, { queryClient, namespace: () => 'user-a', getOrderById: async () => order(6, 2) });
+    releaseOld(order(5));
+    expect((await oldRead).header.version).toBe(5); // its own caller keeps its answer (not cancelled)
+    expect((await refreshed).header.version).toBe(6);
+    expect(queryClient.getQueryData(key)).toBeUndefined(); // the pre-command entry is dropped, nothing new written
   });
 
-  it('two commands in a row: the first refresh, answering late with the older version, never publishes', async () => {
+  it('a response of a session that ended meanwhile (logout/login, other rights) is rejected and not cached', async () => {
+    const queryClient = new QueryClient();
+    let session = 'user-a';
+    await expect(fetchOrderAfterRework(42, {
+      queryClient,
+      namespace: () => session,
+      getOrderById: async () => { session = 'user-b'; return order(6); },
+    })).rejects.toBeInstanceOf(ReworkReadSuperseded);
+    expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
+  });
+
+  it('refreshes of one draft from different pickers share a generation: a late older answer never publishes', async () => {
+    const draft = {};
     const published: number[] = [];
+    let draftVersion = 5;
     let releaseFirst: (value: OrderDto) => void = () => {};
-    const reads = [
-      new Promise<OrderDto>((resolve) => { releaseFirst = resolve; }), // the read after command 1 hangs
-      Promise.resolve(order(7)), // the read after command 2
-    ];
-    const refresh = createReworkFormRefresh({
-      getOrder: () => reads.shift()!,
+    const make = (read: () => Promise<OrderDto>) => createReworkFormRefresh({
+      draft,
+      getOrder: read,
       isClean: () => true,
-      publish: (dto) => published.push(Number(dto.header.version)),
+      draftVersion: () => draftVersion,
+      publish: (dto) => { published.push(Number(dto.header.version)); draftVersion = Number(dto.header.version); },
     });
-    const first = refresh(1, 6);
-    const second = refresh(1, 7);
-    expect(await second).toBe('published');
+    const fromHeaderMenu = make(() => new Promise<OrderDto>((resolve) => { releaseFirst = resolve; }));
+    const fromStatusField = make(async () => order(7));
+    const first = fromHeaderMenu(1, 6);
+    expect(await fromStatusField(1, 7)).toBe('published');
     releaseFirst(order(6));
     expect(await first).toBe('superseded');
     expect(published).toEqual([7]);
   });
 
-  it('a refresh answering a version older than its command, or into a form with new edits, publishes nothing', async () => {
+  it('an answer older than the command or than the draft (saved meanwhile), or into a form with new edits, publishes nothing', async () => {
     const published: number[] = [];
-    const stale = createReworkFormRefresh({ getOrder: async () => order(5), isClean: () => true, publish: (d) => published.push(Number(d.header.version)) });
-    expect(await stale(1, 6)).toBe('stale');
-    const dirty = createReworkFormRefresh({ getOrder: async () => order(6), isClean: () => false, publish: (d) => published.push(Number(d.header.version)) });
-    expect(await dirty(1, 6)).toBe('dirty');
+    const make = (version: number, draftVersion: number, clean = true) => createReworkFormRefresh({
+      draft: {},
+      getOrder: async () => order(version),
+      isClean: () => clean,
+      draftVersion: () => draftVersion,
+      publish: (dto) => published.push(Number(dto.header.version)),
+    });
+    expect(await make(5, 5)(1, 6)).toBe('stale'); // older than the command
+    expect(await make(6, 8)(1, 6)).toBe('stale'); // the draft was saved to 8 meanwhile
+    expect(await make(6, 5, false)(1, 6)).toBe('dirty');
     expect(published).toEqual([]);
   });
 
