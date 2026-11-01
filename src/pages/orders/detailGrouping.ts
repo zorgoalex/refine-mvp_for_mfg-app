@@ -58,6 +58,16 @@ const idValue = (raw: unknown): string => {
   return Number.isFinite(num) && num > 0 ? String(num) : EMPTY_GROUP_KEY;
 };
 
+/**
+ * «Переделка»: a detail of production round > 1 groups apart from the same stage of round 1 (its label is
+ * «Распилен ·2»); round 1 keeps the plain stage key.
+ */
+export function productionStatusGroupKey(statusId: unknown, round: unknown): string {
+  const key = idValue(statusId);
+  const roundNo = Number(round);
+  return key !== EMPTY_GROUP_KEY && Number.isInteger(roundNo) && roundNo > 1 ? `${key}·${roundNo}` : key;
+}
+
 const numberValue = (raw: unknown): string => {
   if (raw === null || raw === undefined || raw === '') return EMPTY_GROUP_KEY;
   const num = Number(raw);
@@ -142,7 +152,7 @@ export function extractGroupValue(detail: OrderDetail, field: GroupField): strin
       const trimmed = (detail.note || '').trim();
       return trimmed === '' ? EMPTY_GROUP_KEY : trimmed;
     }
-    case 'production_status': return idValue(detail.production_status_id);
+    case 'production_status': return productionStatusGroupKey(detail.production_status_id, detail.production_round);
     // Boolean: детали с присадкой — своя группа, остальные падают в «пустую»
     // (EMPTY сортируется последней, присадочные оказываются сверху).
     case 'doweling': return detail.doweling === true ? 'yes' : EMPTY_GROUP_KEY;

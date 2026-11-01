@@ -127,9 +127,10 @@ describe('«Переделка» UI model', () => {
     const show = readFileSync(join(__dirname, '../../show.tsx'), 'utf8');
     expect(show).toContain('<OrderReworkPanel');
     const panel = readFileSync(join(__dirname, 'OrderReworkPanel.tsx'), 'utf8');
-    // Actions use the backend-resolved capability (orders.rework + orders.update in scope).
-    expect(panel).toContain('const canRework = order.canRework;');
-    expect(panel).toContain("availability !== 'disabled_flag'");
+    // Actions use the backend-resolved capability (orders.rework + orders.update in scope); with the flag off no
+    // action is offered (start, open round, history reason) — every command would answer 503.
+    expect(panel).toContain("const canRework = order.canRework && availability !== 'disabled_flag';");
+    expect(panel).toContain('const showStart = canRework && action !== null;');
     // Why the action is unavailable (MDF engine, cutover) is visible text, not a hover tooltip of a disabled button.
     expect(panel).toContain('{unavailableHint ? <Text type="secondary">{unavailableHint}</Text> : null}');
     // Phone: round actions go under the banner text, not beside it.
