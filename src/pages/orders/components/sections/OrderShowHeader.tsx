@@ -26,6 +26,8 @@ import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitiv
 import { can } from '../../../../utils/permissions';
 import { featureFlags } from '../../../../config/featureFlags';
 import { collectOrderBasisProjects } from './orderBasisProjects';
+import { resolveOrderBasisProject } from '../../../../utils/orderBasisProject';
+import { getDowelingOrderShowPath } from '../../utils/dowelingOrderPaths';
 import { buildOrderHeaderMaterialSummaryItems } from '../../orderMaterialsSummary';
 import type { OrderHdfDetail } from '../../../../types/orders';
 import { useOptionalUiVariant } from '../../../../ui-variant/UiVariantProvider';
@@ -277,6 +279,39 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     null;
   const basisProjectSummary =
     basisProjects.length > 0 ? basisProjects.join(', ') : fallbackBasisProjectName;
+  // Базис-проекты — ссылки на свои карточки (с возвратом в заказ): из деталей — карточка XML-проекта,
+  // иначе — карточка присадки, связанной с заказом
+  const canOpenBazisProjects = featureFlags.useBackendBazis && can('bazis.view');
+  const basisProjectLinks = useMemo(() => {
+    if (basisProjects.length > 0) {
+      const byName = new Map<string, string | null>();
+      for (const detail of details || []) {
+        const resolved = resolveOrderBasisProject(detail as never);
+        if (!resolved.name || byName.get(resolved.name)) continue;
+        byName.set(resolved.name, canOpenBazisProjects && resolved.projectId ? `/bazis/projects/${resolved.projectId}` : null);
+      }
+      return basisProjects.map((name) => ({ name, to: byName.get(name) ?? null }));
+    }
+    if (!fallbackBasisProjectName) return [];
+    const dowelingOrderId = latestDowelingLink?.doweling_order?.doweling_order_id ?? latestDowelingLink?.doweling_order_id ?? record?.doweling_order_id;
+    return [{ name: fallbackBasisProjectName, to: getDowelingOrderShowPath(dowelingOrderId) }];
+  }, [basisProjects, canOpenBazisProjects, details, fallbackBasisProjectName, latestDowelingLink, record?.doweling_order_id]);
+  const basisProjectNodes = basisProjectLinks.map((item, index) => (
+    <React.Fragment key={`${item.name}-${index}`}>
+      {index > 0 ? ', ' : null}
+      {item.to ? (
+        <a
+          className="order-basis-project-link"
+          style={{ color: '#DC2626', fontWeight: 600 }}
+          href={item.to}
+          title="Открыть карточку Базис-проекта"
+          onClick={(event) => { event.preventDefault(); openWithOrigin(item.to as string); }}
+        >
+          {item.name}
+        </a>
+      ) : <span className="order-basis-project-link order-basis-project-link--static" style={{ color: '#DC2626', fontWeight: 600 }}>{item.name}</span>}
+    </React.Fragment>
+  ));
   const totalAmount = Number(record?.total_amount) || 0;
   const finalAmount = Number(record?.final_amount) || totalAmount || 0;
   const paidAmount = Number(record?.paid_amount) || 0;
@@ -526,7 +561,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
               ) : null}
               {basisProjectSummary ? (
                 <span className="wb-order-head__meta-item" title={basisProjectSummary}>
-                  Базис-проект: <strong>{basisProjectSummary}</strong>
+                  Базис-проект: <strong>{basisProjectNodes}</strong>
                   {basisProjects.length === 0 && dowelingLinks.length > 1 && ` +${dowelingLinks.length - 1}`}
                 </span>
               ) : null}
@@ -678,7 +713,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
           </span>
           {basisProjectSummary ? (
             <span className="order-show-header__compact-item order-show-header__compact-doweling" title={basisProjectSummary}>
-              Базис-проект: <Text strong className="order-show-header__compact-text">{basisProjectSummary}</Text>
+              Базис-проект: <Text strong className="order-show-header__compact-text">{basisProjectNodes}</Text>
             </span>
           ) : null}
           <span className="order-show-header__compact-item order-show-header__compact-material" title={compactMaterialSummary}>
@@ -968,7 +1003,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
           <>
             <Text style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
               Базис-проект: <Text strong style={{ color: '#DC2626' }}>
-                {basisProjectSummary}
+                {basisProjectNodes}
               </Text>
               {basisProjects.length === 0 && latestDowelingLink?.doweling_order?.design_engineer_id && (
                 <span style={{ marginLeft: 8, fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text-muted)' }}>

@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-01", title: "Заказ: Базис-проект открывается по клику",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Карточка заказа: Базис-проект в шапке — красная ссылка: открывает карточку Базис-проекта (или связанной присадки), со стрелкой «← Заказ …» обратно в заказ.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-01", title: "Справочники: правка в боковой панели",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [
