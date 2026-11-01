@@ -7313,6 +7313,251 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/bazis/cards:
+    post:
+      tags:
+        - Bazis projects
+      operationId: createBazisProjectCard
+      summary: Создать карточку Базис-проекта (quick-create, клиент обязателен)
+      security:
+        - bearerAuth: []
+      x-permission: doweling.create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - dowelingOrderName
+                - designEngineerId
+                - paymentStatusId
+                - idempotencyKey
+              properties:
+                clientId:
+                  type: integer
+                  nullable: true
+                  description: Клиент карточки; без него — клиент заказа orderId (иначе 422)
+                dowelingOrderName:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                designEngineerId:
+                  type: integer
+                paymentStatusId:
+                  type: integer
+                dowelingOrderDate:
+                  type: string
+                  format: date
+                  nullable: true
+                productionStatusId:
+                  type: integer
+                  nullable: true
+                operatorId:
+                  type: integer
+                  nullable: true
+                partsCount:
+                  type: integer
+                  minimum: 0
+                  nullable: true
+                linkCadFile:
+                  type: string
+                  maxLength: 2000
+                  nullable: true
+                linkPdfFile:
+                  type: string
+                  maxLength: 2000
+                  nullable: true
+                orderId:
+                  type: integer
+                  nullable: true
+                  description: >-
+                    Quick-create from an order: link the new doweling order to this production order in the same
+                    transaction (requires orders.update with scope over the order; an invisible order is 404)
+                idempotencyKey:
+                  type: string
+                  minLength: 8
+                  maxLength: 200
+      responses:
+        '201':
+          description: Присадка создана
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - dowelingOrder
+                  - requestId
+                properties:
+                  dowelingOrder:
+                    type: object
+                    required:
+                      - dowelingOrderId
+                      - dowelingOrderName
+                      - version
+                    properties:
+                      dowelingOrderId:
+                        type: integer
+                      dowelingOrderName:
+                        type: string
+                      version:
+                        type: integer
+                  link:
+                    $ref: '#/components/schemas/DowelingOrderLink'
+                  auditId:
+                    type: string
+                  requestId:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Связанная запись присадки (DOWELING_REFERENCE_NOT_FOUND) или заказ (ORDER_NOT_FOUND) не найдены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '409':
+          description: >-
+            Idempotency key reused with a different request (IDEMPOTENCY_KEY_REUSED), still processing
+            (IDEMPOTENCY_IN_PROGRESS), or previously failed (IDEMPOTENCY_FAILED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          description: >-
+            Doweling commands API is disabled (SERVICE_UNAVAILABLE) or the database is not configured
+            (DATABASE_UNAVAILABLE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/bazis/cards/imports:
+    post:
+      tags:
+        - Bazis
+      operationId: importBazisXmlIntoCard
+      summary: Import a Bazis XML revision into a Bazis project card (the given one, the single candidate or a new one)
+      security:
+        - bearerAuth: []
+      x-permission: bazis.manage
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - idempotencyKey
+              properties:
+                file:
+                  type: string
+                  format: binary
+                dowelingOrderId:
+                  type: integer
+                idempotencyKey:
+                  type: string
+                  minLength: 8
+                  maxLength: 200
+                projectId:
+                  type: integer
+                bazisProjectId:
+                  type: integer
+      responses:
+        '201':
+          description: Imported Bazis revision
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - bazisProject
+                  - revision
+                  - unmappedMaterials
+                  - warnings
+                  - requestId
+                properties:
+                  bazisProject:
+                    type: object
+                    required:
+                      - bazisProjectId
+                      - projectId
+                      - name
+                    properties:
+                      bazisProjectId:
+                        type: integer
+                      projectId:
+                        type: integer
+                      name:
+                        type: string
+                  revision:
+                    type: object
+                    required:
+                      - bazisRevisionId
+                      - revisionNo
+                      - xmlSha256
+                      - summary
+                    properties:
+                      bazisRevisionId:
+                        type: integer
+                      revisionNo:
+                        type: integer
+                      xmlSha256:
+                        type: string
+                      summary:
+                        type: object
+                        additionalProperties:
+                          type: integer
+                  unmappedMaterials:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - name
+                        - kindGuess
+                        - usageCount
+                      properties:
+                        name:
+                          type: string
+                        kindGuess:
+                          type: string
+                        usageCount:
+                          type: integer
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+                  requestId:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/bazis/projects:
     get:
       tags:
