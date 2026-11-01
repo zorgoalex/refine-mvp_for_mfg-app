@@ -121,8 +121,9 @@ export const OrderReworkPanel: React.FC<OrderReworkPanelProps> = ({ orderId, ver
 
   if (!state || availability === 'disabled_flag' && state.data.length === 0) return null;
   const { order } = state;
-  // Same gates as the backend commands: orders.rework + orders.update within the order's update scope.
-  const canRework = order.canRework;
+  // Same gates as the backend commands: orders.rework + orders.update within the order's update scope; with the flag
+  // off every command answers 503, so the history stays readable without actions.
+  const canRework = order.canRework && availability !== 'disabled_flag';
   const openRound = state.data.find((round) => round.closedAt === null) ?? null;
   // Forms send the version the shown rounds were read with; while it differs from the card
   // (data stale or re-loading) actions are disabled.
@@ -131,7 +132,7 @@ export const OrderReworkPanel: React.FC<OrderReworkPanelProps> = ({ orderId, ver
   const action = order.action;
   const unavailableHint = availability && availability !== 'available' && availability !== 'disabled_flag'
     ? UNAVAILABLE_HINT[availability] : null;
-  const showStart = canRework && action !== null && availability !== 'disabled_flag';
+  const showStart = canRework && action !== null;
 
   const roundActions = (round: OrderReworkRound) => (
     <Space wrap>

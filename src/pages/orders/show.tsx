@@ -87,13 +87,13 @@ import {
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
 import { CutPage } from "../cut/CutPage";
 import {
-  EMPTY_GROUP_KEY,
   buildGroupedRows,
   extractCutJobGroupValue,
   formatBasisProjectGroupLabel,
   formatBazisCutSetsGroupLabel,
   formatCutJobGroupLabel,
   GROUP_TINT_COUNT,
+  productionStatusGroupKey,
   selectedGroupLabelForCut,
   type GroupField,
 } from './detailGrouping';
@@ -1758,6 +1758,16 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const detailCardLookups: DetailCardLookups = {
     millingNameOf: (d) => millingTypesMap.get((d as any).milling_type_id) || '—',
     materialNameOf: (d) => resolveDetailMaterialName(d, resolvedNameByDetailId, materialsMap) || '—',
+    // The stage the table shows (a live stage command first), its name from the stage reference.
+    stageNameOf: (d) => {
+      const detailId = Number(d.detail_id);
+      const statusId = Number.isInteger(detailId) && currentDetailProductionStatusById.has(detailId)
+        ? normalizeProductionStatusId(currentDetailProductionStatusById.get(detailId))
+        : normalizeProductionStatusId(d.production_status_id);
+      if (statusId == null) return '';
+      return productionStatusesById.get(statusId)?.name
+        || (statusId === normalizeProductionStatusId(d.production_status_id) ? String(d.production_status_name ?? '') : '');
+    },
   };
 
   // SP3: unique server-resolved display material names for the show header summary.
@@ -2102,10 +2112,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
   const groupValueOf = useCallback((sample: any, field: GroupField): string | null | undefined => {
     switch (field) {
-      case 'production_status': {
-        const statusId = resolveGroupProductionStatusId(sample);
-        return statusId == null ? EMPTY_GROUP_KEY : String(statusId);
-      }
+      case 'production_status':
+        return productionStatusGroupKey(resolveGroupProductionStatusId(sample), sample?.production_round);
       case 'cut_job': {
         const detailId = Number(sample?.detail_id);
         const ref = Number.isInteger(detailId) ? cutJobByDetailId.get(detailId) : undefined;
@@ -2138,9 +2146,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         const statusId = resolveGroupProductionStatusId(sample);
         if (statusId == null) return '—';
         const baseStatusId = normalizeProductionStatusId(sample.production_status_id);
-        return productionStatusesById.get(statusId)?.name
-          || (statusId === baseStatusId ? sample.production_status_name : '')
-          || String(statusId);
+        return withRoundSuffix(
+          productionStatusesById.get(statusId)?.name
+            || (statusId === baseStatusId ? sample.production_status_name : '')
+            || String(statusId),
+          sample.production_round,
+        );
       }
       case 'doweling': return sample.doweling === true ? 'Присадка' : '—';
       case 'cut_job': {

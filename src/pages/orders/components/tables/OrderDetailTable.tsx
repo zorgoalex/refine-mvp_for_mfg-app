@@ -42,12 +42,12 @@ import {
 } from '../../../../hooks/useSheetMaterialOptions';
 import { buildNameByIdMap, resolveReferenceLabel } from './referenceNameMaps';
 import {
-  EMPTY_GROUP_KEY,
   buildGroupedRows,
   extractCutJobGroupValue,
   formatBazisCutSetsGroupLabel,
   formatCutJobGroupLabel,
   GROUP_TINT_COUNT,
+  productionStatusGroupKey,
   type GroupField,
 } from '../../detailGrouping';
 import { groupCheckboxState, toggleGroupSelection } from '../../groupSelection';
@@ -3369,10 +3369,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
   const groupValueOf = useCallback((sample: OrderDetail, field: GroupField): string | null | undefined => {
     switch (field) {
-      case 'production_status': {
-        const statusId = Number(getDisplayedField(sample, 'production_status_id'));
-        return Number.isFinite(statusId) && statusId > 0 ? String(statusId) : EMPTY_GROUP_KEY;
-      }
+      case 'production_status':
+        return productionStatusGroupKey(getDisplayedField(sample, 'production_status_id'), sample.production_round);
       case 'cut_job': {
         const detailId = Number(sample?.detail_id);
         const ref = Number.isInteger(detailId) ? cutJobByDetailId?.get(detailId) : undefined;
@@ -3405,7 +3403,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       }
       case 'production_status': {
         const statusId = getDisplayedField(sample, 'production_status_id');
-        return statusId != null ? (productionStatusNameById.get(statusId) || sample.production_status_name || '—') : '—';
+        return statusId != null
+          ? withRoundSuffix(productionStatusNameById.get(statusId) || sample.production_status_name || '—', sample.production_round)
+          : '—';
       }
       case 'doweling': return getDisplayedField(sample, 'doweling') === true ? 'Присадка' : '—';
       case 'cut_job': {

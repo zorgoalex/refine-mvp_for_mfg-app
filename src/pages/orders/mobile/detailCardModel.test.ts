@@ -18,6 +18,14 @@ describe('buildDetailCardModel', () => {
     expect(m.milling).toBe('Фрез-1');
     expect(m.note).toBe('кромка 2 мм');
   });
+  it('shows the stage with the «Переделка» round suffix', () => {
+    const stage = (name: string) => ({ ...lookups, stageNameOf: () => name });
+    expect(buildDetailCardModel({ production_round: 2 }, stage('Распилен')).stage).toBe('Распилен ·2');
+    expect(buildDetailCardModel({ production_round: 1 }, stage('Распилен')).stage).toBe('Распилен');
+    expect(buildDetailCardModel({}, stage('Новый')).stage).toBe('Новый');
+    expect(buildDetailCardModel({ production_round: 3 }, stage('')).stage).toBe('');
+    expect(buildDetailCardModel({ production_round: 2 }, lookups).stage).toBe('');
+  });
   it('handles empty row', () => {
     const m = buildDetailCardModel({}, { millingNameOf: () => '—', materialNameOf: () => '—' });
     expect(m.num).toBe('№—');

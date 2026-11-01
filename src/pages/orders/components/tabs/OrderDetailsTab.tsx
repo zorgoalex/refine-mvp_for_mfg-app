@@ -37,14 +37,15 @@ import { AddToCutModal } from '../AddToCutModal';
 import { AddToBazisCutModal } from '../../../bazis-cut/AddToBazisCutModal';
 import { selectedDetailIds } from '../../groupSelection';
 import {
-  EMPTY_GROUP_KEY,
   extractCutJobGroupValue,
   formatBasisProjectGroupLabel,
   formatBazisCutSetsGroupLabel,
   formatCutJobGroupLabel,
+  productionStatusGroupKey,
   selectedGroupLabelForCut,
   type GroupField,
 } from '../../detailGrouping';
+import { withRoundSuffix } from '../../../../api/orderReworkApi';
 import { featureFlags } from '../../../../config/featureFlags';
 import { can } from '../../../../utils/permissions';
 import { useOrderFormData } from '../../../../hooks/useOrderFormData';
@@ -329,10 +330,8 @@ export const OrderDetailsTab = forwardRef<
   const groupValueOf = useCallback(
     (sample: OrderDetail, field: GroupField): string | null | undefined => {
       switch (field) {
-        case 'production_status': {
-          const statusId = Number(sample.production_status_id);
-          return Number.isFinite(statusId) && statusId > 0 ? String(statusId) : EMPTY_GROUP_KEY;
-        }
+        case 'production_status':
+          return productionStatusGroupKey(sample.production_status_id, sample.production_round);
         case 'cut_job': {
           const detailId = Number(sample.detail_id);
           const ref = Number.isInteger(detailId) ? cutJobMaps.cutJobByDetailId.get(detailId) : undefined;
@@ -377,7 +376,10 @@ export const OrderDetailsTab = forwardRef<
           return sample.film_id != null ? (groupFilmNameById.get(sample.film_id) || '—') : '—';
         case 'production_status':
           return sample.production_status_id != null
-            ? orderFormData.references.productionStatusNameById.get(sample.production_status_id) || sample.production_status_name || '—'
+            ? withRoundSuffix(
+              orderFormData.references.productionStatusNameById.get(sample.production_status_id) || sample.production_status_name || '—',
+              sample.production_round,
+            )
             : '—';
         case 'doweling':
           return sample.doweling === true ? 'Присадка' : '—';
