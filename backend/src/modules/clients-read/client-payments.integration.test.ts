@@ -8,6 +8,7 @@ import type { PermissionName } from '../../permissions/permissions';
 import { ROLE_POLICIES } from '../../permissions/policies/role-policies';
 import { PgClientPaymentsRepository } from './adapters/pg-client-payments-repository';
 import { ClientPaymentsService } from './application/client-payments.service';
+import type { ClientPaymentSortKey, TabSort } from './application/client-tab-sort';
 
 // Real PostgreSQL in an isolated schema: set TEST_DATABASE_URL.
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -145,5 +146,21 @@ describe.skipIf(!databaseUrl)('payments of a client for the client card (Postgre
       { request_id: 'req-no-payments', related_client_id: '1', status_code: 'missing_permission', missing: ['payments.view'], order_scope: 'own', payment_scope: 'own' },
     ]);
     expect(await code(service.list(user(11, 'admin'), 999, 1, 20, 'req-missing'))).toBe('CLIENT_NOT_FOUND');
+  });
+
+  it('sorts over all pages by any column: the order number naturally, empty notes last, ties by the newest payment', async () => {
+    await pool.query(`INSERT INTO "${schema}".clients VALUES (3, 'Тест Сортировка');
+      INSERT INTO "${schema}".orders VALUES (21, '101', 3, NULL, '2026-10-01', 12, 12, false, 'production_order'),
+        (22, '9', 3, NULL, '2026-10-02', 12, 12, false, 'production_order');
+      INSERT INTO "${schema}".payments VALUES (201, 21, 300, '2026-12-01', 1, 'Б', false, NULL), (202, 22, 100, '2026-12-03', 2, NULL, false, NULL),
+        (203, 21, 900, '2026-12-02', 2, 'А', false, NULL), (204, 22, 50, '2026-12-04', 1, '  ', false, NULL);`);
+    const ids = async (sort: TabSort<ClientPaymentSortKey>, pageSize = 20, page = 1) =>
+      (await service.list(user(11, 'admin'), 3, page, pageSize, `req-psort-${sort.key}-${sort.direction}-${page}`, sort)).data.map((p) => p.paymentId);
+    expect(await ids({ key: 'date', direction: 'asc' })).toEqual([201, 203, 202, 204]);
+    expect(await ids({ key: 'amount', direction: 'desc' })).toEqual([203, 201, 202, 204]);
+    expect(await ids({ key: 'type', direction: 'asc' })).toEqual([203, 202, 204, 201]);
+    expect(await ids({ key: 'order', direction: 'asc' })).toEqual([204, 202, 203, 201]);
+    expect(await ids({ key: 'notes', direction: 'asc' })).toEqual([203, 201, 204, 202]);
+    expect([...await ids({ key: 'amount', direction: 'asc' }, 2, 1), ...await ids({ key: 'amount', direction: 'asc' }, 2, 2)]).toEqual([204, 202, 201, 203]);
   });
 });

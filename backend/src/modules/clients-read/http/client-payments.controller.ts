@@ -6,10 +6,13 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { ClientPaymentsService } from '../application/client-payments.service';
 import { CLIENT_PAYMENTS_PAGE_SIZE_MAX, type ClientPaymentsResponseDto } from '../application/client-payments.types';
+import { CLIENT_PAYMENT_SORT_KEYS, DEFAULT_PAYMENT_SORT } from '../application/client-tab-sort';
 
 const querySchema = z.object({
   page: z.coerce.number().int().min(1).max(100_000).default(1),
   pageSize: z.coerce.number().int().min(1).max(CLIENT_PAYMENTS_PAGE_SIZE_MAX).default(20),
+  sort: z.enum(CLIENT_PAYMENT_SORT_KEYS).default(DEFAULT_PAYMENT_SORT.key),
+  order: z.enum(['asc', 'desc']).default(DEFAULT_PAYMENT_SORT.direction),
 }).strict();
 
 /** Client card, tab «Платежи»: the payments of the orders of one client the user may see, with their sum. Read-only. */
@@ -26,6 +29,7 @@ export class ClientPaymentsController {
     const id = /^[1-9]\d{0,14}$/.test(clientId) ? Number(clientId) : NaN;
     const parsed = querySchema.safeParse(query ?? {});
     if (!Number.isSafeInteger(id) || !parsed.success) throw new ApiError(400, 'VALIDATION_FAILED', 'Некорректный запрос платежей клиента');
-    return this.payments.list(request.user, id, parsed.data.page, parsed.data.pageSize, request.requestId ?? randomUUID());
+    const { page, pageSize, sort, order } = parsed.data;
+    return this.payments.list(request.user, id, page, pageSize, request.requestId ?? randomUUID(), { key: sort, direction: order });
   }
 }

@@ -44,9 +44,16 @@ export interface ClientOrdersResponse {
 }
 
 /** Карточка клиента, «Заказы»: область видимости заказов применяет backend. */
+/** Sorting of a client card tab over all pages (the server sorts; ties — the newest first). */
+export interface ClientTabSort<K extends string> { key: K; direction: 'asc' | 'desc' }
+export type ClientOrderSortKey = 'number' | 'date' | 'status' | 'production' | 'payment' | 'final' | 'paid' | 'debt';
+export type ClientPaymentSortKey = 'date' | 'amount' | 'type' | 'order' | 'notes';
+
 export const clientOrdersApi = {
-  list(clientId: number, page: number, pageSize: number): Promise<ClientOrdersResponse> {
-    return httpClient.get<ClientOrdersResponse>(withQuery(apiRoutes.clientsRead.orders(clientId), { page, pageSize }));
+  list(clientId: number, page: number, pageSize: number, sort?: ClientTabSort<ClientOrderSortKey>): Promise<ClientOrdersResponse> {
+    return httpClient.get<ClientOrdersResponse>(withQuery(apiRoutes.clientsRead.orders(clientId), {
+      page, pageSize, ...(sort ? { sort: sort.key, order: sort.direction } : {}),
+    }));
   },
 };
 
@@ -71,8 +78,10 @@ export interface ClientPaymentsResponse {
 }
 
 export const clientPaymentsApi = {
-  list(clientId: number, page: number, pageSize: number): Promise<ClientPaymentsResponse> {
-    return httpClient.get<ClientPaymentsResponse>(withQuery(apiRoutes.clientsRead.payments(clientId), { page, pageSize }));
+  list(clientId: number, page: number, pageSize: number, sort?: ClientTabSort<ClientPaymentSortKey>): Promise<ClientPaymentsResponse> {
+    return httpClient.get<ClientPaymentsResponse>(withQuery(apiRoutes.clientsRead.payments(clientId), {
+      page, pageSize, ...(sort ? { sort: sort.key, order: sort.direction } : {}),
+    }));
   },
 };
 

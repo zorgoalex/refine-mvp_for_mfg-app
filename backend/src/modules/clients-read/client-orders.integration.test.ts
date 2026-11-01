@@ -8,6 +8,7 @@ import type { PermissionName } from '../../permissions/permissions';
 import { ROLE_POLICIES } from '../../permissions/policies/role-policies';
 import { PgClientOrdersRepository } from './adapters/pg-client-orders-repository';
 import { ClientOrdersService } from './application/client-orders.service';
+import type { ClientOrderSortKey, TabSort } from './application/client-tab-sort';
 
 // Real PostgreSQL in an isolated schema: set TEST_DATABASE_URL.
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -130,5 +131,36 @@ describe.skipIf(!databaseUrl)('orders of a client for the client card (PostgreSQ
       { request_id: 'req-nogrant', related_client_id: '1', status_code: 'scope_not_allowed', missing: [], order_scope: 'none' },
     ]);
     expect(await code(service.list(user(11, 'admin'), 999, 1, 20, 'req-missing'))).toBe('CLIENT_NOT_FOUND');
+  });
+
+  it('sorts over all pages by any column: the number naturally, ties by the newest; a money sort needs the financial right (audited)', async () => {
+    await pool.query(`INSERT INTO "${schema}".clients VALUES (3, 'Тест Сортировка');
+      INSERT INTO "${schema}".order_statuses VALUES (2, 'Готов');
+      INSERT INTO "${schema}".orders VALUES
+        (401, '101', 3, NULL, '2026-10-01', 2, 1, 1, 12, 12, 300, 100),
+        (402, '9', 3, NULL, '2026-10-03', 1, 1, 1, 12, 12, 100, 100),
+        (403, '101-2', 3, NULL, '2026-10-02', 1, 1, 1, 12, 12, 900, 0),
+        (404, '12', 3, NULL, '2026-10-04', 2, 1, 1, 13, 13, 50, 0),
+        (405, 'Тест-без-номера', 3, NULL, NULL, 1, 1, 1, 12, 12, 0, 0);`);
+    const ids = async (sort: TabSort<ClientOrderSortKey>, who = user(11, 'admin'), pageSize = 20, page = 1) =>
+      (await service.list(who, 3, page, pageSize, `req-sort-${sort.key}-${sort.direction}-${page}`, sort)).data.map((o) => o.orderId);
+    expect(await ids({ key: 'number', direction: 'asc' })).toEqual([402, 404, 401, 403, 405]);
+    expect(await ids({ key: 'number', direction: 'desc' })).toEqual([403, 401, 404, 402, 405]);
+    expect(await ids({ key: 'date', direction: 'asc' })).toEqual([401, 403, 402, 404, 405]);
+    // «В работе» before «Готов»; within one status the newest order first.
+    expect(await ids({ key: 'status', direction: 'asc' })).toEqual([405, 403, 402, 404, 401]);
+    expect(await ids({ key: 'debt', direction: 'desc' })).toEqual([403, 401, 404, 405, 402]);
+    // Pages follow the sorted set, not the page alone.
+    expect([...await ids({ key: 'final', direction: 'desc' }, user(11, 'admin'), 2, 1), ...await ids({ key: 'final', direction: 'desc' }, user(11, 'admin'), 2, 2)])
+      .toEqual([403, 401, 402, 404]);
+    // The own-orders visibility still applies under any sort.
+    expect(await ids({ key: 'number', direction: 'asc' }, user(12, 'manager'))).toEqual([402, 401, 403, 405]);
+    // Ordering by money reveals it: without the right, refused and audited; non-money columns still sort.
+    const noMoney = user(12, 'manager', ['clients.view', 'orders.view']);
+    expect(await code(service.list(noMoney, 3, 1, 20, 'req-sort-paid', { key: 'paid', direction: 'asc' }))).toBe('PERMISSION_DENIED');
+    expect(await ids({ key: 'number', direction: 'asc' }, noMoney)).toEqual([402, 401, 403, 405]);
+    const denied = (await pool.query(`SELECT status_code, metadata_json->>'action' action, metadata_json->>'sort' sort FROM "${schema}".audit_log
+      WHERE event = 'clients.orders_denied' AND request_id = 'req-sort-paid'`)).rows;
+    expect(denied).toEqual([{ status_code: 'missing_permission', action: 'client_orders_sort', sort: 'paid' }]);
   });
 });

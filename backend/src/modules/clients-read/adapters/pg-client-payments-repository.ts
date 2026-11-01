@@ -8,6 +8,16 @@ import {
   scopeNeedsActor,
 } from '../../../permissions/policies/order-read-scope-sql';
 import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
+import { DEFAULT_PAYMENT_SORT, orderNumberSortSql, sqlDirection, type ClientPaymentSortKey, type TabSort } from '../application/client-tab-sort';
+
+/** Fixed SQL of each sort key over the page query below (`v` — the visible payments, `pt` — payment types). */
+const PAYMENT_SORT_SQL: Record<ClientPaymentSortKey, (direction: 'ASC' | 'DESC') => string> = {
+  date: (d) => `v.payment_date ${d} NULLS LAST`,
+  amount: (d) => `v.amount ${d} NULLS LAST`,
+  type: (d) => `pt.type_paid_name ${d} NULLS LAST`,
+  order: (d) => orderNumberSortSql('v.order_name::text', d),
+  notes: (d) => `NULLIF(btrim(v.notes), '') ${d} NULLS LAST`,
+};
 
 /** Only real orders, as in the «Заказы» tab: CRM requests and drafts are not orders. */
 const ORDER_ROWS = `o.order_kind = 'production_order'`;
@@ -55,7 +65,12 @@ export class PgClientPaymentsRepository {
     return (await this.database.query('SELECT 1 FROM clients WHERE client_id = $1', [clientId])).rows.length > 0;
   }
 
-  async list(clientId: number, viewer: CurrentUser, page: number, pageSize: number): Promise<ClientPaymentsPage> {
+  async list(
+    clientId: number, viewer: CurrentUser, page: number, pageSize: number,
+    sort: TabSort<ClientPaymentSortKey> = DEFAULT_PAYMENT_SORT,
+  ): Promise<ClientPaymentsPage> {
+    // The newest payment breaks ties, so a page never shifts between two requests.
+    const orderBy = `${PAYMENT_SORT_SQL[sort.key](sqlDirection(sort.direction))}, v.payment_id DESC`;
     const params: unknown[] = [clientId];
     const visible = appendClientPaymentVisibilitySql(params, viewer);
     const where = `o.client_id = $1 AND o.delete_flag = false AND ${ORDER_ROWS} AND p.delete_flag = false AND ${visible}`;
@@ -77,14 +92,14 @@ export class PgClientPaymentsRepository {
                   pt.type_paid_name::text AS type_paid_name, v.notes, v.ref_key_1c IS NOT NULL AS from_onec,
                   v.order_id, v.order_name::text AS order_name,
                   CASE WHEN mp.code IS NULL THEN NULL ELSE mp.code || '-' || v.order_name END AS full_number,
-                  v.payment_date AS sort_date
+                  row_number() OVER (ORDER BY ${orderBy}) AS sort_pos
              FROM visible v
              LEFT JOIN projects mp ON mp.project_id = v.project_id
              LEFT JOIN payment_types pt ON pt.type_paid_id = v.type_paid_id
-            ORDER BY v.payment_date DESC, v.payment_id DESC
+            ORDER BY ${orderBy}
             LIMIT $${limit} OFFSET $${offset}
          ) page_rows ON true
-        ORDER BY page_rows.sort_date DESC NULLS LAST, page_rows.payment_id DESC NULLS LAST`, params)).rows;
+        ORDER BY page_rows.sort_pos NULLS LAST`, params)).rows;
     const first = result[0];
     const rows = result.filter((row) => row.payment_id !== null);
     return { rows, total: Number(first?.total ?? 0), amount: Number(first?.sum_amount ?? 0) };
