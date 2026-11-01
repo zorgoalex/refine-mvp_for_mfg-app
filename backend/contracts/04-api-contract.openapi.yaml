@@ -20875,6 +20875,183 @@ paths:
         '403': {description: "Permission denied (audited as payments.onec_denied)"}
         '404': {description: "ONEC_RECEIPT_NOT_FOUND — no such line or it is outside the user's payment scope"}
         '503': {description: "ONEC_PAYMENT_MATCHING_DISABLED — the feature or the 1C integration is off"}
+  /api/v1/payments/onec-receipts/auto-match:
+    post:
+      tags:
+        - Payments
+      operationId: autoMatchOnecReceipts
+      summary: "«Сверить сейчас»: one auto-match pass over the ERP orders of the user's payments.update scope (exact pairs only)"
+      security:
+        - {bearerAuth: []}
+      x-permission: payments.onec.manage
+      description: >-
+        Requires payments.onec.view, payments.onec.manage, payments.view, payments.update and orders.view_financials. Pairs a
+        review-state receipt line with the only free payment of its ERP order of the same amount within 3 days (mutually
+        unique); every pair is re-checked under locks. Enabled by BACKEND_ONEC_PAYMENT_MATCHING_COMMANDS.
+      responses:
+        '200': {description: "{passId, candidates, matched, skipped}"}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as payments.onec_denied)"}
+        '503': {description: "ONEC_PAYMENT_MATCHING_COMMANDS_DISABLED"}
+  /api/v1/payments/onec-receipts/{lineId}/match:
+    post:
+      tags:
+        - Payments
+      operationId: matchOnecReceipt
+      summary: "Match a 1C receipt line with a payment of its ERP order"
+      security:
+        - {bearerAuth: []}
+      x-permission: payments.onec.manage
+      description: >-
+        Same permissions as auto-match; the payment scope covers the line's ERP order and the payment's order (checked before any
+        answer about the line). A different amount needs a note. A repeat of the same match is no change.
+      parameters:
+        - {name: lineId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [paymentId, expectedStateToken, expectedPaymentToken]
+              properties:
+                paymentId: {type: integer, minimum: 1}
+                expectedStateToken: {type: string, minLength: 1, maxLength: 200}
+                expectedPaymentToken: {type: string, minLength: 1, maxLength: 200}
+                note: {type: string, maxLength: 500, nullable: true}
+      responses:
+        '200': {description: "{changed, matchId, line}"}
+        '400': {description: Invalid body}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as payments.onec_denied)"}
+        '404': {description: "ONEC_RECEIPT_NOT_FOUND"}
+        '409': {description: "ONEC_RECEIPT_STATE_CHANGED, ONEC_RECEIPT_ALREADY_MATCHED, PAYMENT_ALREADY_MATCHED, ONEC_PAYMENT_NOT_OF_ORDER, ONEC_RECEIPT_NOT_ELIGIBLE, ONEC_MATCH_NOTE_REQUIRED"}
+        '503': {description: "ONEC_PAYMENT_MATCHING_COMMANDS_DISABLED"}
+  /api/v1/payments/onec-receipts/{lineId}/unmatch:
+    post:
+      tags:
+        - Payments
+      operationId: unmatchOnecReceipt
+      summary: "Remove the active match or «разобрано» of a 1C receipt line (the record stays as history)"
+      security:
+        - {bearerAuth: []}
+      x-permission: payments.onec.manage
+      parameters:
+        - {name: lineId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedMatchId]
+              properties:
+                expectedMatchId: {type: integer, minimum: 1}
+                reason: {type: string, maxLength: 500, nullable: true}
+      responses:
+        '200': {description: "{changed, matchId, line}"}
+        '400': {description: Invalid body}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as payments.onec_denied); a line outside the scope answers 403 whatever match id is given"}
+        '404': {description: "ONEC_RECEIPT_NOT_FOUND"}
+        '409': {description: "ONEC_RECEIPT_STATE_CHANGED"}
+        '503': {description: "ONEC_PAYMENT_MATCHING_COMMANDS_DISABLED"}
+  /api/v1/payments/onec-receipts/{lineId}/dismiss:
+    post:
+      tags:
+        - Payments
+      operationId: dismissOnecReceipt
+      summary: "Mark a 1C receipt line «разобрано» without a payment (note required)"
+      security:
+        - {bearerAuth: []}
+      x-permission: payments.onec.manage
+      parameters:
+        - {name: lineId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedStateToken, note]
+              properties:
+                expectedStateToken: {type: string, minLength: 1, maxLength: 200}
+                note: {type: string, maxLength: 500}
+      responses:
+        '200': {description: "{changed, matchId, line}"}
+        '400': {description: Invalid body}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as payments.onec_denied)"}
+        '404': {description: "ONEC_RECEIPT_NOT_FOUND"}
+        '409': {description: "ONEC_RECEIPT_STATE_CHANGED, ONEC_RECEIPT_ALREADY_MATCHED, ONEC_DISMISS_NOTE_REQUIRED"}
+        '503': {description: "ONEC_PAYMENT_MATCHING_COMMANDS_DISABLED"}
+  /api/v1/payments/onec-receipts/{lineId}/order-link:
+    put:
+      tags:
+        - Payments
+      operationId: linkOnecReceiptOrder
+      summary: "Link the line's 1C customer order to an ERP order by hand (orderId null — «not an ERP order»)"
+      security:
+        - {bearerAuth: []}
+      x-permission: payments.onec.manage
+      description: >-
+        The scope covers the ERP order before and after the change («no order» on either side needs scope «all»). One ERP order is
+        linked to at most one 1C order.
+      parameters:
+        - {name: lineId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedStateToken, orderId]
+              properties:
+                expectedStateToken: {type: string, minLength: 1, maxLength: 200}
+                orderId: {type: integer, minimum: 1, nullable: true}
+                note: {type: string, maxLength: 500, nullable: true}
+      responses:
+        '200': {description: "{changed, matchId: null, line}"}
+        '400': {description: Invalid body}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as payments.onec_denied)"}
+        '404': {description: "ONEC_RECEIPT_NOT_FOUND"}
+        '409': {description: "ONEC_RECEIPT_STATE_CHANGED, ONEC_RECEIPT_NO_ONEC_ORDER, ONEC_LINK_ORDER_NOT_ELIGIBLE, ONEC_LINK_ORDER_TAKEN"}
+        '503': {description: "ONEC_PAYMENT_MATCHING_COMMANDS_DISABLED"}
+  /api/v1/payments/onec-receipts/{lineId}/order-unlink:
+    post:
+      tags:
+        - Payments
+      operationId: unlinkOnecReceiptOrder
+      summary: "Remove the manual link of the line's 1C order — back to the series rule"
+      security:
+        - {bearerAuth: []}
+      x-permission: payments.onec.manage
+      description: The scope covers the ERP order before and the one the rule returns the receipt to.
+      parameters:
+        - {name: lineId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedStateToken]
+              properties:
+                expectedStateToken: {type: string, minLength: 1, maxLength: 200}
+      responses:
+        '200': {description: "{changed, matchId: null, line}"}
+        '400': {description: Invalid body}
+        '401': {description: Authentication required}
+        '403': {description: "Permission denied (audited as payments.onec_denied)"}
+        '404': {description: "ONEC_RECEIPT_NOT_FOUND"}
+        '409': {description: "ONEC_RECEIPT_STATE_CHANGED, ONEC_RECEIPT_NO_ONEC_ORDER"}
+        '503': {description: "ONEC_PAYMENT_MATCHING_COMMANDS_DISABLED"}
   /api/v1/payments-analytics/summary:
     get:
       tags:
