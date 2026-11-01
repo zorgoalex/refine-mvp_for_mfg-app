@@ -68,9 +68,13 @@ class PgTransactionClient implements TransactionClient {
     params: readonly unknown[],
     options: DatabaseQueryOptions,
   ): Promise<QueryResult<T>> {
+    // A per-query timeout also lifts node-pg's own `query_timeout` of the pool (else a longer `timeoutMs` never
+    // takes effect: the driver aborts at the pool default first). The server-side `statement_timeout` is the caller's.
     return this.telemetry.measure(text, () =>
       withTimeout(
-        this.raw.query<T>(text, [...params]),
+        options.timeoutMs === undefined
+          ? this.raw.query<T>(text, [...params])
+          : this.raw.query<T>({ text, values: [...params], query_timeout: options.timeoutMs } as never),
         options.timeoutMs ?? this.defaultTimeoutMs,
         'Database query',
       ),

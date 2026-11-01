@@ -114,7 +114,21 @@ export class OnecAlertProjector {
           details: { rejectedConfigVersion: int(p.rejectedConfigVersion), rejectedReason: str(p.rejectedReason) },
         });
         return;
-      case 'onec.source.identity_changed':
+      case 'onec.source.identity_changed': {
+        // Projected against the source's CURRENT state: a rebaseline that accepted the new identity before this
+        // event was relayed already resolved the alert, and an alert opened now would stay open with nothing to
+        // close it. An event of an older generation (accepted by a rebaseline, then the base changed again) is
+        // superseded by the newer change's own event. Lock order agent -> source -> alert, as session start and
+        // heartbeat (agent FOR UPDATE, then the source) and rebaseline (agent, then source FOR NO KEY UPDATE): the
+        // agent KEY SHARE is the one the alert's agent FK needs anyway. The source FOR NO KEY UPDATE waits for a
+        // running rebaseline, so the two cannot interleave, and not for the KEY SHARE locks of an ETL `complete`.
+        if (!agentId || sourceId === null) return;
+        await tx.query(`SELECT 1 FROM onec_agents WHERE agent_id = $1 FOR KEY SHARE`, [agentId]);
+        const source = await this.repository.getSource(tx, sourceId, 'no_key');
+        if (source?.identityStatus !== 'identity_changed') return;
+        // Events written before sourceGeneration was carried have none: then only the current status decides.
+        const eventGeneration = int(p.sourceGeneration);
+        if (eventGeneration !== null && eventGeneration !== source.generation) return;
         await this.repository.upsertAlert(tx, {
           kind: 'source_identity_changed',
           agentId,
@@ -125,6 +139,7 @@ export class OnecAlertProjector {
           details: {},
         });
         return;
+      }
       case 'onec.command.completed': {
         // Only failures that need an operator become alerts; success is audit + event only.
         const status = str(p.status);
