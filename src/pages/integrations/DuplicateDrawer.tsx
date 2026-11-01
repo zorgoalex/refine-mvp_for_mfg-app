@@ -25,6 +25,7 @@ import {
   userText,
   viaLabel,
 } from './duplicatesModel';
+import { DuplicateCompareModal } from './DuplicateCompareModal';
 import { MergeClientsModal } from './MergeClientsModal';
 import { canMergeCase } from './mergeClientsModel';
 
@@ -94,6 +95,7 @@ export function DuplicateDrawer({ caseId, canResolve, onSelectCase, onClose, onC
   const [reason, setReason] = useState<DuplicateReason | null>(null);
   const [saving, setSaving] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
   // Only the answer of the latest load of the case shown may land: a late answer of the previous case is dropped.
   const generation = useRef(0);
   const shownCaseId = useRef<number | null>(caseId);
@@ -217,7 +219,12 @@ export function DuplicateDrawer({ caseId, canResolve, onSelectCase, onClose, onC
           </Descriptions>
 
           <div>
-            <Text strong>Участники</Text>
+            <Space size="middle">
+              <Text strong>Участники</Text>
+              {card.members.length > 1 && (
+                <Button size="small" onClick={() => setCompareOpen(true)}>Сравнить</Button>
+              )}
+            </Space>
             <Space direction="vertical" size="small" style={{ width: '100%', marginTop: 8 }}>
               {card.members.map((member) => (
                 <MemberCard key={`${member.system}:${member.recordKey}`} member={member} />
@@ -282,6 +289,12 @@ export function DuplicateDrawer({ caseId, canResolve, onSelectCase, onClose, onC
           <Text>{pending ? ACTION_TEXT[pending].title : ''}?</Text>
         )}
       </Modal>
+      <DuplicateCompareModal
+        open={compareOpen && Boolean(card)}
+        caseId={card?.caseId ?? null}
+        members={card?.members ?? []}
+        onClose={() => setCompareOpen(false)}
+      />
       <MergeClientsModal
         open={mergeOpen && showMerge}
         card={card}
