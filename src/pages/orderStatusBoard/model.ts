@@ -1027,7 +1027,9 @@ export function collectCncOrderIds(columns: CncTelegramTodayColumn[]): number[] 
   return Array.from(orderIds).sort((left, right) => left - right);
 }
 
-/** Orders with MDF work on the board: a non-MDF file (cream card) alone gives its orders no order card. */
+/** Orders with MDF work on the board, or work not proven non-MDF (a rework file, an unknown material, any bath).
+ * An order on the board outside this set reaches it only through proven non-MDF work (a cream file, non-MDF Базис
+ * rows): its card shows «Без МДФ» instead of MDF counters. */
 export function collectCncMdfOrderIds(columns: CncTelegramTodayColumn[]): number[] {
   return collectCncOrderIds(columns.map((column) => ({
     ...column,

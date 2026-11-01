@@ -20,6 +20,7 @@ import {
   buildCncMachineColumnCards,
   buildCncOrderReadiness,
   cncOrderReadinessProgress,
+  cncReadinessExcessText,
   buildCncOrderStatusBoardRequestKey,
   cncOrderStatusBoardKeyCovers,
   narrowCncOrderStatusBoard,
@@ -45,6 +46,7 @@ import {
   buildCncOrderFilterOptions,
   buildCncOrderMissingDetails,
   buildOrderStatusBoardDatasetKey,
+  collectCncMdfOrderIds,
   collectCncOrderIds,
   DEFAULT_MDF_ORDER_CARD_SORT,
   filterBoardColumns,
@@ -58,7 +60,6 @@ import {
   filterCncTodayColumnsByPlannedOrderDate,
   selectCncSearchedOrderItems,
   splitCncSearchedOrderItems,
-  collectCncMdfOrderIds,
   isCncCardSummaryOnly,
   isCncOrderHiddenFromMdfBoard,
   mergeOrderStatusBoardColumnPage,
@@ -117,7 +118,8 @@ describe('MDF order quantity accounting regressions', () => {
       ], new Set());
       const sum = (key: 'cut' | 'rolled' | 'remaining' | 'creditedCut' | 'creditedRolled') => actual.reduce((n,p) => n+p[key], 0);
       expect({ cut: sum('cut'), rolled: sum('rolled'), remaining: sum('remaining'), creditedCut: sum('creditedCut'), creditedRolled: sum('creditedRolled') })
-        .toEqual({ cut: expected.cutDetails, rolled: expected.rolledDetails, remaining: expected.remainingDetails,
+        .toEqual({ cut: expected.cutDetails + expected.excessQuantities!.cut,
+          rolled: expected.rolledDetails + expected.excessQuantities!.rolled, remaining: expected.remainingDetails,
           creditedCut: expected.creditedQuantities!.cut, creditedRolled: expected.creditedQuantities!.rolled });
     }
   });
@@ -128,8 +130,8 @@ describe('MDF order quantity accounting regressions', () => {
       historical('bath', 'cut-result:9', 5, 'baths_laminated')];
     const readiness = buildCncOrderReadiness(sources, {}, [], facts);
     expect(splitCncOrderCardsByManualColumn([demand([7, 2])], readiness, {}).orders[0].readiness)
-      .toMatchObject({ cutDetails: 4, rolledDetails: 5, remainingDetails: 2,
-        creditedQuantities: { cut: 2, rolled: 5 } });
+      .toMatchObject({ cutDetails: 2, rolledDetails: 5, remainingDetails: 2,
+        creditedQuantities: { cut: 2, rolled: 5 }, excessQuantities: { cut: 2, rolled: 0 } });
     expect(buildCncOrderMissingDetails([demand([7, 2])], sources, facts).get(2705))
       .toEqual([{ detailId: 102, detailNumber: 2, requiredQuantity: 2, presentQuantity: 0, missingQuantity: 2 }]);
   });
@@ -189,7 +191,8 @@ describe('MDF order quantity accounting regressions', () => {
     order.details[1].detailNumber = 1;
     const sources = columns([cut('E2E-foreign', 999, 1, 2), cut('E2E-ambiguous', null, 1, 2)], [rolled(101, 1, 3)]);
     expect(calculate(order, sources)).toMatchObject({
-      cutDetails: 4, rolledDetails: 3, remainingDetails: 3, creditedQuantities: { cut: 0, rolled: 3 },
+      cutDetails: 0, rolledDetails: 3, remainingDetails: 3, creditedQuantities: { cut: 0, rolled: 3 },
+      excessQuantities: { cut: 4, rolled: 0 },
     });
     expect(buildCncOrderMissingDetails([order], sources).get(2705)?.map(d => d.missingQuantity)).toEqual([3, 3]);
   });
@@ -264,10 +267,17 @@ describe('MDF order quantity accounting regressions', () => {
     for (let ca = 0; ca <= 4; ca++) for (let la = 0; la <= 4; la++) {
       for (let cb = 0; cb <= 4; cb++) for (let lb = 0; lb <= 4; lb++) {
         const values = [[3, ca, la], [2, cb, lb]];
-        const expected = { cutDetails: 0, rolledDetails: 0, remainingDetails: 0 };
+        const expected = { cutDetails: 0, rolledDetails: 0, remainingDetails: 0,
+          excessQuantities: { cut: 0, rolled: 0 } };
         for (const [required, cutCount, rollCount] of values) {
-          expected.cutDetails += cutCount > rollCount ? cutCount - rollCount : 0;
-          expected.rolledDetails += rollCount;
+          // shown: each position capped at its required quantity; the rest is excess
+          const rolledShown = Math.min(required, rollCount);
+          const cutRaw = cutCount > rollCount ? cutCount - rollCount : 0;
+          const cutShown = Math.min(required - rolledShown, cutRaw);
+          expected.cutDetails += cutShown;
+          expected.rolledDetails += rolledShown;
+          expected.excessQuantities.cut += cutRaw - cutShown;
+          expected.excessQuantities.rolled += rollCount - rolledShown;
           // Every required physical slot is covered by cut OR rolled, never both.
           for (let slot = 1; slot <= required; slot++) {
             if (slot > cutCount && slot > rollCount) expected.remainingDetails++;
@@ -305,7 +315,8 @@ describe('MDF order quantity accounting regressions', () => {
     const order = demand([3, 0]);
     order.details[1].detailNumber = 1;
     const sources = columns([cut('E2E-ambiguous-zero', null, 1, 3)]);
-    expect(calculate(order, sources)).toMatchObject({ cutDetails: 3, remainingDetails: 3 });
+    expect(calculate(order, sources)).toMatchObject({ cutDetails: 0, remainingDetails: 3,
+      excessQuantities: { cut: 3, rolled: 0 } });
     expect(buildCncOrderMissingDetails([order], sources).get(2705)?.[0].missingQuantity).toBe(3);
   });
 
@@ -344,8 +355,9 @@ describe('order status board model', () => {
       expect(split.orders_ready).toEqual([]);
       expect(split.orders[0].readiness).toMatchObject({
         totalDetails: 10, remainingDetails: 5,
-        cutDetails: kind === 'cnc' || kind === 'bazis' ? 10 : 0,
-        rolledDetails: kind === 'cnc' || kind === 'bazis' ? 0 : 10,
+        cutDetails: kind === 'cnc' || kind === 'bazis' ? 5 : 0,
+        rolledDetails: kind === 'cnc' || kind === 'bazis' ? 0 : 5,
+        excessQuantities: kind === 'cnc' || kind === 'bazis' ? { cut: 5, rolled: 0 } : { cut: 0, rolled: 5 },
       });
       const progress = cncOrderReadinessProgress(split.orders[0].readiness);
       expect(progress.cutPercent + progress.rolledPercent).toBe(50);
@@ -367,7 +379,8 @@ describe('order status board model', () => {
     ], {}), {});
     const entry = [...split.orders, ...split.orders_ready][0];
     expect(entry.readiness.remainingDetails).toBe(5 - bQuantity);
-    expect(entry.readiness.cutDetails).toBe(10 + bQuantity);
+    expect(entry.readiness.cutDetails).toBe(5 + bQuantity);
+    expect(entry.readiness.excessQuantities).toEqual({ cut: 5, rolled: 0 });
     expect(split.orders_ready).toHaveLength(bQuantity === 5 ? 1 : 0);
     expect(cncOrderReadinessProgress(entry.readiness).cutPercent).toBe(50 + bQuantity * 10);
   });
@@ -401,7 +414,8 @@ describe('order status board model', () => {
       ], { 'packet:part': 'completed', 'bazisCutSet:9001': 'completed' });
       const remaining = identity === 'same-id' || identity === 'number-only' ? 5 : 8;
       expect(splitCncOrderCardsByManualColumn([order], sources, {}).orders[0]?.readiness)
-        .toMatchObject({ cutDetails: 5, remainingDetails: remaining });
+        .toMatchObject({ cutDetails: 10 - remaining, remainingDetails: remaining,
+          excessQuantities: { cut: remaining - 5, rolled: 0 } });
     },
   );
 
@@ -1230,7 +1244,8 @@ describe('order status board model', () => {
     expect(selectCncSearchedOrderItems(column, ['2708'])).toEqual([]);
     // An unrecognised material is not proven non-MDF: the card is not cream and still counts.
     expect(selectCncSearchedOrderItems(column, ['2709'])).toHaveLength(1);
-    // 2708 and 2710 reach the board only through non-MDF work: no order card.
+    // 2708 and 2710 reach the board only through non-MDF work: an order card marked «Без МДФ».
+    expect(collectCncOrderIds([column])).toEqual([2706, 2708, 2709, 2710]);
     expect(collectCncMdfOrderIds([column])).toEqual([2706, 2709]);
   });
 
@@ -1617,7 +1632,7 @@ describe('order status board model', () => {
     }).get(2705)).toMatchObject({ totalDetails: 10, cutDetails: 10, rolledDetails: 0, remainingDetails: 0 });
   });
 
-  it('shows additive excess after rolling without counting the bath as another cut source', () => {
+  it('shows additive excess apart from the counters after rolling, without counting the bath as another cut source', () => {
     const packet = cncPacket('excess-source', ['2705'], [2705], [2705], [101]);
     packet.items[0] = { ...packet.items[0], quantity: 6 };
     const set = cncBazisCutSet(9001, [{ orderName: '2705', orderId: 2705, detailId: 101 }]);
@@ -1633,8 +1648,10 @@ describe('order status board model', () => {
       buildCncOrderReadiness(columns, {}), {},
     );
     expect(split.orders[0]?.readiness).toMatchObject({
-      totalDetails: 10, cutDetails: 7, rolledDetails: 5, remainingDetails: 0,
+      totalDetails: 10, cutDetails: 5, rolledDetails: 5, remainingDetails: 0,
+      excessQuantities: { cut: 2, rolled: 0 },
     });
+    expect(cncReadinessExcessText(split.orders[0]!.readiness)).toBe('Излишек: распил +2');
   });
 
   it('counts only MDF machine files and Basis-cut details for MDF order cut readiness', () => {
@@ -1744,7 +1761,33 @@ describe('order status board model', () => {
     expect(split.orders_ready).toEqual([]);
   });
 
-  it('preserves excess cut quantity while using ordered quantity as the denominator', () => {
+  it('marks «Без МДФ» only an order whose work on the board is all proven non-MDF', () => {
+    const ldsp = { ...cncPacket('ldsp', ['2705'], [2705], [2705], [101]), materialName: 'ЛДСП 16мм' };
+    const rework = { ...cncPacket('rework', ['2706'], [2706], [2706], [201]), rework: true };
+    const unknown = { ...cncPacket('unknown', ['2707'], [2707], [2707], [301]), materialName: '' };
+    const columns: CncTelegramTodayColumn[] = [
+      { key: 'completed', title: 'Распилено', total: 3, packets: [ldsp, rework, unknown], baths: [] },
+    ];
+    const orders = [2705, 2706, 2707].map((id) => ({ ...card(id), partsCount: 4,
+      details: [orderDetail(id === 2705 ? 101 : id === 2706 ? 201 : 301, 4)], orderStatusName: 'В производстве' }));
+    expect(collectCncOrderIds(columns)).toEqual([2705, 2706, 2707]);
+    // a rework file and an unknown material are not proof of «no MDF»
+    const mdfWorkOrderIds = new Set(collectCncMdfOrderIds(columns));
+    expect([...mdfWorkOrderIds]).toEqual([2706, 2707]);
+    const missing = buildCncOrderMissingDetails(orders, columns);
+    const split = splitCncOrderCardsByManualColumn(orders, buildCncOrderReadiness(columns, {}), {},
+      undefined, missing, { mdfWorkOrderIds });
+    const byId = new Map(split.orders.map((entry) => [entry.card.orderId, entry]));
+    expect(byId.get(2705)?.readiness.withoutMdfWork).toBe(true);
+    expect(byId.get(2705)?.missingDetails).toEqual([]);
+    expect(byId.get(2706)?.readiness.withoutMdfWork).toBeUndefined();
+    expect(byId.get(2707)?.readiness.withoutMdfWork).toBeUndefined();
+    // without the set nothing is marked
+    expect(splitCncOrderCardsByManualColumn(orders, new Map(), {}).orders.some((entry) => entry.readiness.withoutMdfWork))
+      .toBe(false);
+  });
+
+  it('keeps excess cut apart while using ordered quantity as the denominator', () => {
     const split = splitCncOrderCardsByManualColumn(
       [{ ...card(2705), partsCount: 34, details: [orderDetail(101, 34)] }],
       new Map([
@@ -1763,13 +1806,14 @@ describe('order status board model', () => {
     expect(split.orders_ready.map(({ card: item }) => item.orderId)).toEqual([2705]);
     expect(split.orders_ready[0]?.readiness).toMatchObject({
       totalDetails: 34,
-      cutDetails: 53,
+      cutDetails: 34,
       rolledDetails: 0,
       remainingDetails: 0,
+      excessQuantities: { cut: 19, rolled: 0 },
     });
   });
 
-  it('keeps both numeric stage counts above the order quantity without a negative remainder', () => {
+  it('caps both stage counts at the order quantity and shows the rest as excess, without a negative remainder', () => {
     const split = splitCncOrderCardsByManualColumn(
       [{ ...card(2705), partsCount: 10, details: [orderDetail(101, 10)], orderStatusName: 'В производстве' }],
       new Map([[2705, { totalDetails: 15, cutDetails: 3, rolledDetails: 12, remainingDetails: 0,
@@ -1778,8 +1822,10 @@ describe('order status board model', () => {
       {},
     );
     expect(split.orders[0]?.readiness).toMatchObject({
-      totalDetails: 10, cutDetails: 3, rolledDetails: 12, remainingDetails: 0,
+      totalDetails: 10, cutDetails: 0, rolledDetails: 10, remainingDetails: 0,
+      excessQuantities: { cut: 3, rolled: 2 },
     });
+    expect(cncReadinessExcessText(split.orders[0]!.readiness)).toBe('Излишек: распил +3 · закатка +2');
     expect(split.orders_ready).toEqual([]); // real order status still owns placement
   });
 
