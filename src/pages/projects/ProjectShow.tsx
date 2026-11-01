@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Form, Input, Modal, Select, Space, Typography, message, notification } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link, useParams } from 'react-router-dom';
+import { ArrowLeftOutlined } from '@ant-design/icons';
+import { useBackToOrigin } from '../../utils/backToOrigin';
 import { ApiError } from '../../api/apiError';
 import { projectsApi } from '../../api/projectsApi';
 import type { ProjectCard, ProjectDto, ProjectOrderSummary } from '../../api/projectsApi';
@@ -22,6 +24,7 @@ interface ProjectFormValues {
 }
 
 export const ProjectShow: React.FC = () => {
+  const { origin: backOrigin, goBack: goBackToOrigin } = useBackToOrigin();
   const { canViewFinancials } = useOrderFinancialVisibility();
   const { id } = useParams();
   const projectId = Number(id);
@@ -204,9 +207,17 @@ export const ProjectShow: React.FC = () => {
   return (
     <div style={{ padding: 24 }}>
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        <Title level={3} style={{ margin: 0 }}>
-          Проект
-        </Title>
+        <Space align="center" size="small">
+          {/* opened from an order (or another card): the arrow returns there */}
+          {backOrigin ? (
+            <Button type="text" icon={<ArrowLeftOutlined />} onClick={goBackToOrigin} title="Вернуться">
+              {backOrigin.fromLabel ?? 'Назад'}
+            </Button>
+          ) : null}
+          <Title level={3} style={{ margin: 0 }}>
+            Проект
+          </Title>
+        </Space>
 
         <Card
           loading={loading}

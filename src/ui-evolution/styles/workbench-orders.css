@@ -535,6 +535,19 @@
   font-weight: 600;
 }
 
+/* клиент и проект в шапке заказа открывают свои карточки */
+:root[data-ui-variant="workbench"] .wb-order-head__client--link,
+:root[data-ui-variant="workbench"] .wb-order-head__meta-item > a {
+  color: var(--evo-primary);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+:root[data-ui-variant="workbench"] .wb-order-head__client--link:hover,
+:root[data-ui-variant="workbench"] .wb-order-head__meta-item > a:hover {
+  text-decoration: underline;
+}
+
 :root[data-ui-variant="workbench"] .wb-order-head__meta-item {
   max-width: 100%;
   overflow: hidden;

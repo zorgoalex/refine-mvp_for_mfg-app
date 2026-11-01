@@ -8,6 +8,7 @@ import type { MenuProps } from 'antd';
 import { ArrowLeftOutlined, StarOutlined, EyeOutlined, PhoneOutlined, WalletOutlined } from '@ant-design/icons';
 import { useList } from '../../../../query/orderLifecycleQueries';
 import { useNavigate } from 'react-router-dom';
+import { useOpenWithOrigin } from '../../../../utils/backToOrigin';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { getMaterialColor } from '../../../../config/displayColors';
@@ -51,6 +52,8 @@ interface OrderShowHeaderProps {
   compactActions?: React.ReactNode;
   /** «NewLine» page head: project code shown in the sub line. */
   projectLabel?: string | null;
+  /** the project's card (`/projects/show/:id`) opens on a click on the project code */
+  projectId?: number | null;
   onAddPayment?: () => void;
   /** Re-reads the order: the stage letters come from the backend projection. */
   onRefreshOrder?: () => void;
@@ -68,10 +71,13 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
   actions,
   compactActions,
   projectLabel,
+  projectId = null,
   onAddPayment,
   onRefreshOrder,
 }) => {
   const navigate = useNavigate();
+  // client and project open in their cards; the card's back arrow returns to this order
+  const openWithOrigin = useOpenWithOrigin(record?.order_name ? `Заказ ${record.order_name}` : 'Заказ');
   const isOperational = useOperationalUi();
   const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
   const { getSetting } = useOrderAppSettings();
@@ -99,11 +105,13 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
         label: 'Просмотр клиента',
         onClick: () => {
           setClientMenuOpen(false);
-          navigate(`/clients/show/${record.client_id}`);
+          openWithOrigin(`/clients/show/${record.client_id}`);
         },
       },
     ];
-  }, [canViewClients, record?.client_id, navigate]);
+  }, [canViewClients, record?.client_id, openWithOrigin]);
+  const clientLinkTo = record?.client_id && canViewClients ? `/clients/show/${record.client_id}` : null;
+  const projectLinkTo = projectId ? `/projects/show/${projectId}` : null;
 
   // Load employees for design_engineer lookup
   const { data: employeesData } = useList({
@@ -422,7 +430,16 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
       );
     }
 
-    const clientName = (
+    const clientName = clientLinkTo ? (
+      <a
+        className="wb-order-head__client wb-order-head__client--link"
+        href={clientLinkTo}
+        title="Открыть карточку клиента"
+        onClick={(event) => { event.preventDefault(); openWithOrigin(clientLinkTo); }}
+      >
+        {record?.client_name || '—'}
+      </a>
+    ) : (
       <span className="wb-order-head__client" style={record?.client_id ? { cursor: 'context-menu' } : undefined}>
         {record?.client_name || '—'}
       </span>
@@ -494,7 +511,19 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
               {record?.created_by_label ? (
                 <span className="wb-order-head__meta-item" title="Создал заказ">{record.created_by_label}</span>
               ) : null}
-              {projectLabel ? <span className="wb-order-head__meta-item">{projectLabel}</span> : null}
+              {projectLabel ? (
+                <span className="wb-order-head__meta-item">
+                  {projectLinkTo ? (
+                    <a
+                      href={projectLinkTo}
+                      title="Открыть карточку проекта"
+                      onClick={(event) => { event.preventDefault(); openWithOrigin(projectLinkTo); }}
+                    >
+                      {projectLabel}
+                    </a>
+                  ) : projectLabel}
+                </span>
+              ) : null}
               {basisProjectSummary ? (
                 <span className="wb-order-head__meta-item" title={basisProjectSummary}>
                   Базис-проект: <strong>{basisProjectSummary}</strong>
@@ -734,10 +763,12 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             >
               <Text
                 strong
+                title={clientLinkTo ? 'Открыть карточку клиента' : undefined}
+                onClick={clientLinkTo ? () => openWithOrigin(clientLinkTo) : undefined}
                 style={{
                   fontSize: 16,
-                  color: 'var(--app-text)',
-                  cursor: 'context-menu',
+                  color: clientLinkTo ? 'var(--ant-color-link, #1677ff)' : 'var(--app-text)',
+                  cursor: clientLinkTo ? 'pointer' : 'context-menu',
                 }}
               >
                 {record?.client_name || '—'}

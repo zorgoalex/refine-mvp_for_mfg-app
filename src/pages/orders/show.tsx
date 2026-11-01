@@ -3910,6 +3910,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               hdfDetails={hdfDetails}
               actions={workbenchHeadActions}
               projectLabel={featureFlags.projects && projectId ? projectLabel : null}
+              projectId={featureFlags.projects ? projectId : null}
               onAddPayment={openAddPayment}
               onRefreshOrder={refreshOrderShow}
             />

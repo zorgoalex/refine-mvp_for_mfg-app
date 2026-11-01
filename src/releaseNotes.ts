@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-01", title: "Заказ: клиент и проект открываются по клику, с возвратом назад",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "Карточка заказа: имя клиента и код проекта в шапке кликабельны — открывают карточку клиента или проекта. На открытой карточке слева вверху стрелка «← Заказ …» возвращает в тот заказ, откуда перешли. Так же работают «Карточка» клиента и «Проект» в «Связях» справа.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-01", title: "Заказ: при группировке деталей — сразу чекбоксы для раскроя",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

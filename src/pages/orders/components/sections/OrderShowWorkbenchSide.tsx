@@ -1,7 +1,8 @@
 // «NewLine» order card: right column cards. Display only — every value comes from
 // data the card already shows elsewhere (header, «Дополнительная информация», groups).
 import React, { useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
+import { originState } from '../../../../utils/backToOrigin';
 import { message } from 'antd';
 import { Tooltip } from '../../../../ui/tooltipDelay';
 import {
@@ -59,11 +60,12 @@ export const OrderClientCard: React.FC<{
     return rows.filter((row) => typeof row.phone_number === 'string' && row.phone_number.trim());
   }, [phonesData]);
   const name = clientName || '—';
+  const location = useLocation();
 
   return (
     <WorkbenchSideCard
       title="Клиент"
-      extra={clientId && canViewClients ? <Link className="wb-side-card__link" to={`/clients/show/${clientId}`}>Карточка</Link> : null}
+      extra={clientId && canViewClients ? <Link className="wb-side-card__link" to={`/clients/show/${clientId}`} state={originState(location)}>Карточка</Link> : null}
     >
       <div className="wb-side-row wb-side-row--lead">
         <span className="wb-avatar" aria-hidden>{initials(name) || '—'}</span>
@@ -149,7 +151,9 @@ export interface OrderLinkItem {
   title?: string;
 }
 
-export const OrderLinksCard: React.FC<{ items: OrderLinkItem[] }> = ({ items }) => (
+export const OrderLinksCard: React.FC<{ items: OrderLinkItem[] }> = ({ items }) => {
+  const location = useLocation();
+  return (
   <WorkbenchSideCard title="Связи" className="wb-side-card--links">
     {items.length === 0 ? (
       <div className="wb-side-row wb-side-row--muted">Связанных объектов нет</div>
@@ -162,13 +166,14 @@ export const OrderLinksCard: React.FC<{ items: OrderLinkItem[] }> = ({ items }) 
         </>
       );
       return item.to ? (
-        <Link key={item.key} className="wb-link-row" to={item.to} title={item.title}>{content}</Link>
+        <Link key={item.key} className="wb-link-row" to={item.to} state={originState(location)} title={item.title}>{content}</Link>
       ) : (
         <div key={item.key} className="wb-link-row wb-link-row--static" title={item.title}>{content}</div>
       );
     })}
   </WorkbenchSideCard>
-);
+  );
+};
 
 export const OrderNotesCard: React.FC<{ notes?: string | null; extra?: React.ReactNode }> = ({ notes, extra }) => (
   <WorkbenchSideCard title="Примечание" extra={extra}>
