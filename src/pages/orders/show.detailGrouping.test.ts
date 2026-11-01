@@ -26,6 +26,11 @@ describe('show.tsx detail grouping integration', () => {
   it('keeps grouping visible during cut-select (no !cutSelectMode suppression)', () => {
     expect(src).not.toMatch(/groupingActive[^\n]*!cutSelectMode/);
   });
+  it('split into groups, shows the cut checkboxes at once; the toggle button only for the ungrouped list', () => {
+    expect(src).toContain('const cutSelectionShown = cutSelectMode || (!isMobile && detailSelectionEnabled && groupingActive);');
+    expect(src).toMatch(/\{!groupingActive && \(\s*<Button size="small" onClick=\{\(\) => setCutSelectMode/);
+    expect(src).toMatch(/rowSelection=\{\s*cutSelectionShown/);
+  });
   it('renders a group checkbox on separators and filters non-numeric keys', () => {
     expect(src).toContain('groupCheckboxState');
     expect(src).toContain('toggleGroupSelection');

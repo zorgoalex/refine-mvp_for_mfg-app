@@ -120,9 +120,9 @@ describe('cut detail column', () => {
     // rowSelection (cutSelectMode) prepends a checkbox column → `base`. «Раскрой»
     // is appended as the last entry of detailColumns (conditionally via cutColumnEnabled)
     // and flows through visibleDetailColumns.map, so no literal per-column indices needed.
-    expect(show).toContain('const base = cutSelectMode ? 1 : 0');
+    expect(show).toContain('const base = cutSelectionShown ? 1 : 0');
     // leading checkbox summary cell only while selecting
-    expect(show).toContain('{cutSelectMode && <Table.Summary.Cell index={0} />}');
+    expect(show).toContain('{cutSelectionShown && <Table.Summary.Cell index={0} />}');
     // Summary cells iterate visibleDetailColumns dynamically (Раскрой is the last
     // element of detailColumns when cutColumnEnabled, so it is included in the map).
     expect(show).toContain('visibleDetailColumns.map((column, index) =>');

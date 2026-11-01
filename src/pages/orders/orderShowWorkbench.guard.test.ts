@@ -52,7 +52,7 @@ describe('order card under the NewLine variant', () => {
   });
 
   it('heads every group and hides the ХДФ column without ХДФ only in NewLine', () => {
-    expect(show).toContain('includeLeadingSeparator: cutSelectMode || isWorkbench');
+    expect(show).toContain('includeLeadingSeparator: cutSelectionShown || isWorkbench');
     expect(show).toContain(".filter((column) => !isWorkbench || orderHasHdf || column.key !== 'hdf_parameter_override_mm')");
   });
 

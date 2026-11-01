@@ -1867,9 +1867,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     asWorkspaceRecord(restoredShowCheckpoint?.dom),
   ), [restoredShowCheckpoint, tabKey]);
 
-  useEffect(() => {
-    if (!cutSelectMode) setCutSelectedDetailIds([]);
-  }, [cutSelectMode]);
 
   const cutSelectionOrderIdRef = useRef(Number(currentOrderId) || null);
   useEffect(() => {
@@ -2120,6 +2117,16 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   // Active only when a field is chosen and separation is on (grouping stays
   // visible even during cut-select so users can select by group).
   const groupingActive = !!grouping.state.field && grouping.state.showSeparation;
+  // Split into groups, the details show their checkboxes right away (no «Выделить детали для раскроя» click);
+  // the mobile card list has no grouping and keeps the explicit toggle.
+  const cutSelectionShown = cutSelectMode || (!isMobile && detailSelectionEnabled && groupingActive);
+
+  // the selection is dropped when the checkboxes go away (not on the first render, before the grouping is read)
+  const cutSelectionShownRef = useRef(cutSelectionShown);
+  useEffect(() => {
+    if (cutSelectionShownRef.current && !cutSelectionShown) setCutSelectedDetailIds([]);
+    cutSelectionShownRef.current = cutSelectionShown;
+  }, [cutSelectionShown]);
 
   const resolveGroupProductionStatusId = useCallback((detail: any): number | null => {
     const detailId = Number(detail?.detail_id);
@@ -2301,9 +2308,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   // OrderDetail; let TS infer.
   const groupedDataSource = useMemo(
     () => (groupingActive
-      ? buildGroupedRows(sortedDetails, grouping.state.field!, { includeLeadingSeparator: cutSelectMode || isWorkbench, groupValueOf, groupLabelOf })
+      ? buildGroupedRows(sortedDetails, grouping.state.field!, { includeLeadingSeparator: cutSelectionShown || isWorkbench, groupValueOf, groupLabelOf })
       : sortedDetails),
-    [groupingActive, sortedDetails, grouping.state.field, cutSelectMode, groupValueOf, groupLabelOf, isWorkbench],
+    [groupingActive, sortedDetails, grouping.state.field, cutSelectionShown, groupValueOf, groupLabelOf, isWorkbench],
   );
   const orderShowLiveRowsRef = useRef<any[]>([]);
   const orderShowDetailsDataSource = useMemo(() => {
@@ -3106,7 +3113,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     'order-show-live-cells-v2',
   );
   const orderShowDetailTableRenderVersion = [
-    cutSelectMode ? `cut:${cutSelectedDetailIds.join(',')}` : 'view',
+    cutSelectionShown ? `cut:${cutSelectedDetailIds.join(',')}` : 'view',
     highlightDetail ?? '',
     canEditOrderContent ? 'editable' : 'readonly',
     millingTypesMap.size,
@@ -3155,10 +3162,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           />
           {detailSelectionEnabled && details.length > 0 && (
             <>
-              <Button size="small" onClick={() => setCutSelectMode((v) => !v)}>
-                {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
-              </Button>
-              {cutSelectMode && (
+              {!groupingActive && (
+                <Button size="small" onClick={() => setCutSelectMode((v) => !v)}>
+                  {cutSelectMode ? 'Отменить выбор' : 'Выделить детали для раскроя'}
+                </Button>
+              )}
+              {cutSelectionShown && (
                 <>
                   <Button
                     size="small"
@@ -4552,7 +4561,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               }
               scroll={{ x: 'max-content' }}
               rowSelection={
-                cutSelectMode
+                cutSelectionShown
                   ? {
                       selectedRowKeys: cutSelectedDetailIds,
                       onChange: (keys) => setCutSelectedDetailIds(filterNumericKeys(keys)),
@@ -4623,11 +4632,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 const totalArea = calculateOrderTotalArea(details);
                 const totalCost = details.reduce((sum, d) => sum + (d.detail_cost || 0), 0);
 
-                const base = cutSelectMode ? 1 : 0;
+                const base = cutSelectionShown ? 1 : 0;
                 return (
                   <Table.Summary fixed>
                     <Table.Summary.Row style={{ backgroundColor: 'var(--app-surface-muted)', fontWeight: 'bold' }}>
-                      {cutSelectMode && <Table.Summary.Cell index={0} />}
+                      {cutSelectionShown && <Table.Summary.Cell index={0} />}
                       {visibleDetailColumns.map((column, index) => {
                         const key = String(column.key ?? '');
                         if (key === 'detail_number') {

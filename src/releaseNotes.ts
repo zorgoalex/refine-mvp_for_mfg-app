@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-01", title: "Заказ: при группировке деталей — сразу чекбоксы для раскроя",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Карточка заказа: когда детали разделены на группы (по материалу, фрезеровке и др.), чекбоксы выбора для раскроя показываются сразу — у деталей и у групп, с кнопками «Выделить все» и «Добавить выбранные в раскрой»; нажимать «Выделить детали для раскроя» больше не нужно. Без группировки — как раньше.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-01", title: "Календарь: материалы отдельной строкой",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [
