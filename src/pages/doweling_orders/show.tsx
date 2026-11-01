@@ -8,6 +8,7 @@ import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
 import { CardXmlBlock } from "./CardXmlBlock";
 import { DowelingClientLink, DowelingOrderLink } from "./dowelingRecordLinks";
+import { BackToOriginButton } from "../../components/BackToOriginButton";
 
 const { Text } = Typography;
 
@@ -55,6 +56,8 @@ export const DowelOrderShow: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <Show isLoading={isLoading} title="Просмотр Базис-проекта">
+      {/* открыта из заказа — стрелка обратно (NewLine прячет шапку страницы) */}
+      <BackToOriginButton style={{ marginBottom: 8 }} />
       {record && (
         <Row gutter={[16, 16]}>
           <Col xs={24} lg={12}>

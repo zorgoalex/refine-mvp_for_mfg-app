@@ -12,6 +12,7 @@ import { useSelect } from '../../ui/refineSelect';
 import type { BazisProjectCard } from '../../api/types/bazisApi.types';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
+import { BackToOriginButton } from '../../components/BackToOriginButton';
 import { featureFlags } from '../../config/featureFlags';
 import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
@@ -530,6 +531,8 @@ export const BazisProjectViewPage: React.FC = () => {
 
   return (
     <div className={isWorkbench ? 'bazis-project-workspace wb-bz-proj' : 'bazis-project-workspace'}>
+      {/* открыта из заказа — стрелка обратно */}
+      <BackToOriginButton style={{ alignSelf: 'flex-start', marginBottom: 4 }} />
       {workbenchHeader}
       {isOperational ? (
         <OperationalPageHeader

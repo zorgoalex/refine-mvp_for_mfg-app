@@ -28,6 +28,8 @@ import { featureFlags } from '../../../../config/featureFlags';
 import { collectOrderBasisProjects } from './orderBasisProjects';
 import { resolveOrderBasisProject } from '../../../../utils/orderBasisProject';
 import { getDowelingOrderShowPath } from '../../utils/dowelingOrderPaths';
+import { canQueryHasuraResource } from '../../../../utils/resourcePermissions';
+import { authSession } from '../../../../api/authSession';
 import { buildOrderHeaderMaterialSummaryItems } from '../../orderMaterialsSummary';
 import type { OrderHdfDetail } from '../../../../types/orders';
 import { useOptionalUiVariant } from '../../../../ui-variant/UiVariantProvider';
@@ -282,20 +284,51 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
   // Базис-проекты — ссылки на свои карточки (с возвратом в заказ): из деталей — карточка XML-проекта,
   // иначе — карточка присадки, связанной с заказом
   const canOpenBazisProjects = featureFlags.useBackendBazis && can('bazis.view');
+  // имя Базис-проекта из деталей без ссылки на XML-проект — это номер присадки («Базис-проекты»): найти её по имени
+  const xmlProjectPathByName = useMemo(() => {
+    const byName = new Map<string, string | null>();
+    for (const detail of details || []) {
+      const resolved = resolveOrderBasisProject(detail as never);
+      if (!resolved.name || byName.get(resolved.name)) continue;
+      byName.set(resolved.name, canOpenBazisProjects && resolved.projectId ? `/bazis/projects/${resolved.projectId}` : null);
+    }
+    return byName;
+  }, [canOpenBazisProjects, details]);
+  const dowelingIdByName = useMemo(() => {
+    const byName = new Map<string, unknown>();
+    for (const link of dowelingLinks || []) {
+      const name = String(link?.doweling_order?.doweling_order_name ?? link?.doweling_order_name ?? '').trim();
+      const id = link?.doweling_order?.doweling_order_id ?? link?.doweling_order_id;
+      if (name && id != null) byName.set(name, id);
+    }
+    return byName;
+  }, [dowelingLinks]);
+  const unresolvedBasisNames = basisProjects.filter((name) => !xmlProjectPathByName.get(name) && !dowelingIdByName.has(name));
+  const { data: dowelingByNameData } = useList({
+    resource: 'doweling_orders_view',
+    filters: [{ field: 'doweling_order_name', operator: 'in', value: unresolvedBasisNames }],
+    pagination: { pageSize: 20 },
+    queryOptions: {
+      enabled: unresolvedBasisNames.length > 0 && canQueryHasuraResource('doweling_orders_view', authSession.getUser()),
+    },
+  });
   const basisProjectLinks = useMemo(() => {
     if (basisProjects.length > 0) {
-      const byName = new Map<string, string | null>();
-      for (const detail of details || []) {
-        const resolved = resolveOrderBasisProject(detail as never);
-        if (!resolved.name || byName.get(resolved.name)) continue;
-        byName.set(resolved.name, canOpenBazisProjects && resolved.projectId ? `/bazis/projects/${resolved.projectId}` : null);
+      const foundByName = new Map<string, unknown>();
+      for (const row of (dowelingByNameData?.data ?? []) as any[]) {
+        const name = String(row?.doweling_order_name ?? '').trim();
+        if (name && !foundByName.has(name)) foundByName.set(name, row?.doweling_order_id);
       }
-      return basisProjects.map((name) => ({ name, to: byName.get(name) ?? null }));
+      return basisProjects.map((name) => ({
+        name,
+        to: xmlProjectPathByName.get(name)
+          ?? getDowelingOrderShowPath(dowelingIdByName.get(name) ?? foundByName.get(name)),
+      }));
     }
     if (!fallbackBasisProjectName) return [];
     const dowelingOrderId = latestDowelingLink?.doweling_order?.doweling_order_id ?? latestDowelingLink?.doweling_order_id ?? record?.doweling_order_id;
     return [{ name: fallbackBasisProjectName, to: getDowelingOrderShowPath(dowelingOrderId) }];
-  }, [basisProjects, canOpenBazisProjects, details, fallbackBasisProjectName, latestDowelingLink, record?.doweling_order_id]);
+  }, [basisProjects, dowelingByNameData, dowelingIdByName, fallbackBasisProjectName, latestDowelingLink, record?.doweling_order_id, xmlProjectPathByName]);
   const basisProjectNodes = basisProjectLinks.map((item, index) => (
     <React.Fragment key={`${item.name}-${index}`}>
       {index > 0 ? ', ' : null}

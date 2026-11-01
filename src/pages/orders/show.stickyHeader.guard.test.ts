@@ -98,6 +98,13 @@ describe('OrderShow sticky detail header guards', () => {
     expect(headerSource).toContain("onClick={(event) => { event.preventDefault(); openWithOrigin(item.to as string); }}");
     expect(headerSource).toContain("canOpenBazisProjects && resolved.projectId ? `/bazis/projects/${resolved.projectId}` : null");
     expect(headerSource).toContain("style={{ color: '#DC2626', fontWeight: 600 }}");
+    // имя без XML-проекта — присадка: из связей заказа, иначе поиск по имени в «Базис-проектах»
+    expect(headerSource).toContain("filters: [{ field: 'doweling_order_name', operator: 'in', value: unresolvedBasisNames }],");
+    expect(headerSource).toContain("?? getDowelingOrderShowPath(dowelingIdByName.get(name) ?? foundByName.get(name)),");
+    const dowelingCard = readFileSync(fileURLToPath(new URL('../doweling_orders/show.tsx', import.meta.url)), 'utf8');
+    const bazisCard = readFileSync(fileURLToPath(new URL('../bazis/BazisProjectViewPage.tsx', import.meta.url)), 'utf8');
+    expect(dowelingCard).toContain('<BackToOriginButton');
+    expect(bazisCard).toContain('<BackToOriginButton');
     expect(editHeaderSource).toContain('Базис-проект: <Text strong className="order-show-header__compact-text">{basisProjectSummary}</Text>');
     expect(headerSource).not.toContain('Присадка: <Text strong');
     expect(editHeaderSource).not.toContain('Присадка: <Text strong');
