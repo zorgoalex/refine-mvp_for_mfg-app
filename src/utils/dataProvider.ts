@@ -475,6 +475,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
   order_statuses: [
     "order_status_id",
     "order_status_name",
+    "order_status_code",
     "sort_order",
     "color",
     "description",

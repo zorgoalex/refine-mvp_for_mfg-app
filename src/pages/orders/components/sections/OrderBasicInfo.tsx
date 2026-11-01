@@ -32,6 +32,8 @@ import { can } from '../../../../utils/permissions';
 import type { ReferenceOption } from '../../../../query/orderFormDataReferences';
 import { ORDER_MANAGER_CHANGE_PERMISSION, orderManagerOptions } from './orderManagerOptions';
 import { ordersApi } from '../../../../api/ordersApi';
+import { useOrderFormReworkPick } from '../rework/useOrderFormReworkPick';
+import { useReworkOrderStatusIds } from '../rework/useReworkOrderStatusIds';
 import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
 import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
 import {
@@ -147,6 +149,9 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
     sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'order_status_id', order: 'asc' }],
     queryOptions: { enabled: !useBackendReferences },
   });
+  // «Переделка» is set by the rework command: picking it opens the rework form, the field keeps its value.
+  const reworkStatusIds = useReworkOrderStatusIds();
+  const pickRework = useOrderFormReworkPick();
   const resolvedOrderStatusProps = useBackendReferences
     ? createBackendSelectProps(orderFormData.references.orderStatuses, orderFormData.isLoading)
     : orderStatusProps;
@@ -527,7 +532,9 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
               <Select
                 {...resolvedOrderStatusProps}
                 value={header.order_status_id}
-                onChange={(value) => updateHeaderField('order_status_id', value)}
+                onChange={(value) => (reworkStatusIds.has(Number(value))
+                  ? pickRework(header.order_id)
+                  : updateHeaderField('order_status_id', value))}
                 placeholder="Выберите статус"
               />
             </Form.Item>
