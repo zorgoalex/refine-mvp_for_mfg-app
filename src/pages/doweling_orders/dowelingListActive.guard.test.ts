@@ -13,12 +13,12 @@ describe('doweling orders list active filter', () => {
     expect(listSource).toContain('text={active ? "Активен" : "Неактивен"}');
   });
 
-  it('defaults to active doweling orders and can include inactive rows', () => {
-    expect(listSource).toContain('const [showInactive, setShowInactive] = useState(false)');
-    expect(listSource).toContain('field: "delete_flag"');
-    expect(listSource).toContain('operator: "in"');
-    expect(listSource).toContain('value: showInactive ? [false, true] : [false]');
-    expect(listSource).toContain('aria-label="Показывать неактивные"');
+  it('defaults to active doweling orders and can include inactive rows (the «Показывать неактивные» of the filter bar)', () => {
+    const filters = readFileSync(resolve(process.cwd(), 'src/pages/doweling_orders/dowelingListFilters.ts'), 'utf8');
+    expect(listSource).toContain('<ReferenceFilterBar');
+    expect(listSource).toContain('applyDowelingFilters(allRows, filters)');
+    expect(filters).toContain('activeField: true');
+    expect(filters).toContain("(showInactive || row.delete_flag !== true)");
   });
 
   it('keeps delete_flag selectable and filterable on doweling_orders_view', () => {

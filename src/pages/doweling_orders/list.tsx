@@ -1,9 +1,9 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton, List } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Badge, Button, Space, Switch } from "antd";
+import { Badge, Button, Space } from "antd";
 import { EyeOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
@@ -13,27 +13,24 @@ import { useBazisCardsCapability } from "../../hooks/useBazisCardsCapability";
 import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
 import { naturalSorter } from "../../utils/naturalSort";
 import { DowelingClientLink, DowelingOrderLink } from "./dowelingRecordLinks";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import { applyDowelingFilters, dowelingFilterConfig, type DowelingRow } from "./dowelingListFilters";
 
 export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
-  const [showInactive, setShowInactive] = useState(false);
   // Money columns only with the right and the settings matrix (Hasura answers money only with orders.view_financials).
   const { canViewFinancials } = useOrderFinancialVisibility();
   // The quick-create of a card needs a backend that knows cards (an open tab after a backend rollback hides it).
   const cardsSupported = useBazisCardsCapability();
   // Используем doweling_orders_view - одна строка = одна пара присадка-заказ (через order_doweling_links);
   // standalone присадки (без связи) показываются одной строкой с NULL order-колонками (LEFT JOIN).
-  const { tableProps, tableQueryResult } = useTable({
+  // Search and filters (the «Фильтры» bar) are applied to the loaded rows too (dowelingListFilters.ts): they stay
+  // in the URL but are not sent to the server; inactive cards are hidden unless «Показывать неактивные».
+  const { tableProps, tableQueryResult, filters, setFilters, setCurrent } = useTable({
     resource: "doweling_orders_view",
     syncWithLocation: true,
     filters: {
-      permanent: [
-        {
-          field: "delete_flag",
-          operator: "in",
-          value: showInactive ? [false, true] : [false],
-        },
-      ],
+      mode: "off",
     },
     // The whole list (a few hundred rows) is loaded and sorted here: numbers of Bazis projects and orders sort
     // naturally («2» before «12», «1347» before «1347-5»), which a text sort on the server cannot do.
@@ -47,6 +44,9 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
   });
 
   const { show } = useNavigation();
+  const allRows = (tableProps.dataSource ?? []) as DowelingRow[];
+  const filterConfig = useMemo(() => dowelingFilterConfig(allRows, canViewFinancials), [allRows, canViewFinancials]);
+  const rows = useMemo(() => applyDowelingFilters(allRows, filters), [allRows, filters]);
 
   const formatDate = (date: string | null) => {
     if (!date) return "—";
@@ -75,14 +75,6 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
       title="Базис-проекты"
       headerButtons={() => (
         <Space size={12} wrap>
-          <Space size={8}>
-            <Switch
-              checked={showInactive}
-              onChange={setShowInactive}
-              aria-label="Показывать неактивные"
-            />
-            <span>Показывать неактивные</span>
-          </Space>
           {can("doweling.create") && cardsSupported ? (
             <Button
               type="primary"
@@ -102,14 +94,23 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
           void tableQueryResult.refetch();
         }}
       />
+      <ReferenceFilterBar
+        storageKey="doweling_orders"
+        config={filterConfig}
+        filters={filters}
+        setFilters={setFilters}
+        setCurrent={setCurrent}
+      />
       <Table
         {...tableProps}
+        dataSource={rows}
         rowKey={(record: any) => `${record.doweling_order_id}-${record.order_id}`}
         sticky
         scroll={{ x: "max-content", y: 600 }}
         showSorterTooltip={{ mouseEnterDelay: 1 }}
         pagination={{
           ...tableProps.pagination,
+          total: rows.length,
           pageSizeOptions: [10, 20, 25, 50, 100],
           showSizeChanger: true,
           showTotal: (total, range) => `${range[0]}-${range[1]} из ${total}`,
