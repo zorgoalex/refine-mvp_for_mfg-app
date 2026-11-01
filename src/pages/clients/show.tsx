@@ -2,7 +2,7 @@ import { Table } from '../../ui/tooltipDelay';
 import { useState } from "react";
 import { useShow, useList, IResourceComponentsProps } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
-import { Typography, Badge, Row, Col, Divider, Tag, Space, Tabs } from "antd";
+import { Typography, Badge, Row, Col, Divider, Tag, Space, Tabs, Button } from "antd";
 import { ArrowLeftOutlined, PhoneOutlined, StarFilled } from "@ant-design/icons";
 import { useBackToOrigin } from "../../utils/backToOrigin";
 import { ClientPhone, PhoneType, PHONE_TYPE_LABELS } from "../../types/clients";
@@ -185,15 +185,13 @@ export const ClientShow: React.FC<IResourceComponentsProps> = () => {
     </>
   );
   return (
-    <Show
-      isLoading={isLoading}
-      title="Просмотр Клиента"
-      // opened from an order (or another card): the arrow returns there
-      headerProps={backOrigin ? {
-        onBack: goBackToOrigin,
-        backIcon: <span className="app-back-to-origin" title="Вернуться"><ArrowLeftOutlined /> {backOrigin.fromLabel ?? 'Назад'}</span>,
-      } : undefined}
-    >
+    <Show isLoading={isLoading} title="Просмотр Клиента">
+      {/* opened from an order (or another card): the arrow returns there; in the card body — NewLine hides the page header */}
+      {backOrigin ? (
+        <Button className="app-back-to-origin" type="text" icon={<ArrowLeftOutlined />} onClick={goBackToOrigin} title="Вернуться">
+          {backOrigin.fromLabel ?? 'Назад'}
+        </Button>
+      ) : null}
       <Tabs
         key={refreshKey}
         defaultActiveKey="main"

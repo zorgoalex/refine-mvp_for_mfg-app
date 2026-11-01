@@ -210,7 +210,7 @@ export const ProjectShow: React.FC = () => {
         <Space align="center" size="small">
           {/* opened from an order (or another card): the arrow returns there */}
           {backOrigin ? (
-            <Button type="text" icon={<ArrowLeftOutlined />} onClick={goBackToOrigin} title="Вернуться">
+            <Button className="app-back-to-origin" type="text" icon={<ArrowLeftOutlined />} onClick={goBackToOrigin} title="Вернуться">
               {backOrigin.fromLabel ?? 'Назад'}
             </Button>
           ) : null}
