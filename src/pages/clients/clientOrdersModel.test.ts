@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../api/apiError';
-import { clientOrderMoney, clientOrderNumber, clientOrdersProblem, clientOrdersScopeNote, clientOrdersTotals } from './clientOrdersModel';
+import {
+  clientOrderMoney, clientOrderNumber, clientOrdersProblem, clientOrdersScopeNote, clientOrdersTotals, columnSortOrder, tabSortFromTable,
+} from './clientOrdersModel';
 
 const pagination = { page: 1, pageSize: 20, total: 37, totalPages: 2 };
 
@@ -12,10 +14,24 @@ describe('orders of a client in the client card («Заказы»)', () => {
     expect(clientOrderMoney(undefined)).toBe('');
   });
 
-  it('names an order by its full number, else its name, else its id', () => {
-    expect(clientOrderNumber({ fullNumber: 'П-12-230725', orderName: '230725', orderId: 5 })).toBe('П-12-230725');
-    expect(clientOrderNumber({ fullNumber: null, orderName: '230725', orderId: 5 })).toBe('230725');
-    expect(clientOrderNumber({ fullNumber: '', orderName: '', orderId: 5 })).toBe('#5');
+  it('names an order by its number only — never with the group code — else its id', () => {
+    expect(clientOrderNumber({ orderName: '230725', orderId: 5 })).toBe('230725');
+    expect(clientOrderNumber({ orderName: ' 230725 ', orderId: 5 })).toBe('230725');
+    expect(clientOrderNumber({ orderName: '', orderId: 5 })).toBe('#5');
+  });
+
+  it('reads the column sort of the table, and shows the arrow of the chosen column only', () => {
+    const keys = ['number', 'date', 'final'] as const;
+    expect(tabSortFromTable({ columnKey: 'number', order: 'ascend' }, keys)).toEqual({ key: 'number', direction: 'asc' });
+    expect(tabSortFromTable([{ columnKey: 'final', order: 'descend' }], keys)).toEqual({ key: 'final', direction: 'desc' });
+    // Third click (no order), an unknown column or nothing — the default server order.
+    expect(tabSortFromTable({ columnKey: 'number', order: undefined }, keys)).toBeNull();
+    expect(tabSortFromTable({ columnKey: 'debt', order: 'ascend' }, keys)).toBeNull();
+    expect(tabSortFromTable(undefined, keys)).toBeNull();
+    expect(columnSortOrder({ key: 'date', direction: 'asc' }, 'date')).toBe('ascend');
+    expect(columnSortOrder({ key: 'date', direction: 'desc' }, 'date')).toBe('descend');
+    expect(columnSortOrder({ key: 'date', direction: 'desc' }, 'number')).toBeNull();
+    expect(columnSortOrder(null, 'number')).toBeNull();
   });
 
   it('totals of the tab: the number of orders, and money only with the summary of the backend', () => {

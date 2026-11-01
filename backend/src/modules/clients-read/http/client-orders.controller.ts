@@ -6,10 +6,13 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { ClientOrdersService } from '../application/client-orders.service';
 import { CLIENT_ORDERS_PAGE_SIZE_MAX, type ClientOrdersResponseDto } from '../application/client-orders.types';
+import { CLIENT_ORDER_SORT_KEYS, DEFAULT_ORDER_SORT } from '../application/client-tab-sort';
 
 const querySchema = z.object({
   page: z.coerce.number().int().min(1).max(100_000).default(1),
   pageSize: z.coerce.number().int().min(1).max(CLIENT_ORDERS_PAGE_SIZE_MAX).default(20),
+  sort: z.enum(CLIENT_ORDER_SORT_KEYS).default(DEFAULT_ORDER_SORT.key),
+  order: z.enum(['asc', 'desc']).default(DEFAULT_ORDER_SORT.direction),
 }).strict();
 
 /** Client card, tab «Заказы»: the orders of one client the user may see, with totals. Read-only. */
@@ -26,6 +29,7 @@ export class ClientOrdersController {
     const id = /^[1-9]\d{0,14}$/.test(clientId) ? Number(clientId) : NaN;
     const parsed = querySchema.safeParse(query ?? {});
     if (!Number.isSafeInteger(id) || !parsed.success) throw new ApiError(400, 'VALIDATION_FAILED', 'Некорректный запрос заказов клиента');
-    return this.orders.list(request.user, id, parsed.data.page, parsed.data.pageSize, request.requestId ?? randomUUID());
+    const { page, pageSize, sort, order } = parsed.data;
+    return this.orders.list(request.user, id, page, pageSize, request.requestId ?? randomUUID(), { key: sort, direction: order });
   }
 }

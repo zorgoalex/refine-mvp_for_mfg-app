@@ -7,9 +7,29 @@ export function clientOrderMoney(value: number | null | undefined): string {
   return value.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-/** Номер заказа с кодом проекта, как в списке заказов; иначе название; иначе id. */
-export function clientOrderNumber(order: Pick<ClientOrder, 'fullNumber' | 'orderName' | 'orderId'>): string {
-  return order.fullNumber?.trim() || order.orderName?.trim() || `#${order.orderId}`;
+/** Номер заказа без кода группы (решение пользователя 01.11: во вкладках клиента — только номер); иначе id. */
+export function clientOrderNumber(order: Pick<ClientOrder, 'orderName' | 'orderId'>): string {
+  return order.orderName?.trim() || `#${order.orderId}`;
+}
+
+/**
+ * Сортировка вкладки из события таблицы antd: выбранная колонка и направление; без выбора (третий клик) — null,
+ * тогда сервер сортирует по умолчанию (новые сверху).
+ */
+export function tabSortFromTable<K extends string>(sorter: unknown, keys: readonly K[]): { key: K; direction: 'asc' | 'desc' } | null {
+  const one = Array.isArray(sorter) ? sorter[0] : sorter;
+  if (!one || typeof one !== 'object') return null;
+  const { columnKey, order } = one as { columnKey?: unknown; order?: unknown };
+  if (typeof columnKey !== 'string' || !(keys as readonly string[]).includes(columnKey)) return null;
+  if (order === 'ascend') return { key: columnKey as K, direction: 'asc' };
+  if (order === 'descend') return { key: columnKey as K, direction: 'desc' };
+  return null;
+}
+
+/** Состояние стрелки сортировки в заголовке колонки antd. */
+export function columnSortOrder<K extends string>(sort: { key: K; direction: 'asc' | 'desc' } | null, key: K): 'ascend' | 'descend' | null {
+  if (!sort || sort.key !== key) return null;
+  return sort.direction === 'asc' ? 'ascend' : 'descend';
 }
 
 /**

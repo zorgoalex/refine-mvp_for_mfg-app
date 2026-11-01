@@ -6,10 +6,11 @@ import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import type { ClientPaymentsPage } from '../adapters/pg-client-payments-repository';
 import { clientOrderReadScope } from '../../party-contacts/client-order-read-scope';
 import type { ClientPaymentsResponseDto } from './client-payments.types';
+import { DEFAULT_PAYMENT_SORT, type ClientPaymentSortKey, type TabSort } from './client-tab-sort';
 
 export interface ClientPaymentsReadPort {
   clientExists(clientId: number): Promise<boolean>;
-  list(clientId: number, viewer: CurrentUser, page: number, pageSize: number): Promise<ClientPaymentsPage>;
+  list(clientId: number, viewer: CurrentUser, page: number, pageSize: number, sort: TabSort<ClientPaymentSortKey>): Promise<ClientPaymentsPage>;
 }
 
 const REQUIRED = ['clients.view', 'orders.view', 'payments.view', 'orders.view_financials'] as const;
@@ -36,7 +37,10 @@ function answerScope(orderKind: 'all' | 'own', paymentSet: readonly string[]): C
 export class ClientPaymentsService {
   constructor(private readonly ports: { read: ClientPaymentsReadPort; auditClient: DatabaseClient }) {}
 
-  async list(user: CurrentUser, clientId: number, page: number, pageSize: number, requestId: string): Promise<ClientPaymentsResponseDto> {
+  async list(
+    user: CurrentUser, clientId: number, page: number, pageSize: number, requestId: string,
+    sort: TabSort<ClientPaymentSortKey> = DEFAULT_PAYMENT_SORT,
+  ): Promise<ClientPaymentsResponseDto> {
     const missing = REQUIRED.filter((permission) => !user.permissions.includes(permission));
     const orderScope = clientOrderReadScope(user);
     const paymentSet = policyScopeSetsForUser(user).payments.view;
@@ -55,7 +59,8 @@ export class ClientPaymentsService {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра платежей клиента', { requiredPermissions: [...REQUIRED] });
     }
     if (!(await this.ports.read.clientExists(clientId))) throw new ApiError(404, 'CLIENT_NOT_FOUND', 'Клиент не найден');
-    const result = await this.ports.read.list(clientId, user, page, pageSize);
+    // Every column may be sorted: the whole tab already needs the right to see order money.
+    const result = await this.ports.read.list(clientId, user, page, pageSize, sort);
     return {
       data: result.rows.map((row) => ({
         paymentId: Number(row.payment_id), paymentDate: row.payment_date, amount: money(Number(row.amount)),
