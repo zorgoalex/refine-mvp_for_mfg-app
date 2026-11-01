@@ -1,0 +1,61 @@
+/* «NewLine», карточка Базис-проекта: изделия · панели · свойства (мокап 17) */
+.wb-bz-products {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(360px, 2fr) minmax(320px, 1.6fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.wb-bz-products__col {
+  min-width: 0;
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--evo-border, #e5e7eb);
+  border-radius: 10px;
+  background: var(--evo-surface, #fff);
+}
+
+.wb-bz-products__col h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.wb-bz-products__col h3 small,
+.wb-bz-products__node small {
+  margin-left: 6px;
+  color: var(--evo-text-secondary, #8c8c8c);
+  font-weight: 400;
+}
+
+.wb-bz-products__node {
+  display: inline-flex;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.wb-bz-products__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-bz-products__col--panels .ant-table-row {
+  cursor: pointer;
+}
+
+.wb-bz-products__marks .ant-tag {
+  margin-inline-end: 4px;
+}
+
+@media (max-width: 1280px) {
+  .wb-bz-products {
+    grid-template-columns: minmax(200px, 1fr) minmax(320px, 2fr);
+  }
+
+  .wb-bz-products__col--props {
+    grid-column: 1 / -1;
+    max-height: none;
+  }
+}

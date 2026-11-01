@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-01", title: "Базис-проект: вкладка «Изделия»",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "NewLine, карточка Базис-проекта: новая первая вкладка «Изделия» в три колонки — слева изделия и сборки деревом (с числом панелей), в середине панели выбранного изделия (позиция, размер, материал, кромка и присадка), справа свойства выбранной панели с чертежом кромки и присадки. Прежние вкладки «Панели», «Фурнитура», «Дерево» и др. остались.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-01", title: "Базис-проекты: сортировка номеров и ссылки на заказ и клиента",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

@@ -13,6 +13,7 @@ import type { BazisProjectCard } from '../../api/types/bazisApi.types';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
 import { BackToOriginButton } from '../../components/BackToOriginButton';
+import { ProductPanelsView } from './ProductPanelsView';
 import { featureFlags } from '../../config/featureFlags';
 import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
@@ -63,7 +64,8 @@ export const BazisProjectViewPage: React.FC = () => {
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
   const [treeHeight] = useState(() => Math.max(400, window.innerHeight - 360));
   const viewerTreeRef = useRef<ViewerTreeHandle>(null);
-  const [activeTab, setActiveTab] = useState('panels');
+  // NewLine открывает карточку на «Изделиях» (мокап 17), прочие варианты — на «Панелях», как раньше
+  const [activeTab, setActiveTab] = useState(() => (isWorkbench ? 'products' : 'panels'));
   const [selectedPanelId, setSelectedPanelId] = useState<number | null>(null);
   const [selectedPanelNodeIds, setSelectedPanelNodeIds] = useState<number[]>([]);
   const [exportingCutXls, setExportingCutXls] = useState(false);
@@ -164,8 +166,8 @@ export const BazisProjectViewPage: React.FC = () => {
     setSelectedPanelId(null);
     setSelectedPanelNodeIds([]);
     setPendingTreeNodeId(null);
-    setActiveTab('panels');
-  }, [selectedRevisionId]);
+    setActiveTab(isWorkbench ? 'products' : 'panels');
+  }, [selectedRevisionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const revisionData = useRevisionData(selectedRevisionId ?? 0);
   const rootProductCount = useMemo(
@@ -637,6 +639,15 @@ export const BazisProjectViewPage: React.FC = () => {
             activeKey={activeTab}
             onChange={setActiveTab}
             items={[
+              ...(isWorkbench ? [{
+                key: 'products',
+                label: tabLabel('Изделия'),
+                children: revisionData.errorText ? (
+                  <Alert type="warning" showIcon message={revisionData.errorText} />
+                ) : revisionData.loading ? <Spin /> : (
+                  <ProductPanelsView key={selectedRevision.bazisRevisionId} nodes={revisionData.nodes} />
+                ),
+              }] : []),
               {
                 key: 'panels',
                 label: tabLabel('Панели', selectedRevision.summary.panels),
