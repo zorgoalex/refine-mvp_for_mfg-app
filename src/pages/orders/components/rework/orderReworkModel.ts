@@ -35,6 +35,90 @@ export function isReworkTargetAllowed(
   return !issued || target.sortOrder < issued.sortOrder;
 }
 
+/** Active stages in production order (the chain the rework form shows). */
+export function activeStagesInOrder(stages: readonly ReworkStageOption[]): ReworkStageOption[] {
+  return stages.filter((stage) => stage.isActive).sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
+}
+
+/**
+ * The chain a user picks «what to redo» from: every active stage after the first one (the first is the initial state —
+ * nothing to redo) up to «Выдан» inclusive.
+ */
+export function reworkChain(stages: readonly ReworkStageOption[]): ReworkStageOption[] {
+  const ordered = activeStagesInOrder(stages);
+  const issued = ordered.find((stage) => stage.code === 'issued');
+  return ordered.slice(1).filter((stage) => !issued || stage.sortOrder <= issued.sortOrder);
+}
+
+/**
+ * «Redo from stage R» → the stage the detail returns to (the backend's target): the active stage right before R —
+ * it stays done, R is the next one to do.
+ */
+export function redoTarget(redoFromId: number | undefined, stages: readonly ReworkStageOption[]): number | undefined {
+  if (redoFromId === undefined) return undefined;
+  const ordered = activeStagesInOrder(stages);
+  const index = ordered.findIndex((stage) => stage.id === redoFromId);
+  return index > 0 ? ordered[index - 1].id : undefined;
+}
+
+/** «Redo from R» is possible for a detail whose stage is `current`: the stage before R is a valid return target. */
+export function isRedoFromAllowed(
+  redoFromId: number,
+  current: ReworkStageOption | undefined,
+  stages: readonly ReworkStageOption[],
+): boolean {
+  const target = redoTarget(redoFromId, stages);
+  const targetStage = target === undefined ? undefined : stages.find((stage) => stage.id === target);
+  return Boolean(targetStage) && isReworkTargetAllowed(targetStage!, current, stages);
+}
+
+export interface RedoSummary {
+  /** Stages that stay done (up to and including the return target). */
+  kept: string[];
+  /** Stages to do again: from R up to the furthest current stage of the selected details. */
+  redo: string[];
+  /** The stage the details get (with the round suffix applied by the caller). */
+  becomes: string | null;
+  /** The next stage to do — R. */
+  next: string;
+}
+
+export function redoSummary(
+  redoFromId: number,
+  stages: readonly ReworkStageOption[],
+  currentStageIds: readonly (number | null)[],
+): RedoSummary | null {
+  const ordered = activeStagesInOrder(stages);
+  const index = ordered.findIndex((stage) => stage.id === redoFromId);
+  if (index <= 0) return null;
+  const furthest = Math.max(...currentStageIds
+    .map((id) => ordered.find((stage) => stage.id === id)?.sortOrder ?? Number.NEGATIVE_INFINITY));
+  return {
+    kept: ordered.slice(1, index).map((stage) => stage.name),
+    redo: ordered.slice(index).filter((stage) => stage.sortOrder <= furthest).map((stage) => stage.name),
+    becomes: ordered[index - 1].name,
+    next: ordered[index].name,
+  };
+}
+
+/**
+ * The details the outcome is shown for, grouped by their actual «redo from» (own choice, else the common one): one
+ * outcome per group, so a per-detail choice is never hidden behind the common text.
+ */
+export function redoGroups(
+  details: readonly ReworkDetailRow[],
+  perRowRedo: Readonly<Record<number, number | undefined>>,
+  commonRedo: number | undefined,
+): Array<{ redoFrom: number; details: ReworkDetailRow[] }> {
+  const groups = new Map<number, ReworkDetailRow[]>();
+  for (const detail of details) {
+    const redoFrom = perRowRedo[detail.id] ?? commonRedo;
+    if (redoFrom === undefined) continue;
+    groups.set(redoFrom, [...(groups.get(redoFrom) ?? []), detail]);
+  }
+  return [...groups].map(([redoFrom, rows]) => ({ redoFrom, details: rows }));
+}
+
 export type ReworkRequestResult =
   | {
     ok: true;

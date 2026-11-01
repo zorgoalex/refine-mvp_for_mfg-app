@@ -86,6 +86,7 @@ export const DetailCardList: React.FC<{
             </Space>
             <Typography.Text style={{ display: 'block' }}>{m.material}</Typography.Text>
             <Typography.Text type="secondary" style={{ display: 'block' }}>{m.milling}</Typography.Text>
+            {m.stage && <Typography.Text style={{ display: 'block' }}>Этап: {m.stage}</Typography.Text>}
             {hasBasisProjectValue && (
               <Space wrap size={4}>
                 <Typography.Text type="secondary">Базис-проект:</Typography.Text>

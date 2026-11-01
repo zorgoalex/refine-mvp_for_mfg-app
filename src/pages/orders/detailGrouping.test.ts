@@ -1,6 +1,6 @@
 // src/pages/orders/detailGrouping.test.ts
 import { describe, it, expect } from 'vitest';
-import { GROUP_FIELDS, extractGroupValue, buildGroupedRows, selectedGroupLabelForCut, formatBasisProjectGroupLabel } from './detailGrouping';
+import { GROUP_FIELDS, extractGroupValue, buildGroupedRows, selectedGroupLabelForCut, formatBasisProjectGroupLabel, productionStatusGroupKey } from './detailGrouping';
 import type { OrderDetail } from '../../types/orders';
 
 const d = (over: Partial<OrderDetail>): OrderDetail =>
@@ -257,5 +257,32 @@ describe('selectedGroupLabelForCut', () => {
 
     expect(selectedGroupLabelForCut(details, [11], null, () => 'Модерн')).toBeNull();
     expect(selectedGroupLabelForCut(details, [11], 'milling', () => '—')).toBeNull();
+  });
+});
+
+describe('«Переделка»: stage groups by production round', () => {
+  it('a detail of round > 1 has its own stage group; round 1 keeps the plain stage key', () => {
+    expect(productionStatusGroupKey(4, 2)).toBe('4·2');
+    expect(productionStatusGroupKey(4, 1)).toBe('4');
+    expect(productionStatusGroupKey(4, undefined)).toBe('4');
+    expect(productionStatusGroupKey(null, 2)).toBe('__EMPTY__');
+    expect(extractGroupValue(d({ production_status_id: 4, production_round: 2 }), 'production_status')).toBe('4·2');
+  });
+
+  it('«Распилен» and «Распилен ·2» are separate groups', () => {
+    const rows = buildGroupedRows(
+      [
+        d({ detail_id: 1, production_status_id: 4 }),
+        d({ detail_id: 2, production_status_id: 4, production_round: 2 }),
+        d({ detail_id: 3, production_status_id: 4 }),
+      ],
+      'production_status',
+    );
+    const groups = new Map<number, number[]>();
+    for (const row of rows) {
+      if (row.kind !== 'detail') continue;
+      groups.set(row.groupIndex, [...(groups.get(row.groupIndex) ?? []), Number(row.detail.detail_id)]);
+    }
+    expect([...groups.values()]).toEqual([[1, 3], [2]]);
   });
 });

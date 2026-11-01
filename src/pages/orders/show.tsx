@@ -4,7 +4,7 @@ import { useDataProvider, useParsed, IResourceComponentsProps } from "@refinedev
 import type { BaseRecord } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Alert, Button, Card, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
-import { LeftOutlined, WalletOutlined, FolderOutlined, ApartmentOutlined, ScissorOutlined, BlockOutlined, AimOutlined, RightOutlined, PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, WhatsAppOutlined, SendOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
+import { LeftOutlined, WalletOutlined, FolderOutlined, ApartmentOutlined, ScissorOutlined, BlockOutlined, AimOutlined, RightOutlined, PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, WhatsAppOutlined, SendOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined, RollbackOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { getTableColumnDataIndex, getTableStickyOffsetHeader } from './utils/tableCompatibility';
 import { forwardRef, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -21,7 +21,7 @@ import { generateOrderFileName } from "../../utils/excel/fileNameGenerator";
 import { handleExcelError } from "../../utils/excel/excelErrorHandler";
 import { openOrderProductionPdfPreview } from "../../utils/pdf/orderProductionPdf";
 import { OrderPrintView } from "./components/print/OrderPrintView";
-import { OrderReworkPanel } from './components/rework/OrderReworkPanel';
+import { OrderReworkPanel, type ReworkStartMenuAction } from './components/rework/OrderReworkPanel';
 import { createOrderVersionCatchUp, type OrderVersionCatchUp } from './orderVersionCatchUp';
 import { withRoundSuffix } from '../../api/orderReworkApi';
 import { OrderShowHeader } from "./components/sections/OrderShowHeader";
@@ -87,13 +87,13 @@ import {
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
 import { CutPage } from "../cut/CutPage";
 import {
-  EMPTY_GROUP_KEY,
   buildGroupedRows,
   extractCutJobGroupValue,
   formatBasisProjectGroupLabel,
   formatBazisCutSetsGroupLabel,
   formatCutJobGroupLabel,
   GROUP_TINT_COUNT,
+  productionStatusGroupKey,
   selectedGroupLabelForCut,
   type GroupField,
 } from './detailGrouping';
@@ -808,6 +808,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       ? restoredShowCheckpoint.activeOperationalTab
       : 'overview'
   ));
+  // «Переделка»: the start/extend command is a «⋯» menu item; the panel reports it and opens its form on request.
+  const [reworkStartMenu, setReworkStartMenu] = useState<ReworkStartMenuAction | null>(null);
+  const [reworkStartRequest, setReworkStartRequest] = useState(0);
   const [moveModalOpen, setMoveModalOpen] = useState(
     () => restoredShowCheckpoint?.moveModalOpen === true,
   );
@@ -1758,6 +1761,16 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const detailCardLookups: DetailCardLookups = {
     millingNameOf: (d) => millingTypesMap.get((d as any).milling_type_id) || '—',
     materialNameOf: (d) => resolveDetailMaterialName(d, resolvedNameByDetailId, materialsMap) || '—',
+    // The stage the table shows (a live stage command first), its name from the stage reference.
+    stageNameOf: (d) => {
+      const detailId = Number(d.detail_id);
+      const statusId = Number.isInteger(detailId) && currentDetailProductionStatusById.has(detailId)
+        ? normalizeProductionStatusId(currentDetailProductionStatusById.get(detailId))
+        : normalizeProductionStatusId(d.production_status_id);
+      if (statusId == null) return '';
+      return productionStatusesById.get(statusId)?.name
+        || (statusId === normalizeProductionStatusId(d.production_status_id) ? String(d.production_status_name ?? '') : '');
+    },
   };
 
   // SP3: unique server-resolved display material names for the show header summary.
@@ -2102,10 +2115,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
   const groupValueOf = useCallback((sample: any, field: GroupField): string | null | undefined => {
     switch (field) {
-      case 'production_status': {
-        const statusId = resolveGroupProductionStatusId(sample);
-        return statusId == null ? EMPTY_GROUP_KEY : String(statusId);
-      }
+      case 'production_status':
+        return productionStatusGroupKey(resolveGroupProductionStatusId(sample), sample?.production_round);
       case 'cut_job': {
         const detailId = Number(sample?.detail_id);
         const ref = Number.isInteger(detailId) ? cutJobByDetailId.get(detailId) : undefined;
@@ -2138,9 +2149,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         const statusId = resolveGroupProductionStatusId(sample);
         if (statusId == null) return '—';
         const baseStatusId = normalizeProductionStatusId(sample.production_status_id);
-        return productionStatusesById.get(statusId)?.name
-          || (statusId === baseStatusId ? sample.production_status_name : '')
-          || String(statusId);
+        return withRoundSuffix(
+          productionStatusesById.get(statusId)?.name
+            || (statusId === baseStatusId ? sample.production_status_name : '')
+            || String(statusId),
+          sample.production_round,
+        );
       }
       case 'doweling': return sample.doweling === true ? 'Присадка' : '—';
       case 'cut_job': {
@@ -3266,8 +3280,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       { key: 'json', icon: <FileTextOutlined />, label: 'JSON snapshot', disabled: !record || isSnapshotExporting },
     ] : []),
   ] : [];
+  const reworkMenuItems = reworkStartMenu ? [{
+    key: 'rework-start',
+    icon: <RollbackOutlined />,
+    label: reworkStartMenu.hint ? <span title={reworkStartMenu.hint}>{reworkStartMenu.label}</span> : reworkStartMenu.label,
+    disabled: reworkStartMenu.disabled,
+  }] : [];
   const workbenchMoreItems = [
     ...(canUpdateOrders ? [{ key: 'refresh', icon: <ReloadOutlined />, label: 'Обновить', disabled: isRefreshingOrder }] : []),
+    ...reworkMenuItems,
     ...(canMoveOrderProject ? [{ key: 'move-project', icon: <SwapOutlined />, label: 'Перенести в другой проект' }] : []),
     ...(canDeleteOrder ? [{ key: 'delete-order', icon: <DeleteOutlined />, label: 'Удалить заказ', danger: true }] : []),
   ];
@@ -3279,6 +3300,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     if (key === 'excel-without-prices') void handleExportExcel('without-prices');
     if (key === 'json') void handleExportSnapshot();
     if (key === 'move-project') setMoveModalOpen(true);
+    if (key === 'rework-start') setReworkStartRequest((n) => n + 1);
     if (key === 'delete-order') handleDeleteOrder();
   };
   // Customer screen: what this page has loaded and shows (read-only; see ClientScreenShowHeader).
@@ -3486,6 +3508,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                           },
                         ]
                       : []),
+                    ...reworkMenuItems,
                     ...(canMoveOrderProject
                       ? [
                           {
@@ -3527,6 +3550,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     }
                     if (key === 'move-project') {
                       setMoveModalOpen(true);
+                    }
+                    if (key === 'rework-start') {
+                      setReworkStartRequest((n) => n + 1);
                     }
                     if (key === 'delete-order') {
                       handleDeleteOrder();
@@ -3577,7 +3603,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 </>
               ) : null}
               {orderSendAction}
-              {canExportOrders || canMoveOrderProject || canDeleteOrder ? (
+              {canExportOrders || canMoveOrderProject || canDeleteOrder || reworkMenuItems.length > 0 ? (
                 <Dropdown
                   trigger={['click']}
                   menu={{
@@ -3615,6 +3641,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                             },
                           ]
                         : []),
+                      ...reworkMenuItems,
                       ...(canMoveOrderProject
                         ? [
                             {
@@ -3647,6 +3674,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       }
                       if (key === 'move-project') {
                         setMoveModalOpen(true);
+                      }
+                      if (key === 'rework-start') {
+                        setReworkStartRequest((n) => n + 1);
                       }
                       if (key === 'delete-order') {
                         handleDeleteOrder();
@@ -3809,6 +3839,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           {record?.order_id ? (
             <OrderReworkPanel
               orderId={Number(record.order_id)}
+              onStartActionChange={setReworkStartMenu}
+              startRequest={reworkStartRequest}
               version={Number(record.version ?? backendOrder?.version ?? 0)}
               details={(detailsWithLiveProductionStatuses as Array<Record<string, unknown>>).map((detail) => ({
                 id: Number(detail.detail_id),

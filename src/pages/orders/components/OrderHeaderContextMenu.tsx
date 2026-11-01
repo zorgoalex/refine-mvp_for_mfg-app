@@ -24,6 +24,8 @@ import {
   isPackerUser,
 } from '../../../utils/packerStatusAccess';
 import { useKeepAlive } from '../../../components/workspace/KeepAliveContext';
+import { isReworkOrderStatus } from './rework/reworkStartRequests';
+import { useOrderFormReworkPick } from './rework/useOrderFormReworkPick';
 import {
   isWorkspaceOperationOwnershipLost,
   runPageOwnedWorkspaceOperation,
@@ -104,6 +106,12 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
     sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
     queryOptions: { enabled: !packerMode },
   });
+
+  // «Переделка» is set by the rework command (it moves the details too): picking it opens the rework form.
+  const reworkStatusIds = new Set((orderStatusesData?.data || [])
+    .filter((s: any) => isReworkOrderStatus({ code: s.order_status_code }))
+    .map((s: any) => Number(s.order_status_id)));
+  const pickRework = useOrderFormReworkPick();
 
   const orderStatuses = filterOrderStatusesForPacker((orderStatusesData?.data || []).map((s: any) => ({
     id: s.order_status_id,
@@ -424,7 +432,8 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
     key: `order_status_${status.id}`,
     label: status.name,
     onClick: () => {
-      handleStatusChange('order_status', status.id, status.name);
+      if (reworkStatusIds.has(Number(status.id))) pickRework(header.order_id);
+      else handleStatusChange('order_status', status.id, status.name);
       onClose();
     },
   }));

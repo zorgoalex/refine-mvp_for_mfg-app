@@ -129,6 +129,10 @@ const ShellReloadRequired: React.FC = () => (
   </div>
 );
 
+// «Переделка»: the app-level host of the rework form opened from status pickers — its own chunk, loaded with the shell.
+const ReworkStartHost = React.lazy(() => import('../pages/orders/components/rework/ReworkStartHost')
+  .then((module) => ({ default: module.ReworkStartHost })));
+
 export const VariantWorkspaceLayout: React.FC = () => {
   const { variant } = useUiVariant();
   const hintState = useHintDerivedShellState();
@@ -136,8 +140,13 @@ export const VariantWorkspaceLayout: React.FC = () => {
   if (hintState === 'manual') return <ShellReloadRequired />;
   const Shell = shellRegistry[variant];
   return (
-    <React.Suspense fallback={<ShellLoadingFallback />}>
-      <Shell />
-    </React.Suspense>
+    <>
+      <React.Suspense fallback={<ShellLoadingFallback />}>
+        <Shell />
+      </React.Suspense>
+      <React.Suspense fallback={null}>
+        <ReworkStartHost />
+      </React.Suspense>
+    </>
   );
 };

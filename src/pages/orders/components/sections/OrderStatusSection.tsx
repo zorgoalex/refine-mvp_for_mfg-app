@@ -5,9 +5,14 @@ import React from 'react';
 import { Form, Row, Col, Select } from 'antd';
 import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
+import { useOrderFormReworkPick } from '../rework/useOrderFormReworkPick';
+import { useReworkOrderStatusIds } from '../rework/useReworkOrderStatusIds';
 
 export const OrderStatusSection: React.FC = () => {
   const { header, updateHeaderField } = useOrderFormStore();
+  // «Переделка» is set by the rework command: picking it opens the rework form, the field keeps its value.
+  const reworkStatuses = useReworkOrderStatusIds();
+  const pickRework = useOrderFormReworkPick();
 
   // Load order statuses
   const { selectProps: orderStatusProps } = useSelect({
@@ -40,7 +45,11 @@ export const OrderStatusSection: React.FC = () => {
             <Select
               {...orderStatusProps}
               value={header.order_status_id}
-              onChange={(value) => updateHeaderField('order_status_id', value)}
+              onChange={(value) => {
+                if (!reworkStatuses.ready) { reworkStatuses.explainNotReady(); return; }
+                if (reworkStatuses.ids.has(Number(value))) pickRework(header.order_id);
+                else updateHeaderField('order_status_id', value);
+              }}
               placeholder="Выберите статус заказа"
             />
           </Form.Item>
