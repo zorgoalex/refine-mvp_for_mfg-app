@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../../database/database.module';
 import { PgOrderRealtimeReader } from './adapters/pg-order-realtime-reader';
 import { PgOrderRealtimeWriter } from './adapters/pg-order-realtime-writer';
+import { OrderRealtimeDeferredDrainService } from './application/order-realtime-deferred-drain.service';
 import { OrderRealtimeRuntimeConfigService } from './application/order-realtime-runtime-config.service';
 import { OrderRealtimeSnapshotService } from './application/order-realtime-snapshot.service';
 import { OrderRealtimeStreamService } from './application/order-realtime-stream.service';
@@ -16,7 +17,8 @@ import { OrderRealtimeController } from './http/order-realtime.controller';
     OrderRealtimeRuntimeConfigService,
     OrderRealtimeSnapshotService,
     OrderRealtimeStreamService,
+    OrderRealtimeDeferredDrainService,
   ],
-  exports: [PgOrderRealtimeWriter, OrderRealtimeRuntimeConfigService, OrderRealtimeStreamService],
+  exports: [PgOrderRealtimeWriter, OrderRealtimeRuntimeConfigService, OrderRealtimeStreamService, OrderRealtimeDeferredDrainService],
 })
 export class OrderRealtimeModule {}

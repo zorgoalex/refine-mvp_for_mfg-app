@@ -104,6 +104,9 @@ async function bootstrap(): Promise<void> {
     SWAGGER_PATH: config.get('SWAGGER_PATH', { infer: true }),
   });
 
+  // SIGTERM/SIGINT run module destroy hooks (e.g. the deferred realtime drain finishes its
+  // active attempt and logs «drain stopped», «Переделка» §5.9) before the process exits.
+  app.enableShutdownHooks(['SIGTERM', 'SIGINT']);
   await app.listen(config.get('PORT', { infer: true }));
 
   if (onecAgentEnabled) {

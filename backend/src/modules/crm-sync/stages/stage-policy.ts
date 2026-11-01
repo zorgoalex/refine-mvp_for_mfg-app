@@ -21,6 +21,9 @@ export interface StageOrder {
   order_id: string;
   order_name: string;
   order_status_id: number;
+  /** Status whose Bitrix stage the order uses: «Переделка» follows «В производстве» (plan D4). */
+  stage_status_id: number | null;
+  order_status_code: string | null;
   order_kind: string;
   delete_flag: boolean;
   client_id: string;
@@ -113,6 +116,18 @@ export function verifyDeal(
   if (typeof remote.stageId !== 'string' || !remote.stageId)
     throw stageError('RESPONSE_INVALID', 'Bitrix не вернул стадию сделки', 502);
 }
+export const REWORK_UNMAPPED_ERROR =
+  'BITRIX24_STAGE_SKIP_REWORK_UNMAPPED: «Переделка» передаётся в стадию «В производстве», для неё нет сопоставления';
+
+/** Stage mapping lookup by the order's stage status (rework → «В производстве»). */
+export function stageMapping(
+  order: Pick<StageOrder, 'order_status_id' | 'stage_status_id'>,
+  mappings: Array<{ order_status_id: number; stage_id: string }>
+): { statusId: number; stageId: string | undefined } {
+  const statusId = order.stage_status_id ?? order.order_status_id;
+  return { statusId, stageId: mappings.find((m) => m.order_status_id === statusId)?.stage_id };
+}
+
 export function targetStage(
   orderStatusId: number,
   stageId: string | undefined,

@@ -39,3 +39,20 @@ describe('ApiError contract', () => {
     });
   });
 });
+
+describe('mapDatabaseGuardError', () => {
+  it('maps production-round guard raises to 409 with their code', async () => {
+    const { mapDatabaseGuardError } = await import('./api-error.filter');
+    const mapped = mapDatabaseGuardError(Object.assign(new Error('ORDER_REWORK_REQUIRES_COMMAND'), { code: 'P0001' }));
+    expect(mapped?.statusCode).toBe(409);
+    expect(mapped?.code).toBe('ORDER_REWORK_REQUIRES_COMMAND');
+    expect(mapDatabaseGuardError(Object.assign(new Error('STAGE_EVENT_PAST_ROUND_DELETE'), { code: 'P0001' }))?.statusCode).toBe(409);
+  });
+
+  it('leaves unrelated errors to the generic 500 path', async () => {
+    const { mapDatabaseGuardError } = await import('./api-error.filter');
+    expect(mapDatabaseGuardError(Object.assign(new Error('SOMETHING_ELSE'), { code: 'P0001' }))).toBeNull();
+    expect(mapDatabaseGuardError(Object.assign(new Error('ORDER_REWORK_REQUIRES_COMMAND'), { code: '23505' }))).toBeNull();
+    expect(mapDatabaseGuardError(null)).toBeNull();
+  });
+});

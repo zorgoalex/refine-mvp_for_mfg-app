@@ -553,6 +553,7 @@ export class PermissionsService {
         'whatsapp.calendar_send': 'WhatsApp: отправка из календаря',
         'references.quick_create': 'Справочники: быстрое добавление из заказа',
         'clients.contacts.view': 'Клиенты: экран «Контакты клиентов»', 'clients.contacts.manage': 'Клиенты: правка на экране «Контакты клиентов»',
+        'orders.rework': 'Заказы: переделка',
         'integrations.duplicates.view': 'Интеграции: журнал дублей', 'integrations.duplicates.resolve': 'Интеграции: решения по дублям',
         'clients.merge': 'Клиенты: объединение дублей' } as Partial<Record<PermissionName, string>>)[permission] ?? permission,
       description: null as string | null,

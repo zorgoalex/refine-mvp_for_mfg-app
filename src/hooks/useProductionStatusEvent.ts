@@ -13,8 +13,23 @@ import type { ProductionActionResponse } from '../api/types/productionActionsApi
 import { featureFlags } from '../config/featureFlags';
 import { useList } from '../query/orderLifecycleQueries';
 import { ProductionStatusEvent } from '../types/orders';
+import { currentRoundStageEvents } from '../utils/currentRoundStageEvents';
 import { useKeepAlive } from '../components/workspace/KeepAliveContext';
 import { runPageOwnedWorkspaceOperation } from '../workspace/workspaceOperationPins';
+
+/**
+ * Direct Hasura writes to production_status_events are revoked (production
+ * rounds, migration 275): stage marks go through the backend only. A client
+ * still running the legacy path must see a failure, not a false success.
+ */
+export const LEGACY_STAGE_WRITE_UNSUPPORTED_MESSAGE =
+  'Отметка этапов выполняется через сервер. Обновите страницу (Ctrl+F5) и повторите.';
+
+export function legacyStageWriteUnsupportedError(cause: unknown): Error {
+  const error = new Error(LEGACY_STAGE_WRITE_UNSUPPORTED_MESSAGE);
+  (error as Error & { cause?: unknown }).cause = cause;
+  return error;
+}
 
 export interface ProductionStatusCommandOptions {
   version?: number;
@@ -25,6 +40,10 @@ export interface ProductionStatusCommandOptions {
 interface BackendStageOverride {
   active: boolean;
   eventId?: number;
+  /** «Переделка»: the order's production round the command acted in (from the command's answer). */
+  round?: number;
+  /** When the command answered: marks loaded after it are authoritative and replace this override. */
+  at?: number;
 }
 
 export type BackendStageOverrides = Record<string, BackendStageOverride>;
@@ -68,6 +87,8 @@ interface UseProductionStatusEventProps {
   orderId?: number;
   /** Enable loading events */
   enabled?: boolean;
+  /** «Переделка»: the order's current production round (else the newest round among its marks). */
+  productionRound?: number | null;
 }
 
 /**
@@ -79,13 +100,13 @@ export const useProductionStatusEvent = (
   const { tabKey } = useKeepAlive();
   const dataProvider = useDataProvider();
   const invalidate = useInvalidate();
-  const { orderId, enabled = true } = props || {};
+  const { orderId, enabled = true, productionRound } = props || {};
   const [backendStageOverrides, setBackendStageOverrides] = useState<BackendStageOverrides>({});
   const sourceEventsRef = useRef<ProductionStatusEvent[]>([]);
   const backendStageOverridesRef = useRef<BackendStageOverrides>({});
 
   // Load existing events for the order (if orderId provided)
-  const { data: eventsData, isLoading, refetch } = useList<ProductionStatusEvent>({
+  const { data: eventsData, isLoading, refetch, dataUpdatedAt } = useList<ProductionStatusEvent>({
     resource: 'production_status_events',
     filters: orderId
       ? [{ field: 'order_id', operator: 'eq', value: orderId }]
@@ -97,11 +118,27 @@ export const useProductionStatusEvent = (
     },
   });
 
-  const sourceEvents = eventsData?.data || [];
+  // «Переделка»: marks of earlier production rounds are history, not the order's current stages.
+  const sourceEvents = useMemo(
+    () => currentRoundStageEvents(
+      eventsData?.data || [],
+      orderId && productionRound ? new Map([[Number(orderId), Number(productionRound)]]) : undefined,
+    ),
+    [eventsData, orderId, productionRound],
+  );
   sourceEventsRef.current = sourceEvents;
+  // «Переделка»: the order's current round as the data shows it (given, else the round of its loaded marks).
+  const roundOf = useCallback(
+    (targetOrderId: number, from: ProductionStatusEvent[]) =>
+      (orderId && productionRound && Number(targetOrderId) === Number(orderId) ? Number(productionRound) : undefined)
+        ?? knownRoundOf(from, targetOrderId),
+    [orderId, productionRound],
+  );
+  const roundOfRef = useRef(roundOf);
+  roundOfRef.current = roundOf;
   const events = useMemo(
-    () => applyBackendStageOverrides(sourceEvents, backendStageOverrides, orderId),
-    [sourceEvents, backendStageOverrides, orderId],
+    () => applyBackendStageOverrides(sourceEvents, backendStageOverrides, orderId, (id) => roundOf(id, sourceEvents)),
+    [sourceEvents, backendStageOverrides, orderId, roundOf],
   );
 
   useEffect(() => {
@@ -120,7 +157,9 @@ export const useProductionStatusEvent = (
             event.order_id === overrideOrderId &&
             event.production_status_id === productionStatusId,
         );
-        if ((override.active && sourceHasEvent) || (!override.active && !sourceHasEvent)) {
+        // A command of another round says nothing about the order's current round; marks loaded after the command
+        // answered already include it (or a newer state, e.g. an empty new round) — the override is done either way.
+        if (isOverrideSettled(override, { sourceHasEvent, dataRound: roundOf(overrideOrderId, sourceEvents), dataUpdatedAt })) {
           delete next[key];
           changed = true;
         }
@@ -130,7 +169,7 @@ export const useProductionStatusEvent = (
       backendStageOverridesRef.current = result;
       return result;
     });
-  }, [orderId, sourceEvents]);
+  }, [orderId, sourceEvents, roundOf, dataUpdatedAt]);
 
   const clearBackendStageOverridesForOrder = useCallback((targetOrderId: number) => {
     const result = removeBackendStageOverridesForOrder(
@@ -164,12 +203,17 @@ export const useProductionStatusEvent = (
       productionStatusId: number,
       active: boolean,
       eventId?: number,
+      round?: number,
     ) => {
+      // «Переделка»: an answer of a round the loaded marks have already left (a late answer) is not shown.
+      if (isStaleCommandAnswer(round, roundOfRef.current(targetOrderId, sourceEventsRef.current))) return;
       const next = {
         ...backendStageOverridesRef.current,
         [backendStageOverrideKey(targetOrderId, productionStatusId)]: {
           active,
           eventId,
+          round,
+          at: Date.now(),
         },
       };
       backendStageOverridesRef.current = next;
@@ -183,6 +227,8 @@ export const useProductionStatusEvent = (
       const effectiveEvents = applyBackendStageOverrides(
         sourceEventsRef.current,
         backendStageOverridesRef.current,
+        undefined,
+        (id) => roundOfRef.current(id, sourceEventsRef.current),
       );
       return effectiveEvents.some(
         (event) =>
@@ -198,6 +244,8 @@ export const useProductionStatusEvent = (
       const effectiveEvents = applyBackendStageOverrides(
         sourceEventsRef.current,
         backendStageOverridesRef.current,
+        undefined,
+        (id) => roundOfRef.current(id, sourceEventsRef.current),
       );
       return effectiveEvents.find(
         (event) =>
@@ -240,6 +288,7 @@ export const useProductionStatusEvent = (
             productionStatusId,
             true,
             response.event?.productionEventId,
+            response.order?.productionRound,
           );
           options.onResponse?.(response);
           return true;
@@ -284,10 +333,9 @@ export const useProductionStatusEvent = (
           );
           return true;
         }
-        // If table not found in Hasura - skip silently (table not tracked yet)
+        // Hasura no longer grants stage-event writes (production rounds): never report success.
         if (errorMsg.includes('not found in type')) {
-          console.warn('[useProductionStatusEvent] Table not tracked in Hasura, skipping event recording');
-          return true;
+          throw legacyStageWriteUnsupportedError(error);
         }
         console.error('[useProductionStatusEvent] Error recording event:', error);
         throw error;
@@ -348,10 +396,9 @@ export const useProductionStatusEvent = (
           );
           return;
         }
-        // If table not found in Hasura - skip silently
+        // Hasura no longer grants stage-event writes (production rounds): never report success.
         if (errorMsg.includes('not found in type')) {
-          console.warn('[useProductionStatusEvent] Table not tracked in Hasura, skipping event recording');
-          return;
+          throw legacyStageWriteUnsupportedError(error);
         }
         console.error('[useProductionStatusEvent] Error recording event:', error);
         throw error;
@@ -392,6 +439,7 @@ export const useProductionStatusEvent = (
             productionStatusId,
             false,
             response.event?.productionEventId,
+            response.order?.productionRound,
           );
           options.onResponse?.(response);
           return true;
@@ -428,8 +476,7 @@ export const useProductionStatusEvent = (
       } catch (error: any) {
         const errorMsg = error?.message || '';
         if (errorMsg.includes('not found in type')) {
-          console.warn('[useProductionStatusEvent] Table not tracked in Hasura');
-          return true;
+          throw legacyStageWriteUnsupportedError(error);
         }
         console.error('[useProductionStatusEvent] Error removing event:', error);
         throw error;
@@ -515,12 +562,18 @@ export function applyBackendStageOverrides(
   sourceEvents: ProductionStatusEvent[],
   overrides: BackendStageOverrides,
   currentOrderId?: number,
+  currentRoundOf?: (orderId: number) => number | undefined,
 ): ProductionStatusEvent[] {
   let result = sourceEvents;
 
   for (const [key, override] of Object.entries(overrides)) {
     const [orderId, productionStatusId] = key.split(':').map(Number);
     if (currentOrderId !== undefined && orderId !== currentOrderId) {
+      continue;
+    }
+    // «Переделка»: an override made in another production round does not apply to the current one.
+    const round = currentRoundOf?.(orderId);
+    if (override.round !== undefined && round !== undefined && override.round !== round) {
       continue;
     }
 
@@ -553,6 +606,35 @@ export function applyBackendStageOverrides(
   }
 
   return result;
+}
+
+/** «Переделка»: a command answered for a round the loaded marks have already left (a late answer). */
+export function isStaleCommandAnswer(answerRound: number | undefined, dataRound: number | undefined): boolean {
+  return answerRound !== undefined && dataRound !== undefined && answerRound !== dataRound;
+}
+
+/**
+ * An optimistic override is done when the loaded marks confirm it, when they belong to another round than the command,
+ * or when they were loaded after the command answered (they include it, or a newer state such as an empty new round).
+ */
+export function isOverrideSettled(
+  override: { active: boolean; round?: number; at?: number },
+  data: { sourceHasEvent: boolean; dataRound: number | undefined; dataUpdatedAt: number },
+): boolean {
+  if (override.round !== undefined && data.dataRound !== undefined && override.round !== data.dataRound) return true;
+  if (override.at !== undefined && data.dataUpdatedAt > override.at) return true;
+  return override.active ? data.sourceHasEvent : !data.sourceHasEvent;
+}
+
+/** The round of an order's loaded marks (they are the current round's only); undefined without marks. */
+export function knownRoundOf(events: ProductionStatusEvent[], orderId: number): number | undefined {
+  let round: number | undefined;
+  for (const event of events) {
+    if (Number(event.order_id) !== Number(orderId)) continue;
+    const value = Number(event.round_no ?? 1) || 1;
+    round = round === undefined ? value : Math.max(round, value);
+  }
+  return round;
 }
 
 function syntheticProductionEventId(orderId: number, productionStatusId: number): number {
