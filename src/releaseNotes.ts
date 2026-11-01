@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-01", title: "Журнал дублей: поиск снова работает",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "«Интеграции → Дубли»: поиск по названию отвечал ошибкой (сервер не успевал) — проверка названий из 1С перебирала все данные 1С заново для каждой записи. Теперь поиск отвечает за доли секунды; что находится и кому видно — как раньше.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-10-27", title: "Статус заказа «Переделка» и срок готовности круга",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
