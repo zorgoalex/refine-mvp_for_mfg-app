@@ -45,7 +45,8 @@ export const ProductPanelsView: React.FC<{ nodes: readonly BazisTreeNode[] }> = 
         <h3>Изделия</h3>
         <Tree
           blockNode
-          defaultExpandAll
+          // раскрыты изделия и их сборки; глубже — по щелчку
+          defaultExpandedKeys={tree.flatMap((item) => [item.key, ...item.children.map((child) => child.key)])}
           selectedKeys={productId != null ? [productId] : []}
           onSelect={(keys) => { if (keys.length) setProductId(Number(keys[0])); }}
           treeData={treeData(tree)}
@@ -81,7 +82,7 @@ export const ProductPanelsView: React.FC<{ nodes: readonly BazisTreeNode[] }> = 
       </section>
       <aside className="wb-bz-products__col wb-bz-products__col--props" aria-label="Свойства панели">
         <h3>Свойства панели</h3>
-        {panelId != null ? <NodeCard nodeId={panelId} /> : <Empty description="Выберите панель" />}
+        {panelId != null ? <NodeCard nodeId={panelId} narrow /> : <Empty description="Выберите панель" />}
       </aside>
     </div>
   );

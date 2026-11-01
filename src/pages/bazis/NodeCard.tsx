@@ -16,6 +16,8 @@ interface NodeCardProps {
   /** Спрятать список свойств под свёрнутый по дефолту спойлер (включается
    * точечно — верхняя карточка панели на вкладке «Панели»). */
   collapsibleSummary?: boolean;
+  /** Узкая колонка (вкладка «Изделия» NewLine): свойства в одну колонку «название — значение». */
+  narrow?: boolean;
 }
 
 interface KeyValueRow {
@@ -38,7 +40,7 @@ const keyValueColumns: ColumnsType<KeyValueRow> = [
   },
 ];
 
-export const NodeCard: React.FC<NodeCardProps> = ({ nodeId, collapsibleSummary = false }) => {
+export const NodeCard: React.FC<NodeCardProps> = ({ nodeId, collapsibleSummary = false, narrow = false }) => {
   const [card, setCard] = useState<BazisNodeCardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -97,7 +99,7 @@ export const NodeCard: React.FC<NodeCardProps> = ({ nodeId, collapsibleSummary =
   }
 
   const summary = (
-    <Descriptions size="small" column={2} bordered>
+    <Descriptions size="small" column={narrow ? 1 : 2} bordered>
       <Descriptions.Item label="Тип">{card.objectType ?? '—'}</Descriptions.Item>
       <Descriptions.Item label="Вид узла">{card.nodeKind || '—'}</Descriptions.Item>
       <Descriptions.Item label="Наименование">{card.name ?? '—'}</Descriptions.Item>
