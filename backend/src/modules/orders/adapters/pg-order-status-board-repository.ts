@@ -276,11 +276,25 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
             'detailId', od.detail_id,
             'detailNumber', od.detail_number,
             'quantity', GREATEST(od.quantity, 0),
-            'bazisCutQuantity', ${command.query.includeBazisAllocation === false ? '0' : 'COALESCE(bazis_cut.quantity, 0)'}
+            'bazisCutQuantity', ${command.query.includeBazisAllocation === false ? '0' : 'COALESCE(bazis_cut.quantity, 0)'},
+            'statusCut', COALESCE(detail_status.sort_order >= stage_marks.cut_sort_order, false),
+            'statusRolled', COALESCE(detail_status.sort_order >= stage_marks.rolled_sort_order, false)
           )
           ORDER BY od.detail_number ASC NULLS LAST, od.detail_id ASC
         ) AS details_json
         FROM order_details od
+        LEFT JOIN production_statuses detail_status
+          ON detail_status.production_status_id = od.production_status_id
+        -- the stages a detail status proves on the MDF board: «Распилен» and «Закатан», by code or name
+        LEFT JOIN LATERAL (
+          SELECT
+            MIN(ps.sort_order) FILTER (WHERE LOWER(BTRIM(COALESCE(ps.production_status_code, ''))) = 'cut'
+              OR LOWER(BTRIM(ps.production_status_name)) = 'распилен') AS cut_sort_order,
+            MIN(ps.sort_order) FILTER (WHERE LOWER(BTRIM(COALESCE(ps.production_status_code, ''))) = 'laminated'
+              OR LOWER(BTRIM(ps.production_status_name)) = 'закатан') AS rolled_sort_order
+          FROM production_statuses ps
+          WHERE ps.sort_order IS NOT NULL AND COALESCE(ps.is_active, true)
+        ) stage_marks ON true
         ${command.query.includeBazisAllocation === false ? '' : `LEFT JOIN LATERAL (
           SELECT SUM(GREATEST(detail.quantity, 0))::integer AS quantity
           FROM bazis_cut_set_details detail
@@ -744,6 +758,8 @@ function mapBoardCardDetails(value: unknown): OrderStatusBoardCardDetailDto[] {
       bazisCutQuantity: Number.isFinite(bazisCutQuantity)
         ? Math.max(0, Math.trunc(bazisCutQuantity))
         : 0,
+      statusCut: record.statusCut === true || record.statusRolled === true,
+      statusRolled: record.statusRolled === true,
     }];
   });
 }
