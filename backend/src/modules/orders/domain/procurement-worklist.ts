@@ -176,22 +176,27 @@ export interface SupplierCandidate {
 }
 
 /**
- * Основной поставщик позиции (план §4.3): ручной из справочника материала,
- * иначе самый ранний записанный по приходам; остальные — списком.
+ * Основной поставщик позиции (план §4.3): ручной из справочника материала (у листового — его основной, иначе первый
+ * из выбранного списка; у плёнки — первый из списка, migr 280), иначе самый ранний записанный по приходам; остальные
+ * выбранные и записанные — списком, без повторов.
  */
 export function resolveSupplier(
   materialSupplier: { id: number; name: string } | null,
   recorded: SupplierCandidate[],
+  chosen: Array<{ id: number; name: string }> = [],
 ): WorklistSupplierDto {
   const ordered = [...recorded].sort((left, right) => left.firstSeenAt.localeCompare(right.firstSeenAt) || left.id - right.id);
-  if (materialSupplier) {
-    const key = `s:${materialSupplier.id}`;
-    return {
-      key,
-      name: materialSupplier.name,
-      source: 'material',
-      others: ordered.filter((candidate) => candidate.key !== key).map(({ key: k, name }) => ({ key: k, name })),
-    };
+  const main = materialSupplier ?? chosen[0] ?? null;
+  if (main) {
+    const key = `s:${main.id}`;
+    const others: Array<{ key: string; name: string }> = [];
+    const seen = new Set([key]);
+    for (const candidate of [...chosen.map((s) => ({ key: `s:${s.id}`, name: s.name })), ...ordered]) {
+      if (seen.has(candidate.key)) continue;
+      seen.add(candidate.key);
+      others.push({ key: candidate.key, name: candidate.name });
+    }
+    return { key, name: main.name, source: 'material', others };
   }
   const [first, ...rest] = ordered;
   if (!first) return { key: 'none', name: 'Не указан', source: 'none', others: [] };
@@ -213,7 +218,9 @@ export function matchesQuery(line: ProcurementWorklistLineDto, query: Procuremen
   if (onecDocOrders && !onecDocOrders.has(line.lineKey)) return false;
   if (query.search) {
     const needle = query.search.toLocaleLowerCase('ru');
-    const haystack = [line.orderName, line.fullNumber, line.clientName ?? '', line.name, line.supplier.name]
+    // Поиск по любому поставщику позиции — основному и остальным (как SQL-сужение выборки).
+    const haystack = [line.orderName, line.fullNumber, line.clientName ?? '', line.name, line.supplier.name,
+      ...line.supplier.others.map((other) => other.name)]
       .join('\n').toLocaleLowerCase('ru');
     if (!haystack.includes(needle)) return false;
   }

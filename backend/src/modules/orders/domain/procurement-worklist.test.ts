@@ -132,6 +132,17 @@ describe('поставщик (§4.3)', () => {
   it('никого — «Не указан»', () => {
     expect(resolveSupplier(null, [])).toMatchObject({ key: 'none', source: 'none' });
   });
+
+  it('выбранный список (migr 280): первый — основной, если у материала нет своего; повторы с приходами схлопываются', () => {
+    expect(resolveSupplier(null, recorded, [{ id: 7, name: 'Kira' }, { id: 2, name: 'Kronospan' }])).toEqual({
+      key: 's:7', name: 'Kira', source: 'material',
+      others: [{ key: 's:2', name: 'Kronospan' }, { key: 's:1', name: 'Мебель-Трейд' }],
+    });
+    // Основной листового важнее выбранных дополнительных.
+    expect(resolveSupplier({ id: 1, name: 'Мебель-Трейд' }, recorded, [{ id: 7, name: 'Kira' }])).toMatchObject({
+      key: 's:1', others: [{ key: 's:7', name: 'Kira' }, { key: 's:2', name: 'Kronospan' }],
+    });
+  });
 });
 
 function line(overrides: Partial<ProcurementWorklistLineDto>): ProcurementWorklistLineDto {
@@ -161,6 +172,14 @@ describe('фильтры, пресеты, сортировка, группы', (
     expect(matchesQuery(line({}), { ...q, search: 'мебель' })).toBe(true);
     expect(matchesQuery(line({}), { ...q, search: 'плёнка' })).toBe(false);
     expect(matchesQuery(line({ dueDate: null }), { ...q, dueFrom: '2026-09-01' })).toBe(false);
+  });
+
+  it('поиск находит позицию и по второму поставщику; фильтр по ключу — только по основному', () => {
+    const q = { preset: 'all', groupBy: 'none', sort: 'due' } as const;
+    const withOthers = line({ supplier: { key: 's:1', name: 'Мебель-Трейд', source: 'material', others: [{ key: 's:7', name: 'Kira' }] } });
+    expect(matchesQuery(withOthers, { ...q, search: 'kira' })).toBe(true);
+    expect(matchesQuery(withOthers, { ...q, supplierKey: 's:7' })).toBe(false);
+    expect(matchesQuery(withOthers, { ...q, supplierKey: 's:1' })).toBe(true);
   });
 
   it('сортировка по сроку: просрочено, затем по дате, без даты — в конце', () => {

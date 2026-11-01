@@ -1,5 +1,16 @@
 import type { DatabaseService } from '../../../database/database.service';
-import type { TransactionClient } from '../../../database/database.types';
+import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
+import {
+  additionalWithoutMain,
+  composeSheetSuppliers,
+  sameIds,
+} from '../../material-suppliers/application/material-suppliers';
+import {
+  assertSuppliersSelectable,
+  loadMaterialSuppliers,
+  loadSuppliersById,
+  replaceMaterialSuppliers,
+} from '../../material-suppliers/adapters/pg-material-suppliers';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
@@ -53,7 +64,7 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
        ORDER BY sort_order ASC, name ASC, sheet_material_type_id ASC`,
       [query.includeInactive ?? false],
     );
-    return result.rows.map(mapRow);
+    return withSuppliers(this.database, result.rows.map(mapRow));
   }
 
   async getById(query: GetSheetMaterialTypeQuery): Promise<SheetMaterialTypeDto> {
@@ -64,7 +75,7 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
     if (result.rowCount === 0) {
       throw new SheetMaterialNotFoundError(query.id);
     }
-    return mapRow(result.rows[0]);
+    return (await withSuppliers(this.database, [mapRow(result.rows[0])]))[0];
   }
 
   async create(command: CreateSheetMaterialTypeCommand): Promise<SheetMaterialTypeDto> {
@@ -102,7 +113,14 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
             text(input.note),
           ],
         );
-        const row = mapRow(inserted.rows[0]);
+        const created = mapRow(inserted.rows[0]);
+        const additional = additionalWithoutMain(created.supplierId, input.additionalSupplierIds ?? []);
+        // Новые поставщики (основной тоже) — существующие и активные.
+        await assertSuppliersSelectable(tx, [...(created.supplierId === null ? [] : [created.supplierId]), ...additional], []);
+        if (additional.length > 0) {
+          await replaceMaterialSuppliers(tx, 'sheet_material', created.sheetMaterialTypeId, additional, numOrNull(command.currentUser.id));
+        }
+        const [row] = await withSuppliers(tx, [created]);
         await auditService.record(
           tx,
           buildSheetMaterialAuditEvent({
@@ -112,6 +130,7 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
             before: null,
             after: diffShape(row),
             requestId: command.requestId,
+            supplierIds: { before: [], after: row.suppliers.map((s) => s.id) },
           }),
         );
         return row;
@@ -132,9 +151,28 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
         if (existing.rowCount === 0) {
           throw new SheetMaterialNotFoundError(command.id);
         }
-        const before = mapRow(existing.rows[0]);
+        const [before] = await withSuppliers(tx, [mapRow(existing.rows[0])]);
         if (before.version !== command.expectedVersion) {
           throw new SheetMaterialStaleVersionError(command.expectedVersion, before.version);
+        }
+        // Основной — legacy-поле supplierId (не передано = нет основного, как раньше). Дополнительные: не переданы —
+        // прежние; основной из них исключается (продвижение дополнительного в основные).
+        const nextMain = input.supplierId ?? null;
+        const nextAdditional = additionalWithoutMain(
+          nextMain,
+          input.additionalSupplierIds === undefined ? before.additionalSupplierIds : input.additionalSupplierIds ?? [],
+        );
+        // Сравнение — с физическими строками: основной, назначенный прежним backend, может быть и среди дополнительных
+        // (в DTO он скрыт) — такая строка тоже должна уйти.
+        const storedAdditional = ((await loadMaterialSuppliers(tx, 'sheet_material', [command.id])).get(command.id) ?? []).map((s) => s.id);
+        // Новые поставщики (основной тоже) — активные; уже бывшие в списке отключённые можно оставить.
+        await assertSuppliersSelectable(
+          tx,
+          [...(nextMain === null ? [] : [nextMain]), ...nextAdditional],
+          [...(before.supplierId === null ? [] : [before.supplierId]), ...storedAdditional],
+        );
+        if (!sameIds(nextAdditional, storedAdditional)) {
+          await replaceMaterialSuppliers(tx, 'sheet_material', command.id, nextAdditional, numOrNull(command.currentUser.id));
         }
         const updated = await tx.query(
           `UPDATE sheet_material_types SET
@@ -168,7 +206,7 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
             kept(input.note, before.note),
           ],
         );
-        const after = mapRow(updated.rows[0]);
+        const [after] = await withSuppliers(tx, [mapRow(updated.rows[0])]);
         await auditService.record(
           tx,
           buildSheetMaterialAuditEvent({
@@ -178,6 +216,7 @@ export class PgSheetMaterialsRepository implements SheetMaterialsPort {
             before: diffShape(before),
             after: diffShape(after),
             requestId: command.requestId,
+            supplierIds: { before: before.suppliers.map((s) => s.id), after: after.suppliers.map((s) => s.id) },
           }),
         );
         // VARIANT B (Task 7b): eager shadow sync removed — migration 034 hard-deletes all
@@ -270,6 +309,8 @@ function mapRow(r: Record<string, unknown>): SheetMaterialTypeDto {
     widthMm: Number(r.width_mm),
     heightMm: Number(r.height_mm),
     supplierId: r.supplier_id == null ? null : toNum(r.supplier_id),
+    additionalSupplierIds: [],
+    suppliers: [],
     vendorId: r.vendor_id == null ? null : toNum(r.vendor_id),
     supplierArticle: r.supplier_article == null ? null : String(r.supplier_article),
     texture: r.texture == null ? null : Boolean(r.texture),
@@ -294,6 +335,7 @@ function diffShape(s: SheetMaterialTypeDto): Record<string, unknown> {
     widthMm: s.widthMm,
     heightMm: s.heightMm,
     supplierId: s.supplierId,
+    additionalSupplierIds: s.additionalSupplierIds,
     vendorId: s.vendorId,
     supplierArticle: s.supplierArticle,
     texture: s.texture,
@@ -306,6 +348,24 @@ function diffShape(s: SheetMaterialTypeDto): Record<string, unknown> {
     nomenclatureCategory: s.nomenclatureCategory,
     note: s.note,
   };
+}
+
+/** Дополнительные поставщики и общий список (основной первым) для строк справочника. */
+async function withSuppliers(client: DatabaseClient, rows: SheetMaterialTypeDto[]): Promise<SheetMaterialTypeDto[]> {
+  if (rows.length === 0) return rows;
+  const additional = await loadMaterialSuppliers(client, 'sheet_material', rows.map((row) => row.sheetMaterialTypeId));
+  const mains = await loadSuppliersById(client, rows.flatMap((row) => (row.supplierId === null ? [] : [row.supplierId])));
+  return rows.map((row) => {
+    const main = row.supplierId === null
+      ? null
+      : mains.get(row.supplierId) ?? { id: row.supplierId, name: `Поставщик #${row.supplierId}`, isActive: true };
+    const suppliers = composeSheetSuppliers(main, additional.get(row.sheetMaterialTypeId) ?? []);
+    return {
+      ...row,
+      suppliers,
+      additionalSupplierIds: suppliers.filter((s) => s.id !== row.supplierId).map((s) => s.id),
+    };
+  });
 }
 
 function toNum(value: unknown): number {

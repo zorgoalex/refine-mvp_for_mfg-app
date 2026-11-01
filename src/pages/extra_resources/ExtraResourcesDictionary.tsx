@@ -10,6 +10,7 @@ import {
   type UpsertExtraResourceRequest,
 } from '../../api/productionTechSettingsApi';
 import { can } from '../../utils/permissions';
+import { SuppliersSelect } from '../../components/materialSuppliers/SuppliersSelect';
 
 interface UnitOption {
   unit_id: number;
@@ -35,6 +36,8 @@ interface ExtraResourceDraft {
   comment: string;
   isActive: boolean;
   sortOrder: number;
+  vendorId: number | null;
+  supplierIds: number[];
 }
 
 const RESOURCE_KIND_OPTIONS = [
@@ -53,6 +56,8 @@ export function ExtraResourcesDictionary() {
   const [drafts, setDrafts] = useState<ExtraResourceDraft[]>([]);
   const [loading, setLoading] = useState(canView);
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  // Производитель и поставщики — только если backend их отдаёт (migr 280): старый backend отклонил бы эти поля.
+  const supportsSuppliers = resources.some((resource) => Array.isArray(resource.suppliers));
 
   const load = useCallback(async () => {
     if (!canView) {
@@ -87,6 +92,18 @@ export function ExtraResourcesDictionary() {
     queryOptions: { enabled: canViewUnits },
   });
 
+  const { data: vendorsData } = useList<{ vendor_id: number; vendor_name: string }>({
+    resource: 'vendors',
+    pagination: { mode: 'off' },
+    sorters: [{ field: 'vendor_name', order: 'asc' }],
+    meta: { fields: ['vendor_id', 'vendor_name'] },
+    queryOptions: { enabled: canViewUnits && supportsSuppliers },
+  });
+  const vendorOptions = useMemo(
+    () => (vendorsData?.data ?? []).map((vendor) => ({ label: vendor.vendor_name, value: vendor.vendor_id })),
+    [vendorsData?.data],
+  );
+
   const unitOptions = useMemo(
     () => (unitsData?.data ?? []).map((item) => ({
       label: item.unit_symbol || item.unit_name || item.unit_code,
@@ -107,7 +124,7 @@ export function ExtraResourcesDictionary() {
   };
 
   const saveDraft = async (draft: ExtraResourceDraft) => {
-    const normalized = normalizeDraft(draft);
+    const normalized = normalizeDraft(draft, supportsSuppliers);
     if (normalized.error) {
       message.error(normalized.error);
       return;
@@ -177,6 +194,39 @@ export function ExtraResourcesDictionary() {
         />
       ),
     },
+    ...(supportsSuppliers ? [
+      {
+        title: 'Производитель',
+        dataIndex: 'vendorId',
+        width: 160,
+        render: (_: unknown, row: ExtraResourceDraft) => (
+          <Select
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            size="small"
+            options={vendorOptions}
+            value={row.vendorId ?? undefined}
+            disabled={!canManage || !canViewUnits}
+            style={{ width: '100%' }}
+            onChange={(value) => updateDraft(row.clientKey, { vendorId: value ?? null })}
+          />
+        ),
+      },
+      {
+        title: 'Поставщики',
+        dataIndex: 'supplierIds',
+        width: 240,
+        render: (_: unknown, row: ExtraResourceDraft) => (
+          <SuppliersSelect
+            value={row.supplierIds}
+            disabled={!canManage || !canViewUnits}
+            placeholder="Первый — основной"
+            onChange={(value) => updateDraft(row.clientKey, { supplierIds: value })}
+          />
+        ),
+      },
+    ] : []),
     {
       title: 'Метод учета',
       dataIndex: 'accountingMethod',
@@ -266,7 +316,7 @@ export function ExtraResourcesDictionary() {
         <Button
           size="small"
           type="primary"
-          disabled={!canManage || !isChanged(row, resources)}
+          disabled={!canManage || !isChanged(row, resources, supportsSuppliers)}
           loading={savingKey === row.clientKey}
           onClick={() => void saveDraft(row)}
         >
@@ -290,7 +340,7 @@ export function ExtraResourcesDictionary() {
         columns={columns}
         pagination={false}
         size="small"
-        scroll={{ x: 1420 }}
+        scroll={{ x: supportsSuppliers ? 1820 : 1420 }}
       />
     </Space>
   );
@@ -313,6 +363,8 @@ function resourceDtoToDraft(resource: ExtraResourceDto): ExtraResourceDraft {
     comment: resource.comment,
     isActive: resource.isActive,
     sortOrder: resource.sortOrder,
+    vendorId: resource.vendorId ?? null,
+    supplierIds: (resource.suppliers ?? []).map((supplier) => supplier.id),
   };
 }
 
@@ -331,10 +383,12 @@ function createEmptyDraft(sortOrder: number): ExtraResourceDraft {
     comment: '',
     isActive: true,
     sortOrder,
+    vendorId: null,
+    supplierIds: [],
   };
 }
 
-function normalizeDraft(draft: ExtraResourceDraft): { resource: UpsertExtraResourceRequest; error?: string } {
+function normalizeDraft(draft: ExtraResourceDraft, withSuppliers: boolean): { resource: UpsertExtraResourceRequest; error?: string } {
   const resourceName = textOrEmpty(draft.resourceName);
   if (!resourceName) return { resource: draftToRequest(draft), error: 'Укажите название доп. ресурса' };
   const resourceKind = textOrEmpty(draft.resourceKind);
@@ -357,6 +411,7 @@ function normalizeDraft(draft: ExtraResourceDraft): { resource: UpsertExtraResou
       comment: textOrEmpty(draft.comment),
       isActive: draft.isActive,
       sortOrder: draft.sortOrder,
+      ...(withSuppliers ? { vendorId: draft.vendorId, supplierIds: draft.supplierIds } : {}),
     },
   };
 }
@@ -369,15 +424,16 @@ function draftToRequest(draft: ExtraResourceDraft): UpsertExtraResourceRequest {
   };
 }
 
-function isChanged(row: ExtraResourceDraft, resources: ExtraResourceDto[]): boolean {
+function isChanged(row: ExtraResourceDraft, resources: ExtraResourceDto[], withSuppliers: boolean): boolean {
   if (!row.id) return Boolean(textOrEmpty(row.resourceName));
   const original = resources.find((resource) => resource.id === row.id);
   if (!original) return true;
-  return JSON.stringify(compareDraft(row)) !== JSON.stringify(compareDraft(resourceDtoToDraft(original)));
+  return JSON.stringify(compareDraft(row, withSuppliers)) !== JSON.stringify(compareDraft(resourceDtoToDraft(original), withSuppliers));
 }
 
-function compareDraft(draft: ExtraResourceDraft) {
+function compareDraft(draft: ExtraResourceDraft, withSuppliers: boolean) {
   return {
+    ...(withSuppliers ? { vendorId: draft.vendorId ?? null, supplierIds: draft.supplierIds } : {}),
     resourceKind: textOrEmpty(draft.resourceKind),
     resourceRefType: draft.resourceRefType ?? null,
     resourceRefId: draft.resourceRefId ?? null,

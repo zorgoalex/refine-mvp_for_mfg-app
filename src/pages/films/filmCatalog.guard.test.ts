@@ -15,7 +15,7 @@ describe('film catalog screens guard', () => {
     expect(show).toContain('record?.ref_key_1c');
     expect(create).toContain('Максимум 50 символов');
     expect(create).toContain('Максимум 150 символов');
-    expect(create).toContain('Поставщик «нд» недопустим');
+    expect(create).toContain('Производитель «нд» недопустим');
   });
 
   it('warns before film creation in both forms and exposes catalog list fields/merge links', () => {

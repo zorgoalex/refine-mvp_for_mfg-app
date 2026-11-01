@@ -14,6 +14,7 @@ import {
   linesOfKind,
   resourceDemandLines,
   resourceKindTotal,
+  supplierColumnText,
   type OrderResourceDemandRow,
   type ResourceDemandLine,
   type ResourceKind,
@@ -131,10 +132,10 @@ export function MaterialRowsView({
         />
         <Table.Column<MaterialRowsItem>
           key="supplier"
-          title="Поставщик / производитель"
+          title="Поставщик"
           onCell={groupCell}
           render={(_, item) => (item.type === 'line'
-            ? <Typography.Text type="secondary">{item.line.supplierLabel?.replace(/^[^:]+:\s*/, '') ?? '—'}</Typography.Text>
+            ? <Typography.Text type="secondary">{supplierColumnText(item.line.supplierLabel)}</Typography.Text>
             : null)}
         />
         <Table.Column<MaterialRowsItem>

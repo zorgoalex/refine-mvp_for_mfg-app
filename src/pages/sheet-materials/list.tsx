@@ -102,8 +102,13 @@ export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="height_mm" title="Высота, мм" />
         <Table.Column
           dataIndex="supplier_id"
-          title="Поставщик"
-          render={(_, record: any) => supplierMap[record?.supplier_id] ?? (record?.supplier_id ? record.supplier_id : '—')}
+          title="Поставщики"
+          render={(_, record: any) => {
+            // Все поставщики (основной первым) — из backend-списка (migr 280); иначе основной из Hasura.
+            const suppliers = nomenclature.byId.get(Number(record?.sheet_material_type_id))?.suppliers;
+            if (suppliers) return suppliers.length > 0 ? suppliers.map((s) => s.name).join(', ') : '—';
+            return supplierMap[record?.supplier_id] ?? (record?.supplier_id ? record.supplier_id : '—');
+          }}
         />
         <Table.Column
           dataIndex="vendor_id"

@@ -44,6 +44,9 @@ export const SheetMaterialShow: React.FC<IResourceComponentsProps> = () => {
   const { data: unitOne } = useOne({ resource: 'units', id: record?.unit_id, queryOptions: { enabled: !!record?.unit_id } });
   const { data: supplierOne } = useOne({ resource: 'suppliers', id: record?.supplier_id, queryOptions: { enabled: !!record?.supplier_id } });
   const { data: vendorOne } = useOne({ resource: 'vendors', id: record?.vendor_id, queryOptions: { enabled: !!record?.vendor_id } });
+  // Все поставщики (основной первым) — из backend-списка (migr 280); без него — только основной из Hasura.
+  const backendSuppliers = record?.sheet_material_type_id ? nomenclature.byId.get(Number(record.sheet_material_type_id))?.suppliers : undefined;
+  const supplierNames = backendSuppliers ? (backendSuppliers.map((s) => s.name).join(', ') || '—') : undefined;
 
   return (
     <Show
@@ -67,7 +70,7 @@ export const SheetMaterialShow: React.FC<IResourceComponentsProps> = () => {
       <Divider />
       <Row gutter={[16, 16]}>
         <Col span={8}><Title level={5}>Высота, мм</Title><TextField value={record?.height_mm} /></Col>
-        <Col span={8}><Title level={5}>Поставщик</Title><TextField value={supplierOne?.data?.supplier_name ?? '—'} /></Col>
+        <Col span={8}><Title level={5}>Поставщики</Title><TextField value={supplierNames ?? supplierOne?.data?.supplier_name ?? '—'} /></Col>
         <Col span={8}><Title level={5}>Производитель</Title><TextField value={vendorOne?.data?.vendor_name ?? '—'} /></Col>
       </Row>
       <Divider />

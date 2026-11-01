@@ -113,7 +113,7 @@ function flattenReportRows(rows: OrderResourceDemandDto[], material: ResourceDem
     }
 
     return row.films.map((film) => ({
-      providerName: film.vendorName?.trim() || 'Без производителя',
+      providerName: film.supplierName?.trim() || 'Без поставщика',
       orderNumber,
       clientName,
       orderDateText,

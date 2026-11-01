@@ -52,7 +52,7 @@ export function SplitPanelView({
   onProcurementChanged,
   byMaterialQuery,
   refreshRevision,
-  clientFiltersActive = false,
+  aggregateBlockedReason = null,
   byMaterialPeriodNote = null,
 }: {
   rows: OrderResourceDemandRow[];
@@ -71,8 +71,8 @@ export function SplitPanelView({
   /** Фильтры текущего списка — «По материалам» грузит агрегат с теми же условиями. */
   byMaterialQuery: OrderResourceByMaterialQuery;
   refreshRevision: number;
-  /** Фильтры списка, которые не передаются в сводку по материалам (заголовки колонок, «Готовые раскрои»). */
-  clientFiltersActive?: boolean;
+  /** Сводка по материалам недоступна (например, «Отключить все» в заголовке): причина вместо таблицы. */
+  aggregateBlockedReason?: string | null;
   /** Подсказка, что сводка взята за период по умолчанию (последний месяц). */
   byMaterialPeriodNote?: string | null;
 }) {
@@ -86,7 +86,7 @@ export function SplitPanelView({
   const subMode = resolvePanelSubMode(storedSubMode, capabilities.byMaterial);
   const byMaterialState = useResourceDemandByMaterial(
     byMaterialQuery,
-    capabilities.byMaterial && subMode === 'materials',
+    capabilities.byMaterial && subMode === 'materials' && aggregateBlockedReason === null,
     refreshRevision,
   );
 
@@ -107,7 +107,7 @@ export function SplitPanelView({
           showProcurement={capabilities.procurement}
           canManage={canManage}
           manageLoading={manageLoading}
-          clientFiltersActive={clientFiltersActive}
+          blockedReason={aggregateBlockedReason}
           periodNote={byMaterialPeriodNote}
           onChanged={() => {
             byMaterialState.reload();
