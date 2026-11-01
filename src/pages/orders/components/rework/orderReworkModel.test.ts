@@ -5,8 +5,12 @@ import { withRoundSuffix } from '../../../../api/orderReworkApi';
 import {
   buildReworkRequest,
   createLatestGate,
+  isRedoFromAllowed,
   isReworkTargetAllowed,
+  redoSummary,
+  redoTarget,
   reworkActionLabel,
+  reworkChain,
   reworkFormVersion,
   type ReworkStageOption,
 } from './orderReworkModel';
@@ -89,13 +93,14 @@ describe('«Переделка» UI model', () => {
 
   it('the start form pre-fills the deadline from the schedule suggestion and shows it on the banner and in the history', () => {
     const panel = readFileSync(join(__dirname, 'OrderReworkPanel.tsx'), 'utf8');
-    expect(panel).toContain('orderReworkApi.suggestDeadline(orderId, targets)');
-    expect(panel).toContain('label="Срок готовности"');
-    expect(panel).toContain("const deadlineRequired = action === 'return';");
+    const form = readFileSync(join(__dirname, 'ReworkStartModal.tsx'), 'utf8');
+    expect(form).toContain('orderReworkApi.suggestDeadline(orderId, targets)');
+    expect(form).toContain('label="Срок готовности"');
+    expect(form).toContain("const deadlineRequired = action === 'return';");
     // Pre-fill only until edited by hand; adding details only moves the deadline later.
-    expect(panel).toContain('if (!plannedDateTouched) {');
-    expect(panel).toContain('next.suggestedDate > current');
-    expect(panel).toContain('Схема этапов и сроки не заполнена — укажите срок вручную');
+    expect(form).toContain('if (!plannedDateTouched) {');
+    expect(form).toContain('next.suggestedDate > current');
+    expect(form).toContain('Схема этапов и сроки не заполнена — укажите срок вручную');
     expect(panel).toContain(", срок: ${formatReworkDate(openRound.plannedCompletionDate)}");
     expect(panel).toContain("title: 'Срок'");
   });
@@ -131,8 +136,15 @@ describe('«Переделка» UI model', () => {
     // action is offered (start, open round, history reason) — every command would answer 503.
     expect(panel).toContain("const canRework = order.canRework && availability !== 'disabled_flag';");
     expect(panel).toContain('const showStart = canRework && action !== null;');
-    // Why the action is unavailable (MDF engine, cutover) is visible text, not a hover tooltip of a disabled button.
-    expect(panel).toContain('{unavailableHint ? <Text type="secondary">{unavailableHint}</Text> : null}');
+    // The start/extend command is a «⋯» menu item of the card (reported up, opened on request); why it is
+    // unavailable (MDF engine, cutover) is visible text in the panel.
+    expect(panel).toContain('<Text type="secondary">{reworkActionLabel(action!, order.openRoundNo)}: {unavailableHint}</Text>');
+    expect(panel).toContain('useEffect(() => { onStartActionChange?.(startMenu); }, [startMenuKey]);');
+    expect(panel).not.toContain('onClick={() => formVersion !== null && setStartForm(');
+    expect(show).toContain('onStartActionChange={setReworkStartMenu}');
+    expect(show).toContain('startRequest={reworkStartRequest}');
+    expect(show.match(/\.\.\.reworkMenuItems,/g)).toHaveLength(3); // NewLine, phone and desktop «⋯» menus
+    expect(show.match(/key === 'rework-start'/g)?.length).toBe(3);
     // Phone: round actions go under the banner text, not beside it.
     expect(panel).toContain('action={canRework && !isMobile ? roundActions(openRound) : undefined}');
     expect(panel).toContain('description={canRework && isMobile ? roundActions(openRound) : undefined}');
@@ -141,7 +153,7 @@ describe('«Переделка» UI model', () => {
     expect(panel).toContain('const formVersion = reworkFormVersion(order.version, version);');
     expect(panel).toContain('setReasonForm({ round: r, version: formVersion })');
     expect(panel).toContain('setReasonForm({ round, version: formVersion })');
-    expect(panel).toContain('setStartForm({ version: formVersion })');
+    expect(panel).toContain('setStartForm({ version: formVersionNow })');
     expect(panel).toContain('const openedVersion = formVersion;');
     expect(panel).toContain('orderReworkApi.clarifyReason(orderId, reasonForm.round.roundNo, reasonForm.version');
     expect(panel).toContain('version={startForm.version}');
@@ -168,5 +180,53 @@ describe('«Переделка» UI model', () => {
     expect(show).toContain('refetch: () => refetchOrderShowRef.current(),');
     expect(show).toContain('const orderVersionCatchUpActive = isWorkspaceTabActive && documentVisible && ordinaryReadActive;');
     expect(show).toContain('orderVersionCatchUpRef.current?.setActive(orderVersionCatchUpActive);');
+  });
+});
+
+describe('«Переделка»: «what to redo» chain', () => {
+  it('the chain starts after the initial stage, skips inactive stages and ends at «Выдан»', () => {
+    expect(reworkChain(stages).map((s) => s.name)).toEqual(['Распилен', 'Упакован', 'Выдан']);
+  });
+
+  it('«redo from R» returns the detail to the active stage right before R', () => {
+    expect(redoTarget(7, stages)).toBe(2); // redo «Упакован» → stays «Распилен» (inactive «Архив» skipped)
+    expect(redoTarget(2, stages)).toBe(1); // redo from «Распилен» → back to «Отрисован», cut again
+    expect(redoTarget(1, stages)).toBeUndefined(); // the initial stage cannot be redone
+    expect(redoTarget(undefined, stages)).toBeUndefined();
+  });
+
+  it('a detail can redo only stages it has reached', () => {
+    expect(isRedoFromAllowed(7, byId.get(7), stages)).toBe(true); // packed: redo packing
+    expect(isRedoFromAllowed(2, byId.get(7), stages)).toBe(true);
+    expect(isRedoFromAllowed(7, byId.get(2), stages)).toBe(false); // only cut: packing not reached
+    expect(isRedoFromAllowed(8, byId.get(8), stages)).toBe(true); // issued: issue again (return to «Упакован»)
+    expect(isRedoFromAllowed(9, byId.get(9), stages)).toBe(false); // after «Выдан» — not a return target
+  });
+
+  it('the summary names what stays done, what is redone and the next stage', () => {
+    expect(redoSummary(7, stages, [7, 2])).toEqual({ kept: ['Распилен'], redo: ['Упакован'], becomes: 'Распилен', next: 'Упакован' });
+    expect(redoSummary(2, stages, [8])).toEqual({ kept: [], redo: ['Распилен', 'Упакован', 'Выдан'], becomes: 'Отрисован', next: 'Распилен' });
+    expect(redoSummary(1, stages, [7])).toBeNull();
+  });
+});
+
+describe('«Переделка»: picking the status «Переделка» opens the rework form', () => {
+  const src = (path: string) => readFileSync(join(__dirname, path), 'utf8');
+  it('every order-status picker routes «Переделка» to the rework form, never to a plain status change', () => {
+    expect(src('../OrderHeaderContextMenu.tsx')).toContain("if (reworkStatusIds.has(Number(status.id))) pickRework(header.order_id);");
+    expect(src('../sections/OrderStatusSection.tsx')).toContain('? pickRework(header.order_id)');
+    expect(src('../sections/OrderBasicInfo.tsx')).toContain('? pickRework(header.order_id)');
+    expect(src('../../../calendar/components/CalendarBoard.tsx')).toContain("if (fieldName === 'order_status' && reworkStatusIds.has(Number(statusId))) {");
+    expect(src('../../../orderStatusBoard/OrderStatusBoardPage.tsx')).toContain("if (viewState.view === 'order' && reworkStatusIds.has(Number(targetStatusId))) {");
+    expect(src('../../../../App.tsx')).toContain('<ReworkStartHost />');
+    // The order form opens it only without unsaved edits and re-reads the order afterwards.
+    const pick = src('useOrderFormReworkPick.ts');
+    expect(pick).toContain('if (storeApi.getState().isDirty) {');
+    expect(pick).toContain('void loadOrderViaBackend(orderId, {');
+  });
+
+  it('the status is recognised by its code, and the code is read with the status reference', () => {
+    expect(src('../../../../utils/dataProvider.ts')).toMatch(/order_statuses: \[\n\s+"order_status_id",\n\s+"order_status_name",\n\s+"order_status_code",/);
+    expect(src('useReworkOrderStatusIds.ts')).toContain('isReworkOrderStatus({ code: status.order_status_code as string | null })');
   });
 });

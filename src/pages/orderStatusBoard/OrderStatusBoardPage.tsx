@@ -1,4 +1,6 @@
 import { Popover, Tooltip } from '../../ui/tooltipDelay';
+import { requestReworkStart } from '../orders/components/rework/reworkStartRequests';
+import { useReworkOrderStatusIds } from '../orders/components/rework/useReworkOrderStatusIds';
 import { MdfProductionReturnDialog, isMdfBackwardMove, type MdfReturnIntent } from './MdfProductionReturnDialog';
 import { keepsShownMdfBoard, mdfShownDataKey, resetMdfBoardForNewSession } from './mdfBoardSessionData';
 import {
@@ -1326,6 +1328,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     [fetchInitial, stale],
   );
 
+  const reworkStatusIds = useReworkOrderStatusIds();
   const moveCard = useCallback(
     async (
       card: OrderStatusBoardCard,
@@ -1347,6 +1350,15 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
           ? card.canChangeOrderStatus
           : card.canChangeProductionStatus;
       if (!canMove) return;
+      // «Переделка» is set by the rework command (it moves the details too): the drop opens its form instead.
+      if (viewState.view === 'order' && reworkStatusIds.has(Number(targetStatusId))) {
+        const opened = requestReworkStart({
+          orderId: card.orderId,
+          onDone: () => { void fetchInitial({ mutationRefetch: true, preserveLoading: true }); },
+        });
+        if (!opened) message.warning('Статус «Переделка» ставится командой переделки в карточке заказа (меню «⋯»)');
+        return;
+      }
       if (
         viewState.view === 'order' &&
         isPackerUser(authSession.getUser()) &&
@@ -1433,7 +1445,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         }
       }
     },
-    [fetchInitial, replacePending, stale, viewState.view],
+    [fetchInitial, replacePending, reworkStatusIds, stale, viewState.view],
   );
 
   const productionToolbarCompact = viewState.view === 'production';

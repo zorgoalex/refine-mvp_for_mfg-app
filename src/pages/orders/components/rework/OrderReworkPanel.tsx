@@ -1,12 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Checkbox, Collapse, DatePicker, Form, Input, Modal, Select, Space, Tag, Typography, message } from 'antd';
-import dayjs from 'dayjs';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Button, Collapse, Modal, Space, Tag, Typography, message } from 'antd';
 import { Table, Tooltip } from '../../../../ui/tooltipDelay';
 import {
   orderReworkApi,
   REWORK_CLOSE_REASON_LABELS,
   type OrderReworkAvailability,
-  type OrderReworkDeadlineSuggestion,
   type OrderReworkReason,
   type OrderReworkRound,
   type OrderReworkState,
@@ -14,22 +12,15 @@ import {
 import { can } from '../../../../utils/permissions';
 import { useIsMobile } from '../../../../hooks/useDeviceTier';
 import {
-  buildReworkRequest,
   createLatestGate,
-  isReworkTargetAllowed,
   reworkFormVersion,
   reworkActionLabel,
   type ReworkDetailRow,
   type ReworkStageOption,
 } from './orderReworkModel';
+import { formatReworkDate, ReasonFields, ReworkStartModal } from './ReworkStartModal';
 
 const { Text } = Typography;
-
-/** «Переделка» 1.1: YYYY-MM-DD → ДД.ММ.ГГГГ. */
-function formatReworkDate(value: string): string {
-  const [year, month, day] = value.slice(0, 10).split('-');
-  return year && month && day ? `${day}.${month}.${year}` : value;
-}
 
 export interface OrderReworkPanelProps {
   orderId: number;
@@ -38,12 +29,43 @@ export interface OrderReworkPanelProps {
   stages: ReworkStageOption[];
   /** Called after any successful command so the card re-reads the order. */
   onChanged: () => void;
+  /**
+   * The start/extend command lives in the card's «⋯» menu: the panel reports what the menu item is (null — none for
+   * this user/order) and opens its form each time `startRequest` changes.
+   */
+  onStartActionChange?: (action: ReworkStartMenuAction | null) => void;
+  startRequest?: number;
+}
+
+export interface ReworkStartMenuAction {
+  label: string;
+  disabled: boolean;
+  /** Why the item is disabled (MDF engine, cutover, data re-loading). */
+  hint: string | null;
 }
 
 const UNAVAILABLE_HINT: Record<Exclude<OrderReworkAvailability, 'available' | 'disabled_flag'>, string> = {
   mdf_engine_unsupported: 'Переделка станет доступна после поддержки кругов в МДФ-движке',
   mdf_cutover_in_progress: 'Идёт переключение производственного учёта, повторите позже',
 };
+
+/** The «⋯» menu item for starting/extending a round — same gates as the panel used for its button. */
+function startMenuAction(
+  state: OrderReworkState | null,
+  availability: OrderReworkAvailability | null,
+  cardVersion: number,
+): ReworkStartMenuAction | null {
+  if (!state || !availability || availability === 'disabled_flag') return null;
+  const { order } = state;
+  if (!order.canRework || order.action === null) return null;
+  const unavailableHint = availability !== 'available' ? UNAVAILABLE_HINT[availability] : null;
+  const syncing = reworkFormVersion(order.version, cardVersion) === null;
+  return {
+    label: reworkActionLabel(order.action, order.openRoundNo),
+    disabled: Boolean(unavailableHint) || syncing,
+    hint: unavailableHint ?? (syncing ? 'Данные заказа обновляются…' : null),
+  };
+}
 
 const errorText = (error: unknown) =>
   (error as { message?: string } | null)?.message ?? 'Не удалось выполнить действие';
@@ -52,7 +74,9 @@ const errorText = (error: unknown) =>
  * «Переделка» in the order card (plan §9): start/extend buttons, the open-round banner
  * (clarify reason, «Это не переделка») and the round history.
  */
-export const OrderReworkPanel: React.FC<OrderReworkPanelProps> = ({ orderId, version, details, stages, onChanged }) => {
+export const OrderReworkPanel: React.FC<OrderReworkPanelProps> = ({
+  orderId, version, details, stages, onChanged, onStartActionChange, startRequest,
+}) => {
   // Reasons are loaded for holders of the permission; actions use the backend-resolved capability.
   const canLoadReasons = can('orders.rework');
   // On a phone the round actions go under the banner text (as an Alert action they squeeze it into a column).
@@ -119,6 +143,19 @@ export const OrderReworkPanel: React.FC<OrderReworkPanelProps> = ({ orderId, ver
     onChanged();
   }, [onChanged, reload]);
 
+  // The «⋯» menu item of the card (reported up) and its open requests — before any early return (hooks).
+  const startMenu = startMenuAction(state, availability, version);
+  const startMenuKey = JSON.stringify(startMenu);
+  useEffect(() => { onStartActionChange?.(startMenu); }, [startMenuKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onStartActionChange?.(null), [onStartActionChange]);
+  const handledStartRequest = useRef(startRequest);
+  useEffect(() => {
+    if (startRequest === undefined || startRequest === handledStartRequest.current) return;
+    handledStartRequest.current = startRequest;
+    const formVersionNow = state ? reworkFormVersion(state.order.version, version) : null;
+    if (startMenu && !startMenu.disabled && formVersionNow !== null) setStartForm({ version: formVersionNow });
+  }, [startRequest]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!state || availability === 'disabled_flag' && state.data.length === 0) return null;
   const { order } = state;
   // Same gates as the backend commands: orders.rework + orders.update within the order's update scope; with the flag
@@ -183,19 +220,10 @@ export const OrderReworkPanel: React.FC<OrderReworkPanelProps> = ({ orderId, ver
           description={canRework && isMobile ? roundActions(openRound) : undefined}
         />
       ) : null}
-      {showStart ? (
+      {/* The command itself is in the card's «⋯» menu; why it is unavailable is written here. */}
+      {showStart && unavailableHint ? (
         <Space style={{ marginTop: openRound ? 6 : 0 }}>
-          <Tooltip title={unavailableHint ?? (action === 'start_in_production' ? 'Брак — выбранные детали пойдут повторно' : undefined)}>
-            <Button
-              size="small"
-              disabled={Boolean(unavailableHint) || syncing}
-              onClick={() => formVersion !== null && setStartForm({ version: formVersion })}
-            >
-              {reworkActionLabel(action!, order.openRoundNo)}
-            </Button>
-          </Tooltip>
-          {/* A disabled button shows no tooltip on hover: the reason is written next to it. */}
-          {unavailableHint ? <Text type="secondary">{unavailableHint}</Text> : null}
+          <Text type="secondary">{reworkActionLabel(action!, order.openRoundNo)}: {unavailableHint}</Text>
         </Space>
       ) : null}
       {syncing ? (
@@ -255,6 +283,7 @@ export const OrderReworkPanel: React.FC<OrderReworkPanelProps> = ({ orderId, ver
           version={startForm.version}
           action={action}
           openRoundNo={order.openRoundNo}
+          roundNo={order.openRoundNo ?? order.lastRoundNo + 1}
           details={details}
           stages={stages}
           reasons={reasons}
@@ -315,216 +344,6 @@ const ReworkReasonModal: React.FC<{
       onOk={() => reasonId && onSubmit(reasonId, comment.trim() || null)}
     >
       <ReasonFields reasons={reasons} reasonId={reasonId} setReasonId={setReasonId} comment={comment} setComment={setComment} />
-    </Modal>
-  );
-};
-
-const ReasonFields: React.FC<{
-  reasons: OrderReworkReason[];
-  reasonId: number | undefined;
-  setReasonId: (id: number) => void;
-  comment: string;
-  setComment: (value: string) => void;
-}> = ({ reasons, reasonId, setReasonId, comment, setComment }) => {
-  const reason = reasons.find((r) => r.reasonId === reasonId);
-  return (
-    <Form layout="vertical">
-      <Form.Item label="Причина" required>
-        <Select
-          value={reasonId}
-          onChange={setReasonId}
-          placeholder="Выберите причину"
-          options={reasons.map((r) => ({ value: r.reasonId, label: r.name }))}
-        />
-      </Form.Item>
-      <Form.Item label={reason?.requiresComment ? 'Комментарий (обязателен)' : 'Комментарий'} required={reason?.requiresComment}>
-        <Input.TextArea value={comment} onChange={(e) => setComment(e.target.value)} maxLength={2000} autoSize={{ minRows: 2, maxRows: 5 }} />
-      </Form.Item>
-    </Form>
-  );
-};
-
-const ReworkStartModal: React.FC<{
-  orderId: number;
-  version: number;
-  action: 'return' | 'start_in_production' | 'extend';
-  openRoundNo: number | null;
-  details: ReworkDetailRow[];
-  stages: ReworkStageOption[];
-  reasons: OrderReworkReason[];
-  busy: boolean;
-  setBusy: (busy: boolean) => void;
-  onCancel: () => void;
-  onDone: (text: string) => Promise<void>;
-  onFailed: (error: unknown) => Promise<void>;
-}> = ({ orderId, version, action, openRoundNo, details, stages, reasons, busy, setBusy, onCancel, onDone, onFailed }) => {
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [commonStage, setCommonStage] = useState<number | undefined>();
-  const [perRow, setPerRow] = useState<Record<number, number | undefined>>({});
-  const [reasonId, setReasonId] = useState<number | undefined>();
-  const [comment, setComment] = useState('');
-  // «Переделка» 1.1: the round deadline — pre-filled from «Схема этапов и сроки» until edited by hand.
-  const [plannedDate, setPlannedDate] = useState<string | null>(null);
-  const [plannedDateTouched, setPlannedDateTouched] = useState(false);
-  const [suggestion, setSuggestion] = useState<OrderReworkDeadlineSuggestion | null>(null);
-  const suggestionGate = useRef(createLatestGate());
-  const stageById = useMemo(() => new Map(stages.map((s) => [s.id, s])), [stages]);
-  const needsReason = action !== 'extend';
-  const deadlineRequired = action === 'return';
-  const request = buildReworkRequest({
-    selected, commonStage, perRow, details, stageById, reasonId, comment, needsReason, reasons,
-    plannedCompletionDate: plannedDate, deadlineRequired,
-  });
-  const targetsKey = JSON.stringify(details
-    .filter((d) => selected.has(d.id))
-    .map((d) => [d.id, perRow[d.id] ?? commonStage ?? null]));
-  useEffect(() => {
-    const targets = (JSON.parse(targetsKey) as Array<[number, number | null]>)
-      .filter((pair): pair is [number, number] => pair[1] !== null)
-      .map(([detailId, productionStatusId]) => ({ detailId, productionStatusId }));
-    if (targets.length === 0) { setSuggestion(null); return undefined; }
-    const ticket = suggestionGate.current.begin();
-    const timer = window.setTimeout(() => {
-      void orderReworkApi.suggestDeadline(orderId, targets).then((next) => {
-        if (!suggestionGate.current.isLatest(ticket)) return;
-        setSuggestion(next);
-        if (!plannedDateTouched) {
-          const current = next.roundPlannedCompletionDate;
-          // Adding details moves the round deadline only later; starting a round takes the suggestion.
-          const prefill = action === 'extend'
-            ? (next.suggestedDate && (!current || next.suggestedDate > current) ? next.suggestedDate : null)
-            : next.suggestedDate;
-          setPlannedDate(prefill);
-        }
-      }).catch(() => {
-        if (suggestionGate.current.isLatest(ticket)) setSuggestion(null);
-      });
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [targetsKey, orderId, action, plannedDateTouched]);
-  const deadlineHint = !suggestion ? (deadlineRequired ? 'Выберите детали и этапы — срок рассчитается по «Схеме этапов и сроки»' : null)
-    : suggestion.suggestedDate
-      ? `По «Схеме этапов и сроки»: ${suggestion.plannedOrderDays} дн. — ${formatReworkDate(suggestion.suggestedDate)}`
-      : suggestion.scheduleConfigured
-        ? 'Этапы вне схемы сроков — укажите срок вручную'
-        : 'Схема этапов и сроки не заполнена — укажите срок вручную';
-  const roundDeadlineNote = action === 'extend' && suggestion?.roundPlannedCompletionDate
-    ? `Текущий срок круга: ${formatReworkDate(suggestion.roundPlannedCompletionDate)} — при добавлении деталей срок только сдвигается позже.`
-    : null;
-  const hint = 'message' in request ? request.message : null;
-
-  const submit = async () => {
-    if (!request.ok) return;
-    setBusy(true);
-    try {
-      const result = await orderReworkApi.startOrExtend(orderId, version, request.body);
-      await onDone(result.action === 'extended' ? 'Детали добавлены в переделку' : `Переделка ·${result.roundNo} начата`);
-    } catch (error) {
-      await onFailed(error);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const eligible = details.filter((d) => d.productionStatusId != null);
-  return (
-    <Modal
-      open
-      width={820}
-      title={reworkActionLabel(action, openRoundNo)}
-      okText={action === 'extend' ? 'Добавить' : 'Начать переделку'}
-      cancelText="Отмена"
-      confirmLoading={busy}
-      okButtonProps={{ disabled: !request.ok }}
-      onCancel={onCancel}
-      onOk={() => void submit()}
-    >
-      <Space direction="vertical" style={{ width: '100%' }}>
-        <Space wrap>
-          <Text>Вернуть выбранные детали на этап:</Text>
-          <Select
-            style={{ minWidth: 220 }}
-            value={commonStage}
-            onChange={setCommonStage}
-            placeholder="Этап для всех выбранных"
-            options={stages.map((s) => ({ value: s.id, label: s.name }))}
-          />
-        </Space>
-        <Table
-          size="small"
-          rowKey="id"
-          pagination={false}
-          scroll={{ y: 320 }}
-          dataSource={eligible}
-          columns={[
-            {
-              title: (
-                <Checkbox
-                  checked={eligible.length > 0 && selected.size === eligible.length}
-                  indeterminate={selected.size > 0 && selected.size < eligible.length}
-                  onChange={(e) => setSelected(e.target.checked ? new Set(eligible.map((d) => d.id)) : new Set())}
-                />
-              ),
-              width: 40,
-              render: (_: unknown, d: ReworkDetailRow) => (
-                <Checkbox
-                  checked={selected.has(d.id)}
-                  onChange={(e) => {
-                    const next = new Set(selected);
-                    if (e.target.checked) next.add(d.id); else next.delete(d.id);
-                    setSelected(next);
-                  }}
-                />
-              ),
-            },
-            { title: '№', dataIndex: 'detailNumber', width: 60 },
-            { title: 'Деталь', dataIndex: 'name', ellipsis: true },
-            {
-              title: 'Текущий этап', width: 170,
-              render: (_: unknown, d: ReworkDetailRow) => {
-                const name = stageById.get(d.productionStatusId!)?.name ?? '—';
-                return d.productionRound > 1 ? `${name} ·${d.productionRound}` : name;
-              },
-            },
-            {
-              title: 'Вернуть на этап', width: 200,
-              render: (_: unknown, d: ReworkDetailRow) => (
-                <Select
-                  size="small"
-                  style={{ width: '100%' }}
-                  allowClear
-                  placeholder={commonStage ? stageById.get(commonStage)?.name : 'как у всех'}
-                  value={perRow[d.id]}
-                  onChange={(value) => setPerRow({ ...perRow, [d.id]: value })}
-                  options={stages
-                    .filter((s) => isReworkTargetAllowed(s, stageById.get(d.productionStatusId!), stages))
-                    .map((s) => ({ value: s.id, label: s.name }))}
-                />
-              ),
-            },
-          ]}
-        />
-        <Form layout="vertical">
-          <Form.Item
-            label="Срок готовности"
-            required={deadlineRequired}
-            extra={[deadlineHint, roundDeadlineNote].filter(Boolean).join(' ') || undefined}
-            style={{ marginBottom: 4 }}
-          >
-            <DatePicker
-              format="DD.MM.YYYY"
-              allowClear={!deadlineRequired}
-              value={plannedDate ? dayjs(plannedDate) : null}
-              disabledDate={(day) => Boolean(suggestion?.today) && day.format('YYYY-MM-DD') < (suggestion?.today ?? '')}
-              onChange={(day) => { setPlannedDateTouched(true); setPlannedDate(day ? day.format('YYYY-MM-DD') : null); }}
-            />
-          </Form.Item>
-        </Form>
-        {needsReason ? (
-          <ReasonFields reasons={reasons} reasonId={reasonId} setReasonId={setReasonId} comment={comment} setComment={setComment} />
-        ) : null}
-        {hint ? <Text type="secondary">{hint}</Text> : null}
-      </Space>
     </Modal>
   );
 };

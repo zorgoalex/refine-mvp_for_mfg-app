@@ -40,6 +40,8 @@ import {
 } from '../../../api/productionActionsApi';
 import { authSession } from '../../../api/authSession';
 import { DragItem, CalendarOrder, ViewMode, CalendarFilters, CalendarFilterOption } from '../types/calendar';
+import { requestReworkStart } from '../../orders/components/rework/reworkStartRequests';
+import { useReworkOrderStatusIds } from '../../orders/components/rework/useReworkOrderStatusIds';
 import {
   applyKnownCalendarOrderVersion,
   reserveCalendarOrderVersion,
@@ -568,11 +570,25 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
     }
   }, [calendarSendInterval]);
 
+  // «Переделка» ставится командой переделки (она двигает и этапы деталей): выбор открывает её форму.
+  const reworkStatusIds = useReworkOrderStatusIds();
+
   // Обработчик изменения статуса через контекстное меню (для order_status и payment_status)
   const handleStatusChange = async (fieldName: string, statusId: number, statusName: string) => {
     if (!contextMenu.order) return;
 
     const order = contextMenu.order;
+    if (fieldName === 'order_status' && reworkStatusIds.has(Number(statusId))) {
+      const opened = requestReworkStart({
+        orderId: Number(order.order_id),
+        onDone: () => {
+          void invalidate({ resource: 'orders_view', invalidates: ['list'] });
+          refetch();
+        },
+      });
+      if (!opened) message.warning('Статус «Переделка» ставится командой переделки в карточке заказа (меню «⋯»)');
+      return;
+    }
     await queueOrderAction(order.order_id, async () => {
       applyKnownOrderVersion(order);
       const version = await updateStatus(order, fieldName, statusId, statusName);
