@@ -118,6 +118,7 @@ export class NotificationRulesService {
         createdByUserId: Number(currentUser.id),
       };
 
+      await lockReferencedAccessGroups(client, input.recipients?.groupCodes);
       const rule = await this.ports.repository.create(client, createInput);
 
       await this.audit.record(client, {
@@ -150,7 +151,11 @@ export class NotificationRulesService {
       throw new ApiError(404, 'NOTIFICATION_RULE_NOT_FOUND', 'Notification rule not found', { ruleId });
     }
 
-    const merged = mergeRuleWithPatch(existing, command.patch);
+    // A client that does not know access groups (an older page still open) sends recipients without `groupCodes`:
+    // the rule keeps its groups — dropping them would turn a group-only service rule into «everybody with the right».
+    // Removing groups is explicit: `groupCodes: []`.
+    const patch = withPreservedGroupCodes(command.patch, existing.recipients);
+    const merged = mergeRuleWithPatch(existing, patch);
     const validation = validateNotificationRuleInput(merged, { knownRoleCodes: USER_ROLES });
     if (!validation.ok) {
       throw new ApiError(422, 'INVALID_NOTIFICATION_RULE', 'Notification rule validation failed', {
@@ -160,15 +165,18 @@ export class NotificationRulesService {
     }
 
     return this.ports.database.transaction(async (client) => {
-      const { conditions, recipients, ...patchRest } = command.patch;
+      const { conditions, recipients, ...patchRest } = patch;
       const updateInput: UpdateNotificationRuleInput = {
         ...patchRest,
         ...(conditions !== undefined ? { conditions: toJsonRecord(conditions) } : {}),
         ...(recipients !== undefined ? { recipients: toJsonRecord(recipients) } : {}),
         updatedByUserId: Number(currentUser.id),
-        ...(command.expectedUpdatedAt !== undefined ? { expectedUpdatedAt: command.expectedUpdatedAt } : {}),
+        // Always compare with the version the patch was prepared from (the caller's, or the one read above): the merged
+        // recipients (kept groups) and the audit «before» are built from it — a concurrent change must give 409.
+        expectedUpdatedAt: command.expectedUpdatedAt ?? existing.updatedAt,
       };
 
+      await lockReferencedAccessGroups(client, merged.recipients?.groupCodes);
       const updated = await this.ports.repository.update(client, ruleId, updateInput);
 
       await this.audit.record(client, {
@@ -287,6 +295,36 @@ export class NotificationRulesService {
  * persistence boundary — mirrors `toNotificationRuleRecipients` in the DTO
  * parser, which performs the inverse narrowing.
  */
+/**
+ * The access groups a rule names must exist; FOR KEY SHARE holds them until the rule commits, so a group cannot be
+ * deleted in between (its delete refuses while a rule names it — PgAccessGroupsRepository.remove).
+ */
+async function lockReferencedAccessGroups(client: DatabaseClient, groupCodes: readonly string[] | undefined): Promise<void> {
+  const codes = [...new Set(groupCodes ?? [])];
+  if (codes.length === 0) return;
+  // By group_id, the lock order of every access-group command (groups ascending, then users).
+  const found = await client.query<{ code: string }>(
+    'SELECT code FROM access_groups WHERE code = ANY($1::text[]) ORDER BY group_id FOR KEY SHARE',
+    [codes],
+  );
+  const known = new Set(found.rows.map((row) => row.code));
+  const missing = codes.filter((code) => !known.has(code));
+  if (missing.length > 0) {
+    throw new ApiError(422, 'INVALID_NOTIFICATION_RULE', 'Notification rule validation failed', {
+      code: 'UNKNOWN_GROUP_CODE',
+      detail: missing.join(','),
+    });
+  }
+}
+
+function withPreservedGroupCodes<P extends { recipients?: NotificationRule['recipients'] }>(
+  patch: P,
+  existing: NotificationRule['recipients'],
+): P {
+  if (!patch.recipients || 'groupCodes' in patch.recipients || !existing?.groupCodes?.length) return patch;
+  return { ...patch, recipients: { ...patch.recipients, groupCodes: [...existing.groupCodes] } };
+}
+
 function toJsonRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }

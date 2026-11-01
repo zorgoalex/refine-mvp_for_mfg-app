@@ -1,5 +1,5 @@
 import { Injectable, Optional } from '@nestjs/common';
-import { lockAuthorizationState } from './authorization-command-guard';
+import { assertAdministrationRemains, lockAuthorizationState } from './authorization-command-guard';
 import type { QueryResultRow } from 'pg';
 import { computeDiff } from '../common/audit/audit-diff';
 import { ApiError } from '../common/errors/api-error';
@@ -25,6 +25,13 @@ import {
   type UserAuthorizationSnapshot,
 } from './user-authorization-snapshot';
 import { assertNoUnclosedHasuraNarrowing, hasuraFinancialsState, hasuraFollowsPermissions } from './hasura-unclosed-permissions';
+import {
+  claimIdempotency,
+  completeIdempotency,
+  idempotencyActorId,
+  idempotencyRequestHash,
+  type IdempotencyClaim,
+} from './authorization-idempotency';
 
 export const ROLE_POLICY_SCOPE_KEYS = [
   'orders.view',
@@ -54,7 +61,7 @@ export const ALLOWED_SCOPE_VALUES = {
   'productionTasks.update': ['all', 'assigned', 'none'],
 } as const satisfies Record<RolePolicyScopeKey, readonly Scope[]>;
 
-const DANGEROUS_PERMISSIONS = new Set<PermissionName>([
+export const DANGEROUS_PERMISSIONS = new Set<PermissionName>([
   'cad.technology',
   'cad.approve',
   'system.superadmin',
@@ -250,7 +257,7 @@ export class PermissionsService {
   }
 
   /**
-   * Effective authorization of a user (base role; access groups when enabled — migration 249). One SQL
+   * Effective authorization of a user (base role; access groups when enabled — migration 285). One SQL
    * statement; takes no locks. Pass the caller's transaction client to read under the caller's locks.
    * Returns null for an unknown user. Without a database: the static matrix of the given fallback role.
    */
@@ -309,6 +316,7 @@ export class PermissionsService {
     currentUser: CurrentUser,
     request: UpdateRolesMatrixRequest,
     requestId = 'permissions-matrix',
+    idempotencyKey?: string,
   ): Promise<RolesMatrixDto> {
     this.requireMatrixMutationAccess(currentUser);
     return this.requireDatabase().transaction(async (tx) => {
@@ -316,6 +324,12 @@ export class PermissionsService {
       // seed under it. Seeding first would hold catalog rows while waiting for permissions_state — a cycle with a
       // command that holds permissions_state and waits for a session whose holder seeds (R2).
       await lockAuthorizationState(tx, 'update');
+      const claim = matrixIdempotencyClaim(idempotencyKey, 'permissions.roles_matrix.update', 'roles_matrix', currentUser, request);
+      if (claim) {
+        const replay = await claimIdempotency<RolesMatrixDto>(tx, claim);
+        if (replay !== null) return replay;
+      }
+      await this.reassertMatrixMutationAccess(tx, currentUser);
       await this.seedDefaults(tx);
       const before = await this.readMatrix(tx, { lockState: true });
       this.assertExpectedVersion(request.version, before.version);
@@ -325,6 +339,9 @@ export class PermissionsService {
       await assertLockoutSafe(tx, next);
 
       await writeMatrixRows(tx, next);
+      // The shared rule on the written state (access groups R7 §5): a human administrator remains, and while groups are
+      // on — one by role alone (assertLockoutSafe above also counts service accounts and checks only roles).
+      await assertAdministrationRemains(tx);
       const afterVersion = await bumpPermissionsVersion(tx);
       const after = await this.readMatrix(tx, { version: afterVersion });
       await writePermissionsAudit(tx, {
@@ -334,6 +351,7 @@ export class PermissionsService {
         before,
         after,
       });
+      if (claim) await completeIdempotency(tx, claim.key, after);
       return after;
     });
   }
@@ -342,6 +360,7 @@ export class PermissionsService {
     currentUser: CurrentUser,
     roleId: number,
     requestId = 'permissions-matrix-reset',
+    idempotencyKey?: string,
   ): Promise<RolesMatrixDto> {
     this.requireMatrixMutationAccess(currentUser);
     return this.requireDatabase().transaction(async (tx) => {
@@ -349,6 +368,12 @@ export class PermissionsService {
       // seed under it. Seeding first would hold catalog rows while waiting for permissions_state — a cycle with a
       // command that holds permissions_state and waits for a session whose holder seeds (R2).
       await lockAuthorizationState(tx, 'update');
+      const claim = matrixIdempotencyClaim(idempotencyKey, 'permissions.roles_matrix.reset', String(roleId), currentUser, { roleId });
+      if (claim) {
+        const replay = await claimIdempotency<RolesMatrixDto>(tx, claim);
+        if (replay !== null) return replay;
+      }
+      await this.reassertMatrixMutationAccess(tx, currentUser);
       await this.seedDefaults(tx);
       const before = await this.readMatrix(tx, { lockState: true });
       const role = before.roles.find((row) => row.roleId === roleId);
@@ -364,6 +389,9 @@ export class PermissionsService {
       await assertLockoutSafe(tx, next);
 
       await writeMatrixRows(tx, next, { onlyRoleId: roleId });
+      // The shared rule on the written state (access groups R7 §5): a human administrator remains, and while groups are
+      // on — one by role alone (assertLockoutSafe above also counts service accounts and checks only roles).
+      await assertAdministrationRemains(tx);
       const afterVersion = await bumpPermissionsVersion(tx);
       const after = await this.readMatrix(tx, { version: afterVersion });
       await writePermissionsAudit(tx, {
@@ -374,8 +402,27 @@ export class PermissionsService {
         after,
         roleId,
       });
+      if (claim) await completeIdempotency(tx, claim.key, after);
       return after;
     });
+  }
+
+  /**
+   * The actor again, after lockAuthorizationState (access groups plan R7 §4.2): the rights checked before the lock may
+   * have been taken away (role, access group, deactivation) while the command waited for it. Same rule and answer as
+   * requireMatrixMutationAccess, on the actor's authorization read under the lock.
+   */
+  private async reassertMatrixMutationAccess(tx: DatabaseClient, currentUser: CurrentUser): Promise<void> {
+    const actor = await this.loadUserAuthorization(currentUser.id, tx);
+    if (
+      !actor?.isActive ||
+      !actor.permissions.includes('system.superadmin') ||
+      !actor.permissions.includes('permissions.manage')
+    ) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+        requiredPermissions: ['system.superadmin', 'permissions.manage'],
+      });
+    }
   }
 
   private requireMatrixMutationAccess(currentUser: CurrentUser): void {
@@ -912,6 +959,25 @@ function assertDangerousConfirmed(
       { changed },
     );
   }
+}
+
+/** Transitional idempotency of the matrix commands (R5 §5.3): only with a key; namespace `permissions-matrix:`. */
+function matrixIdempotencyClaim(
+  key: string | undefined,
+  name: string,
+  entityId: string,
+  currentUser: CurrentUser,
+  payload: unknown,
+): IdempotencyClaim | null {
+  if (key === undefined) return null;
+  return {
+    key: `permissions-matrix:${key}`,
+    name,
+    entityType: 'roles_matrix',
+    entityId,
+    hash: idempotencyRequestHash(name, entityId, payload),
+    actorUserId: idempotencyActorId(currentUser),
+  };
 }
 
 async function assertLockoutSafe(tx: TransactionClient, next: RolesMatrixDto): Promise<void> {

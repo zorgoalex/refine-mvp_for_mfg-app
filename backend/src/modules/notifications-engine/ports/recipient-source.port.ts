@@ -5,5 +5,7 @@ import type { RecipientResolverKind } from '../domain/notification-event-registr
 export interface RecipientSourcePort {
   resolveDynamic(client: DatabaseClient, kind: RecipientResolverKind, ctx: NotificationEventContext): Promise<number[]>;
   resolveRoleMembers(client: DatabaseClient, roleCodes: string[]): Promise<number[]>;
+  /** Active members of active access groups — none while access groups are disabled. */
+  resolveAccessGroupMembers(client: DatabaseClient, groupCodes: string[]): Promise<number[]>;
   filterActiveUsers(client: DatabaseClient, userIds: number[]): Promise<number[]>;
 }

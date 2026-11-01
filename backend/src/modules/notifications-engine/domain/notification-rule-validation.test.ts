@@ -18,6 +18,18 @@ describe('validateNotificationRuleInput', () => {
     expect(validateNotificationRuleInput({ ...base, eventType: 'nope' }, { knownRoleCodes: [] }))
       .toEqual({ ok: false, code: 'UNKNOWN_EVENT_TYPE' });
   });
+  it('access groups: count as recipients, need a valid code, refused for events delivered by another path', () => {
+    expect(validateNotificationRuleInput({ ...base, recipients: { groupCodes: ['manager_change'] } }, { knownRoleCodes: [] })).toEqual({ ok: true });
+    expect(validateNotificationRuleInput({ ...base, recipients: { groupCodes: ['Bad Code'] } }, { knownRoleCodes: [] }))
+      .toEqual({ ok: false, code: 'INVALID_GROUP_CODE', detail: 'Bad Code' });
+    expect(validateNotificationRuleInput({
+      ...base, eventType: 'GROUP_DEADLINE_OVERDUE', conditions: {}, recipients: { resolvers: ['group_participants' as never], groupCodes: ['managers'] },
+    }, { knownRoleCodes: [] })).toEqual({ ok: false, code: 'ACCESS_GROUPS_UNSUPPORTED_FOR_EVENT', detail: 'GROUP_DEADLINE_OVERDUE' });
+    // switchable engine-owned deadline: groups resolve like roles
+    expect(validateNotificationRuleInput({
+      ...base, eventType: 'DEADLINE_EXPIRED', conditions: {}, recipients: { groupCodes: ['managers'] },
+    }, { knownRoleCodes: [] })).toEqual({ ok: true });
+  });
   it('rejects empty recipients', () => {
     expect(validateNotificationRuleInput({ ...base, recipients: {} }, { knownRoleCodes: [] }))
       .toEqual({ ok: false, code: 'EMPTY_RECIPIENTS' });

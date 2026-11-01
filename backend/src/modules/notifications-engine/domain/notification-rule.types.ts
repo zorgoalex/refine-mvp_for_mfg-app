@@ -42,6 +42,11 @@ export interface NotificationRuleConditions {
 export interface NotificationRuleRecipients {
   resolvers?: RecipientResolverKind[];
   roleCodes?: string[];
+  /**
+   * Access groups (plan v6 §5): the active members of these groups — only while access groups are enabled. A rule with
+   * only groupCodes and the switch off has nobody (never «everybody»).
+   */
+  groupCodes?: string[];
   userIds?: number[];
 }
 

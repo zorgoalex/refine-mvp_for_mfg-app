@@ -10,7 +10,8 @@ export interface ProcurementNotificationsRepositoryPort {
   isRuleEnabled(ruleCode: string): Promise<boolean>;
   loadSettings(): Promise<{ digestTime: string; unallocatedAlertDays: number } | null>;
   loadRule(ruleCode: string): Promise<ServiceRuleState>;
-  ruleRecipients(rule: Pick<ServiceRuleState, 'roleCodes' | 'userIds'>, defaultPermission: string, required: string[]): Promise<CurrentUser[]>;
+  authorizationVersion(): Promise<number>;
+  ruleRecipients(rule: Pick<ServiceRuleState, 'roleCodes' | 'groupCodes' | 'userIds'>, defaultPermission: string, required: string[]): Promise<CurrentUser[]>;
   scanDemandChanges(shouldContinue: () => Promise<boolean>): Promise<number>;
   unallocatedReceipts(olderThan: string, notBefore: string, after?: { docDate: string; documentId: number } | null): Promise<UnallocatedReceiptRow[]>;
   writeServiceNotification(input: ServiceNotificationInput, guard?: ServiceRuleGuard): Promise<boolean>;
@@ -75,7 +76,10 @@ export class ProcurementNotificationsService {
     await this.isolate(summary, 'digest', async () => {
       const rule = await this.deps.repository.loadRule(rules.digest);
       if (!rule.isEnabled || !this.deps.enabled()) return;
-      const guard = { ruleCode: rule.ruleCode, recipientsHash: rule.recipientsHash };
+      // Before selection and the per-user totals (scope): a later authorization change skips the write (next run).
+      const authorizationVersion = await this.deps.repository.authorizationVersion();
+      const guard = { ruleCode: rule.ruleCode, recipientsHash: rule.recipientsHash,
+        eligibility: { defaultPermission: SERVICE_RULE_DEFAULT_PERMISSION, required: ['procurement.manage'], authorizationVersion } };
       for (const user of await this.deps.repository.ruleRecipients(rule, SERVICE_RULE_DEFAULT_PERMISSION, ['procurement.manage'])) {
         if (!(await this.stillOn(rules.digest))) return;
         await this.isolate(summary, `digest:${user.id}`, async () => {
@@ -96,6 +100,7 @@ export class ProcurementNotificationsService {
     await this.isolate(summary, 'unallocated', async () => {
       const rule = await this.deps.repository.loadRule(rules.unallocated);
       if (!rule.isEnabled || !this.deps.enabled()) return;
+      const authorizationVersion = await this.deps.repository.authorizationVersion();
       const users = await this.deps.repository.ruleRecipients(rule, SERVICE_RULE_DEFAULT_PERMISSION, ['procurement.view']);
       if (users.length === 0) return;
       const olderThan = addDays(today, -settings.unallocatedAlertDays);
@@ -114,7 +119,8 @@ export class ProcurementNotificationsService {
       }
       const text = unallocatedDigestText(totals, today);
       if (!text) return;
-      const guard = { ruleCode: rule.ruleCode, recipientsHash: rule.recipientsHash };
+      const guard = { ruleCode: rule.ruleCode, recipientsHash: rule.recipientsHash,
+        eligibility: { defaultPermission: SERVICE_RULE_DEFAULT_PERMISSION, required: ['procurement.view'], authorizationVersion } };
       for (const user of users) {
         if (!(await this.stillOn(rules.unallocated))) return;
         await this.isolate(summary, `unallocated:${user.id}`, async () => {
