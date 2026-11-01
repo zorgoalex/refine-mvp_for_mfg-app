@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-01", title: "Платёж по заказу — окном, с быстрыми суммами",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "NewLine, карточка заказа на компьютере: «Добавить платёж» открывает окно «Платёж по заказу» прямо поверх заказа — сумма с кнопками «Весь остаток / 50% / Другая сумма», способ оплаты, дата, примечание и подсказка об остатке. Полная форма платежей — по ссылке в окне.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-01", title: "Заказ: клиент и проект открываются по клику, с возвратом назад",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

@@ -477,6 +477,29 @@
   font-size: 14px;
 }
 
+/* Тот же быстрый платёж на компьютере — окно «Платёж по заказу» (мокап 03): компактнее листа */
+:root[data-ui-variant="workbench"] .wb-paysheet--dialog .ant-modal-content {
+  padding: 18px 20px 0;
+  border-radius: 14px;
+  background: var(--evo-surface);
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet--dialog .wb-paysheet__body {
+  gap: 12px;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet--dialog .wb-paysheet__acts {
+  margin: 0 -20px;
+  padding: 12px 20px 16px;
+  border-radius: 0 0 14px 14px;
+}
+
+:root[data-ui-variant="workbench"] .wb-paysheet--dialog .wb-paysheet__acts .ant-btn {
+  height: 40px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
 /* Мобильная карточка заказа (мокап 22, экран 2) */
 :root[data-ui-variant="workbench"] .wb-order-head__back,
 :root[data-ui-variant="workbench"] .wb-order-head__avatar {

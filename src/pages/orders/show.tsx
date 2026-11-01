@@ -3306,10 +3306,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const openAddPaymentForm = record?.order_id && canCreatePayment
     ? () => navigate(buildOrderEditAddPaymentPath(Number(record.order_id)))
     : undefined;
-  // NewLine на телефоне — быстрый платёж нижним листом (POST /payments); без backend-платежей — прежняя форма.
-  // Лист смонтирован и вне телефона (переход ширины не сбрасывает защиту от повтора), показывается только на телефоне.
+  // NewLine — быстрый платёж (POST /payments): на телефоне нижним листом, на компьютере окном «Платёж по заказу»;
+  // без backend-платежей — прежняя форма. Один экземпляр на обе ширины: переход ширины не сбрасывает защиту от повтора.
   const quickPaymentMounted = isWorkbench && featureFlags.useBackendPayments && !deletedOrder;
-  const quickPaymentAvailable = quickPaymentMounted && isMobile;
+  const quickPaymentAvailable = quickPaymentMounted;
   const paymentsListActive = !!record?.order_id && !useBackendOrdersRead && canViewFinancials;
   /**
    * Перечитать заказ и, при старом чтении заказа, отдельный список оплат; true — оба реально перечитаны
@@ -3936,6 +3936,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 onClose={() => setQuickPaymentOpen(false)}
                 onReconcile={reconcileQuickPayment}
                 onOpenFullForm={() => { setQuickPaymentOpen(false); openAddPaymentForm(); }}
+                layout={isMobile ? 'sheet' : 'dialog'}
               />
             ) : null}
 

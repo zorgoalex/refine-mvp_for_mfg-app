@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import { useDataProvider, useInvalidate, useList } from '@refinedev/core';
-import { Button, DatePicker, Drawer, Input, InputNumber, message } from 'antd';
+import { Button, DatePicker, Drawer, Input, InputNumber, Modal, message } from 'antd';
 import { CheckCircleOutlined, CloseOutlined, ExclamationCircleOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import {
@@ -56,11 +56,14 @@ export interface WorkbenchQuickPaymentSheetProps {
   onReconcile: () => Promise<boolean>;
   /** Все поля платежа — прежняя форма заказа, вкладка «Финансы». */
   onOpenFullForm: () => void;
+  /** `sheet` — нижний лист на телефоне; `dialog` — окно «Платёж по заказу» на компьютере (мокап 03). */
+  layout?: 'sheet' | 'dialog';
 }
 
 /**
- * Быстрый платёж NewLine на телефоне (мокап 22): нижний лист поверх карточки заказа.
- * Пишет тем же путём, что «Создание платежа» (`payments` → POST /payments).
+ * Быстрый платёж NewLine: на телефоне — нижний лист поверх карточки заказа (мокап 22), на компьютере — окно
+ * «Платёж по заказу» с «Весь остаток / 50% / Другая сумма» (мокап 03). Пишет тем же путём, что «Создание
+ * платежа» (`payments` → POST /payments); защита от повтора и перечитывание заказа — общие.
  */
 export const WorkbenchQuickPaymentSheet: React.FC<WorkbenchQuickPaymentSheetProps> = ({
   open,
@@ -71,7 +74,10 @@ export const WorkbenchQuickPaymentSheet: React.FC<WorkbenchQuickPaymentSheetProp
   onClose,
   onReconcile,
   onOpenFullForm,
+  layout = 'sheet',
 }) => {
+  const dialog = layout === 'dialog';
+  const amountRef = useRef<HTMLInputElement | null>(null);
   const presets = useMemo(() => quickPaymentPresets(remaining), [remaining]);
   const [typePaidId, setTypePaidId] = useState<number | null>(null);
   const [paymentDate, setPaymentDate] = useState<Dayjs>(() => dayjs());
@@ -203,23 +209,12 @@ export const WorkbenchQuickPaymentSheet: React.FC<WorkbenchQuickPaymentSheetProp
     .filter(Boolean)
     .join(' · ');
 
-  return (
-    <Drawer
-      rootClassName="wb-paysheet"
-      open={open}
-      onClose={submitting ? undefined : onClose}
-      maskClosable={!submitting}
-      placement="bottom"
-      height="auto"
-      closable={false}
-      title={null}
-      destroyOnClose
-    >
+  const body = (
       <div className="wb-paysheet__body" role="group" aria-labelledby="wb-paysheet-title">
-        <span className="wb-paysheet__grab" aria-hidden="true" />
+        {dialog ? null : <span className="wb-paysheet__grab" aria-hidden="true" />}
         <div className="wb-paysheet__head">
           <div>
-            <h2 id="wb-paysheet-title">Добавить платёж</h2>
+            <h2 id="wb-paysheet-title">{dialog ? 'Платёж по заказу' : 'Добавить платёж'}</h2>
             <div className="wb-paysheet__sub">{subtitle}</div>
           </div>
           <Button type="text" aria-label="Закрыть" icon={<CloseOutlined />} onClick={onClose} disabled={submitting} />
@@ -228,6 +223,7 @@ export const WorkbenchQuickPaymentSheet: React.FC<WorkbenchQuickPaymentSheetProp
         <div className="wb-paysheet__field">
           <label className="wb-paysheet__label" htmlFor="wb-paysheet-amount">Сумма</label>
           <InputNumber<number>
+            ref={amountRef}
             id="wb-paysheet-amount"
             className="wb-paysheet__amount"
             inputMode="decimal"
@@ -257,9 +253,21 @@ export const WorkbenchQuickPaymentSheet: React.FC<WorkbenchQuickPaymentSheetProp
                   disabled={blocked}
                   onClick={() => setAmount(preset.amount)}
                 >
-                  {preset.label}
+                  {dialog && preset.key === 'half' ? '50%' : preset.label}
                 </button>
               ))}
+              {dialog ? (
+                // своя сумма: поле очищается и получает фокус
+                <button
+                  type="button"
+                  className="wb-paysheet__chip"
+                  aria-pressed={amount !== null && !presets.some((preset) => preset.amount === amount)}
+                  disabled={blocked}
+                  onClick={() => { setAmount(null); amountRef.current?.focus(); }}
+                >
+                  Другая сумма
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -335,6 +343,37 @@ export const WorkbenchQuickPaymentSheet: React.FC<WorkbenchQuickPaymentSheetProp
           <Button type="primary" onClick={submit} loading={submitting || phase === 'syncing'} disabled={!canSubmit}>Добавить платёж</Button>
         </div>
       </div>
+  );
+
+  return dialog ? (
+    <Modal
+      wrapClassName="wb-paysheet wb-paysheet--dialog"
+      open={open}
+      onCancel={submitting ? undefined : onClose}
+      maskClosable={!submitting}
+      keyboard={!submitting}
+      closable={false}
+      title={null}
+      footer={null}
+      width={460}
+      centered
+      destroyOnClose
+    >
+      {body}
+    </Modal>
+  ) : (
+    <Drawer
+      rootClassName="wb-paysheet"
+      open={open}
+      onClose={submitting ? undefined : onClose}
+      maskClosable={!submitting}
+      placement="bottom"
+      height="auto"
+      closable={false}
+      title={null}
+      destroyOnClose
+    >
+      {body}
     </Drawer>
   );
 };

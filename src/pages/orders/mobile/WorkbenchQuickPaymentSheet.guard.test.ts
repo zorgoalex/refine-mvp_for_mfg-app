@@ -23,11 +23,21 @@ describe('workbench quick payment sheet wiring', () => {
     expect(sheetSource).not.toMatch(/graphql|hasura|insert_payments/i);
   });
 
-  it('is offered only with backend payments, on a NewLine phone, for a live order with the create right', () => {
+  it('is offered only with backend payments, in NewLine, for a live order with the create right (sheet on a phone, window on a computer)', () => {
     expect(showSource).toContain(
       'const quickPaymentMounted = isWorkbench && featureFlags.useBackendPayments && !deletedOrder;',
     );
-    expect(showSource).toContain('const quickPaymentAvailable = quickPaymentMounted && isMobile;');
+    expect(showSource).toContain('const quickPaymentAvailable = quickPaymentMounted;');
+    expect(showSource).toContain("layout={isMobile ? 'sheet' : 'dialog'}");
+    // the window: «Весь остаток / 50% / Другая сумма»; state lives above the Drawer/Modal, so a width change keeps it
+    expect(sheetSource).toContain("{dialog && preset.key === 'half' ? '50%' : preset.label}");
+    expect(sheetSource).toContain('Другая сумма');
+    expect(sheetSource).toContain('onCancel={submitting ? undefined : onClose}');
+    expect(sheetSource).toContain('keyboard={!submitting}');
+    // antd 5.0 Modal has no rootClassName (it is overwritten): the window's classes go on its wrap
+    expect(sheetSource).toContain('wrapClassName="wb-paysheet wb-paysheet--dialog"');
+    expect(sheetSource).not.toMatch(/<Modal[^>]*rootClassName/);
+    expect(mobileCss).toContain('.wb-paysheet--dialog .ant-modal-content');
     expect(showSource).toMatch(/const openAddPaymentForm = record\?\.order_id && canCreatePayment/);
     expect(showSource).toContain('const openAddPayment = openAddPaymentForm && quickPaymentAvailable');
   });
