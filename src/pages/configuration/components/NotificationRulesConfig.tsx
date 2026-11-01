@@ -55,6 +55,10 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   'order.status_changed': 'Изменение статуса заказа',
   'order.production_status_changed': 'Изменение статуса производства',
   'order.payment_status_changed': 'Изменение статуса оплаты',
+  'order.rework_started': 'Переделка: запуск',
+  'order.rework_details_added': 'Переделка: добавлены детали',
+  'order.rework_reason_clarified': 'Переделка: уточнена причина',
+  'order.rework_closed': 'Переделка: круг закрыт',
   DEADLINE_EXPIRED: 'Истечение срока',
   GROUP_DEADLINE_OVERDUE: 'Просрочка срока группы',
   'order.resource_procurement_changed': 'Закуп материала заказа',
@@ -93,6 +97,7 @@ const RESOLVER_LABELS: Record<RecipientResolverKind, string> = {
   stage_assignee: 'Ответственный за этап',
   workshop_head: 'Руководитель цеха',
   direction_head: 'Руководитель направления',
+  rework_managers: 'С правом «Переделка»',
   group_participants: 'Участники группы',
 };
 

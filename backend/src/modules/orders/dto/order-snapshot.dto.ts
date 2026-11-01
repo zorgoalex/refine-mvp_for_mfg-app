@@ -2,11 +2,18 @@ import type { SaveOrderDto } from './save-order.dto';
 
 export const ORDER_SNAPSHOT_SCHEMA = 'erp.order.snapshot.v1' as const;
 export const ORDER_SNAPSHOT_FORMAT_VERSION = '1.0.0' as const;
+/**
+ * «Переделка»: additive minor version for orders with production rounds
+ * (data.productionRounds, event roundNo). Orders without rounds keep exporting 1.0.0.
+ */
+export const ORDER_SNAPSHOT_ROUNDS_FORMAT_VERSION = '1.1.0' as const;
 export const ORDER_SNAPSHOT_SERVICE_NAME = 'erp-order-snapshot' as const;
 export const ORDER_SNAPSHOT_SERVICE_VERSION = '1.0.0' as const;
 export const ORDER_SNAPSHOT_SUPPORTED_IMPORT_VERSIONS = [
   ORDER_SNAPSHOT_FORMAT_VERSION,
+  ORDER_SNAPSHOT_ROUNDS_FORMAT_VERSION,
 ] as const;
+export type OrderSnapshotFormatVersion = typeof ORDER_SNAPSHOT_SUPPORTED_IMPORT_VERSIONS[number];
 
 export const ORDER_SNAPSHOT_REFERENCE_ENTITY_TYPES = [
   'catalogItem',
@@ -61,7 +68,7 @@ export interface ImportOrderSnapshotUnmappedReferenceDto {
 
 export interface OrderSnapshotDto {
   schema: typeof ORDER_SNAPSHOT_SCHEMA;
-  formatVersion: typeof ORDER_SNAPSHOT_FORMAT_VERSION;
+  formatVersion: OrderSnapshotFormatVersion;
   exporterService: {
     name: typeof ORDER_SNAPSHOT_SERVICE_NAME;
     version: typeof ORDER_SNAPSHOT_SERVICE_VERSION | string;
@@ -90,6 +97,8 @@ export interface OrderSnapshotDto {
     productionStatusEvents: ProductionStatusEventSnapshotDto[];
     deadlineInstances: Record<string, unknown>[];
     deadlineEvents: Record<string, unknown>[];
+    /** Format 1.1.0 only: production rounds of the order («Переделка»). */
+    productionRounds?: OrderSnapshotProductionRoundsDto;
   };
   references: OrderSnapshotReferencesDto;
 }
@@ -171,6 +180,59 @@ export interface ProductionStatusEventSnapshotDto {
   eventBy: number | null;
   note: string | null;
   payload: Record<string, unknown>;
+  /** Format 1.1.0 only; absent means round 1. */
+  roundNo?: number;
+}
+
+export interface OrderSnapshotProductionRoundsDto {
+  productionRound: number;
+  lastRoundNo: number;
+  /** Exported details whose current production round is > 1. */
+  detailRounds: Array<{ detailSourceId: string; productionRound: number }>;
+  rounds: OrderSnapshotProductionRoundDto[];
+}
+
+export interface OrderSnapshotProductionRoundDto {
+  roundNo: number;
+  mode: 'after_ready' | 'in_production';
+  reasonCode: string;
+  reasonName: string;
+  reasonComment: string | null;
+  fromOrderStatusId: number;
+  fromOrderProductionRound: number;
+  source: 'manual' | 'auto_cut_repeat' | 'import';
+  sourceCutJobId: string | null;
+  sourcePacketId: string | null;
+  startedAt: string;
+  startedBy: number | null;
+  reasonClarifiedAt: string | null;
+  reasonClarifiedBy: number | null;
+  closedAt: string | null;
+  closedBy: number | null;
+  closeReason: 'ready' | 'issued' | 'completed' | 'false_positive' | null;
+  eventSeq: number;
+  /** «Переделка» 1.1 (optional — snapshots before it have none): the round deadline and the order dates before it. */
+  plannedCompletionDate?: string | null;
+  plannedCompletionSource?: 'schedule' | 'manual' | null;
+  suggestedPlannedCompletionDate?: string | null;
+  fromPlannedCompletionDate?: string | null;
+  fromCompletionDate?: string | null;
+  details: Array<{
+    detailSourceId: string;
+    fromProductionStatusId: number | null;
+    fromProductionRound: number;
+    fromProductionStatusSort: number | null;
+    toProductionStatusId: number;
+    addedAt: string;
+    addedBySource: 'start' | 'extend';
+  }>;
+  sources: Array<{
+    detailSourceId: string;
+    sourceKind: string;
+    sourceId: string;
+    sourceRevision: string;
+    createdAt: string;
+  }>;
 }
 
 export interface ImportOrderSnapshotRequestDto {

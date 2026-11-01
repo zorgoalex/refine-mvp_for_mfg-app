@@ -12,6 +12,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
+import { markStageEventWriter } from '../../../shared/production-status/stage-event-writer';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { assertDowelingOrdersWritable } from '../../doweling/adapters/doweling-write-guard';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
@@ -26,6 +27,7 @@ import type {
 } from '../application/order-snapshot.types';
 import {
   ORDER_SNAPSHOT_FORMAT_VERSION,
+  ORDER_SNAPSHOT_ROUNDS_FORMAT_VERSION,
   ORDER_SNAPSHOT_SCHEMA,
   ORDER_SNAPSHOT_SERVICE_NAME,
   ORDER_SNAPSHOT_SERVICE_VERSION,
@@ -60,6 +62,17 @@ import type {
 import { prepareOrderSave } from '../domain/order-save-preparer';
 import { OrderNotFoundError } from '../errors/order.errors';
 import { insertAutoRoot } from './pg-order-transaction-manager';
+import { assertMdfSupportsRounds } from '../application/order-rework.service';
+import {
+  assertSnapshotRoundStatusModel,
+  readSnapshotProductionRounds,
+  resolveSnapshotReworkReasons,
+  requestRoundDeadlineSync,
+  restoreSnapshotOrderRound,
+  restoreSnapshotProductionRounds,
+  snapshotHasProductionRounds,
+  validateSnapshotProductionRounds,
+} from './pg-order-snapshot-rounds';
 // Note: shadow-material helpers (resolveShadowMaterialId, buildShadowMaterialAuditEvent,
 // ShadowContext) and SNAPSHOT_IMPORT_SOURCE removed in Variant B (Task 4): post-034 migration
 // we no longer create/sync synthetic shadow materials during snapshot import.
@@ -353,16 +366,18 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
   constructor(private readonly database: DatabaseService) {}
 
   async exportOrderSnapshot(command: ExportOrderSnapshotCommand): Promise<ExportedOrderSnapshotFile> {
+    // One transaction snapshot for every read: a concurrent rework command cannot
+    // produce a file with the header of one round and the rounds of another.
     const snapshot = await this.database.transaction(async (tx) => {
       await this.assertCanExport(tx, command);
       const built = await buildSnapshot(tx, command.orderId);
       await writeAudit(tx, 'orders.snapshot_export', command.currentUser, command.orderId, built.data.order.clientId, {
         requestId: command.requestId,
-        formatVersion: ORDER_SNAPSHOT_FORMAT_VERSION,
+        formatVersion: built.formatVersion,
         serviceVersion: ORDER_SNAPSHOT_SERVICE_VERSION,
       });
       return built;
-    });
+    }, { isolation: 'repeatable read' });
 
     return {
       fileName: snapshotFileName(snapshot),
@@ -405,6 +420,8 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
 
     try {
       const result = await this.database.transaction(async (tx) => {
+        // «Переделка» §5.5: restoring rounds takes the MDF cutover fence first (fail fast, 409).
+        if (snapshotHasProductionRounds(snapshot)) await assertMdfSupportsRounds(tx);
         await setSessionUser(tx, command.currentUser.id);
         await tx.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [
           snapshot.source.sourceInstanceId,
@@ -471,6 +488,8 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
             status: result.status,
             formatVersion: snapshot.formatVersion,
             serviceVersion: snapshot.exporterService.version,
+            // «Переделка»: restored production rounds (history; no rework events are re-emitted).
+            productionRoundNos: remappedSnapshot.data.productionRounds?.rounds.map((round) => round.roundNo) ?? [],
           },
           collectSnapshotSheetIds(remappedSnapshot),
         );
@@ -678,6 +697,8 @@ async function buildSnapshot(tx: TransactionClient, orderId: number): Promise<Or
     'SELECT to_jsonb(d.*) AS data FROM deadline_instances d WHERE order_id = $1 ORDER BY created_at, deadline_id',
     [orderId],
   );
+  const productionRounds = await readSnapshotProductionRounds(tx, orderId, header, details);
+  const formatVersion = productionRounds ? ORDER_SNAPSHOT_ROUNDS_FORMAT_VERSION : ORDER_SNAPSHOT_FORMAT_VERSION;
   const deadlineEvents = await readOptionalTableRows(
     tx,
     'deadline_events',
@@ -702,17 +723,23 @@ async function buildSnapshot(tx: TransactionClient, orderId: number): Promise<Or
     requirements: requirements.map(mapRequirementSnapshot),
     dowelingOrders: dowelingOrders.map(mapDowelingOrderSnapshot),
     dowelingLinks: dowelingLinks.map(mapDowelingLinkSnapshot),
-    productionStatusEvents: productionEvents.map(mapProductionEventSnapshot),
+    // Format 1.0.0 files stay byte-identical: round numbers only for orders with rounds.
+    productionStatusEvents: productionEvents.map((row) => productionRounds
+      ? { ...mapProductionEventSnapshot(row), roundNo: toNumber(row.round_no) }
+      : mapProductionEventSnapshot(row)),
     deadlineInstances,
     deadlineEvents,
+    ...(productionRounds ? { productionRounds } : {}),
   };
   const snapshot: OrderSnapshotDto = {
     schema: ORDER_SNAPSHOT_SCHEMA,
-    formatVersion: ORDER_SNAPSHOT_FORMAT_VERSION,
+    formatVersion,
     exporterService: {
       name: ORDER_SNAPSHOT_SERVICE_NAME,
       version: ORDER_SNAPSHOT_SERVICE_VERSION,
-      compatibleImportVersions: [...ORDER_SNAPSHOT_SUPPORTED_IMPORT_VERSIONS],
+      compatibleImportVersions: formatVersion === ORDER_SNAPSHOT_FORMAT_VERSION
+        ? [ORDER_SNAPSHOT_FORMAT_VERSION]
+        : [...ORDER_SNAPSHOT_SUPPORTED_IMPORT_VERSIONS],
     },
     source: {
       sourceInstanceId,
@@ -830,6 +857,14 @@ function collectSnapshotReferenceIds(data: OrderSnapshotDto['data']): Map<OrderS
 
   for (const event of data.productionStatusEvents) {
     add('productionStatus', event.productionStatusId);
+  }
+
+  for (const round of data.productionRounds?.rounds ?? []) {
+    add('orderStatus', round.fromOrderStatusId);
+    for (const detail of round.details) {
+      add('productionStatus', detail.fromProductionStatusId);
+      add('productionStatus', detail.toProductionStatusId);
+    }
   }
 
   return ids;
@@ -989,6 +1024,21 @@ async function remapSnapshotReferencesForImport(
     })),
     deadlineInstances: data.deadlineInstances.map(remapDeadlineReferenceFields),
     deadlineEvents: data.deadlineEvents.map(remapDeadlineReferenceFields),
+    ...(data.productionRounds === undefined ? {} : { productionRounds: {
+      ...data.productionRounds,
+      rounds: await mapSeries(data.productionRounds.rounds, async (round) => ({
+        ...round,
+        fromOrderStatusId: await resolver.required('orderStatus', round.fromOrderStatusId),
+        startedBy: await existingOptionalId(tx, 'users', 'user_id', round.startedBy),
+        reasonClarifiedBy: await existingOptionalId(tx, 'users', 'user_id', round.reasonClarifiedBy),
+        closedBy: await existingOptionalId(tx, 'users', 'user_id', round.closedBy),
+        details: await mapSeries(round.details, async (detail) => ({
+          ...detail,
+          fromProductionStatusId: await resolver.optional('productionStatus', detail.fromProductionStatusId),
+          toProductionStatusId: await resolver.required('productionStatus', detail.toProductionStatusId),
+        })),
+      })),
+    } }),
   };
 
   resolver.throwIfMissing();
@@ -1289,7 +1339,18 @@ async function importSnapshotInTransaction(
     details: snapshotDetails,
   });
 
+  // «Переделка» (§6.2): rounds are restored only here, for a NEW order. The status
+  // model and reason catalogue are checked before any order row is written.
+  const restoresRounds = snapshotHasProductionRounds(snapshot);
+  const reworkReasonIds = snapshot.data.productionRounds
+    ? (await assertSnapshotRoundStatusModel(tx, snapshot), await resolveSnapshotReworkReasons(tx, snapshot))
+    : new Map<string, number>();
+  // The DB guard admits «Переделка» only from the rework command or this validated import;
+  // the marker covers the header insert only.
+  if (restoresRounds) await tx.query("SELECT set_config('erp.rework_command', 'import', true)");
   const orderId = await upsertOrderHeader(tx, snapshot, clientId, payloadHash, command);
+  if (restoresRounds) await tx.query("SELECT set_config('erp.rework_command', '', true)");
+  await restoreSnapshotOrderRound(tx, snapshot, orderId);
   // The phones of a snapshot describe its own client: a client merged into another one keeps none (its phones were moved or
   // dropped as duplicates by the merge), and the survivor's phones are not rewritten from the merged client's snapshot.
   if (!(await isMergedSnapshotClient(tx, snapshot))) await upsertClientPhones(tx, snapshot, clientId, orderId, payloadHash);
@@ -1305,9 +1366,21 @@ async function importSnapshotInTransaction(
       ownOrderId: orderId,
     });
   const dowelingOrderIds = await upsertDowelingOrders(tx, snapshot, orderId, payloadHash, guardDowelingOrders);
+  // A snapshot with rounds carries the order stage marks of every round: the detail-stage automation (266) is
+  // off while its details are written, otherwise details of earlier rounds would mark their stages in the
+  // restored current round.
+  if (restoresRounds) await markStageEventWriter(tx, 'historical_import');
   await upsertOrderChildren(tx, snapshot, orderId, dowelingOrderIds, payloadHash, command);
   await upsertProductionEvents(tx, snapshot, orderId, payloadHash);
+  await restoreSnapshotProductionRounds(
+    tx, snapshot, orderId,
+    await localIdsFor(tx, source, SNAPSHOT_ENTITY_TYPES.detail, snapshot.data.details),
+    reworkReasonIds,
+  );
   await upsertDeadlines(tx, snapshot, orderId, payloadHash);
+  // «Переделка» 1.1: the imported final deadline may lag behind a round command whose reconciliation had not run in
+  // the source; the order's newest round asks for one here (background pass; the importer is the initiator).
+  if (restoresRounds) await requestRoundDeadlineSync(tx, orderId, command.currentUser.id, command.requestId ?? 'order-snapshot-import');
   await upsertMap(tx, {
     source,
     entityType: SNAPSHOT_ENTITY_TYPES.order,
@@ -2733,32 +2806,34 @@ async function upsertProductionEvent(
   event: ProductionStatusEventSnapshotDto,
   targetId: number,
 ): Promise<number> {
+  // Format 1.0.0 events are round 1; 1.1.0 carries the original round (plan «Переделка» §6.2).
+  await markStageEventWriter(tx, 'historical_import');
   const result = event.targetType === 'order'
     ? await tx.query<IdRow>(
         `
-        INSERT INTO production_status_events (order_id, production_status_id, event_at, event_by, note, payload)
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-        ON CONFLICT (order_id, production_status_id) WHERE order_id IS NOT NULL
+        INSERT INTO production_status_events (order_id, production_status_id, event_at, event_by, note, payload, round_no)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+        ON CONFLICT (order_id, production_status_id, round_no) WHERE order_id IS NOT NULL
         DO UPDATE SET event_at = EXCLUDED.event_at,
                       event_by = EXCLUDED.event_by,
                       note = EXCLUDED.note,
                       payload = EXCLUDED.payload
         RETURNING event_id AS id
         `,
-        [targetId, event.productionStatusId, event.eventAt, event.eventBy, event.note, JSON.stringify(event.payload)],
+        [targetId, event.productionStatusId, event.eventAt, event.eventBy, event.note, JSON.stringify(event.payload), event.roundNo ?? 1],
       )
     : await tx.query<IdRow>(
         `
-        INSERT INTO production_status_events (detail_id, production_status_id, event_at, event_by, note, payload)
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-        ON CONFLICT (detail_id, production_status_id) WHERE detail_id IS NOT NULL
+        INSERT INTO production_status_events (detail_id, production_status_id, event_at, event_by, note, payload, round_no)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+        ON CONFLICT (detail_id, production_status_id, round_no) WHERE detail_id IS NOT NULL
         DO UPDATE SET event_at = EXCLUDED.event_at,
                       event_by = EXCLUDED.event_by,
                       note = EXCLUDED.note,
                       payload = EXCLUDED.payload
         RETURNING event_id AS id
         `,
-        [targetId, event.productionStatusId, event.eventAt, event.eventBy, event.note, JSON.stringify(event.payload)],
+        [targetId, event.productionStatusId, event.eventAt, event.eventBy, event.note, JSON.stringify(event.payload), event.roundNo ?? 1],
       );
   return Number(result.rows[0].id);
 }
@@ -3027,6 +3102,7 @@ async function deleteMissingImportedProductionEvents(
     .map((row) => toNumber(row.local_entity_id));
   if (ids.length === 0) return;
 
+  await markStageEventWriter(tx, 'historical_import');
   await tx.query('DELETE FROM production_status_events WHERE event_id = ANY($1::bigint[])', [ids]);
 }
 
@@ -3162,6 +3238,32 @@ async function upsertDeadlines(
     });
   }
 
+  // «Переделка» 1.1: a round's deadline instance names the instance it replaced (`previousDeadlineId`, the target of
+  // «Это не переделка»). Imported instances get local ids, so the reference follows the mapping (null outside the snapshot).
+  for (const raw of snapshot.data.deadlineInstances) {
+    const metadata = raw.metadata_json as Record<string, unknown> | null | undefined;
+    // A false-positive restore made before it was marked `reworkRestoreOfRound` is known by its source idempotency key
+    // (`order:<source order>:rework-round:<N>:fp-restore`, dropped on import): the mark keeps it from being repeated.
+    const restoreKey = typeof raw.idempotency_key === 'string' ? /^order:\d+:rework-round:(\d+):fp-restore$/.exec(raw.idempotency_key) : null;
+    if (restoreKey && metadata?.reworkRestoreOfRound === undefined) {
+      await tx.query(
+        `UPDATE deadline_instances
+            SET metadata_json = COALESCE(metadata_json, '{}'::jsonb) || jsonb_build_object('reworkRestoreOfRound', $2::int)
+          WHERE deadline_id = $1::uuid`,
+        [requiredString(deadlineIds.get(requiredString(raw.deadline_id, 'deadline_id')), 'deadline mapping'), Number(restoreKey[1])],
+      );
+    }
+    const previous = metadata?.previousDeadlineId;
+    if (typeof previous !== 'string') continue;
+    await tx.query(
+      `UPDATE deadline_instances
+          -- An external predecessor becomes JSON null (a SQL NULL would null the whole metadata, round tag included).
+          SET metadata_json = jsonb_set(metadata_json, '{previousDeadlineId}', COALESCE(to_jsonb($2::text), 'null'::jsonb))
+        WHERE deadline_id = $1::uuid`,
+      [requiredString(deadlineIds.get(requiredString(raw.deadline_id, 'deadline_id')), 'deadline mapping'), deadlineIds.get(previous) ?? null],
+    );
+  }
+
   await deleteMissingImportedDeadlineRows(
     tx,
     source,
@@ -3219,6 +3321,8 @@ function assertSupportedSnapshot(snapshot: OrderSnapshotDto): OrderSnapshotDto {
   if (snapshot.source.payloadHash && snapshot.source.payloadHash !== expected) {
     throw new ApiError(422, 'SNAPSHOT_HASH_MISMATCH', 'Order snapshot payload hash does not match');
   }
+
+  validateSnapshotProductionRounds(snapshot);
 
   if (snapshot.data.catalogLines !== undefined) {
     const result = z.array(z.object({

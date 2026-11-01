@@ -20,6 +20,7 @@ import { buildProductionStagesDisplayConfig } from '../../../../utils/production
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../types/productionWorkflow';
 import { OrderHeaderContextMenu } from '../OrderHeaderContextMenu';
 import { RowSeparator } from './RowSeparator';
+import { withRoundSuffix } from '../../../../api/orderReworkApi';
 import dayjs from 'dayjs';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
@@ -60,6 +61,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({
   const { getSetting } = useOrderAppSettings();
   const productionStatusEvents = useProductionStatusEvent({
     orderId: header.order_id,
+    productionRound: (header as { production_round?: number | null }).production_round ?? null,
   });
   // Detail and HDF stages set and clear the order marks in the database: a saved
   // order (new version) or changed stages re-read them.
@@ -390,7 +392,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({
                     : '#4F46E5'
               }
             >
-              {orderStatusData?.data?.order_status_name || 'Не назначен'}
+              {withRoundSuffix(orderStatusData?.data?.order_status_name || 'Не назначен', header.production_round)}
             </Tag>
             <Tag
               color={

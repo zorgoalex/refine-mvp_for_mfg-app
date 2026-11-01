@@ -8,7 +8,8 @@ export type RecipientResolverKind =
   | 'stage_assignee'
   | 'group_participants'
   | 'workshop_head'
-  | 'direction_head';
+  | 'direction_head'
+  | 'rework_managers';
 export type EventContextField = 'orderId' | 'clientId' | 'paymentId' | 'deadlineId';
 
 /** Runtime-переключатель семейства событий; проверяется в момент обработки (план закупок §5.7 R5-3). */
@@ -58,6 +59,18 @@ const ORDER_RESOLVERS: RecipientResolverKind[] = [
   'workshop_head',
   'direction_head',
 ];
+
+// «Переделка» (plan §8.7): order resolvers + holders of `orders.rework`.
+const REWORK_RESOLVERS: RecipientResolverKind[] = [...ORDER_RESOLVERS, 'rework_managers'];
+const reworkEvent = (eventType: string): NotificationEventDefinition => ({
+  eventType,
+  aggregateType: 'order',
+  owner: 'engine',
+  contextFields: ['orderId', 'clientId'],
+  supportedResolvers: REWORK_RESOLVERS,
+  supportsOrderConditions: true,
+  supportsDeadlineConditions: false,
+});
 
 export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefinition> = {
   'order.status_changed': {
@@ -145,6 +158,10 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     allowedChannels: ['in_app', 'balloon'],
     featureFlag: 'procurementNotifications',
   },
+  'order.rework_started': reworkEvent('order.rework_started'),
+  'order.rework_details_added': reworkEvent('order.rework_details_added'),
+  'order.rework_reason_clarified': reworkEvent('order.rework_reason_clarified'),
+  'order.rework_closed': reworkEvent('order.rework_closed'),
   DEADLINE_EXPIRED: {
     eventType: 'DEADLINE_EXPIRED',
     aggregateType: 'deadline',

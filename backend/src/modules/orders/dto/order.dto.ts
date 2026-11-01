@@ -211,6 +211,9 @@ export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
   paymentStatusName: string;
   productionStatusName: string | null;
   passedProductionStatusCodes?: string[];
+  /** «Переделка»: current production round and the highest round number ever used. */
+  productionRound?: number;
+  lastRoundNo?: number;
   totalAmount: number;
   finalAmount: number;
   paidAmount: number;
@@ -236,6 +239,8 @@ export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
 export type OrderDetailDto = CalculatedOrderDetailDto & {
   id: number;
   orderId: number;
+  /** «Переделка»: current production round of the detail (1 = the original run). */
+  productionRound?: number;
   bazisProjectId: number | null;
   // SP3: server-resolved COALESCE(sheet,material) display name (no sheet_materials.view needed).
   materialName?: string | null;

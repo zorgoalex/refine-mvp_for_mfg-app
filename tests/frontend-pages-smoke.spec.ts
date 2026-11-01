@@ -193,6 +193,34 @@ async function setupFrontendPageApiMocks(page: Page) {
         });
     });
 
+    // The order card asks the backend whether rework is available and for the rounds of the order; the smoke has no backend.
+    await page.route(/\/api\/v1\/order-rework\/availability$/, async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ availability: 'disabled_flag' }),
+        });
+    });
+
+    await page.route(/\/api\/v1\/orders\/\d+\/rework\/rounds$/, async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                order: {
+                    orderStatusCode: 'new',
+                    version: 1,
+                    canRework: false,
+                    productionRound: 1,
+                    lastRoundNo: 1,
+                    openRoundNo: null,
+                    action: null,
+                },
+                data: [],
+            }),
+        });
+    });
+
     await page.route(/\/api\/v1\/notifications(?:\?.*)?$/, async (route) => {
         await route.fulfill({
             status: 200,

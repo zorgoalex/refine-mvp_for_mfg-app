@@ -45,6 +45,10 @@ function expectedFilter(name: string): unknown {
   if (['order_details', 'order_details_view', 'order_doweling_links'].includes(name)) {
     return { order: { order_kind: { _eq: 'production_order' } } };
   }
+  // «Переделка»: an order's stage marks of its current production round only (production-status-events-current-round.sh).
+  if (name === 'production_status_events') {
+    return { _or: [{ order_id: { _is_null: true } }, { order: { production_round: { _ceq: ['$', 'round_no'] } } }] };
+  }
   return {};
 }
 

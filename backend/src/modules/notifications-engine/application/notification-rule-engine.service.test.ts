@@ -360,6 +360,22 @@ describe('NotificationRuleEngineService.processEvent', () => {
     expect(payment.message).toBe('Заказ А-17: статус оплаты изменён с «Частично» на «Оплачено».');
   });
 
+  it('has Russian default texts for the «Переделка» events', () => {
+    const empty = rule({ titleTemplate: null, messageTemplate: null });
+    const texts: Record<string, string> = {
+      'order.rework_started': 'запущена переделка',
+      'order.rework_details_added': 'в переделку добавлены детали',
+      'order.rework_reason_clarified': 'уточнена причина переделки',
+      'order.rework_closed': 'круг переделки закрыт',
+    };
+    for (const [eventType, text] of Object.entries(texts)) {
+      expect(renderNotificationText(empty, ctx({ eventType, orderName: 'А-17' }))).toEqual({
+        title: `Заказ А-17: ${text}`,
+        message: `Заказ А-17: ${text}.`,
+      });
+    }
+  });
+
   it('falls back to the order id and a generic text when names are unknown', () => {
     const { title, message } = renderNotificationText(
       rule({ titleTemplate: null, messageTemplate: null }),

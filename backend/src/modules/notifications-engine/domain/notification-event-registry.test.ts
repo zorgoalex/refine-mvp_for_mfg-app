@@ -51,6 +51,17 @@ describe('notification event registry', () => {
     }
   });
 
+  it('registers «Переделка» events as engine-owned order events with the rework_managers resolver', () => {
+    for (const eventType of ['order.rework_started', 'order.rework_details_added', 'order.rework_reason_clarified', 'order.rework_closed']) {
+      expect(isEngineOwnedEvent(eventType)).toBe(true);
+      const def = getEventDefinition(eventType);
+      expect(def).toMatchObject({ aggregateType: 'order', supportsOrderConditions: true });
+      expect(def?.supportedResolvers).toEqual(expect.arrayContaining(['order_manager', 'workshop_head', 'rework_managers']));
+    }
+    // Other events keep their resolver sets.
+    expect(getEventDefinition('order.status_changed')?.supportedResolvers).not.toContain('rework_managers');
+  });
+
   it('does not add head resolvers to the group-only GROUP_DEADLINE_OVERDUE event', () => {
     const def = getEventDefinition('GROUP_DEADLINE_OVERDUE');
     expect(def?.supportedResolvers).toEqual(['group_participants']);
