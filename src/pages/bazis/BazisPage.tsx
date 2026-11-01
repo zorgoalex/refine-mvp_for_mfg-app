@@ -71,7 +71,7 @@ export const BazisPage: React.FC = () => {
       const response = await bazisApi.listProjects();
       setRows(response.map((item) => ({ ...item, key: item.bazisProjectId })));
     } catch (error) {
-      const text = error instanceof Error ? error.message : 'Не удалось загрузить Базис-проекты';
+      const text = error instanceof Error ? error.message : 'Не удалось загрузить XML Базиса';
       setErrorText(text);
     } finally {
       setLoading(false);
@@ -104,7 +104,7 @@ export const BazisPage: React.FC = () => {
     setDeletingProjectIds((prev) => ({ ...prev, [bazisProjectId]: true }));
     try {
       const response = await bazisApi.deleteProject(bazisProjectId);
-      message.success(`Базис-проект «${response.name}» удалён (ревизий: ${response.revisionsDeleted})`);
+      message.success(`XML-проект «${response.name}» удалён (ревизий: ${response.revisionsDeleted})`);
       setExpandedProjectIds((prev) => prev.filter((id) => id !== bazisProjectId));
       setProjectCards((prev) => {
         const next = { ...prev };
@@ -113,7 +113,7 @@ export const BazisPage: React.FC = () => {
       });
       await loadProjects();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Не удалось удалить Базис-проект');
+      message.error(error instanceof Error ? error.message : 'Не удалось удалить XML-проект');
     } finally {
       setDeletingProjectIds((prev) => ({ ...prev, [bazisProjectId]: false }));
     }
@@ -199,6 +199,14 @@ export const BazisPage: React.FC = () => {
         render: (value: string, record) => <Link to={`/bazis/projects/${record.bazisProjectId}`}>{value}</Link>,
       },
       {
+        title: 'Базис-проект',
+        key: 'card',
+        width: 150,
+        render: (_: unknown, record) => record.card
+          ? <Link to={`/doweling-orders/show/${record.card.dowelingOrderId}`}>{record.card.name || `#${record.card.dowelingOrderId}`}</Link>
+          : '—',
+      },
+      {
         title: 'Заказ Базис',
         dataIndex: 'bazisOrderNo',
         key: 'bazisOrderNo',
@@ -278,7 +286,7 @@ export const BazisPage: React.FC = () => {
             }
           >
             <Popconfirm
-              title={<PopconfirmContent title="Удалить Базис-проект?" description={`«${record.name}» и все его ревизии будут удалены безвозвратно.`} />}
+              title={<PopconfirmContent title="Удалить XML-проект?" description={`«${record.name}» и все его ревизии будут удалены безвозвратно.`} />}
               okText="Удалить"
               okButtonProps={{ danger: true }}
               cancelText="Отмена"
@@ -385,7 +393,7 @@ export const BazisPage: React.FC = () => {
               }
             >
               <Popconfirm
-                title={<PopconfirmContent title="Удалить Базис-проект?" description={`«${record.name}» и все его ревизии будут удалены безвозвратно.`} />}
+                title={<PopconfirmContent title="Удалить XML-проект?" description={`«${record.name}» и все его ревизии будут удалены безвозвратно.`} />}
                 okText="Удалить"
                 okButtonProps={{ danger: true }}
                 cancelText="Отмена"
@@ -432,7 +440,7 @@ export const BazisPage: React.FC = () => {
         {isWorkbench ? (
           <header className="wb-bz-list__head">
             <div className="wb-bz-list__titles">
-              <h1>Базис-проекты</h1>
+              <h1>XML Базиса</h1>
               <p className="wb-bz-list__sub">
                 <span>{bazisProjectsCountLabel(rows.length)}</span>
                 {lastImport ? <span>{`последний импорт ${formatDateTime(lastImport.toISOString())}`}</span> : null}
@@ -446,7 +454,7 @@ export const BazisPage: React.FC = () => {
         ) : null}
         <Card
           className="bazis-list-modern__card"
-          title={isWorkbench ? undefined : <Title level={3} style={{ margin: 0 }}>Базис-проекты</Title>}
+          title={isWorkbench ? undefined : <Title level={3} style={{ margin: 0 }}>XML Базиса</Title>}
           extra={isWorkbench ? undefined : (
             <Button
               type="primary"
@@ -466,7 +474,7 @@ export const BazisPage: React.FC = () => {
                   allowClear
                   prefix={<SearchOutlined />}
                   placeholder="Проект, заказ или конструктор"
-                  aria-label="Поиск по Базис-проектам"
+                  aria-label="Поиск по XML-проектам"
                   value={listQuery}
                   onChange={(event) => {
                     setListQuery(event.target.value);
@@ -517,7 +525,7 @@ export const BazisPage: React.FC = () => {
               locale={{
                 emptyText: errorText
                   ? <Text type="secondary">Нет данных</Text>
-                  : <Empty description={isWorkbench && rows.length > 0 ? 'По поиску и выбранной связи проектов нет' : 'Базис-проекты не найдены'} />,
+                  : <Empty description={isWorkbench && rows.length > 0 ? 'По поиску и выбранной связи проектов нет' : 'XML-проекты не найдены'} />,
               }}
               expandable={{
                 expandedRowKeys: expandedProjectIds,

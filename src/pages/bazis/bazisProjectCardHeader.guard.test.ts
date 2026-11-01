@@ -18,7 +18,7 @@ describe('Bazis project card header guards', () => {
   it('offers manager-only accessible rename controls with keyboard support', () => {
     expect(view).toContain("can('bazis.manage')");
     expect(view).toContain('bazisApi.renameProject');
-    expect(view).toContain('aria-label="Изменить название Базис-проекта"');
+    expect(view).toContain('aria-label="Изменить название XML-проекта"');
     expect(view).toContain('onPressEnter');
     expect(view).toContain("event.key === 'Escape'");
   });

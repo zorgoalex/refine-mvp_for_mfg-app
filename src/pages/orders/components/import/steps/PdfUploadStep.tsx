@@ -183,7 +183,7 @@ export const PdfUploadStep: React.FC<PdfUploadStepProps> = ({
               size="small"
               column={2}
             >
-              <Descriptions.Item label="Присадка">
+              <Descriptions.Item label="Базис-проект">
                 <Tag color="blue">№ {result.metadata.orderNumber}</Tag>
                 {result.metadata.orderName && (
                   <Text> / {result.metadata.orderName}</Text>

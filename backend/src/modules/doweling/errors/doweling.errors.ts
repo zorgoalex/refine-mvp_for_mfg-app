@@ -13,7 +13,7 @@ export class DowelingDatabaseUnavailableError extends ApiError {
 
 export class DowelingReferenceNotFoundError extends ApiError {
   constructor(details: Record<string, unknown>) {
-    super(404, 'DOWELING_REFERENCE_NOT_FOUND', 'Связанная запись присадки не найдена', details);
+    super(404, 'DOWELING_REFERENCE_NOT_FOUND', 'Связанная запись Базис-проекта не найдена', details);
   }
 }
 
@@ -43,7 +43,7 @@ export class DowelingIdempotencyFailedError extends ApiError {
 
 export class DowelingOrderNotFoundError extends ApiError {
   constructor(dowelingOrderId: number) {
-    super(404, 'DOWELING_ORDER_NOT_FOUND', 'Присадка не найдена', { dowelingOrderId });
+    super(404, 'DOWELING_ORDER_NOT_FOUND', 'Базис-проект не найден', { dowelingOrderId });
   }
 }
 
@@ -55,7 +55,7 @@ export class DowelingLinkedOrderNotFoundError extends ApiError {
 
 export class DowelingVersionConflictError extends ApiError {
   constructor(dowelingOrderId: number, expectedVersion: number, currentVersion: number) {
-    super(409, 'DOWELING_VERSION_CONFLICT', 'Присадку уже изменили. Обновите карточку и повторите', {
+    super(409, 'DOWELING_VERSION_CONFLICT', 'Базис-проект уже изменили. Обновите карточку и повторите', {
       dowelingOrderId,
       expectedVersion,
       currentVersion,
@@ -65,7 +65,7 @@ export class DowelingVersionConflictError extends ApiError {
 
 export class DowelingLinksConflictError extends ApiError {
   constructor(dowelingOrderId: number, baseOrderIds: number[], currentOrderIds: number[]) {
-    super(409, 'DOWELING_LINKS_CONFLICT', 'Заказы присадки уже изменили. Обновите карточку и повторите', {
+    super(409, 'DOWELING_LINKS_CONFLICT', 'Заказы Базис-проекта уже изменили. Обновите карточку и повторите', {
       dowelingOrderId,
       baseOrderIds,
       currentOrderIds,
@@ -75,7 +75,7 @@ export class DowelingLinksConflictError extends ApiError {
 
 export class DowelingConcurrentChangeError extends ApiError {
   constructor(dowelingOrderId: number) {
-    super(409, 'DOWELING_CONCURRENT_CHANGE', 'Присадку одновременно изменяют. Повторите сохранение', { dowelingOrderId });
+    super(409, 'DOWELING_CONCURRENT_CHANGE', 'Базис-проект одновременно изменяют. Повторите сохранение', { dowelingOrderId });
   }
 }
 
@@ -92,9 +92,9 @@ export class DowelingAmountsInvalidError extends ApiError {
 }
 
 function duplicateMessage(constraint: string | null): string {
-  if (constraint === 'idx_doweling_orders__ref_key_1c') return 'Присадка с таким Ref Key 1C уже есть';
-  if (constraint === 'uq_doweling_orders_order_name_active') return 'У заказа уже есть присадка с таким названием';
-  return 'Такая присадка уже есть';
+  if (constraint === 'idx_doweling_orders__ref_key_1c') return 'Базис-проект с таким Ref Key 1C уже есть';
+  if (constraint === 'uq_doweling_orders_order_name_active') return 'У заказа уже есть Базис-проект с таким названием';
+  return 'Такой Базис-проект уже есть';
 }
 
 const AMOUNT_MESSAGES: Record<string, string> = {
@@ -106,5 +106,35 @@ const AMOUNT_MESSAGES: Record<string, string> = {
 };
 
 function amountsMessage(constraint: string | null): string {
-  return (constraint && AMOUNT_MESSAGES[constraint]) || 'Суммы присадки не согласованы';
+  return (constraint && AMOUNT_MESSAGES[constraint]) || 'Суммы Базис-проекта не согласованы';
+}
+
+/** The card, its live orders and its attached XML projects belong to one client (migration 279). */
+export class BazisProjectClientMismatchError extends ApiError {
+  constructor(dowelingOrderId: number | null, orderIds: number[], bazisProjectIds: number[] = []) {
+    super(409, 'BAZIS_PROJECT_CLIENT_MISMATCH', 'Клиент Базис-проекта не совпадает с клиентом заказа', {
+      dowelingOrderId,
+      orderIds,
+      bazisProjectIds,
+    });
+  }
+}
+
+/** A new Bazis project card needs its client: given, or taken from the order it is created for. */
+export class BazisProjectClientRequiredError extends ApiError {
+  constructor() {
+    super(422, 'VALIDATION_ERROR', 'Укажите клиента Базис-проекта', {
+      errors: [{ field: 'clientId', message: 'Укажите клиента Базис-проекта' }],
+    });
+  }
+}
+
+/** A card of an unknown client (written by the previous backend) links orders of several clients: pick the client. */
+export class BazisProjectClientAmbiguousError extends ApiError {
+  constructor(dowelingOrderId: number, clientIds: number[]) {
+    super(409, 'BAZIS_PROJECT_CLIENT_AMBIGUOUS', 'У Базис-проекта заказы разных клиентов — выберите клиента', {
+      dowelingOrderId,
+      clientIds,
+    });
+  }
 }

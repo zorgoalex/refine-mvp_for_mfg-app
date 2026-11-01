@@ -10,6 +10,8 @@ export interface CreateDowelingOrderCommand {
   currentUser: CurrentUser;
   requestId?: string;
   dto: CreateDowelingOrderRequestDto;
+  /** Route POST /bazis/cards: the client is mandatory (given or from the order). The legacy route allows none. */
+  clientRequired?: boolean;
 }
 
 export interface UpdateDowelingOrderCommand {

@@ -28,7 +28,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   'order-status-board': ['orders.view'],
   'mdf-work-board': ['orders.view'],
   scan: ['labels.view'],
-  doweling_orders_view: ['orders.view'],
+  doweling_orders_view: ['doweling.view'],
   order_workshops: ['orders.view'],
   order_resource_requirements: ['orders.view'],
   crm: ['orders.view'],

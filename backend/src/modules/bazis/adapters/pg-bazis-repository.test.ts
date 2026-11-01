@@ -32,6 +32,72 @@ beforeEach(() => {
   getOrderByIdMock.mockReset();
 });
 
+describe('PgBazisRepository.importRevision into a Bazis project card (route /bazis/cards/imports)', () => {
+  const cardsCommand = (cards: { dowelingOrderId: number | null; idempotencyKey: string }, overrides: Record<string, unknown> = {}) => ({
+    ...importCommand({ parsed: parsedRevision({ designEngineerName: 'Тапен Жамит' } as never) }),
+    cards,
+    ...overrides,
+  });
+
+  it('creates the card of a new XML project (client = the group client) and completes the import key', async () => {
+    const database = createDatabase({ activeEmployees: [{ employee_id: 10, full_name: 'Тапен Жамит' }] } as never);
+    const repository = new PgBazisRepository(database.service);
+
+    const response = await repository.importRevision(cardsCommand({ dowelingOrderId: null, idempotencyKey: 'import-key-1' }) as never);
+
+    expect(response.dowelingOrderId).toBe(555);
+    const sql = normalizedSql(database.queries);
+    expect(sql).toContain('INSERT INTO command_idempotency_keys');
+    expect(database.queries.find((query) => normalizeSql(query.text).startsWith('INSERT INTO doweling_orders'))?.params?.slice(4)).toEqual([5, 'manual']);
+    expect(database.queries.some((query) => query.params?.[0] === 'doweling.created')).toBe(true);
+    expect(database.queries.find((query) => normalizeSql(query.text).startsWith('UPDATE command_idempotency_keys SET status')))
+      .toBeDefined();
+  });
+
+  it('replays the stored answer of the same key without importing again', async () => {
+    const stored = { bazisProject: { bazisProjectId: 41, projectId: 77, name: '1457' }, dowelingOrderId: 555, requestId: 'r0' };
+    // The hash of this request: actor, XML, group, XML project, card.
+    const { createHash } = await import('node:crypto');
+    const storedHash = createHash('sha256').update(JSON.stringify(['1', 'sha-001', 77, null, null])).digest('hex');
+    const database = createDatabase({ importState: { storedResponse: stored, storedHash } });
+    const repository = new PgBazisRepository(database.service);
+    const command = cardsCommand({ dowelingOrderId: null, idempotencyKey: 'import-key-1' });
+
+    await expect(repository.importRevision(command as never)).resolves.toMatchObject({ dowelingOrderId: 555 });
+    expect(normalizedSql(database.queries)).not.toContain('INSERT INTO bazis_projects');
+  });
+
+  it('refuses to put a revision of an XML project of card A into card B (409 BAZIS_PROJECT_CARD_MISMATCH)', async () => {
+    const database = createDatabase({ card: { cardId: 300 } });
+    const repository = new PgBazisRepository(database.service);
+
+    await expect(repository.importRevision(cardsCommand(
+      { dowelingOrderId: 301, idempotencyKey: 'import-key-2' }, { projectId: null, bazisProjectId: 41 },
+    ) as never)).rejects.toMatchObject({ statusCode: 409, code: 'BAZIS_PROJECT_CARD_MISMATCH' });
+    // the current and the requested card are locked as one id-ordered set
+    const cardLock = database.queries.find((query) => normalizeSql(query.text).includes('FROM doweling_orders WHERE doweling_order_id = ANY'));
+    expect(cardLock?.params?.[0]).toEqual([300, 301]);
+  });
+
+  it('checks the right on the card of the XML project on the legacy route too', async () => {
+    const database = createDatabase({ card: { cardId: 300 } });
+    const repository = new PgBazisRepository(database.service);
+    const user = { ...currentUser('manager'), permissions: currentUser('manager').permissions.filter((p) => p !== 'doweling.update') };
+
+    await expect(repository.importRevision({ ...importCommand(), currentUser: user, projectId: null, bazisProjectId: 41 } as never))
+      .rejects.toMatchObject({ statusCode: 403 });
+  });
+});
+
+describe('Bazis project card events', () => {
+  it('uses distinct outbox key prefixes for XML attach and order link (no collision of equal numbers)', async () => {
+    const source = (await import('node:fs')).readFileSync(new URL('./bazis-project-card.ts', import.meta.url), 'utf8');
+    expect(source).toContain('`bazis-card-xml-attached-${input.bazisProjectId}-${version}`');
+    expect(source).toContain('`bazis-card-order-linked-${input.orderId}-${input.card.cardId}`');
+    expect(source).toContain('`bazis-card-xml-detached-${input.bazisProjectId}-${version}`');
+  });
+});
+
 describe('PgBazisRepository.importRevision', () => {
   it('sets session user first, then inserts project/revision/nodes/audit/outbox/run', async () => {
     const database = createDatabase();
@@ -1057,7 +1123,8 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
       detailsCreated: 2,
       mappedNodes: 2,
       requestId: 'req-create-order',
-      auditId: 'audit-1',
+      // audit-1/audit-2 — the new card of the XML project (doweling.created, bazis.project_card_linked).
+      auditId: 'audit-3',
     });
     const sql = normalizedSql(database.queries);
     expect(sql).toContain('WITH RECURSIVE sel AS');
@@ -1072,15 +1139,145 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
     expect(sql).toContain('ON CONFLICT (node_id, order_id) DO NOTHING');
     expect(sql).toContain('INSERT INTO bazis_order_links');
     expect(sql).toContain('ON CONFLICT (bazis_project_id, order_id) DO NOTHING');
+    // No card yet: the XML project gets one (client = the XML group's client), linked to the new order.
     const dowelingInsert = database.queries.find((query) =>
       normalizeSql(query.text).startsWith('INSERT INTO doweling_orders'),
     );
-    expect(dowelingInsert?.params).toEqual(['1457', 9001, 1, 2, 88, 2]);
-    expect(normalizeSql(dowelingInsert?.text ?? '')).not.toContain('operator_id');
+    expect(dowelingInsert?.params).toEqual(['1457', 2, 88, 2, 5, 'order']);
+    expect(database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('UPDATE bazis_projects SET doweling_order_id = $2'),
+    )?.params).toEqual([41, 555]);
     expect(database.queries.find((query) =>
       normalizeSql(query.text).startsWith('INSERT INTO order_doweling_links'),
-    )?.params).toEqual([9001, 501]);
+    )?.params).toEqual([9001, 555]);
     expect(database.queries.some((query) => query.params?.[0] === 'doweling.created')).toBe(true);
+    expect(database.queries.some((query) => query.params?.[0] === 'bazis.project_card_linked')).toBe(true);
+    // Lock hierarchy: card and XML project before the revision.
+    const projectLockIdx = orderedHook.findIndex((sqlText) => sqlText.includes('FROM bazis_projects bp') && sqlText.includes('FOR UPDATE OF bp'));
+    expect(projectLockIdx).toBeGreaterThan(-1);
+    expect(projectLockIdx).toBeLessThan(revisionLockIdx);
+  });
+
+  describe('the Bazis project card of the XML project (migration 279, plan v8 §0a)', () => {
+    const panelState = () => ({
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          revision_bazis_order_no: '1457',
+          project_client_id: 5,
+        },
+        panelRows: [
+          {
+            bazis_node_id: 101,
+            object_type: 'Панель',
+            name: 'Фасад/левая створка',
+            position: '7',
+            designation: 'D-01',
+            cumulative_quantity: 2,
+            length_mm: 1200,
+            width_mm: 450,
+            main_material_name: 'Laminate White',
+            product_name: 'Шкаф',
+            product_order_no: '1443',
+            raw_json: {
+              ОблицовкаПласти1: { Пласть: [{ Наименование: 'Snow Film' }] },
+              ОблицовкаПласти2: { Пласть: [{ Наименование: 'Snow Film' }] },
+            },
+          },
+          {
+            bazis_node_id: 102,
+            object_type: 'Панель',
+            name: 'Полка',
+            position: '8',
+            designation: 'S-02',
+            cumulative_quantity: 1,
+            length_mm: 800,
+            width_mm: 300,
+            main_material_name: 'Unknown Sheet',
+            product_name: 'Шкаф',
+            product_order_no: '1443',
+            raw_json: {},
+          },
+        ],
+        mappingRows: [
+          {
+            source_kind: 'sheet',
+            name: 'laminate white',
+            target_kind: 'sheet',
+            sheet_material_type_id: 501,
+            film_id: null,
+            edge_type_id: null,
+          },
+          {
+            source_kind: 'film',
+            name: 'snow film',
+            target_kind: 'film',
+            sheet_material_type_id: null,
+            film_id: 601,
+            edge_type_id: null,
+          },
+          {
+            source_kind: 'sheet',
+            name: 'unknown sheet',
+            target_kind: 'sheet',
+            sheet_material_type_id: 502,
+            film_id: null,
+            edge_type_id: null,
+          },
+        ],
+      });
+    const hookOnly = (database: ReturnType<typeof createDatabase>) => ({
+      create: async (command: { postPersistHook?: (uow: unknown, created: unknown) => Promise<unknown> }) => {
+        await command.postPersistHook?.(
+          { getTransactionClient: () => database.tx },
+          { orderId: 9001, detailIdsByClientKey: new Map([['bazis-node-101', 7001], ['bazis-node-102', 7002]]) },
+        );
+        return buildOrderDto(9001, 'ERP order');
+      },
+    });
+
+    it('links the order to the existing card of the XML project and leaves its fields alone', async () => {
+      const database = createDatabase({ createOrderState: panelState(), card: { cardId: 300 } });
+      const repository = new PgBazisRepository(database.service, hookOnly(database) as never);
+
+      await repository.createOrderFromRevision(createOrderCommand());
+
+      const sql = normalizedSql(database.queries);
+      expect(sql).not.toContain('INSERT INTO doweling_orders');
+      expect(database.queries.find((query) =>
+        normalizeSql(query.text).startsWith('INSERT INTO order_doweling_links'),
+      )?.params).toEqual([9001, 300]);
+      expect(database.queries.some((query) => query.params?.[0] === 'doweling.created')).toBe(false);
+      expect(database.queries.some((query) => query.params?.[0] === 'doweling.updated')).toBe(true);
+      expect(database.queries.find((query) => query.params?.[3] === 'bazis-card-order-linked-9001-300')).toBeDefined();
+    });
+
+    it('refuses with 409 BAZIS_PROJECT_CARD_CONFLICT when several cards are candidates', async () => {
+      const database = createDatabase({ createOrderState: panelState(), card: { candidates: [300, 301] } });
+      const repository = new PgBazisRepository(database.service, hookOnly(database) as never);
+
+      await expect(repository.createOrderFromRevision(createOrderCommand())).rejects.toMatchObject({
+        statusCode: 409,
+        code: 'BAZIS_PROJECT_CARD_CONFLICT',
+      });
+      expect(normalizedSql(database.queries)).not.toContain('INSERT INTO doweling_orders');
+    });
+
+    it('adopts the single candidate of the same client without creating a card', async () => {
+      const database = createDatabase({ createOrderState: panelState(), card: { candidates: [300] } });
+      const repository = new PgBazisRepository(database.service, hookOnly(database) as never);
+
+      await repository.createOrderFromRevision(createOrderCommand());
+
+      expect(normalizedSql(database.queries)).not.toContain('INSERT INTO doweling_orders');
+      expect(database.queries.find((query) =>
+        normalizeSql(query.text).startsWith('UPDATE bazis_projects SET doweling_order_id = $2'),
+      )?.params).toEqual([41, 300]);
+      expect(database.queries.some((query) => query.params?.[0] === 'bazis.project_card_linked')).toBe(true);
+      expect(database.queries.some((query) => query.params?.[0] === 'doweling.created')).toBe(false);
+    });
   });
 
   it('requires a constructor before creating the ERP order', async () => {
@@ -1613,7 +1810,7 @@ describe('PgBazisRepository.createOrderFromDraft', () => {
       detailsCreated: 3,
       mappedNodes: 2,
       requestId: 'req-create-order-draft',
-      auditId: 'audit-1',
+      auditId: 'audit-3',
     });
 
     const mapInserts = database.queries.filter((query) =>
@@ -1626,12 +1823,12 @@ describe('PgBazisRepository.createOrderFromDraft', () => {
     expect(mapInserts).toHaveLength(2);
 
     const outbox = database.queries.find((query) =>
-      normalizeSql(query.text).startsWith('INSERT INTO outbox_events'),
+      normalizeSql(query.text).startsWith('INSERT INTO outbox_events') && query.params?.[0] === 'bazis.order_created',
     );
     expect(outbox?.params?.[4]).toBe('bazis-order-created-draft-9001');
 
     const auditInsert = database.queries.find((query) =>
-      normalizeSql(query.text).startsWith('INSERT INTO audit_log ('),
+      normalizeSql(query.text).startsWith('INSERT INTO audit_log (') && query.params?.[0] === 'bazis.order_created',
     );
     expect(auditInsert?.params?.[0]).toBe('bazis.order_created');
     expect(auditInsert?.params?.some((param) => String(param).includes('"source":"panels_draft"'))).toBe(true);
@@ -3519,6 +3716,8 @@ function createDatabase(
       rows?: Array<Record<string, unknown>>;
     };
     projectRevisionRows?: Array<Record<string, unknown>>;
+    card?: CardMockState;
+    importState?: { storedResponse?: Record<string, unknown>; storedHash?: string };
     createOrderState?: {
       idempotencyConflict?: boolean;
       existingIdempotencyRow?: {
@@ -3598,6 +3797,8 @@ function createDatabase(
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
       const normalized = normalizeSql(text);
+      const card = bazisCardMock(normalized, params, options.card);
+      if (card) return card;
 
       if (normalized === 'SELECT employee_id, full_name FROM employees WHERE is_active = true ORDER BY employee_id') {
         return {
@@ -3617,6 +3818,13 @@ function createDatabase(
       }
 
       if (normalized.startsWith('INSERT INTO command_idempotency_keys')) {
+        if (String(params[1]) === 'bazis.import') {
+          const stored = options.importState?.storedResponse;
+          return stored
+            ? { rows: [], rowCount: 0 }
+            : { rows: [{ idempotency_key: params[0], request_hash: params[5], response_json: null, status: 'processing',
+                created_at: '2026-10-27T12:00:00.000Z' }], rowCount: 1 };
+        }
         if (
           String(params[1]) === 'bazis.create_order' ||
           String(params[1]) === 'bazis.create_order_from_draft' ||
@@ -3647,6 +3855,11 @@ function createDatabase(
         }
       }
 
+      if (normalized.startsWith('SELECT idempotency_key, request_hash, response_json, status, created_at FROM command_idempotency_keys')
+        && options.importState?.storedResponse) {
+        return { rows: [{ idempotency_key: params[0], request_hash: options.importState.storedHash, status: 'completed',
+          response_json: options.importState.storedResponse, created_at: '2026-10-27T12:00:00.000Z' }], rowCount: 1 };
+      }
       if (normalized.startsWith('SELECT idempotency_key, request_hash, response_json, status, created_at FROM command_idempotency_keys')) {
         const row = options.addToOrderState?.existingIdempotencyRow ?? options.createOrderState?.existingIdempotencyRow;
         return row
@@ -3891,6 +4104,11 @@ function createDatabase(
           : { rows: [{ bazis_revision_id: 82 }], rowCount: 1 };
       }
 
+      if (!normalized.includes('FROM payment_statuses') && normalized.includes('FROM production_statuses')
+        && normalized.includes("production_status_code)) = 'drawn'")) {
+        const defaults = options.createOrderState?.dowelingStatusDefaults ?? { payment_status_id: 1, production_status_id: 2 };
+        return { rows: [{ production_status_id: defaults.production_status_id }], rowCount: 1 };
+      }
       if (normalized.includes('FROM payment_statuses') && normalized.includes('FROM production_statuses')) {
         return {
           rows: [options.createOrderState?.dowelingStatusDefaults ?? {
@@ -4091,6 +4309,64 @@ function parsedRevision(overrides: Partial<ParsedBazisRevision> = {}): ParsedBaz
 
 function currentUser(role: CurrentUser['role'] = 'manager'): CurrentUser {
   return { id: '1', username: role, role, roleId: 10, permissions: getPermissionsForRole(role) };
+}
+
+/** Mock answers of the Bazis project card SQL (bazis-project-card.ts, migration 279); null — not a card query. */
+interface CardMockState {
+  cardId?: number | null;
+  candidates?: number[];
+  clientId?: number;
+  cardClientId?: number;
+  cardDeleted?: boolean;
+  cardOrderIds?: number[];
+}
+function bazisCardMock(normalized: string, params: readonly unknown[], state: CardMockState = {}) {
+  const clientId = state.clientId ?? 5;
+  const cardRow = (id: number) => ({
+    doweling_order_id: id, client_id: state.cardClientId ?? clientId, client_source: 'manual',
+    delete_flag: state.cardDeleted ?? false, version: 3, doweling_order_name: 'Карточка ' + id,
+  });
+  if (normalized.startsWith('SELECT bp.bazis_project_id, bp.project_id, bp.doweling_order_id, p.client_id FROM bazis_projects bp')) {
+    return { rows: [{ bazis_project_id: params[0], project_id: 77, doweling_order_id: state.cardId ?? null, client_id: clientId }], rowCount: 1 };
+  }
+  if (normalized.startsWith('SELECT DISTINCT d.doweling_order_id FROM bazis_order_links bl')) {
+    const rows = (state.candidates ?? []).map((id) => ({ doweling_order_id: id }));
+    return { rows, rowCount: rows.length };
+  }
+  if (normalized.startsWith('SELECT client_id FROM projects WHERE project_id = $1')) {
+    return { rows: [{ client_id: clientId }], rowCount: 1 };
+  }
+  if (normalized.startsWith('SELECT project_id FROM projects WHERE project_id = $1 FOR SHARE')) {
+    return { rows: [{ project_id: params[0] }], rowCount: 1 };
+  }
+  if (normalized.startsWith('SELECT doweling_order_id, client_id, client_source, delete_flag, version, doweling_order_name FROM doweling_orders WHERE doweling_order_id = ANY')) {
+    const rows = (params[0] as number[]).map(cardRow);
+    return { rows, rowCount: rows.length };
+  }
+  if (normalized.startsWith('SELECT doweling_order_id, client_id, client_source, delete_flag, version, doweling_order_name FROM doweling_orders WHERE doweling_order_id = $1')) {
+    return { rows: [cardRow(Number(params[0]))], rowCount: 1 };
+  }
+  if (normalized.startsWith('INSERT INTO doweling_orders (doweling_order_name, doweling_order_date, payment_status_id, production_status_id, design_engineer_id,')) {
+    return { rows: [{ ...cardRow(555), client_id: params[4], doweling_order_name: params[0], version: 0 }], rowCount: 1 };
+  }
+  if (normalized.startsWith('UPDATE doweling_orders SET version = version + 1')) {
+    return { rows: [{ version: 4 }], rowCount: 1 };
+  }
+  if (normalized.startsWith('SELECT version FROM doweling_orders')) {
+    return { rows: [{ version: 4 }], rowCount: 1 };
+  }
+  if (normalized.startsWith('SELECT order_id FROM order_doweling_links WHERE doweling_order_id = $1')) {
+    const rows = (state.cardOrderIds ?? []).map((id) => ({ order_id: id }));
+    return { rows, rowCount: rows.length };
+  }
+  if (normalized.startsWith('SELECT name FROM bazis_projects WHERE bazis_project_id = $1')) {
+    return { rows: [{ name: 'XML ' + String(params[0]) }], rowCount: 1 };
+  }
+  if (normalized.startsWith('SELECT d.doweling_order_id, d.order_id AS legacy_order_id')) {
+    const rows = (params[0] as number[]).map((id) => ({ doweling_order_id: id, legacy_order_id: null, linked: state.cardOrderIds ?? [] }));
+    return { rows, rowCount: rows.length };
+  }
+  return null;
 }
 
 function normalizeSql(sql: string): string {
@@ -4631,6 +4907,25 @@ describe('PgBazisRepository.renameProject', () => {
 });
 
 describe('PgBazisRepository.setProjectDesignEngineer', () => {
+  it('adopts the single candidate card of the XML project when the design engineer is set (no new card)', async () => {
+    const database = createDatabase({
+      card: { candidates: [300] },
+      projectDesignEngineerState: {
+        existingRow: { project_id: 77, design_engineer_id: null, design_engineer_name: null, design_engineer_xml_name: null, design_engineer_source: null },
+        employeeRow: { full_name: 'Тапен Жамит' },
+      },
+    } as never);
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.setProjectDesignEngineer({ currentUser: currentUser('admin'), requestId: 'req-engineer-adopt', bazisProjectId: 41, designEngineerId: 10 });
+
+    expect(normalizedSql(database.queries)).not.toContain('INSERT INTO doweling_orders');
+    expect(database.queries.find((query) => normalizeSql(query.text).startsWith('UPDATE bazis_projects SET doweling_order_id = $2'))?.params)
+      .toEqual([41, 300]);
+    expect(database.queries.some((query) => query.params?.[0] === 'doweling.created')).toBe(false);
+    expect(database.queries.find((query) => query.params?.[3] === 'bazis-card-xml-attached-41-4')).toBeDefined();
+  });
+
   it('validates the active employee and writes a manual audited selection', async () => {
     const database = createDatabase({
       projectDesignEngineerState: {
@@ -4746,7 +5041,7 @@ describe('PgBazisRepository.deleteProject', () => {
     const ordered = database.queries.map((query) => normalizeSql(query.text));
     expect(ordered[0]).toBe('SELECT set_session_user($1)');
     const lockIdx = ordered.findIndex((sql) => sql.includes('FROM bazis_projects') && sql.includes('FOR UPDATE'));
-    const linksIdx = ordered.findIndex((sql) => sql.includes('FROM bazis_order_links'));
+    const linksIdx = ordered.findIndex((sql) => sql.startsWith('SELECT order_id FROM bazis_order_links'));
     const runsIdx = ordered.findIndex((sql) => sql.startsWith('DELETE FROM bazis_import_runs'));
     const revisionsIdx = ordered.findIndex((sql) => sql.startsWith('DELETE FROM bazis_project_revisions'));
     const projectIdx = ordered.findIndex((sql) => sql.startsWith('DELETE FROM bazis_projects'));
@@ -4801,6 +5096,7 @@ function createDeleteDatabase(
   options: {
     projectRow?: { bazis_project_id: number; project_id: number; name: string } | null;
     linkedOrderIds?: number[];
+    card?: CardMockState;
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
@@ -4815,6 +5111,11 @@ function createDeleteDatabase(
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
       const normalized = normalizeSql(text);
+      if (!projectRow && normalized.startsWith('SELECT bp.bazis_project_id, bp.project_id, bp.doweling_order_id')) {
+        return { rows: [], rowCount: 0 };
+      }
+      const card = bazisCardMock(normalized, params, options.card);
+      if (card) return card;
 
       if (normalized.includes('FROM bazis_projects') && normalized.includes('FOR UPDATE')) {
         return projectRow ? { rows: [projectRow], rowCount: 1 } : { rows: [], rowCount: 0 };

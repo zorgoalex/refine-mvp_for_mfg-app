@@ -16,6 +16,7 @@ import {
   DowelingIdempotencyInProgressError,
   DowelingIdempotencyKeyReusedError,
 } from '../errors/doweling.errors';
+import { BazisProjectClientMismatchError, BazisProjectClientRequiredError } from '../errors/doweling.errors';
 import { assertDowelingAccess, assertDowelingMoneyAllowed, lockOrders, mapDowelingWriteError, requestIdOrFallback, setSessionUser, SOURCE } from './doweling-sql';
 import { updateDowelingOrder } from './pg-doweling-update';
 
@@ -33,6 +34,8 @@ interface InsertedDowelingRow extends QueryResultRow {
   doweling_order_name: string;
   version: number;
   payment_status_id: number | string;
+  client_id: number | string;
+  client_source: string;
 }
 
 export class PgDowelingRepository implements DowelingRepositoryPort {
@@ -44,6 +47,9 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
 
   async createDowelingOrder(command: CreateDowelingOrderCommand): Promise<CreateDowelingOrderResponseDto> {
     const orderId = command.dto.orderId ?? null;
+    if (command.clientRequired && orderId === null && !command.dto.clientId) {
+      throw new BazisProjectClientRequiredError();
+    }
     await assertDowelingMoneyAllowed(
       { database: this.database, currentUser: command.currentUser, requestId: requestIdOrFallback(command.requestId),
         action: 'doweling_create', dowelingOrderId: null },
@@ -90,6 +96,7 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
           // Only when linking: a standalone create keeps the hash shape of the earlier releases, so a key stored
           // before this release still replays its response.
           ...(orderId !== null ? { orderId } : {}),
+          ...(command.dto.clientId ? { clientId: command.dto.clientId } : {}),
         },
       });
       if (idempotency.completedResponse) {
@@ -97,7 +104,11 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
       }
 
       // Quick-create from an order: the order must be one the user may update (same rule as the order save).
+      // The card's client is the order's client (a given client must be the same).
+      let clientId: number | null = command.dto.clientId ?? null;
+      let clientSource = 'manual';
       if (orderId !== null) {
+        const orders = await lockOrders(tx, [orderId]);
         await assertDowelingAccess({
           database: this.database,
           tx,
@@ -107,19 +118,25 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
           dowelingOrderId: null,
           currentOrderIds: [],
           addedOrderIds: [orderId],
-          orders: await lockOrders(tx, [orderId]),
+          orders,
         });
+        const orderClientId = orders.get(orderId)?.clientId ?? null;
+        if (clientId !== null && orderClientId !== clientId) {
+          throw new BazisProjectClientMismatchError(null, [orderId]);
+        }
+        clientId = orderClientId;
+        clientSource = 'order';
       }
 
       const result = await tx.query<InsertedDowelingRow>(
           `
           INSERT INTO doweling_orders
             (doweling_order_name, doweling_order_date, payment_status_id, production_status_id,
-             design_engineer_id, operator_id, parts_count, link_cad_file, link_pdf_file)
+             design_engineer_id, operator_id, parts_count, link_cad_file, link_pdf_file, client_id, client_source)
           VALUES ($1, COALESCE($2::date, CURRENT_DATE),
                   COALESCE($3::integer, (SELECT payment_status_id FROM payment_statuses WHERE payment_status_code = 'unpaid')),
-                  $4, $5, $6, COALESCE($7, 0), $8, $9)
-          RETURNING doweling_order_id, doweling_order_name, version, payment_status_id
+                  $4, $5, $6, COALESCE($7, 0), $8, $9, $10, $11)
+          RETURNING doweling_order_id, doweling_order_name, version, payment_status_id, client_id, client_source
           `,
           [
             command.dto.dowelingOrderName.trim(),
@@ -131,9 +148,13 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
             command.dto.partsCount ?? null,
             command.dto.linkCadFile ?? null,
             command.dto.linkPdfFile ?? null,
+            // No client (previous frontend, legacy route): the BEFORE INSERT trigger of migration 279 sets «нд»/'default'.
+            clientId,
+            clientSource,
           ],
         );
       const inserted = result.rows[0];
+      const insertedClientId = Number(inserted.client_id);
 
       let link: DowelingOrderLinkDto | null = null;
       if (orderId !== null) {
@@ -158,6 +179,8 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
         designEngineerId: command.dto.designEngineerId,
         paymentStatusId: Number(inserted.payment_status_id),
         productionStatusId: command.dto.productionStatusId ?? null,
+        clientId: insertedClientId,
+        clientSource: inserted.client_source,
         link,
       });
 
@@ -176,6 +199,7 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
           designEngineerId: command.dto.designEngineerId,
           paymentStatusId: Number(inserted.payment_status_id),
           productionStatusId: command.dto.productionStatusId ?? null,
+          clientId: insertedClientId,
           orderIds: link ? [link.orderId] : [],
           orderDowelingLinkId: link?.orderDowelingLinkId ?? null,
           version: inserted.version,
@@ -191,6 +215,7 @@ export class PgDowelingRepository implements DowelingRepositoryPort {
           dowelingOrderId: inserted.doweling_order_id,
           dowelingOrderName: inserted.doweling_order_name,
           version: inserted.version,
+          clientId: insertedClientId,
         },
         link,
         auditId,
@@ -282,6 +307,8 @@ async function writeAudit(
     designEngineerId: number;
     paymentStatusId: number;
     productionStatusId: number | null;
+    clientId: number;
+    clientSource: string;
     link: DowelingOrderLinkDto | null;
   },
 ): Promise<string> {
@@ -296,6 +323,7 @@ async function writeAudit(
     requestId: input.requestId,
     source: SOURCE,
     relatedOrderId: input.link?.orderId ?? null,
+    relatedClientId: input.clientId,
     statusField: input.productionStatusId === null ? null : 'production_status_id',
     statusId: input.productionStatusId,
     before: {},
@@ -305,6 +333,7 @@ async function writeAudit(
       designEngineerId: input.designEngineerId,
       paymentStatusId: input.paymentStatusId,
       productionStatusId: input.productionStatusId,
+      clientId: input.clientId,
       orderIds,
     },
     diff: { created: { from: false, to: true }, ...(input.link ? { orderIds: { from: [], to: orderIds } } : {}) },
@@ -315,6 +344,8 @@ async function writeAudit(
       paymentStatusId: input.paymentStatusId,
       orderId: input.link?.orderId ?? null,
       orderDowelingLinkId: input.link?.orderDowelingLinkId ?? null,
+      clientId: input.clientId,
+      clientSource: input.clientSource,
       action: 'doweling_create',
       requestId: input.requestId,
     },

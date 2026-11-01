@@ -3007,6 +3007,27 @@ probe_file() {
       "$(q_trg trg_orders_close_rework_round)" \
       "$(q_fun_hash 'public.trg_orders_close_rework_round()' b5591f65ae646e55dd5232ad77f8cac7)" ;;
     # «Переделка» 1.1: срок готовности круга и отметка сверки итогового дедлайна (аддитивно).
+    # Client merge journal written only by the card-aware merge/undo (rollback of 279 refused, not desynced).
+    288_client_merge_cards_guard*) probe_all \
+      "SELECT to_regprocedure('public.trg_client_merges_cards_guard()') IS NOT NULL;" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_client_merges_cards_guard' AND tgrelid = 'public.client_merges'::regclass AND tgenabled <> 'D' AND NOT tgisinternal);" ;;
+    # «Присадка» → «Базис-проект»: клиент карточки, ссылка XML-проекта на карточку, инвариант клиента, orders_view.
+    279_bazis_project_cards*) probe_all \
+      "$(q_col doweling_orders client_id)" \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='doweling_orders' AND column_name='client_id' AND is_nullable='NO');" \
+      "$(q_col doweling_orders client_source)" \
+      "$(q_con_on doweling_orders chk_doweling_orders_client_source)" \
+      "$(q_col bazis_projects doweling_order_id)" \
+      "$(q_col doweling_orders_view client_source)" \
+      "SELECT to_regprocedure('public.bazis_card_client_violation(bigint)') IS NOT NULL AND to_regprocedure('public.bazis_nd_client_id()') IS NOT NULL;" \
+      "$(q_trg ctrg_odl_bazis_client)" \
+      "$(q_trg ctrg_doweling_orders_bazis_client)" \
+      "$(q_trg ctrg_orders_bazis_client)" \
+      "$(q_trg ctrg_bazis_projects_client)" \
+      "$(q_trg ctrg_projects_bazis_client)" \
+      "$(q_trg trg_doweling_orders_default_client)" \
+      "SELECT position('order_doweling_links' IN pg_get_viewdef('public.orders_view'::regclass, true)) > 0;" \
+      ;;
     281_order_rework_round_deadline*) probe_all \
       "$(q_col order_production_rounds planned_completion_date)" \
       "$(q_col order_production_rounds planned_completion_source)" \
@@ -3116,6 +3137,12 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     276_order_rework_round_closure*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    288_client_merge_cards_guard*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    279_bazis_project_cards*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     281_order_rework_round_deadline*)

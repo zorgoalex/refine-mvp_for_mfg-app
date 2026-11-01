@@ -7,6 +7,8 @@ import { useSelect } from '../../ui/refineSelect';
 import { Alert, Button, Descriptions, Input, Modal, Radio, Select, Space, Spin, Steps, Tree, Typography, Upload, message } from 'antd';
 import { ApiError } from '../../api/apiError';
 import { bazisApi } from '../../api/bazisApi';
+import { isOutdatedBackendError, OUTDATED_BACKEND_MESSAGE } from '../../api/dowelingApi';
+import { useBazisCardsCapability } from '../../hooks/useBazisCardsCapability';
 import { projectsApi, type ProjectDto } from '../../api/projectsApi';
 import { ordersApi } from '../../api/ordersApi';
 import type { OrderListItemDto } from '../../api/types/orderApi.types';
@@ -69,6 +71,8 @@ interface ImportWizardModalProps {
   onClose: () => void;
   onImported: () => void;
   onOpenTree: (revisionId: number, label: string, projectId: number | null) => void;
+  /** Opened from a Bazis project card: the XML goes to this card. */
+  dowelingOrderId?: number;
 }
 
 type BindingMode = 'bazis' | 'erp' | 'new';
@@ -92,8 +96,15 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   onClose,
   onImported,
   onOpenTree,
+  dowelingOrderId,
 }) => {
   const [currentStep, setCurrentStep] = useState<StepKey>('file');
+  const cardsSupported = useBazisCardsCapability();
+  // The route of an import is fixed at its first attempt, together with its key (R3 #1, #3): a retry after a lost answer
+  // never goes to the legacy route, and the background capability poll does not restart a running import.
+  const cardsSupportedRef = useRef(cardsSupported);
+  cardsSupportedRef.current = cardsSupported;
+  const importRouteRef = useRef<'cards' | 'legacy' | null>(null);
   const [minimized, setMinimized] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -119,6 +130,8 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectClientId, setNewProjectClientId] = useState<number | undefined>(undefined);
   const [createProjectKey, setCreateProjectKey] = useState<string>(createWizardUuid);
+  // The import key is fixed per open, like the project key: a retry after a lost answer is the same import.
+  const [importKey, setImportKey] = useState<string>(() => `bazis-import:${createWizardUuid()}`);
   const [importLoading, setImportLoading] = useState(false);
   // Гейт повторного запуска импорта БЕЗ участия в deps: importLoading в deps
   // самого эффекта отменял (cancelled=true) собственный запрос сразу после
@@ -189,6 +202,8 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     setNewProjectName('');
     setNewProjectClientId(undefined);
     setCreateProjectKey(createWizardUuid());
+    setImportKey(`bazis-import:${createWizardUuid()}`);
+    importRouteRef.current = null;
     importLoadingRef.current = false;
     setImportLoading(false);
     setImportErrorText(null);
@@ -321,11 +336,21 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
           targetProjectId = created.projectId;
         }
 
+        importRouteRef.current ??= cardsSupportedRef.current ? 'cards' : 'legacy';
+        if (importRouteRef.current === 'legacy' && dowelingOrderId != null) {
+          throw new ApiError({ code: 'HTTP_404', message: OUTDATED_BACKEND_MESSAGE, status: 404 });
+        }
         const response = await bazisApi.import(
           xmlFile,
-          bindingMode === 'bazis'
-            ? { bazisProjectId: selectedBazisProjectId }
-            : { projectId: targetProjectId },
+          {
+            ...(bindingMode === 'bazis'
+              ? { bazisProjectId: selectedBazisProjectId as number }
+              : { projectId: targetProjectId as number }),
+            ...(dowelingOrderId != null ? { dowelingOrderId } : {}),
+            idempotencyKey: importKey,
+            // Fixed per import: the card route, or (an older backend at the first attempt) the legacy import without a card.
+            legacy: importRouteRef.current === 'legacy',
+          },
         );
         if (cancelled) {
           return;
@@ -372,6 +397,8 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
     bindingMode,
     createProjectKey,
     currentStep,
+    dowelingOrderId,
+    importKey,
     newProjectClientId,
     newProjectName,
     open,
@@ -453,7 +480,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
 
     if (currentStep === 'binding') {
       if (bindingMode === 'bazis' && selectedBazisProjectId == null) {
-        message.warning('Выберите Базис-проект');
+        message.warning('Выберите XML-проект');
         return;
       }
       if (bindingMode === 'erp' && selectedProjectId == null) {
@@ -647,7 +674,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
               }}
             >
               <Space direction="vertical">
-                <Radio value="bazis">Существующий Базис-проект</Radio>
+                <Radio value="bazis">Существующий XML-проект</Radio>
                 <Radio value="erp">Существующий ERP-проект</Radio>
                 <Radio value="new">Новый проект</Radio>
               </Space>
@@ -659,7 +686,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
                 allowClear
                 optionFilterProp="label"
                 loading={bazisProjectsLoading}
-                placeholder="Выберите Базис-проект"
+                placeholder="Выберите XML-проект"
                 value={selectedBazisProjectId}
                 onChange={(value) => setSelectedBazisProjectId(value)}
                 options={bazisProjects.map((item) => ({
@@ -807,7 +834,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
             ))}
 
             <Descriptions bordered size="small" column={1}>
-              <Descriptions.Item label="Базис-проект">{summary.bazisProjectName}</Descriptions.Item>
+              <Descriptions.Item label="XML-проект">{summary.bazisProjectName}</Descriptions.Item>
               <Descriptions.Item label="ERP-проект">#{summary.projectId}</Descriptions.Item>
               <Descriptions.Item label="Ревизия">#{summary.revisionNo}</Descriptions.Item>
               {Object.entries(summary.summary).map(([key, value]) => {
@@ -837,7 +864,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
 
             <Space wrap>
               {/* Создание ERP-заказа НАМЕРЕННО не отсюда: заказ создаётся из
-                  карточки Базис-проекта (вкладка «Панели»). Визард только
+                  карточки XML-проекта (вкладка «Панели»). Визард только
                   импортирует; синяя CTA «Создать заказ» подталкивала к
                   необязательному действию. */}
               <Button onClick={() => onOpenTree(summary.revisionId, buildRevisionLabel(summary), summary.projectId)}>
@@ -867,6 +894,9 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
 };
 
 function formatImportError(error: unknown): string {
+  if (isOutdatedBackendError(error)) {
+    return OUTDATED_BACKEND_MESSAGE;
+  }
   if (error instanceof ApiError) {
     return error.message;
   }

@@ -88,6 +88,7 @@ export class BazisService {
           xmlSha256,
           rawXmlGzip,
           parsed,
+          ...(input.cards ? { cards: input.cards } : {}),
         });
       } catch (error) {
         if (error instanceof BazisXmlParseError) {
@@ -110,19 +111,24 @@ export class BazisService {
 
   async listProjects(
     currentUser: CurrentUser,
-    filter: { projectId?: number },
+    filter: { projectId?: number; dowelingOrderId?: number },
   ): Promise<BazisProjectListItemDto[]> {
     await this.requirePermission(currentUser, 'bazis.view', 'list_projects');
-    const projects = await this.ports.repository.listProjects(filter);
+    // The XML of a card only for a reader of cards (the card itself is checked per row below).
+    if (filter.dowelingOrderId != null && !currentUser.permissions.includes('doweling.view')) return [];
+    const projects = (await this.ports.repository.listProjects(filter))
+      .filter((project) => filter.dowelingOrderId == null || project.card?.dowelingOrderId === filter.dowelingOrderId);
     const readable = await this.readable(currentUser, projects.flatMap(projectOrderIds));
-    return readable ? projects.map((project) => withReadableOrders(project, readable)) : projects;
+    const shown = projects.map((project) => withReadableOrders(project, readable, currentUser));
+    // Filtered by a card the reader may not read: nothing (not even that XML projects exist).
+    return filter.dowelingOrderId != null && shown.some((project) => project.card === null) ? [] : shown;
   }
 
   async getProject(currentUser: CurrentUser, id: number): Promise<BazisProjectCardDto> {
     await this.requirePermission(currentUser, 'bazis.view', 'get_project');
     const project = await this.ports.repository.getProject(id);
     const readable = await this.readable(currentUser, projectOrderIds(project));
-    return readable ? withReadableOrders(project, readable) : project;
+    return withReadableOrders(project, readable, currentUser);
   }
 
   async renameProject(
@@ -385,14 +391,22 @@ async function gzipFile(filePath: string): Promise<Buffer> {
 
 /** Every order id a Bazis project carries (both the references and the id list). */
 function projectOrderIds(project: BazisProjectListItemDto): number[] {
-  return [...project.linkedOrders.map((order) => order.orderId), ...project.linkedOrderIds];
+  return [...project.linkedOrders.map((order) => order.orderId), ...project.linkedOrderIds, ...(project.card?.orderIds ?? [])];
 }
 
-/** Both order fields filtered by one set of readable ids (access groups 0A.4, review R1). */
-function withReadableOrders<T extends BazisProjectListItemDto>(project: T, readable: Set<number>): T {
+/**
+ * Both order fields filtered by one set of readable ids (access groups 0A.4, review R1); null — reads are unrestricted.
+ * The card is given only to a reader of the card: doweling.view and every order of the card readable (the Hasura read
+ * predicate of doweling orders); its order ids are not given out.
+ */
+function withReadableOrders<T extends BazisProjectListItemDto>(project: T, readable: Set<number> | null, user: CurrentUser): T {
+  const cardReadable = project.card !== null
+    && user.permissions.includes('doweling.view')
+    && (readable === null || project.card.orderIds.every((id) => readable.has(id)));
   return {
     ...project,
-    linkedOrders: project.linkedOrders.filter((order) => readable.has(order.orderId)),
-    linkedOrderIds: project.linkedOrderIds.filter((id) => readable.has(id)),
+    linkedOrders: readable ? project.linkedOrders.filter((order) => readable.has(order.orderId)) : project.linkedOrders,
+    linkedOrderIds: readable ? project.linkedOrderIds.filter((id) => readable.has(id)) : project.linkedOrderIds,
+    card: cardReadable && project.card ? { ...project.card, orderIds: [] } : null,
   };
 }

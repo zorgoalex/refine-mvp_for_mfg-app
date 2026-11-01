@@ -69,7 +69,7 @@ describe('QuickCreateDowelingModal source guards', () => {
 describe('doweling list source guards', () => {
   it('gates the quick-create button behind can(doweling.create)', () => {
     expect(list).toMatch(/can\(["']doweling\.create["']\)/);
-    expect(list).toContain('Быстрое создание присадки');
+    expect(list).toContain('Быстрое создание Базис-проекта');
   });
 
   it('refetches the table after a successful create', () => {

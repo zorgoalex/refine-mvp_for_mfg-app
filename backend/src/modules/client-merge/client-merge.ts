@@ -29,9 +29,11 @@ export const OBSTACLES = {
   PROJECTS_NOT_PERMITTED: 'Нет права изменять группы заказов',
   CLIENTS_NOT_PERMITTED: 'Нет права изменять клиентов (телефоны и контакты)',
   ONEC_LINK_NOT_PERMITTED: 'Нет права менять связь клиента с 1С',
+  BAZIS_CARDS_NOT_PERMITTED: 'Нет права изменять Базис-проекты клиента (их клиент меняется вместе с заказами)',
   UNDO_ORDER: 'Сначала отмените более позднее объединение с участием этих клиентов',
   UNDO_ONEC_LINK_CONFLICT: 'Остающийся клиент уже связан с другим контрагентом 1С',
   UNDO_MERGED_LINKED: 'Объединённый клиент уже связан с контрагентом 1С',
+  UNDO_BAZIS_CARD_SPLIT: 'Базис-проект связывает заказы, которые вернутся, и заказы, которые останутся: сначала отвяжите их в карточке Базис-проекта',
 } as const;
 export type ObstacleCode = keyof typeof OBSTACLES;
 
@@ -44,7 +46,7 @@ export const obstacle = (code: ObstacleCode): Obstacle => ({ code, message: OBST
 
 export const MERGE_ITEM_KINDS = [
   'project', 'order', 'phone_moved', 'phone_deleted', 'phone_key_moved', 'phone_primary',
-  'contact_moved', 'contact_deleted', 'contact_primary', 'onec_link', 'redirect_repointed',
+  'contact_moved', 'contact_deleted', 'contact_primary', 'onec_link', 'redirect_repointed', 'bazis_card',
 ] as const;
 export type MergeItemKind = (typeof MERGE_ITEM_KINDS)[number];
 
