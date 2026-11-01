@@ -6,50 +6,66 @@ import { ordersApi } from '../../../../api/ordersApi';
 import type { OrderDto } from '../../../../api/types/orderApi.types';
 import { featureFlags } from '../../../../config/featureFlags';
 import { getAuthCacheNamespace } from '../../../../query/authCacheNamespace';
+import { appQueryClient } from '../../../../query/appQueryClient';
 import { createOrderEditBackendPrimaryIdentity } from '../../../../query/orderEditPrimaryResource';
 import { getOrdersReadBackendMode } from '../../../../query/orderPrimaryResource';
-import { appQueryClient } from '../../../../query/appQueryClient';
 import { useOrderDraftStoreApi } from '../../../../stores/orderFormStore';
 import { requestReworkStart } from './reworkStartRequests';
 
+const authNamespace = () => getAuthCacheNamespace(getOrdersReadBackendMode(featureFlags.useBackendOrdersRead));
+
+/** The read was started in another session (logout/login, other rights) than the one now active. */
+export class ReworkReadSuperseded extends Error {}
+
 /**
- * The order after a rework command: a direct read (never joining an order-edit request already in flight — that one
- * may predate the command), and the order-edit cache entry is replaced only by a newer version.
+ * The order after a rework command, read directly (never joining an order-edit read already in flight — it may predate
+ * the command). Nothing is written to the order-edit cache: its entry is dropped, so the next opening reads the order
+ * again (a pre-command read still in flight lands in the dropped entry). A response of a session that ended meanwhile
+ * is rejected.
  */
 export async function fetchOrderAfterRework(
   orderId: number,
-  options: { queryClient?: QueryClient; getOrderById?: (orderId: number) => Promise<OrderDto> } = {},
+  options: { queryClient?: QueryClient; getOrderById?: (orderId: number) => Promise<OrderDto>; namespace?: () => string } = {},
 ): Promise<OrderDto> {
+  const namespace = options.namespace ?? authNamespace;
+  const owner = namespace();
   const order = await (options.getOrderById ?? ((id: number) => ordersApi.getById(id)))(orderId);
+  if (namespace() !== owner) throw new ReworkReadSuperseded();
   const queryClient = options.queryClient ?? appQueryClient;
-  const key = createOrderEditBackendPrimaryIdentity({
-    orderId,
-    authCacheNamespace: getAuthCacheNamespace(getOrdersReadBackendMode(featureFlags.useBackendOrdersRead)),
-  }).queryKey;
-  const cached = queryClient.getQueryData<OrderDto>(key);
-  if (!cached || Number(cached.header.version ?? 0) <= Number(order.header.version ?? 0)) {
-    queryClient.setQueryData(key, order);
-  }
+  const { queryKey } = createOrderEditBackendPrimaryIdentity({ orderId, authCacheNamespace: owner });
+  // A read of this entry still in flight is let finish (its own caller keeps its answer — removing now would cancel
+  // it); then the entry, possibly pre-command, is dropped so the next opening reads the order again.
+  const inFlight = queryClient.getQueryCache().find({ queryKey, exact: true });
+  if (inFlight?.state.fetchStatus === 'fetching') await inFlight.fetch().catch(() => undefined);
+  queryClient.removeQueries({ queryKey, exact: true });
   return order;
 }
 
 export type ReworkRefreshOutcome = 'published' | 'superseded' | 'stale' | 'dirty';
 
+/** One generation counter per order draft: every caller re-reading the same draft shares it. */
+const refreshGenerations = new WeakMap<object, number>();
+
 /**
- * Re-reads the order into the form after each rework command. Only the latest refresh may publish, only a version not
- * older than the command's, and only into a form without unsaved edits.
+ * Re-reads the order into the form after a rework command. Publishes only the latest refresh of this draft, only a
+ * version not older than the command's and than the version the draft already holds, and only into a form without
+ * unsaved edits.
  */
 export function createReworkFormRefresh(deps: {
+  /** Identity of the draft (its store): refreshes of the same draft share one generation. */
+  draft: object;
   getOrder: (orderId: number) => Promise<OrderDto>;
   isClean: () => boolean;
+  draftVersion: () => number;
   publish: (order: OrderDto) => void;
 }): (orderId: number, commandVersion: number) => Promise<ReworkRefreshOutcome> {
-  let latest = 0;
   return async (orderId, commandVersion) => {
-    const mine = ++latest;
+    const mine = (refreshGenerations.get(deps.draft) ?? 0) + 1;
+    refreshGenerations.set(deps.draft, mine);
     const order = await deps.getOrder(orderId);
-    if (mine !== latest) return 'superseded';
-    if (Number(order.header.version ?? 0) < commandVersion) return 'stale';
+    if (refreshGenerations.get(deps.draft) !== mine) return 'superseded';
+    const version = Number(order.header.version ?? 0);
+    if (version < commandVersion || version < deps.draftVersion()) return 'stale';
     if (!deps.isClean()) return 'dirty';
     deps.publish(order);
     return 'published';
@@ -64,8 +80,10 @@ export function createReworkFormRefresh(deps: {
 export function useOrderFormReworkPick(): (orderId: number | null | undefined) => void {
   const storeApi = useOrderDraftStoreApi();
   const refresh = useMemo(() => createReworkFormRefresh({
+    draft: storeApi,
     getOrder: (orderId) => fetchOrderAfterRework(orderId),
     isClean: () => !storeApi.getState().isDirty,
+    draftVersion: () => Number(storeApi.getState().version ?? 0),
     publish: (order) => {
       const store = storeApi.getState();
       store.loadOrder(mapOrderDtoToFormValues(order));
@@ -92,7 +110,9 @@ export function useOrderFormReworkPick(): (orderId: number | null | undefined) =
         }
         void refresh(orderId, result.version).then((outcome) => {
           if (outcome === 'stale' || outcome === 'dirty') message.info('Обновите заказ, чтобы увидеть переделку');
-        }).catch(() => message.info('Обновите заказ, чтобы увидеть переделку'));
+        }).catch((error) => {
+          if (!(error instanceof ReworkReadSuperseded)) message.info('Обновите заказ, чтобы увидеть переделку');
+        });
       },
     });
     if (!opened) message.warning('Статус «Переделка» ставится командой переделки в карточке заказа (меню «⋯»)');
