@@ -41,7 +41,7 @@ import {
 import { authSession } from '../../../api/authSession';
 import { DragItem, CalendarOrder, ViewMode, CalendarFilters, CalendarFilterOption } from '../types/calendar';
 import { requestReworkStart } from '../../orders/components/rework/reworkStartRequests';
-import { useReworkOrderStatusIds } from '../../orders/components/rework/useReworkOrderStatusIds';
+import { REWORK_STATUSES_LOADING_TEXT, useReworkOrderStatusIds } from '../../orders/components/rework/useReworkOrderStatusIds';
 import {
   applyKnownCalendarOrderVersion,
   reserveCalendarOrderVersion,
@@ -571,14 +571,18 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   }, [calendarSendInterval]);
 
   // «Переделка» ставится командой переделки (она двигает и этапы деталей): выбор открывает её форму.
-  const reworkStatusIds = useReworkOrderStatusIds();
+  const reworkStatuses = useReworkOrderStatusIds();
 
   // Обработчик изменения статуса через контекстное меню (для order_status и payment_status)
   const handleStatusChange = async (fieldName: string, statusId: number, statusName: string) => {
     if (!contextMenu.order) return;
 
     const order = contextMenu.order;
-    if (fieldName === 'order_status' && reworkStatusIds.has(Number(statusId))) {
+    if (fieldName === 'order_status' && !reworkStatuses.ready) {
+      message.info(REWORK_STATUSES_LOADING_TEXT);
+      return;
+    }
+    if (fieldName === 'order_status' && reworkStatuses.ids.has(Number(statusId))) {
       const opened = requestReworkStart({
         orderId: Number(order.order_id),
         onDone: () => {
