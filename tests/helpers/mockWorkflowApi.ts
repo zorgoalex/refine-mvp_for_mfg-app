@@ -1154,6 +1154,18 @@ function applyQuery(rows: Row[], query: string, paginate = true): Row[] {
         });
     }
 
+    // Header filters of the reference lists: `distinct_on: [field]` keeps the first row of each value.
+    const distinctField = query.match(/distinct_on:\s*\[\s*([A-Za-z_][\w]*)\s*\]/)?.[1];
+    if (distinctField) {
+        const seen = new Set<unknown>();
+        result = result.filter((row) => {
+            const key = row[distinctField];
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    }
+
     if (!paginate) return result;
     const offset = Number(query.match(/offset:\s*(\d+)/)?.[1] || 0);
     const limitMatch = query.match(/limit:\s*(\d+)/);

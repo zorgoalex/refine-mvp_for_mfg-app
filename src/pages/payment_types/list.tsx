@@ -3,6 +3,7 @@ import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton } from "@refinedev/antd";
 import { ReferenceEditButton } from "../../components/referenceDrawer/ReferenceEditButton";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
 import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
 import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
@@ -17,13 +18,20 @@ const PAYMENT_TYPES_FILTERS: ReferenceFilterConfig = {
   ],
 };
 
+const PAYMENT_TYPES_HEADER_FILTERS = {
+  resource: "payment_types",
+  fields: ["type_paid_name", "ref_key_1c"],
+};
+
 export const PaymentTypeList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps, filters, setFilters, setCurrent } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "type_paid_id", order: "asc" }],
     },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, PAYMENT_TYPES_HEADER_FILTERS);
   const { highlightProps } = useHighlightRow(
     "type_paid_id",
     tableProps.dataSource,
@@ -46,6 +54,7 @@ export const PaymentTypeList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="type_paid_id" title="id" sorter />
         <Table.Column
           dataIndex="type_paid_name"
+          {...columnFilter("type_paid_name")}
           title="Тип оплаты"
           sorter
         />
@@ -65,7 +74,7 @@ export const PaymentTypeList: React.FC<IResourceComponentsProps> = () => {
             />
           )}
         />
-        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
+        <Table.Column dataIndex="ref_key_1c" sorter {...columnFilter("ref_key_1c")} title="1C-key" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (

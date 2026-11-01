@@ -1219,14 +1219,19 @@ const REFERENCE_URL_SCALAR_RESOURCES: ReadonlySet<string> = new Set([
 ]);
 
 /** Boolean columns of the reference lists whose names do not start with `is_` (filters «Да / Нет»). */
-const REFERENCE_BOOLEAN_FIELDS: ReadonlySet<string> = new Set(['affects_stock', 'requires_document']);
+const REFERENCE_BOOLEAN_FIELDS: ReadonlySet<string> = new Set(['affects_stock', 'requires_document', 'texture']);
 
-/** `is_*` and the boolean columns above → boolean; `*_id`, `sort_order` and range bounds → number, when the string is exactly that. */
+/** Number columns of the reference lists (column header filters keep their values in the URL as text). */
+const REFERENCE_NUMBER_FIELDS: ReadonlySet<string> = new Set([
+  'thickness_mm', 'width_mm', 'height_mm', 'decimals', 'cost_per_sqm', 'min_width_mm', 'sequence_order',
+]);
+
+/** `is_*` and the boolean columns above → boolean; `*_id`, `sort_order`, the number columns above and range bounds → number, when the string is exactly that. */
 export function referenceUrlScalar(field: unknown, operator: unknown, value: unknown): unknown {
   if (typeof value !== 'string' || typeof field !== 'string') return value;
   if (field.startsWith('is_') || REFERENCE_BOOLEAN_FIELDS.has(field)) return value === 'true' ? true : value === 'false' ? false : value;
   const numeric = value.trim() !== '' && Number.isFinite(Number(value));
-  if (numeric && (field.endsWith('_id') || field === 'sort_order' || operator === 'gte' || operator === 'lte')) return Number(value);
+  if (numeric && (field.endsWith('_id') || field === 'sort_order' || REFERENCE_NUMBER_FIELDS.has(field) || operator === 'gte' || operator === 'lte')) return Number(value);
   return value;
 }
 
@@ -1883,6 +1888,27 @@ export const dataProvider = (_apiUrl: string) => {
       }
 
       const where = buildWhere(resource, enhancedFilters);
+
+      // Header filters of the reference lists: the distinct values of one scalar column under the other filters
+      // (`meta.distinctOn`; the caller sets the limit and treats `limit` rows as «too many»).
+      const distinctOn = typeof meta?.distinctOn === "string" ? meta.distinctOn : null;
+      if (distinctOn !== null) {
+        if (!GRAPHQL_FIELD_NAME.test(distinctOn) || !scalarFieldsFor(resource)?.has(distinctOn)) {
+          throw new Error(`Нельзя получить значения поля ${distinctOn}`);
+        }
+        const distinctLimit = limit ?? 101;
+        const distinctQuery = `
+          query {
+            ${resource}(distinct_on: [${distinctOn}], order_by: [{ ${distinctOn}: asc }], limit: ${distinctLimit}${where}) {
+              ${distinctOn}
+            }
+          }
+        `;
+        const distinctData = await gqlRequest(distinctQuery, undefined, hasuraRequestOptionsFromMeta(meta));
+        const rows = distinctData[resource] ?? [];
+        return { data: rows, total: rows.length };
+      }
+
       const selection = fieldsFor(resource, meta);
       // For aggregate, remove leading comma from where clause
       const aggregateWhere = where ? `(${where.replace(/^,\s*/, '')})` : '';

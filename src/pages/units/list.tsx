@@ -3,6 +3,7 @@ import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton } from "@refinedev/antd";
 import { ReferenceEditButton } from "../../components/referenceDrawer/ReferenceEditButton";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
 import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
 import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space } from "antd";
@@ -18,11 +19,18 @@ const UNITS_FILTERS: ReferenceFilterConfig = {
   ],
 };
 
+const UNITS_HEADER_FILTERS = {
+  resource: "units",
+  fields: ["unit_code", "unit_name", "unit_symbol", "decimals", "ref_key_1c"],
+};
+
 export const UnitList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps, filters, setFilters, setCurrent } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: { initial: [{ field: "sort_order", order: "asc" }, { field: "unit_id", order: "asc" }] },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, UNITS_HEADER_FILTERS);
   const { show } = useNavigation();
 
   return (
@@ -39,11 +47,11 @@ export const UnitList: React.FC<IResourceComponentsProps> = () => {
       >
         <Table.Column dataIndex="unit_id" title="id" sorter />
         <ReferenceSortOrderColumn />
-        <Table.Column dataIndex="unit_code" title="Код единицы" sorter />
-        <Table.Column dataIndex="unit_name" title="Название" sorter />
-        <Table.Column dataIndex="unit_symbol" title="Обозначение единицы" />
-        <Table.Column dataIndex="decimals" title="Знаков после запятой" />
-        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
+        <Table.Column dataIndex="unit_code" {...columnFilter("unit_code")} title="Код единицы" sorter />
+        <Table.Column dataIndex="unit_name" {...columnFilter("unit_name")} title="Название" sorter />
+        <Table.Column dataIndex="unit_symbol" sorter {...columnFilter("unit_symbol")} title="Обозначение единицы" />
+        <Table.Column dataIndex="decimals" sorter {...columnFilter("decimals")} title="Знаков после запятой" />
+        <Table.Column dataIndex="ref_key_1c" sorter {...columnFilter("ref_key_1c")} title="1C-key" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (

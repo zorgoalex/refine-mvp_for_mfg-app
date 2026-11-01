@@ -47,4 +47,13 @@ describe('reference filters model', () => {
     expect(hasUserFilters([])).toBe(false);
     expect(hasUserFilters([{ field: 'name', operator: 'contains', value: '' }])).toBe(false);
   });
+
+  it('panel changes keep the column header filter of the same field (is_active «in» stays the panel\'s)', () => {
+    const header = { field: 'vendor_name', operator: 'in', value: ['A', 'B'] };
+    const next = withField([header], 'vendor_name', [{ operator: 'contains', value: 'дуб' }]);
+    expect(next).toEqual([header, { field: 'vendor_name', operator: 'contains', value: 'дуб' }]);
+    expect(withField(next, 'vendor_name', [{ operator: 'contains', value: '' }])).toEqual([header]);
+    const inactive = withShowInactive([], true);
+    expect(withShowInactive(inactive, false)).toEqual([]);
+  });
 });

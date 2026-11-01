@@ -3,6 +3,7 @@ import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton } from "@refinedev/antd";
 import { ReferenceEditButton } from "../../components/referenceDrawer/ReferenceEditButton";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
 import { Space, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
@@ -17,13 +18,20 @@ const EDGE_TYPE_FILTERS: ReferenceFilterConfig = {
   ],
 };
 
+const EDGE_TYPES_HEADER_FILTERS = {
+  resource: "edge_types",
+  fields: ["edge_type_name", "ref_key_1c"],
+};
+
 export const EdgeTypeList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps, filters, setFilters, setCurrent } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "edge_type_id", order: "asc" }],
     },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, EDGE_TYPES_HEADER_FILTERS);
 
   const { highlightProps } = useHighlightRow(
     "edge_type_id",
@@ -45,7 +53,7 @@ export const EdgeTypeList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="edge_type_id" title="id" sorter />
-        <Table.Column dataIndex="edge_type_name" title="Тип обката" sorter />
+        <Table.Column dataIndex="edge_type_name" {...columnFilter("edge_type_name")} title="Тип обката" sorter />
         <Table.Column
           dataIndex="sort_order"
           title="Сортировка по умолчанию"
@@ -62,7 +70,7 @@ export const EdgeTypeList: React.FC<IResourceComponentsProps> = () => {
             />
           )}
         />
-        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
+        <Table.Column dataIndex="ref_key_1c" sorter {...columnFilter("ref_key_1c")} title="1C-key" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (

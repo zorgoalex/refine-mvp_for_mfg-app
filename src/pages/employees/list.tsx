@@ -2,6 +2,7 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
 import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
 import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
@@ -22,13 +23,20 @@ const EMPLOYEES_FILTERS: ReferenceFilterConfig = {
   ],
 };
 
+const EMPLOYEES_HEADER_FILTERS = {
+  resource: "employees",
+  fields: ["full_name", "position", "note", "ref_key_1c"],
+};
+
 export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps, filters, setFilters, setCurrent } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "employee_id", order: "desc" }],
     },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, EMPLOYEES_HEADER_FILTERS);
   const { show } = useNavigation();
   const [contactsApiMissing, setContactsApiMissing] = useState(false);
   const canViewContacts = can("employees.view") && !contactsApiMissing;
@@ -63,8 +71,8 @@ export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="employee_id" title="ID" sorter />
-        <Table.Column dataIndex="full_name" title="ФИО" sorter />
-        <Table.Column dataIndex="position" title="Должность" sorter />
+        <Table.Column dataIndex="full_name" {...columnFilter("full_name")} title="ФИО" sorter />
+        <Table.Column dataIndex="position" {...columnFilter("position")} title="Должность" sorter />
         <Table.Column
           dataIndex="is_active"
           title="Активен"
@@ -92,8 +100,8 @@ export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
             }}
           />
         ) : null}
-        <Table.Column dataIndex="note" title="Примечание" />
-        <Table.Column dataIndex="ref_key_1c" title="Ключ 1C" />
+        <Table.Column dataIndex="note" sorter {...columnFilter("note")} title="Примечание" />
+        <Table.Column dataIndex="ref_key_1c" sorter {...columnFilter("ref_key_1c")} title="Ключ 1C" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (

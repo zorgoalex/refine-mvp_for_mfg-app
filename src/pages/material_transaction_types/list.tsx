@@ -3,6 +3,7 @@ import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton } from "@refinedev/antd";
 import { ReferenceEditButton } from "../../components/referenceDrawer/ReferenceEditButton";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
 import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
 import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Tag, Badge } from "antd";
@@ -19,14 +20,24 @@ const MATERIAL_TRANSACTION_TYPES_FILTERS: ReferenceFilterConfig = {
   ],
 };
 
+const MATERIAL_TRANSACTION_TYPES_HEADER_FILTERS = {
+  resource: "material_transaction_types",
+  fields: ["transaction_type_name", "affects_stock", "requires_document", "direction_type_id"],
+  lookups: {
+    direction_type_id: { resource: "transaction_direction", optionValue: "direction_type_id", optionLabel: "direction_name" },
+  },
+};
+
 export const MaterialTransactionTypeList: React.FC<IResourceComponentsProps> =
   () => {
-    const { tableProps, filters, setFilters, setCurrent } = useTable({
+    const table = useTable({
       syncWithLocation: true,
       sorters: {
         initial: [{ field: "sort_order", order: "asc" }, { field: "transaction_type_id", order: "asc" }],
       },
     });
+    const { filters, setFilters, setCurrent } = table;
+    const { tableProps, columnFilter } = useReferenceHeaderFilters(table, MATERIAL_TRANSACTION_TYPES_HEADER_FILTERS);
     const { show } = useNavigation();
 
     return (
@@ -44,16 +55,20 @@ export const MaterialTransactionTypeList: React.FC<IResourceComponentsProps> =
           <Table.Column dataIndex="transaction_type_id" title="ID" sorter />
           <Table.Column
             dataIndex="transaction_type_name"
+            {...columnFilter("transaction_type_name")}
             title="Тип операции"
             sorter
           />
           <Table.Column
             dataIndex="direction"
+            {...columnFilter("direction_type_id")}
             title="Направление движения"
             render={(direction: any) => direction?.direction_name || "-"}
           />
           <Table.Column
             dataIndex="affects_stock"
+            sorter
+            {...columnFilter("affects_stock")}
             title="Влияет на склад"
             render={(value: boolean) => (
               <Tag color={value ? "green" : "default"}>
@@ -63,6 +78,8 @@ export const MaterialTransactionTypeList: React.FC<IResourceComponentsProps> =
           />
           <Table.Column
             dataIndex="requires_document"
+            sorter
+            {...columnFilter("requires_document")}
             title="Требует документа"
             render={(value: boolean) => (
               <Tag color={value ? "blue" : "default"}>

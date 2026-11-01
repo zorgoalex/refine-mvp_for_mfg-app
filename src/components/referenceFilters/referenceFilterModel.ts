@@ -51,13 +51,17 @@ export function showsInactive(filters: readonly RefineFilter[]): boolean {
   });
 }
 
-/** Replace the filters of one field (all its operators) by the given ones; empty values drop the field. */
+/**
+ * Replace the panel's filters of one field by the given ones; empty values drop them. The column header filter of the
+ * field (`in`, useReferenceHeaderFilters) is not the panel's and stays — except `is_active`, whose `in` is the
+ * panel's «Показывать неактивные».
+ */
 export function withField(
   filters: readonly RefineFilter[],
   field: string,
   next: ReadonlyArray<{ operator: string; value: unknown }>,
 ): RefineFilter[] {
-  const rest = filters.filter((filter) => filter.field !== field);
+  const rest = filters.filter((filter) => filter.field !== field || (field !== ACTIVE_FIELD && filter.operator === 'in'));
   return [...rest, ...next.filter((item) => !isEmpty(item.value)).map((item) => ({ field, ...item }))];
 }
 

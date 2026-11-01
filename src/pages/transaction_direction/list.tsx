@@ -3,6 +3,7 @@ import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton } from "@refinedev/antd";
 import { ReferenceEditButton } from "../../components/referenceDrawer/ReferenceEditButton";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
 import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
 import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
@@ -18,15 +19,22 @@ const TRANSACTION_DIRECTION_FILTERS: ReferenceFilterConfig = {
   ],
 };
 
+const TRANSACTION_DIRECTION_HEADER_FILTERS = {
+  resource: "transaction_direction",
+  fields: ["direction_code", "direction_name", "description"],
+};
+
 export const TransactionDirectionList: React.FC<
   IResourceComponentsProps
 > = () => {
-  const { tableProps, filters, setFilters, setCurrent } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "direction_type_id", order: "asc" }],
     },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, TRANSACTION_DIRECTION_HEADER_FILTERS);
   const { show } = useNavigation();
 
   return (
@@ -43,9 +51,9 @@ export const TransactionDirectionList: React.FC<
       >
         <Table.Column dataIndex="direction_type_id" title="ID" sorter />
         <ReferenceSortOrderColumn />
-        <Table.Column dataIndex="direction_code" title="Код направления" sorter />
-        <Table.Column dataIndex="direction_name" title="Название направления" sorter />
-        <Table.Column dataIndex="description" title="Описание" />
+        <Table.Column dataIndex="direction_code" {...columnFilter("direction_code")} title="Код направления" sorter />
+        <Table.Column dataIndex="direction_name" {...columnFilter("direction_name")} title="Название направления" sorter />
+        <Table.Column dataIndex="description" sorter {...columnFilter("description")} title="Описание" />
         <Table.Column
           dataIndex="is_active"
           title="Активен"

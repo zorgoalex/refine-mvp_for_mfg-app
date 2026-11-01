@@ -2,6 +2,7 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
 import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
 import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
@@ -22,13 +23,20 @@ const SUPPLIERS_FILTERS: ReferenceFilterConfig = {
   ],
 };
 
+const SUPPLIERS_HEADER_FILTERS = {
+  resource: "suppliers",
+  fields: ["supplier_name", "address", "contact_person", "phone", "ref_key_1c"],
+};
+
 export const SupplierList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps, filters, setFilters, setCurrent } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "supplier_id", order: "asc" }],
     },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, SUPPLIERS_HEADER_FILTERS);
 
   const { highlightProps } = useHighlightRow(
     "supplier_id",
@@ -52,9 +60,9 @@ export const SupplierList: React.FC<IResourceComponentsProps> = () => {
       >
         <Table.Column dataIndex="supplier_id" title="id" sorter />
         <ReferenceSortOrderColumn />
-        <Table.Column dataIndex="supplier_name" title="Поставщик" sorter />
-        <Table.Column dataIndex="address" title="Адрес поставщика" />
-        <Table.Column dataIndex="contact_person" title="Контактное лицо" />
+        <Table.Column dataIndex="supplier_name" {...columnFilter("supplier_name")} title="Поставщик" sorter />
+        <Table.Column dataIndex="address" sorter {...columnFilter("address")} title="Адрес поставщика" />
+        <Table.Column dataIndex="contact_person" sorter {...columnFilter("contact_person")} title="Контактное лицо" />
         {contactsSupported ? (
           <Table.Column
             key="contacts"
@@ -62,11 +70,12 @@ export const SupplierList: React.FC<IResourceComponentsProps> = () => {
             render={(_, record: any) => <PrimaryContactsCell contacts={contacts.get(Number(record.supplier_id))} />}
           />
         ) : (
-          <Table.Column dataIndex="phone" title="Телефон" />
+          <Table.Column dataIndex="phone" sorter {...columnFilter("phone")} title="Телефон" />
         )}
-        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
+        <Table.Column dataIndex="ref_key_1c" sorter {...columnFilter("ref_key_1c")} title="1C-key" />
         <Table.Column
           dataIndex="is_active"
+          sorter
           title="Активен"
           render={(value: boolean) => (
             <Badge

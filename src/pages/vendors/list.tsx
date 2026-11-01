@@ -3,6 +3,7 @@ import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/cor
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
 import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
@@ -22,13 +23,21 @@ const VENDORS_FILTERS: ReferenceFilterConfig = {
   ],
 };
 
+const VENDORS_HEADER_FILTERS = {
+  resource: "vendors",
+  fields: ["vendor_name", "contact_info", "material_type_id", "ref_key_1c"],
+  lookups: { material_type_id: { resource: "material_types", optionValue: "material_type_id", optionLabel: "material_type_name" } },
+};
+
 export const VendorList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps, filters, setFilters, setCurrent } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "vendor_id", order: "asc" }],
     },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, VENDORS_HEADER_FILTERS);
 
   const { highlightProps } = useHighlightRow(
     "vendor_id",
@@ -79,7 +88,7 @@ export const VendorList: React.FC<IResourceComponentsProps> = () => {
       >
         <Table.Column dataIndex="vendor_id" title="id" sorter />
         <ReferenceSortOrderColumn />
-        <Table.Column dataIndex="vendor_name" title="Производитель" sorter />
+        <Table.Column dataIndex="vendor_name" title="Производитель" sorter {...columnFilter("vendor_name")} />
         {contactsSupported ? (
           <Table.Column
             key="contacts"
@@ -90,16 +99,20 @@ export const VendorList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column
           dataIndex="contact_info"
           title="Контактная информация"
+          sorter
+          {...columnFilter("contact_info")}
         />
         <Table.Column
           dataIndex="material_type_id"
           title="Тип материала"
+          sorter
+          {...columnFilter("material_type_id")}
           render={(_, record: any) =>
             materialTypeMap[record?.material_type_id] ??
             record?.material_type_id
           }
         />
-        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
+        <Table.Column dataIndex="ref_key_1c" title="1C-key" sorter {...columnFilter("ref_key_1c")} />
         <Table.Column
           dataIndex="is_active"
           title="Активен"

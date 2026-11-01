@@ -3,6 +3,7 @@ import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/cor
 import { ShowButton } from "@refinedev/antd";
 import { ReferenceEditButton } from "../../components/referenceDrawer/ReferenceEditButton";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
 import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
 import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
@@ -23,13 +24,26 @@ const MATERIALS_FILTERS: ReferenceFilterConfig = {
   ],
 };
 
+const MATERIALS_HEADER_FILTERS = {
+  resource: "materials",
+  fields: ["material_name", "unit_id", "material_type_id", "vendor_id", "default_supplier_id", "description", "ref_key_1c"],
+  lookups: {
+    unit_id: { resource: "units", optionValue: "unit_id", optionLabel: "unit_name" },
+    material_type_id: { resource: "material_types", optionValue: "material_type_id", optionLabel: "material_type_name" },
+    vendor_id: { resource: "vendors", optionValue: "vendor_id", optionLabel: "vendor_name" },
+    default_supplier_id: { resource: "suppliers", optionValue: "supplier_id", optionLabel: "supplier_name" },
+  },
+};
+
 export const MaterialList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps, filters, setFilters, setCurrent } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "material_id", order: "asc" }],
     },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, MATERIALS_HEADER_FILTERS);
 
   const { highlightProps } = useHighlightRow(
     "material_id",
@@ -156,9 +170,11 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
       >
         <Table.Column dataIndex="material_id" title="id" sorter />
         <ReferenceSortOrderColumn />
-        <Table.Column dataIndex="material_name" title="Материал" sorter />
+        <Table.Column dataIndex="material_name" {...columnFilter("material_name")} title="Материал" sorter />
         <Table.Column
           dataIndex="unit_id"
+          sorter
+          {...columnFilter("unit_id")}
           title="Единица"
           render={(_, record: any) =>
             unitMap[record?.unit_id] ?? record?.unit_id
@@ -166,6 +182,8 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
         />
         <Table.Column
           dataIndex="material_type_id"
+          sorter
+          {...columnFilter("material_type_id")}
           title="Тип материала"
           render={(_, record: any) =>
             typeMap[record?.material_type_id] ?? record?.material_type_id
@@ -173,6 +191,8 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
         />
         <Table.Column
           dataIndex="vendor_id"
+          sorter
+          {...columnFilter("vendor_id")}
           title="Производитель"
           render={(_, record: any) =>
             vendorMap[record?.vendor_id] ?? record?.vendor_id
@@ -180,13 +200,15 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
         />
         <Table.Column
           dataIndex="default_supplier_id"
+          sorter
+          {...columnFilter("default_supplier_id")}
           title="Поставщик"
           render={(_, record: any) =>
             supplierMap[record?.default_supplier_id] ??
             record?.default_supplier_id
           }
         />
-        <Table.Column dataIndex="description" title="Описание" />
+        <Table.Column dataIndex="description" sorter {...columnFilter("description")} title="Описание" />
         <Table.Column
           dataIndex="is_active"
           title="Активен"
@@ -198,7 +220,7 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
             />
           )}
         />
-        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
+        <Table.Column dataIndex="ref_key_1c" sorter {...columnFilter("ref_key_1c")} title="1C-key" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (
