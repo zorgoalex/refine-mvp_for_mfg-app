@@ -53,6 +53,8 @@ describe('calendar print isolation', () => {
     expect(css).toContain('html.wb-cal-printing body > :not(.wb-cal-print-live)');
     expect(css).toContain('html.wb-cal-printing body > .wb-cal-print-live');
     expect(css).toMatch(/\.wb-cal-print-live\s*{\s*display: none;/);
+    // the cards' fade-in (from opacity 0) would restart in the copy and print blank cards
+    expect(css).toMatch(/\.wb-cal-print-sheet \*\s*{\s*animation: none !important;/);
     const board = readFileSync(join(__dirname, '../components/CalendarBoard.tsx'), 'utf8');
     expect(board).toContain("getGrid={() => containerRef.current?.querySelector<HTMLElement>('.calendar-grid') ?? null}");
     const sheet = readFileSync(join(__dirname, 'calendarPrintSheet.ts'), 'utf8');

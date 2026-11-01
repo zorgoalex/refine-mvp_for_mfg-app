@@ -388,3 +388,9 @@ export function isAccentMilling(millingDisplay: string | null | undefined): bool
   const value = (millingDisplay ?? '').toLowerCase();
   return value.includes('выборка') || value.includes('неоклассика');
 }
+
+/** «Фамилия Имя Отчество» → ['Фамилия', 'Имя Отчество']: the card shows the first word, then the rest, on two lines. */
+export function splitClientName(name: string): string[] {
+  const [first, ...rest] = name.trim().split(/\s+/);
+  return rest.length > 0 ? [first, rest.join(' ')] : [first];
+}

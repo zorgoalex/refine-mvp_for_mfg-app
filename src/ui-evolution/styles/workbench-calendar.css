@@ -578,9 +578,10 @@
   opacity: 0.45;
 }
 
-/* размеры материалов — отдельной строкой, контрастно */
+/* размеры материалов — столбиком справа, рядом с клиентом (имя в две строки), контрастно */
 :root[data-ui-variant="workbench"] .order-card--wb {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 6px;
 }
 
 :root[data-ui-variant="workbench"] .order-card--wb > * {
@@ -588,12 +589,24 @@
 }
 
 :root[data-ui-variant="workbench"] .order-card--wb > .order-card__materials {
-  /* своей строкой под клиентом: в колонке справа они урезали фрезеровку до «Нео…» */
-  grid-column: 1 / -1;
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
+  /* справа от клиента и оплаты; строка фрезеровки остаётся во всю ширину, «Неоклассика» не урезается */
+  grid-column: 2;
+  grid-row: 3 / span 2;
+  flex-direction: column;
+  align-items: flex-end;
+  align-self: start;
   margin: 0;
+}
+
+:root[data-ui-variant="workbench"] .order-card--wb > .order-card__facts {
+  grid-column: 1 / -1;
+}
+
+/* фамилия и имя — каждое своей строкой */
+:root[data-ui-variant="workbench"] .order-card--wb .order-card__client > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 :root[data-ui-variant="workbench"] .order-card--wb > .order-card__stage-bar,

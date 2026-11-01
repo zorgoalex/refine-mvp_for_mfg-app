@@ -50,6 +50,13 @@
   -webkit-print-color-adjust: exact;
 }
 
+/* a copy restarts on-screen entry animations; the paper is taken a frame later, so no motion on it */
+.wb-mdf-print-sheet,
+.wb-mdf-print-sheet * {
+  animation: none !important;
+  transition: none !important;
+}
+
 .wb-mdf-print-sheet__header {
   display: flex;
   align-items: baseline;

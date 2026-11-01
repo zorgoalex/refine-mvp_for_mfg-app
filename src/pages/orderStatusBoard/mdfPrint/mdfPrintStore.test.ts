@@ -41,5 +41,6 @@ describe('MDF board print', () => {
     const css = readFileSync(join(__dirname, 'mdfPrint.css'), 'utf8');
     expect(css).toContain('html.wb-mdf-printing body > :not(.wb-mdf-print-live)');
     expect(css).toContain('.wb-mdf-print-sheet .status-board-column__header');
+    expect(css).toMatch(/\.wb-mdf-print-sheet \*\s*{\s*animation: none !important;/);
   });
 });

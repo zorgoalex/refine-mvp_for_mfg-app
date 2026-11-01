@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { getMaterialsForCard, hasDrawnProductionStatus, areAllProductionStagesReady, MANUAL_STAGE_LETTER_COLOR } from './statusColors';
+import { getMaterialsForCard, splitClientName, hasDrawnProductionStatus, areAllProductionStagesReady, MANUAL_STAGE_LETTER_COLOR } from './statusColors';
 
 describe('all production ready uses ordinary detail composition', () => {
   it('does not trust a packed header, ignore nulls or accept an empty order', () => {
@@ -138,5 +138,13 @@ describe('milling on calendar cards: «выборка» and «неокласси
     expect(isAccentMilling('Выборка, неоклассика')).toBe(true);
     expect(isAccentMilling('Фрезеровка')).toBe(false);
     expect(isAccentMilling(undefined)).toBe(false);
+  });
+});
+
+describe('splitClientName', () => {
+  it('puts the surname on the first line and the rest on the second', () => {
+    expect(splitClientName('Басанов Азат')).toEqual(['Басанов', 'Азат']);
+    expect(splitClientName('  Ербол   Жанымбек  Серикович ')).toEqual(['Ербол', 'Жанымбек Серикович']);
+    expect(splitClientName('Дамиля')).toEqual(['Дамиля']);
   });
 });

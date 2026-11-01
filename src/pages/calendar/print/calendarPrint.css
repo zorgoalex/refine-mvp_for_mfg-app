@@ -58,6 +58,13 @@
   page-break-inside: avoid;
 }
 
+/* the cards fade in from opacity 0 on screen; a copy would restart that and print blank, so no motion on paper */
+.wb-cal-print-sheet,
+.wb-cal-print-sheet * {
+  animation: none !important;
+  transition: none !important;
+}
+
 /* the send-to-chat icon of the day header is a screen action */
 .wb-cal-print-sheet .day-column__send {
   visibility: hidden;

@@ -15,6 +15,7 @@ import {
   getMillingDisplayValue,
   isAccentMilling,
   getMaterialsForCard,
+  splitClientName,
 } from '../utils/statusColors';
 import { formatDateKey } from '../utils/dateUtils';
 import { ProductionStagesDisplay } from '../../../components/ProductionStagesDisplay';
@@ -373,7 +374,10 @@ const OrderCard: React.FC<OrderCardProps> = ({
           <b>{order.total_area > 0 ? `${order.total_area.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} м²` : '0 м²'}</b>
         </div>
         {order.client_name ? (
-          <div className="order-card__client" title={order.client_name}>{order.client_name}</div>
+          // фамилия и имя — двумя строками: справа от них столбик размеров материалов
+          <div className="order-card__client" title={order.client_name}>
+            {splitClientName(order.client_name).map((line, index) => <span key={index}>{line}</span>)}
+          </div>
         ) : null}
         {materials.length > 0 && (
           <div className="order-card__materials">
