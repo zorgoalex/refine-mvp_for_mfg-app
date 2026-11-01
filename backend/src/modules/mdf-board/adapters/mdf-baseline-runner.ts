@@ -253,6 +253,22 @@ export interface MdfBaselineDryRunReport {
   handoff: string; durationMs: number;
 }
 
+/** Rows of `table` written by THIS transaction, its savepoints included (finding 4, 25.10): the dry-run gate counted the
+ * whole table under READ COMMITTED, so a parallel 1C export failed it. Candidates are rows created no earlier than this
+ * transaction started (`created_at` defaults to the writer's transaction start; explicit writers use `clock_timestamp()` —
+ * pinned by mdf-baseline-own-rows.guard.test.ts), which excludes every historical row, frozen ones included (a frozen row
+ * keeps its raw xmin, which could otherwise alias a current xid). Among them a row is ours when its xmin is not older than
+ * our own xid (`age <= 0`) and that xid, widened to xid8 within the current epoch, is still `in progress` — a foreign
+ * committed row is not, a foreign uncommitted row is invisible here. */
+export async function countMdfOwnRows(tx: TransactionClient, table: 'outbox_events' | 'audit_log', filter = 'true'): Promise<number> {
+  return Number((await tx.query<{ n: string }>(`SELECT count(*)::text n
+    FROM ${table} r, (SELECT pg_current_xact_id()::text::numeric cur) c
+    WHERE r.created_at >= transaction_timestamp() AND age(r.xmin) <= 0 AND (${filter})
+      AND pg_xact_status(((c.cur - mod(c.cur, 4294967296)) + r.xmin::text::numeric
+        + CASE WHEN r.xmin::text::numeric < mod(c.cur, 4294967296) THEN 4294967296 ELSE 0 END)::text::xid8) = 'in progress'`)).rows[0].n);
+}
+const AUTOMATION_AUDIT = "r.event LIKE 'status_automation.%'";
+
 /** Dry-run (R1#6): ONE READ COMMITTED transaction, always rolled back. The caller passes a fresh transaction. */
 export async function dryRunMdfBaseline(tx: TransactionClient, actor: MdfBaselineActor): Promise<MdfBaselineDryRunReport> {
   const started = Date.now();
@@ -263,9 +279,8 @@ export async function dryRunMdfBaseline(tx: TransactionClient, actor: MdfBaselin
     COALESCE(production_status_id::text,''),',' ORDER BY order_id)) s FROM orders`)).rows[0].s;
   const detailStatusesBefore = (await tx.query<{ s: string }>(`SELECT md5(string_agg(detail_id||':'||COALESCE(production_status_id::text,''),','
     ORDER BY detail_id)) s FROM order_details`)).rows[0].s;
-  const outboxBefore = Number((await tx.query<{ n: string }>('SELECT count(*)::text n FROM outbox_events')).rows[0].n);
-  const automationBefore = Number((await tx.query<{ n: string }>(
-    "SELECT count(*)::text n FROM audit_log WHERE event LIKE 'status_automation.%'")).rows[0].n);
+  const outboxBefore = await countMdfOwnRows(tx, 'outbox_events');
+  const automationBefore = await countMdfOwnRows(tx, 'audit_log', AUTOMATION_AUDIT);
   const { runId, runSeq, build } = await startMdfBaselineRun(tx, actor, { dryRun: true });
   for (let i = 0; i < build.items.length; i += BATCH) await recordMdfBaselineBatch(tx, actor, runId, runSeq, build.items.slice(i, i + BATCH));
   await markMdfBaselineRecorded(tx, actor, runId, build);
@@ -323,9 +338,8 @@ export async function dryRunMdfBaseline(tx: TransactionClient, actor: MdfBaselin
     COALESCE(production_status_id::text,''),',' ORDER BY order_id)) s FROM orders`)).rows[0].s;
   const detailStatusesAfter = (await tx.query<{ s: string }>(`SELECT md5(string_agg(detail_id||':'||COALESCE(production_status_id::text,''),','
     ORDER BY detail_id)) s FROM order_details`)).rows[0].s;
-  const outboxAfter = Number((await tx.query<{ n: string }>('SELECT count(*)::text n FROM outbox_events')).rows[0].n);
-  const automationAfter = Number((await tx.query<{ n: string }>(
-    "SELECT count(*)::text n FROM audit_log WHERE event LIKE 'status_automation.%'")).rows[0].n);
+  const outboxAfter = await countMdfOwnRows(tx, 'outbox_events');
+  const automationAfter = await countMdfOwnRows(tx, 'audit_log', AUTOMATION_AUDIT);
   const missingPositions = expected.filter(e => !publishedByKey.has(mdfPositionKey(e))).length;
   const statusesUnchanged = statusesBefore === statusesAfter && detailStatusesBefore === detailStatusesAfter;
   const failures = [

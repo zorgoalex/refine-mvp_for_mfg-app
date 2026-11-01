@@ -20,7 +20,7 @@ import { loadMdfUnregisteredSources } from './mdf-published-presentation';
 import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
 import { createMdfCorrectionPgFixture } from './mdf-correction-test-fixture.integration';
 import {
-  abortMdfBaseline, assertMdfBaselineFresh, dryRunMdfBaseline, fatalMdfBaselineSkips, handoffMdfBaseline,
+  abortMdfBaseline, assertMdfBaselineFresh, countMdfOwnRows, dryRunMdfBaseline, fatalMdfBaselineSkips, handoffMdfBaseline,
   hasMdfUnsupportedProductionRounds, loadMdfBaselineBuild, markMdfBaselineRecorded, MdfBaselineRefused,
   recordMdfBaselineBatch, resetMdfBaseline, startMdfBaselineRun, type MdfBaselineActor,
 } from './mdf-baseline-runner';
@@ -84,6 +84,8 @@ describe.skipIf(!enabled)('MDF §5.7b baseline population, isolated PostgreSQL s
     await fixture.client.query(`
       ALTER TABLE audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();
       ALTER TABLE outbox_events ALTER COLUMN outbox_event_id SET DEFAULT gen_random_uuid();
+      ALTER TABLE outbox_events ALTER COLUMN created_at SET DEFAULT now();
+      ALTER TABLE audit_log ALTER COLUMN created_at SET DEFAULT now();
       CREATE UNIQUE INDEX e2e_base_audit_related ON audit_log_related_entity(audit_id,entity_type,entity_id);
       CREATE UNIQUE INDEX e2e_base_outbox ON outbox_events(idempotency_key);
       INSERT INTO order_statuses(order_status_id,order_status_name,sort_order,is_active)
@@ -322,6 +324,40 @@ describe.skipIf(!enabled)('MDF §5.7b baseline population, isolated PostgreSQL s
     expect(report.cardIssues).toEqual({});
     void finishedPacket; void packet;
   }, 60000);
+
+  it('dry-run gate counts only its own outbox/audit rows: a parallel committed writer (1C export) is not a failure', async () => {
+    const outbox = (key: string) => `INSERT INTO outbox_events(event_type,aggregate_type,aggregate_id,payload_json,idempotency_key)
+      VALUES('E2E.own_rows','e2e','1','{}'::jsonb,'${key}')`;
+    const foreign = await newRawClient();
+    await fixture.client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
+    try {
+      const own = tx(fixture.client);
+      expect(await countMdfOwnRows(own, 'outbox_events')).toBe(0);
+      await fixture.client.query(outbox(`E2E-own-top-${randomUUID()}`));
+      // a released savepoint (the job runner's) is still this transaction
+      await fixture.client.query('SAVEPOINT e2e_own');
+      await fixture.client.query(outbox(`E2E-own-sub-${randomUUID()}`));
+      await fixture.client.query('RELEASE SAVEPOINT e2e_own');
+      // a rolled-back savepoint left nothing
+      await fixture.client.query('SAVEPOINT e2e_gone');
+      await fixture.client.query(outbox(`E2E-own-gone-${randomUUID()}`));
+      await fixture.client.query('ROLLBACK TO SAVEPOINT e2e_gone');
+      // a foreign transaction commits while ours is open (visible under READ COMMITTED), another stays open
+      await foreign.query(outbox(`E2E-foreign-${randomUUID()}`));
+      await foreign.query("INSERT INTO audit_log(event,action,entity_type,entity_id) VALUES('status_automation.e2e','status_automation.e2e','e2e','1')");
+      const open = await newRawClient();
+      await open.query('BEGIN');
+      await open.query(outbox(`E2E-open-${randomUUID()}`));
+      expect((await fixture.client.query("SELECT count(*)::int n FROM outbox_events WHERE event_type='E2E.own_rows'")).rows[0].n).toBe(3);
+      expect(await countMdfOwnRows(own, 'outbox_events')).toBe(2);
+      expect(await countMdfOwnRows(own, 'audit_log', "r.event LIKE 'status_automation.%'")).toBe(0);
+      await open.query('ROLLBACK');
+    } finally {
+      await fixture.client.query('ROLLBACK');
+      await foreign.query("DELETE FROM outbox_events WHERE event_type='E2E.own_rows'");
+      await foreign.query("DELETE FROM audit_log WHERE event='status_automation.e2e'");
+    }
+  });
 
   // =====================================================================================================
   // (e) Dry-run gate: a card that cannot publish must fail the pass gate with the right failure code.

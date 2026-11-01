@@ -9,6 +9,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { PerformanceQueryTelemetryService } from '../../../performance/performance-query-telemetry.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { rolePolicyForUser } from '../../../permissions/policies/scope';
+import { installLocalAuthorizationSnapshot } from './mdf-correction-test-fixture.integration';
 import { PgCutRepository } from '../../cut/adapters/pg-cut-repository';
 import { PgBazisCutRepository } from '../../bazis-cut/adapters/pg-bazis-cut-repository';
 import { PgCncTelegramRepository } from '../../cnc-telegram/adapters/pg-cnc-telegram-repository';
@@ -31,6 +32,8 @@ import { PgMdfCorrectionCommand } from './mdf-correction-command';
 import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
 
 describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calculation → MDF receipt → queue → publication', () => {
+  // Real vacuum calculations + MDF jobs on a shared, CPU-capped host: the 5 s default flakes (bath lifecycle cases).
+  vi.setConfig({ testTimeout: 30000 });
   const schema = `e2e_mdf_cut_${randomUUID().replaceAll('-','')}`;
   const connection = { host: process.env.PG_TAILSCALE_BIND_IP || process.env.PG_BIND_IP || '127.0.0.1',
     database: process.env.PG_DB,user: process.env.PG_USER,password: process.env.PG_PASSWORD,connectionTimeoutMillis: 5000,
@@ -150,6 +153,10 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
       }
     }
     await db.query(readFileSync(new URL('../../../../db/migrations/177_cut_result_typed_hdf.sql',import.meta.url),'utf8'));
+    // 177 (needed for cut_result_placement.order_hdf_detail_id) also installs a schema-local copy of
+    // cut_result_snapshot_is_complete, which shadows public's current definition (231 render v2 — what production
+    // snapshots are written for). Drop the stale copy so unqualified calls resolve to the current one.
+    await db.query('DROP FUNCTION cut_result_snapshot_is_complete(jsonb,jsonb,text)');
     // Migration 190 also extends cut_result_command, which is cloned from public AFTER the migrations above.
     await db.query(readFileSync(new URL('../../../../db/migrations/190_mdf_bath_transitions.sql',import.meta.url),'utf8'));
     await db.query(`CREATE TRIGGER e2e_project_maps AFTER INSERT ON cut_result FOR EACH ROW EXECUTE FUNCTION project_new_cut_result_label_maps();
@@ -178,6 +185,8 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('actual vacuum calcu
     const values: Partial<BackendEnv> = { DATABASE_URL: url.toString(),DATABASE_QUERY_TIMEOUT_MS: 15000,DATABASE_POOL_MIN: 0,DATABASE_POOL_MAX: 2,DATABASE_SSL: false };
     database = new DatabaseService({ get: (key: keyof BackendEnv) => values[key] } as ConfigService<BackendEnv,true>,
       { measure: <T>(sql: string, operation: () => Promise<T>) => { onQuery?.(sql); return operation(); } } as PerformanceQueryTelemetryService);
+    // Authorization is read via public.user_authorization_snapshot (migration 248): route it to the schema's copy.
+    await installLocalAuthorizationSnapshot(sql => db.query(sql),database,schema);
     repository = new PgCutRepository(database,freecut,config);
   },30000);
   afterAll(async () => {

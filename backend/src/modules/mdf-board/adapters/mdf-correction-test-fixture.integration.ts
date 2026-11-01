@@ -13,6 +13,47 @@ const safeIdentifier = (value: string) => {
   return `"${value}"`;
 };
 
+/**
+ * Authorization is read through `public.user_authorization_snapshot(...)` (migration 248, access groups 0A), whose
+ * body names the `public.*` role/permission tables explicitly: a test schema that edits its own cloned
+ * `users`/`roles`/`role_permissions`/`permissions_catalog`/`role_policy_scopes` is invisible to it. Installs
+ * migration 248 INTO the test schema (every `public.` re-pointed at it; needs the cloned `users`, `roles`,
+ * `role_permissions`, `permissions_catalog`, `role_policy_scopes`, `permissions_state`) and routes the
+ * statements of `database` that name `public.user_authorization_snapshot` to that copy. Test-only: the
+ * production SQL stays schema-qualified.
+ */
+export async function installLocalAuthorizationSnapshot(
+  query: (sql: string) => Promise<unknown>, database: DatabaseService, schema: string,
+): Promise<void> {
+  const migration = readFileSync(new URL('../../../../db/migrations/248_authorization_snapshot.sql', import.meta.url), 'utf8');
+  await query(migration.replaceAll('public.', `${safeIdentifier(schema)}.`));
+  const local = (text: unknown) => typeof text === 'string'
+    ? text.replaceAll('public.user_authorization_snapshot', `${safeIdentifier(schema)}.user_authorization_snapshot`) : text;
+  const pool = (database as unknown as { pool?: { query: (...a: unknown[]) => unknown; connect: (...a: unknown[]) => unknown } }).pool;
+  if (!pool) throw new Error('MDF_TEST_DATABASE_POOL_MISSING');
+  const poolQuery = pool.query.bind(pool);
+  pool.query = (text: unknown, ...rest: unknown[]) => poolQuery(local(text), ...rest);
+  const routed = new WeakSet<object>();
+  const route = (raw: { query: (...a: unknown[]) => unknown }) => {
+    if (raw && !routed.has(raw)) {
+      routed.add(raw);
+      const rawQuery = raw.query.bind(raw);
+      raw.query = (text: unknown, ...rest: unknown[]) => rawQuery(local(text), ...rest);
+    }
+    return raw;
+  };
+  const connect = pool.connect.bind(pool) as (...a: unknown[]) => unknown;
+  // node-pg's own `pool.query` takes a client through the callback form of `connect`.
+  pool.connect = ((...args: unknown[]) => {
+    const callback = args[args.length - 1];
+    if (typeof callback === 'function') {
+      return connect(...args.slice(0, -1), (error: unknown, raw: never, ...rest: unknown[]) =>
+        (callback as (...a: unknown[]) => unknown)(error, error ? raw : route(raw), ...rest));
+    }
+    return (connect(...args) as Promise<{ query: (...a: unknown[]) => unknown }>).then(route);
+  }) as never;
+}
+
 export interface MdfCorrectionPgFixture {
   readonly schema: string;
   readonly client: Client;

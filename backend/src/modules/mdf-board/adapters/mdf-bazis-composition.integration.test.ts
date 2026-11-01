@@ -1774,6 +1774,8 @@ describe.skipIf(!enabled)('BASIS composition command, isolated PostgreSQL schema
   }, 60000);
 
   it('rejects refill of other-order, duplicate or disabled additions and never trusts provenance for existing rows', async () => {
+    // The «disabled» branch below needs the flag off; the ambient backend env (stage .env) may enable it.
+    vi.stubEnv('BACKEND_MDF_BAZIS_REFILL', 'false');
     const f = await makeV2Source(4);
     const other = await makeV2Source(3);
     await makeRefillable(f.orderId);

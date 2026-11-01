@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { rolePolicyForUser } from '../../../permissions/policies/scope';
 import type { TransactionClient } from '../../../database/database.types';
 import { createMdfCorrectionPgFixture } from './mdf-correction-test-fixture.integration';
 import { recordMdfBathTransition, recordMdfLineageReceipt, recordMdfOrderCascadeReceipt, recordMdfReceipt } from '../application/mdf-receipt';
@@ -388,7 +389,7 @@ describe.skipIf(!enabled)('MDF order-demand cascade, isolated PostgreSQL schema'
   it('redacts owners the actor cannot view and answers contention for lower unlocked owners', async () => {
     const s = await makeSource({ cut: true, extraOwner: true });
     const ownOnly: CurrentUser = { ...user, id: '1',
-      policyScopes: { orders: { view: 'own', update: 'own' } } as never };
+      policyScopes: { ...rolePolicyForUser(user), orders: { ...rolePolicyForUser(user).orders, view: 'own', update: 'own' } } };
     await expect(orderCommand(s.orderIds, tx => tx.query('UPDATE order_details SET quantity=5 WHERE detail_id=$1', [s.member]),
       'redact', { actor: ownOnly })).rejects.toSatisfy((error: { code: string; details?: { cards: { hiddenOwners: boolean;
         sourceId: string | null; orderIds: number[]; displayName: string | null }[] } }) => {
