@@ -213,16 +213,9 @@ export const KeepAliveOutlet: React.FC = () => {
   }
 
   // Runs after every commit (after the eviction effect above): remembers what each
-  // rendered workspace received and forgets evicted ones. A workspace that entered
-  // the cache in this commit without being rendered yet (its route was still
-  // suspended on a lazy chunk) is remembered with the location it was activated at,
-  // so leaving it before it first renders never hands it the next route's address.
+  // rendered workspace received and forgets evicted ones.
   useLayoutEffect(() => {
-    const delivered = new Map(deliveredLocationContexts);
-    if (cacheRef.current.has(activeKey) && !delivered.has(activeKey)) {
-      delivered.set(activeKey, activeLocationContext);
-    }
-    deliveredLocationContextsRef.current = delivered;
+    deliveredLocationContextsRef.current = deliveredLocationContexts;
   });
 
   return (
