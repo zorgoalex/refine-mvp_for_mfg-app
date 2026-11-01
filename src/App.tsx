@@ -2,7 +2,6 @@ import { Refine, Authenticated } from "@refinedev/core";
 import { mdfBoardPeriodDays, readMdfBoardPeriod } from './utils/mdfBoardDailyPeriod';
 import { WhatsAppSendsProvider } from "./components/whatsapp/WhatsAppSendsProvider";
 import { BalloonCenterProvider } from "./notifications/balloons/BalloonCenter";
-import { ReworkStartHost } from "./pages/orders/components/rework/ReworkStartHost";
 import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 import { VariantWorkspaceLayout } from "./ui-variant/shellRegistry";
 import routerProvider, { CatchAllNavigate } from "@refinedev/react-router-v6";
@@ -890,7 +889,6 @@ const ThemedApp = () => {
                       <BalloonCenterProvider>
                         <WhatsAppSendsProvider>
                           <VariantWorkspaceLayout />
-                          <ReworkStartHost />
                         </WhatsAppSendsProvider>
                       </BalloonCenterProvider>
                     </Authenticated>
