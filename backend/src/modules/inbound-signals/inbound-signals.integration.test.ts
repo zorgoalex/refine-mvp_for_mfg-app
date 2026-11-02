@@ -52,7 +52,7 @@ suite('Inbound signals — real PostgreSQL transactions, scopes, retention', () 
       CREATE TABLE order_details(detail_id bigint PRIMARY KEY,order_id bigint,production_status_id smallint,delete_flag boolean DEFAULT false,updated_at timestamptz);
       CREATE TABLE order_hdf_details(hdf_detail_id bigint,order_id bigint,production_status_id smallint);
       CREATE TABLE production_statuses(production_status_id smallint PRIMARY KEY,sort_order integer,production_status_name text,production_status_code text,is_active boolean DEFAULT true);
-      CREATE TABLE order_statuses(order_status_id integer PRIMARY KEY,order_status_name text,is_active boolean DEFAULT true);
+      CREATE TABLE order_statuses(order_status_id integer PRIMARY KEY,order_status_name text,is_active boolean DEFAULT true,order_status_code text);
       CREATE TABLE bazis_order_links(order_id bigint);
       CREATE TABLE order_import_entity_map(local_order_id bigint);
       CREATE TABLE cut_job_item(order_id bigint,cut_job_id bigint,is_active boolean DEFAULT true);
@@ -70,7 +70,7 @@ suite('Inbound signals — real PostgreSQL transactions, scopes, retention', () 
       INSERT INTO permissions_state VALUES(true,1,now());
       INSERT INTO order_statuses VALUES(4,'В работе',true),(6,'Готов',true);
     `);
-    for (const file of ['155_order_production_composition.sql','173_inbound_signals.sql']) {
+    for (const file of ['155_order_production_composition.sql','173_inbound_signals.sql','289_inbound_signal_segments.sql']) {
       await pool.query(readFileSync(new URL(`../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     const values: Partial<BackendEnv> = { DATABASE_URL: url.toString(), DATABASE_QUERY_TIMEOUT_MS: 10000, DATABASE_POOL_MIN: 0, DATABASE_POOL_MAX: 4, DATABASE_SSL: false, BACKEND_ENABLE_INBOUND_SIGNALS: true };
@@ -132,9 +132,11 @@ suite('Inbound signals — real PostgreSQL transactions, scopes, retention', () 
     await service.accept({ ...incoming(), chatId:'999@g.us' },'unknown');
     await service.accept({ ...incoming(), sentAt:new Date(0) },'old');
     expect((await pool.query('SELECT * FROM inbound_messages')).rowCount).toBe(0);
-    await service.accept(incoming('Заказ 1 готов; заказ 2 готов'),'ambiguous');
+    // Several numbers in one line: a signal per order (decision of the user 02.11); one unknown number → the whole line to review.
+    await service.accept(incoming('Заказ 1 готов; заказ 2 готов'),'two-orders');
     await service.accept(incoming('Заказ 1 готов; заказ 999 готов'),'partial');
-    expect((await pool.query('SELECT state FROM inbound_signal_occurrences')).rows.map(r => r.state)).toEqual(['needs_review','needs_review']);
+    expect((await pool.query('SELECT state,order_id FROM inbound_signal_occurrences ORDER BY id')).rows)
+      .toEqual([{ state:'pending', order_id:'1' },{ state:'pending', order_id:'2' },{ state:'needs_review', order_id:null }]);
   });
   it('queue owner none pauses actions while intake remains available', async () => {
     owner='none'; await service.accept(incoming(),'paused'); await service.processBatch();
@@ -230,6 +232,139 @@ suite('Inbound signals — real PostgreSQL transactions, scopes, retention', () 
     } finally { await pool.query('DROP TRIGGER reject_signal_finish ON inbound_signal_occurrences; DROP FUNCTION reject_signal_finish()'); }
     await pool.query('UPDATE inbound_signal_occurrences SET next_attempt_at=now()');
     await service.processBatch(); expect((await row()).state).toBe('succeeded');
+  });
+  describe('several signals in one message', () => {
+    const units = async () => (await pool.query(`SELECT order_id,state,reason_code,segment_index,segment_text,visible_text,group_references
+      FROM inbound_signal_occurrences ORDER BY id`)).rows;
+    it('a multi-line message becomes one signal per order and each is applied to its own order', async () => {
+      await service.accept(incoming('Заказ 1 готов\nЗаказ 2 готов'),'two-lines');
+      expect((await units()).map(u => [u.order_id, u.state, u.segment_index])).toEqual([['1','pending',0],['2','pending',1]]);
+      await service.processBatch();
+      expect((await units()).map(u => u.state)).toEqual(['succeeded','succeeded']);
+      expect((await pool.query('SELECT order_id,order_status_id FROM orders ORDER BY order_id')).rows).toEqual([{ order_id:'1', order_status_id:6 },{ order_id:'2', order_status_id:6 }]);
+      expect((await pool.query('SELECT * FROM outbox_events')).rowCount).toBe(2);
+    });
+    it('a header with number lines; a footer; an unknown number sends the whole group to review', async () => {
+      await service.accept(incoming('Заказчик готов, заказ\n1\n2'),'header');
+      await service.accept(incoming('Заказ 1\nЗаказ 999\nГотов'),'footer-unknown');
+      expect((await units()).map(u => [u.order_id, u.state, u.reason_code])).toEqual([['1','pending',null],['2','pending',null],[null,'needs_review','reference_not_found']]);
+    });
+    it('a sibling reference of the same group that changed before the worker sends the unit to review; the own order is untouched', async () => {
+      // One group (one line, two numbers); separate lines are separate groups and do not depend on each other.
+      await service.accept(incoming('Заказ 1, 2 готов'),'changed');
+      await pool.query('UPDATE orders SET delete_flag=true WHERE order_id=2');
+      await service.processBatch();
+      expect((await units()).map(u => [u.order_id, u.state, u.reason_code])).toEqual([['1','needs_review','reference_changed'],['2','needs_review','order_unavailable']]);
+      expect((await pool.query('SELECT order_status_id FROM orders WHERE order_id=1')).rows[0].order_status_id).toBe(4);
+      await pool.query('UPDATE orders SET delete_flag=false WHERE order_id=2');
+    });
+    it('a redelivered message creates no duplicates; an old single-line message keeps the old shape', async () => {
+      const message = incoming('Заказ 1 готов\nЗаказ 2 готов');
+      await Promise.all([service.accept(message,'a'),service.accept(message,'b')]);
+      await service.accept(incoming('Заказ 1 готов'),'single');
+      expect((await units()).map(u => [u.order_id, u.segment_text === null])).toEqual([['1',false],['2',false],['1',true]]);
+    });
+    it('a scoped user sees only the own masked fragment: list, search, count, detail and history', async () => {
+      await service.accept(incoming('Заказ 1, 2 готов\nЗаказ 2 әлі дайын емес'),'mixed');
+      const list = await service.list({},manager);
+      expect(list.total).toBe(1);
+      expect(list.items[0].message_text).toBe('Заказ 1, … готов');
+      expect(JSON.stringify(list)).not.toContain('дайын');
+      expect((await service.list({ q:'дайын' },manager)).total).toBe(0);
+      const detail = await service.detail(String(list.items[0].id),{ ...manager, permissions:[...manager.permissions,'message_signals.technical'] });
+      expect(JSON.stringify(detail)).not.toMatch(/дайын|"2"|, 2/);
+      expect(detail.fragment).toBe('Заказ 1, … готов');
+      const full = await service.detail(String(list.items[0].id),admin);
+      expect(full.message.message_text).toContain('әлі дайын емес');
+    });
+    it('a re-assigned unit is re-projected for its new order; history hides the earlier order', async () => {
+      await service.accept(incoming('Заказ 2 готов\nЗаказ 999 готов'),'review');
+      // The unit of order 2 goes to review (e.g. after a configuration change) and is re-assigned to order 1.
+      await pool.query("UPDATE inbound_signal_occurrences SET state='needs_review',reason_code='configuration_changed',version=version+1 WHERE order_id=2");
+      const signal = (await pool.query('SELECT * FROM inbound_signal_occurrences WHERE order_id=2')).rows[0];
+      const preview = await service.previewResolve(signal.id,{ version:signal.version,orderId:1 },admin);
+      await service.command(signal.id,'resolve',{ version:signal.version,orderId:1,previewHash:preview.previewHash },randomUUID(),admin,'reassign');
+      expect((await pool.query('SELECT visible_text FROM inbound_signal_occurrences WHERE id=$1',[signal.id])).rows[0].visible_text).toBe('Заказ … готов');
+      for (const permissions of [manager.permissions, [...manager.permissions,'message_signals.technical']]) {
+        const detail = await service.detail(signal.id,{ ...manager, permissions: permissions as CurrentUser['permissions'] });
+        // requestId is a random UUID (it may contain «999» by chance).
+        const json = JSON.stringify(detail, (key, value) => key === 'requestId' ? undefined : value);
+        expect(json).not.toContain('Заказ 2'); expect(json).not.toContain('"orderId":"2"'); expect(json).not.toContain('999');
+      }
+    });
+    it('review r1: a repeated order joins the first unit; a change of an added reference stops it', async () => {
+      await service.accept(incoming('Заказ 1 готов\nЗаказ 1, 2 готов'),'repeat');
+      const rows = await units();
+      expect(rows.map(u => [u.order_id, u.state, u.segment_index])).toEqual([['1','pending',0],['2','pending',1]]);
+      expect(rows[0].group_references.map((r: { reference: string }) => r.reference)).toEqual(['1','2']);
+      expect(rows[0].segment_text).toBe('Заказ 1 готов\nЗаказ 1, 2 готов');
+      expect(rows[0].visible_text).toBe('Заказ 1 готов\nЗаказ 1, … готов');
+      await pool.query('UPDATE orders SET delete_flag=true WHERE order_id=2');
+      await service.processBatch();
+      expect((await units()).map(u => [u.order_id, u.state, u.reason_code])).toEqual([['1','needs_review','reference_changed'],['2','needs_review','order_unavailable']]);
+      expect((await pool.query('SELECT order_status_id FROM orders WHERE order_id=1')).rows[0].order_status_id).toBe(4);
+      await pool.query('UPDATE orders SET delete_flag=false WHERE order_id=2');
+    });
+    it('review r1: an unknown number with a full stop sends its group to review', async () => {
+      await service.accept(incoming('Заказ 1 готов\nЗаказ 999.'),'dot');
+      expect((await units()).map(u => [u.order_id, u.state, u.reason_code])).toEqual([[null,'needs_review','reference_not_found']]);
+      await service.processBatch();
+      expect((await pool.query('SELECT order_status_id FROM orders WHERE order_id=1')).rows[0].order_status_id).toBe(4);
+    });
+    it('review r1: a number line the group did not accept is never shown to a scoped user', async () => {
+      await service.accept(incoming('Заказ 1 готов\n2'),'bare');
+      const list = await service.list({},manager);
+      expect(list.items.map(i => i.message_text)).toEqual(['Заказ 1 готов']);
+      expect((await service.list({ q:'2' },manager)).total).toBe(0);
+      const detail = await service.detail(String(list.items[0].id),{ ...manager, permissions:[...manager.permissions,'message_signals.technical'] });
+      expect(detail.fragment).toBe('Заказ 1 готов');
+    });
+    it('rollback barrier: a split message accepted before the switch is counted; the switched-off module takes and shows nothing', async () => {
+      await service.accept(incoming('Заказ 1 готов\nЗаказ 2 готов'),'before-switch');
+      const off = { get: (key: keyof BackendEnv) => key === 'BACKEND_ENABLE_INBOUND_SIGNALS' ? false : key === 'BACKEND_INBOUND_SIGNALS_RELAY_OWNER' ? 'none' : undefined } as ConfigService<BackendEnv,true>;
+      const disabled = new InboundSignalsService(db, off);
+      for (const call of [() => disabled.accept(incoming('Заказ 1 готов\nЗаказ 2 готов'),'after-switch'), () => disabled.list({},admin), () => disabled.detail('1',admin)]) {
+        await expect(call()).rejects.toMatchObject({ code:'INBOUND_SIGNALS_DISABLED' });
+      }
+      expect(await disabled.acceptWaha({}, 'erp', 'x')).toBe(false);
+      expect((await pool.query('SELECT count(*)::int AS n FROM inbound_signal_occurrences WHERE segment_text IS NOT NULL')).rows[0].n).toBe(2);
+    });
+    it('review r2: a code of another order written with a combining letter is never shown to a scoped user', async () => {
+      await pool.query("INSERT INTO projects VALUES(1,'AA',false),(2,'МАЙ',false); UPDATE orders SET project_id=order_id");
+      const projectConfig = { ...configuration, resolvers:[{ ...configuration.resolvers[0],target:'project_code',prefixes:['проект'],format:'code' }] };
+      const { version, ...document } = projectConfig;
+      await pool.query('UPDATE message_processing_configuration SET version=$1,document=$2',[version,document]);
+      await service.accept(incoming('Проект AA, МАИ\u0306 готов'),'combining');
+      expect((await units()).map(u => [u.order_id, u.state])).toEqual([['1','pending'],['2','pending']]);
+      const list = await service.list({},manager);
+      expect(list.items.map(i => i.message_text)).toEqual(['Проект AA, … готов']);
+      for (const q of ['май', 'МАИ\u0306', 'маи']) expect((await service.list({ q },manager)).total).toBe(0);
+      const detail = await service.detail(String(list.items[0].id),{ ...manager, permissions:[...manager.permissions,'message_signals.technical'] });
+      expect(JSON.stringify(detail).normalize('NFKC').toLowerCase()).not.toContain('май');
+      expect(detail.fragment).toBe('Проект AA, … готов');
+      await pool.query('UPDATE orders SET project_id=NULL; DELETE FROM projects');
+    });
+    it('review r3: a fragment whose letters cannot be mapped back is hidden whole', async () => {
+      await pool.query("INSERT INTO projects VALUES(1,'AA',false),(2,'BB',false); UPDATE orders SET project_id=order_id");
+      const { version, ...document } = { ...configuration, resolvers:[{ ...configuration.resolvers[0],target:'project_code' as const,prefixes:['проект'],format:'code' as const }] };
+      await pool.query('UPDATE message_processing_configuration SET version=$1,document=$2',[version,document]);
+      await service.accept(incoming('Проект AA, ⒷⒷ готов ΟΔΟΣ'),'symbols');
+      expect((await units()).map(u => [u.order_id, u.state])).toEqual([['1','pending'],['2','pending']]);
+      const list = await service.list({},manager);
+      expect(list.items.map(i => i.message_text)).toEqual(['…']);
+      for (const q of ['ⒷⒷ', 'bb', 'ΟΔΟΣ']) expect((await service.list({ q },manager)).total).toBe(0);
+      const detail = await service.detail(String(list.items[0].id),{ ...manager, permissions:[...manager.permissions,'message_signals.technical'] });
+      // requestId is a random UUID (hex may contain «bb» by chance).
+      expect(JSON.stringify(detail, (key, value) => key === 'requestId' ? undefined : value).normalize('NFKC').toLowerCase()).not.toMatch(/bb|οδο/);
+      expect(detail.fragment).toBe('…');
+      await pool.query('UPDATE orders SET project_id=NULL; DELETE FROM projects');
+    });
+    it('the template check keeps its array and adds units on request', async () => {
+      const body = { configuration, text:'Заказ 1 готов\nЗаказ 2 готов', source:'shop' };
+      expect(Array.isArray(await service.testTemplate(body,admin))).toBe(true);
+      expect(await service.testTemplate({ ...body, units:true },admin)).toMatchObject({ split:true,
+        units:[{ segmentIndex:0, signalCode:'ready', references:['1'] },{ segmentIndex:1, signalCode:'ready', references:['2'] }] });
+    });
   });
   it('TTL removes matched and unmatched message details but dedupe survives', async () => {
     const message=incoming(); await service.accept(message,'ttl'); await service.accept(incoming('no match'),'ttl-unmatched');

@@ -828,6 +828,12 @@ describe('backend env validation', () => {
     });
   });
 
+  it('rollback barrier of incoming signals: the module goes off together with its relay owner', () => {
+    expect(() => validateEnv({ BACKEND_ENABLE_INBOUND_SIGNALS: 'false', BACKEND_INBOUND_SIGNALS_RELAY_OWNER: 'in_process' })).toThrow(/BACKEND_ENABLE_INBOUND_SIGNALS/);
+    expect(validateEnv({ BACKEND_ENABLE_INBOUND_SIGNALS: 'false', BACKEND_INBOUND_SIGNALS_RELAY_OWNER: 'none' }))
+      .toMatchObject({ BACKEND_ENABLE_INBOUND_SIGNALS: false, BACKEND_INBOUND_SIGNALS_RELAY_OWNER: 'none' });
+  });
+
   it('pins Telegram Bot API host and validates scheduler ownership', () => {
     expect(() =>
       validateEnv({

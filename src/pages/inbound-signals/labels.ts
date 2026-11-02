@@ -6,6 +6,7 @@ export const signalLabels: Record<string, string> = {
   dismiss: 'Сигнал исключён вручную', retry: 'Запрошена повторная обработка', configuration_changed: 'Настройки изменились — проверьте сигнал',
   preview_changed: 'Заказ или правила изменились — повторите предпросмотр', order_unavailable: 'Заказ удалён или недоступен',
   reference_changed: 'Связь с заказом изменилась — нужно уточнение',
+  too_many_references: 'Слишком много номеров в одном сообщении — нужно уточнить', rollback_review: 'Нужно проверить после отката обработки',
   processing_failed: 'Ошибка обработки', worker_interrupted: 'Обработка прервалась', no_applicable_action: 'Условия правил автостатусов не выполнены',
   false_match: 'Ложное совпадение', irrelevant: 'Не относится к работе', duplicate: 'Повторное сообщение', other: 'Другая причина',
 };
