@@ -52,6 +52,8 @@ import { CutConfigTab } from './components/CutConfigTab';
 import { LabelsConfigTab } from './components/LabelsConfigTab';
 import { FinancialLayerAccessMatrix } from './components/FinancialLayerAccessMatrix';
 import { UserScreenVisibility } from './components/UserScreenVisibility';
+import { VISIBILITY_NOT_APPLICABLE } from './components/UserScreenVisibility';
+import { roleReadsVisibilitySettings } from '../../utils/resourcePermissions';
 import { createVisibilityWriter, type VisibilityWriter } from '../../utils/visibilityWriter';
 import { Segmented } from '../../ui/Segmented';
 import { ExportTemplatesConfigTab } from './components/ExportTemplatesConfigTab';
@@ -71,8 +73,10 @@ import { can } from '../../utils/permissions';
 import { dailyDigestTabVisible } from './components/DailyOrderDigestConfig';
 import { MessageBroadcastsTab } from './components/broadcasts/MessageBroadcastsTab';
 import { authSession } from '../../api/authSession';
+import { authStorage } from '../../utils/auth';
 import {
   buildInitialResourceVisibility,
+  canViewResourceForUser,
   getMenuResources,
   normalizeRoleKey,
   normalizeRoleVisibilityMatrix,
@@ -90,7 +94,9 @@ import {
   CONFIGURATION_SECTION_DESCRIPTIONS,
   buildConfigurationNav,
   configurationSectionHasOwnHeading,
+  configurationTabVisibilityResources,
   filterConfigurationNav,
+  filterConfigurationTabsByVisibility,
 } from './configurationSections';
 
 const { Text } = Typography;
@@ -526,15 +532,19 @@ const TableVisibilityByRoleTab: React.FC = () => {
       getMenuResources(
         resources,
         RESOURCE_LABELS,
-        bitrix24MenuConfig
-          ? [
-              {
-                name: 'crm',
-                label: bitrix24MenuConfig.label,
-                route: bitrix24MenuConfig.url,
-              },
-            ]
-          : [],
+        [
+          ...(bitrix24MenuConfig
+            ? [
+                {
+                  name: 'crm',
+                  label: bitrix24MenuConfig.label,
+                  route: bitrix24MenuConfig.url,
+                },
+              ]
+            : []),
+          // Вкладки «Конфигурации» — строками «Конфигурация → …» рядом с самим экраном.
+          ...configurationTabVisibilityResources(),
+        ],
       ),
     [resources],
   );
@@ -614,18 +624,24 @@ const TableVisibilityByRoleTab: React.FC = () => {
     },
     ...roles.map((role) => {
       const roleKey = normalizeRoleKey(role);
+      // A role that never reads the setting (1C integration operator): hiding would silently do nothing.
+      const applies = roleReadsVisibilitySettings(roleKey);
       return {
-        title: role.role_name || roleKey,
+        title: applies ? role.role_name || roleKey : (
+          <span title={VISIBILITY_NOT_APPLICABLE}>{role.role_name || roleKey} · не применяется</span>
+        ),
         dataIndex: roleKey,
         key: roleKey,
         align: 'center' as const,
         width: 140,
         render: (_: unknown, record: { name: string }) => (
-          <Checkbox
-            checked={matrix[record.name]?.[roleKey] ?? true}
-            disabled={visibilityLocked}
-            onChange={(event) => void handleToggle(record.name, role, event.target.checked)}
-          />
+          <span title={applies ? undefined : VISIBILITY_NOT_APPLICABLE}>
+            <Checkbox
+              checked={matrix[record.name]?.[roleKey] ?? true}
+              disabled={visibilityLocked || !applies}
+              onChange={(event) => void handleToggle(record.name, role, event.target.checked)}
+            />
+          </span>
         ),
       };
     }),
@@ -676,6 +692,9 @@ export const ConfigurationPage: React.FC = () => {
   const [navHidden, setNavHidden] = useState(readConfigurationNavHidden);
   const stickyTabsRef = useConfigurationStickyTabs();
   const [activeTab, setActiveTab] = useState(() => readStoredConfigurationActiveTab() ?? 'orders');
+  const { getSetting: getVisibilitySetting } = useAppSettings();
+  const tabVisibilityMatrix = normalizeRoleVisibilityMatrix(getVisibilitySetting(SETTING_KEYS.RESOURCE_VISIBILITY_BY_ROLE));
+  const visibilityUser = featureFlags.useBackendPermissions ? authSession.getUser() : authStorage.getUser();
   const statusAutomationVisible =
     featureFlags.statusAutomation &&
     (!featureFlags.useBackendPermissions || can('status_automation.view'));
@@ -929,7 +948,7 @@ export const ConfigurationPage: React.FC = () => {
       ? [{ key: 'rework-reasons', label: 'Причины переделки', children: <ReworkReasonsConfigTab /> }]
       : []),
   ];
-  const tabItems = filterConfigurationTabItems(
+  const tabsByPermissions = filterConfigurationTabItems(
     allTabItems,
     generalSettingsVisible,
     deadlineSettingsVisible,
@@ -939,6 +958,9 @@ export const ConfigurationPage: React.FC = () => {
     procurementSettingsVisible,
     notificationsSubsectionsVisible.rules || notificationsSubsectionsVisible.onecAlerts || notificationsSubsectionsVisible.whatsappChannel,
   );
+  // «Видимость экранов» → строки «Конфигурация → …»: личная настройка, затем роль; только показ.
+  const tabItems = filterConfigurationTabsByVisibility(tabsByPermissions, (resourceName) =>
+    canViewResourceForUser(resourceName, visibilityUser, tabVisibilityMatrix));
 
   const availableTabKeys = tabItems.map((item) => item.key);
   const resolvedActiveTab = resolveConfigurationActiveTab(activeTab, availableTabKeys);

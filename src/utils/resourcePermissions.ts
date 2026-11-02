@@ -28,6 +28,15 @@ export function canQueryUsersResource(user: PermissionCarrier | null | undefined
   return can('users.view', user);
 }
 
+/**
+ * Whether users of this role read the visibility setting (app_settings) at all. A role outside this list (the 1C
+ * integration operator) never gets the setting, so hiding screens or «Конфигурация» tabs for it has no effect — the
+ * editor marks it as not applicable instead of storing a rule that silently does nothing.
+ */
+export function roleReadsVisibilitySettings(roleKey: string | undefined): boolean {
+  return roleKey !== undefined && APP_SETTINGS_READ_ROLES.has(roleKey);
+}
+
 export function canQueryAppSettingsResource(
   user: RoleAwarePermissionCarrier,
 ): boolean {
