@@ -27,4 +27,24 @@ describe('NewLine phone (~400 CSS px portrait): two columns, a narrow orders lis
     expect(list).toContain('if (last && last.orderId === record.order_id && now - last.at < 500) {');
     expect(list).toContain('columns={(groupedListRows ? groupedListColumns : phoneListColumns ?? visibleOrderListColumns) as any}');
   });
+
+  it('calendar: scrolls down inside the grid (not clipped), standard cards by default', () => {
+    expect(mobileCss).toMatch(/\.evolution-shell--wb-phone \.calendar-grid \{[^}]*overflow-x: hidden;\s*overflow-y: auto;/);
+    const board = readFileSync('src/pages/calendar/components/CalendarBoard.tsx', 'utf8');
+    expect(board).toContain('responsive.isMobile && !isWorkbench ? ViewMode.BRIEF : ViewMode.STANDARD,');
+  });
+
+  it('order card: no customer screen on a phone, wide tables scroll inside, materials keep their columns', () => {
+    const show = readFileSync('src/pages/orders/show.tsx', 'utf8');
+    const form = readFileSync('src/pages/orders/components/OrderForm.tsx', 'utf8');
+    expect(show).toContain('const clientScreenControl = record?.order_id && !deletedOrder && !isMobile ? (');
+    expect(form).toContain('const clientScreenControl = isMobile ? null : (');
+    expect(mobileCss).toMatch(/\.order-show-page--workbench \.ant-table-content \{\s*overflow-x: auto;/);
+    expect(mobileCss).toMatch(/\.order-show-page--workbench \.wb-materials__table \{\s*min-width: 600px;/);
+  });
+
+  it('bottom bar returns to the open tab of a section with its search (MDF board ?q=)', () => {
+    const bar = readFileSync('src/ui-evolution/shell/WorkbenchMobileTabBar.tsx', 'utf8');
+    expect(bar).toContain('navigate(workbenchMobileTabTarget(tab.route, useTabStore.getState().tabs));');
+  });
 });

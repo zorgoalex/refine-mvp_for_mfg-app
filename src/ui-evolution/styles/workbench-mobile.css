@@ -714,7 +714,9 @@
 
 /* ---------- календарь: два дня в ширину экрана (раскладка — workbenchPhoneLayout), без прокрутки вбок ---------- */
 :root[data-ui-variant="workbench"] .evolution-shell--wb-phone .calendar-grid {
-  overflow-x: visible;
+  /* вбок не прокручивается, вниз — да (оба visible убирали прокрутку совсем) */
+  overflow-x: hidden;
+  overflow-y: auto;
   scroll-snap-type: none;
 }
 
@@ -734,4 +736,39 @@
 
 :root[data-ui-variant="workbench"] .evolution-shell--wb-phone .orders-table .ant-table-tbody > tr {
   touch-action: manipulation; /* двойной тап — открыть заказ, а не масштаб страницы */
+}
+
+/* ---------- карточка заказа на телефоне: широкие таблицы прокручиваются внутри себя, страница вбок не уезжает ---------- */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-show-page--workbench .ant-table-wrapper {
+  max-width: 100%;
+  min-width: 0;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-show-page--workbench .ant-table-content {
+  overflow-x: auto;
+}
+
+/* «Материалы заказа»: названию — постоянная ширина, числа и «Итого» — в своих колонках, таблица листается вбок */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-show-page--workbench .wb-materials__table {
+  min-width: 600px;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .order-show-page--workbench .wb-materials__table th:first-child {
+  width: 140px;
+}
+
+/* ---------- вкладки экранов на телефоне: одна строка, листаются пальцем вбок (свайп — useNativeWorkspaceTabScroll) ---------- */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .evolution-workspace-tabs.workspace-tabs .ant-tabs-nav-wrap {
+  overflow-x: auto !important;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .evolution-workspace-tabs.workspace-tabs .ant-tabs-nav-wrap::-webkit-scrollbar {
+  display: none;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .evolution-workspace-tabs.workspace-tabs .ant-tabs-nav-list {
+  flex-wrap: nowrap;
 }

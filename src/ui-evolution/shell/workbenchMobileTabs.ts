@@ -30,3 +30,8 @@ export function resolveWorkbenchMobileTabs(
 export function isWorkbenchMobileTabActive(route: string, pathname: string): boolean {
   return pathname === route || pathname.startsWith(`${route}/`);
 }
+
+/** Куда ведёт кнопка нижней панели: открытая вкладка раздела (с её адресом и параметрами) или сам раздел. */
+export function workbenchMobileTabTarget(route: string, openTabs: readonly { key: string; path: string }[]): string {
+  return openTabs.find((tab) => tab.key === route)?.path ?? route;
+}

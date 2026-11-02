@@ -2320,7 +2320,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   // «NewLine» shows the sections on one page: the customer follows the section the manager is at
   // (see workbenchCustomerSection.ts), not only the last anchor clicked.
   const clientScreenTab = isWorkbench ? workbenchCustomerSection : activeTab;
-  const clientScreenControl = (
+  // экран клиента (второй монитор) на телефоне не нужен
+  const clientScreenControl = isMobile ? null : (
     <ClientScreenOrderHeader
       orderKey={orderKey}
       orderNumber={(headerNameData?.data as { order_full_number?: string | null } | undefined)?.order_full_number ?? null}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Tabs, Modal, message } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useNativeWorkspaceTabScroll } from '../../hooks/useNativeWorkspaceTabScroll';
 import { useTabStore, computeCloseTargetPath } from '../../stores/tabStore';
 import { DraggableModalWrapper } from '../DraggableModalWrapper';
 import { ClientScreenTabEye } from '../../pages/clientScreen/ClientScreenGlobalIndicator';
@@ -38,6 +39,7 @@ export const WorkspaceTabs: React.FC = () => {
     }
   };
 
+  useNativeWorkspaceTabScroll();
   if (tabs.length === 0) return null;
   return (
     <Tabs

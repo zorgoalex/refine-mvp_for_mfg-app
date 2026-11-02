@@ -3,6 +3,7 @@ import { message, Modal, Tabs } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { DraggableModalWrapper } from '../../components/DraggableModalWrapper';
 import { ClientScreenTabEye } from '../../pages/clientScreen/ClientScreenGlobalIndicator';
+import { useNativeWorkspaceTabScroll } from '../../hooks/useNativeWorkspaceTabScroll';
 import { computeCloseTargetPath, type WorkspaceTab, useTabStore } from '../../stores/tabStore';
 
 export interface EvolutionTabCloseRequest {
@@ -44,6 +45,7 @@ export const EvolutionWorkspaceTabs: React.FC = () => {
   const tabs = useTabStore((state) => state.tabs);
   const closeTab = useTabStore((state) => state.closeTab);
   const activeKey = location.pathname;
+  useNativeWorkspaceTabScroll();
 
   const onEdit = (targetKey: React.Key | React.MouseEvent | React.KeyboardEvent, action: 'add' | 'remove') => {
     if (action !== 'remove' || typeof targetKey !== 'string') return;

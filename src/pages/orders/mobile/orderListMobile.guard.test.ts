@@ -63,7 +63,10 @@ describe('orders list phone rendering', () => {
 
   it('offers persistent list and card modes on phones', () => {
     const src = read('pages/orders/list.tsx');
-    expect(src).toContain('(isTablet || isMobile) && (');
+    // телефон: переключатель всегда на виду, над свёрнутым «Действия и фильтры»; планшет — в шапке
+    expect(src).toContain('pinned={isMobile ? ordersViewSwitch : null}');
+    expect(src).toContain('{isTablet && ordersViewSwitch}');
+    expect(src).toContain("{pinned ? <div className=\"orders-mobile-header-disclosure__pinned\">{pinned}</div> : null}");
     expect(src).toContain("isMobile ? 'cards' : 'list'");
     expect(src).toContain("(isMobile || isTablet) && ordersViewMode === 'cards'");
     expect(src).toContain("'order-card-list--mobile'");

@@ -187,6 +187,8 @@ const withOrderListHeaderTitles = (columns: ColumnsType<any>): ColumnsType<any> 
 
 interface OrdersMobileHeaderDisclosureProps {
   children: React.ReactNode;
+  /** Всегда на виду, под заголовком блока (переключатель вида на телефоне), — не прячется при сворачивании. */
+  pinned?: React.ReactNode;
   expanded: boolean;
   mobile: boolean;
   summary: string;
@@ -195,6 +197,7 @@ interface OrdersMobileHeaderDisclosureProps {
 
 const OrdersMobileHeaderDisclosure: React.FC<OrdersMobileHeaderDisclosureProps> = ({
   children,
+  pinned,
   expanded,
   mobile,
   summary,
@@ -224,6 +227,7 @@ const OrdersMobileHeaderDisclosure: React.FC<OrdersMobileHeaderDisclosureProps> 
         aria-hidden="true"
       />
     </button>
+    {pinned ? <div className="orders-mobile-header-disclosure__pinned">{pinned}</div> : null}
     <div
       id="orders-mobile-header-controls"
       className="orders-mobile-header-disclosure__content"
@@ -1583,6 +1587,31 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       .filter((column) => column.key !== 'actions')
       .map((column) => (column.key === 'order_name' ? { ...column, width: 56 } : column))
     : null;
+  // «Список / Карточки»: на телефоне всегда на виду (над свёрнутым «Действия и фильтры»), на планшете — в шапке
+  const ordersViewSwitch = (
+    <Segmented
+      className="orders-tablet-view-switch orders-view-switch"
+      aria-label="Вид заказов"
+      value={ordersViewMode}
+      onChange={(value) => selectOrdersView(value as OrdersViewMode)}
+      options={[
+        {
+          value: 'list',
+          label: <Tooltip title="Список"><span aria-label="Список"><TableOutlined />{isMobile ? ' Список' : ''}</span></Tooltip>,
+        },
+        {
+          value: 'cards',
+          label: <Tooltip title="Карточки"><span aria-label="Карточки"><AppstoreOutlined />{isMobile ? ' Карточки' : ''}</span></Tooltip>,
+        },
+        ...(isTablet && canViewStatusBoard
+          ? [{
+            value: 'board',
+            label: <Tooltip title="Доска статусов"><span aria-label="Доска статусов"><ProjectOutlined /></span></Tooltip>,
+          }]
+          : []),
+      ]}
+    />
+  );
   const lastRowTapRef = React.useRef<{ orderId: unknown; at: number } | null>(null);
   const quickViewEnabled = isWorkbench && !isMobile && !isTablet;
   const importItemLabel = (title: string, hint: string) => (
@@ -1629,35 +1658,13 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         title="Заказы"
         headerButtons={({ createButtonProps }) => (
           <OrdersMobileHeaderDisclosure
+            pinned={isMobile ? ordersViewSwitch : null}
             expanded={mobileHeaderExpanded}
             mobile={isMobile}
             summary={ordersHeaderSummary}
             onToggle={toggleMobileHeader}
           >
-            {(isTablet || isMobile) && (
-              <Segmented
-                className="orders-tablet-view-switch orders-view-switch"
-                aria-label="Вид заказов"
-                value={ordersViewMode}
-                onChange={(value) => selectOrdersView(value as OrdersViewMode)}
-                options={[
-                  {
-                    value: 'list',
-                    label: <Tooltip title="Список"><span aria-label="Список"><TableOutlined />{isMobile ? ' Список' : ''}</span></Tooltip>,
-                  },
-                  {
-                    value: 'cards',
-                    label: <Tooltip title="Карточки"><span aria-label="Карточки"><AppstoreOutlined />{isMobile ? ' Карточки' : ''}</span></Tooltip>,
-                  },
-                  ...(isTablet && canViewStatusBoard
-                    ? [{
-                      value: 'board',
-                      label: <Tooltip title="Доска статусов"><span aria-label="Доска статусов"><ProjectOutlined /></span></Tooltip>,
-                    }]
-                    : []),
-                ]}
-              />
-            )}
+            {isTablet && ordersViewSwitch}
             {createButtonProps && canCreateOrders && (
               <CreateButton {...createButtonProps}>Создать</CreateButton>
             )}

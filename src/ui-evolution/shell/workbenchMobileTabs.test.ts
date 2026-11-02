@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isWorkbenchMobileTabActive, resolveWorkbenchMobileTabs } from './workbenchMobileTabs';
+import { isWorkbenchMobileTabActive, resolveWorkbenchMobileTabs, workbenchMobileTabTarget } from './workbenchMobileTabs';
 
 describe('NewLine phone tab bar', () => {
   const all = new Set(['orders_view', 'calendar', 'mdf-work-board', 'scan']);
@@ -20,5 +20,15 @@ describe('NewLine phone tab bar', () => {
     expect(isWorkbenchMobileTabActive('/orders', '/orders/show/12')).toBe(true);
     expect(isWorkbenchMobileTabActive('/orders', '/orders-analytics')).toBe(false);
     expect(isWorkbenchMobileTabActive('/scan', '/calendar')).toBe(false);
+  });
+
+  it('returns to the open tab of the section with its query (board search survives an order visit)', () => {
+    const tabs = [
+      { key: '/mdf-work-board', path: '/mdf-work-board?q=3090' },
+      { key: '/orders/show/12', path: '/orders/show/12' },
+    ];
+    expect(workbenchMobileTabTarget('/mdf-work-board', tabs)).toBe('/mdf-work-board?q=3090');
+    expect(workbenchMobileTabTarget('/calendar', tabs)).toBe('/calendar');
+    expect(workbenchMobileTabTarget('/orders', tabs)).toBe('/orders');
   });
 });

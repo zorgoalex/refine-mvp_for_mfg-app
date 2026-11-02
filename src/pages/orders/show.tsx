@@ -1452,8 +1452,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   }, [activationRevision, orderRealtimeEnabled, ordinaryReadActive, record?.order_id, refreshLiveDetailProductionStatuses]);
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const workbenchChromeBottom = useWorkspaceChromeBottom();
-  // на телефоне NewLine (мокап 22) ход производства открыт сразу
-  const [workbenchFlowOpen, setWorkbenchFlowOpen] = useState(() => isWorkbench && isMobile);
+  // «Ход производства» по умолчанию свёрнут (на телефоне тоже — открывается по нажатию)
+  const [workbenchFlowOpen, setWorkbenchFlowOpen] = useState(false);
   // «NewLine»: the right column can be folded to give the details table the full width (per browser).
   const [workbenchSideCollapsed, setWorkbenchSideCollapsed] = useState(() => {
     try {
@@ -3400,7 +3400,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     (detail: any) => (clientScreenGroupField ? String(groupLabelOf(detail, clientScreenGroupField) ?? '') : ''),
     [clientScreenGroupField, groupLabelOf],
   );
-  const clientScreenControl = record?.order_id && !deletedOrder ? (
+  // экран клиента (второй монитор) на телефоне не нужен
+  const clientScreenControl = record?.order_id && !deletedOrder && !isMobile ? (
     <ClientScreenShowHeader
       orderId={record.order_id}
       activeInfoPanel={activeInfoPanel}

@@ -249,8 +249,9 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   const dndBackend = useTouch ? TouchBackend : HTML5Backend;
   // AD-1: set-once default — first-render width decides BRIEF vs STANDARD.
   // User choice is never overwritten on subsequent re-renders.
+  // NewLine на телефоне — стандартные карточки (две колонки в ширину экрана); прежние варианты — краткие
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
-    responsive.isMobile ? ViewMode.BRIEF : ViewMode.STANDARD,
+    responsive.isMobile && !isWorkbench ? ViewMode.BRIEF : ViewMode.STANDARD,
   );
   const [mobileControlsExpanded, setMobileControlsExpanded] = useState(false);
   const [periodDays, setPeriodDays] = useState<7 | 14 | 30>(isWorkbench ? 14 : 7);

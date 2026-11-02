@@ -149,6 +149,19 @@
   margin-right: 0 !important;
 }
 
+/* переключатель вида — всегда на виду под заголовком блока, две равные половины */
+.orders-mobile-header-disclosure__pinned {
+  padding: 0 8px 8px;
+}
+
+.orders-mobile-header-disclosure--mobile .orders-view-switch {
+  display: block;
+}
+
+.orders-mobile-header-disclosure--mobile .orders-view-switch .ant-segmented-item {
+  flex: 1 1 0;
+}
+
 .orders-mobile-header-disclosure--mobile .orders-view-switch .ant-segmented-group {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

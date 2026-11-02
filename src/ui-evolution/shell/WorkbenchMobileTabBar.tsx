@@ -7,8 +7,9 @@ import {
   TableOutlined,
 } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useTabStore } from '../../stores/tabStore';
 import { useEvolutionNavigation } from './useEvolutionNavigation';
-import { isWorkbenchMobileTabActive, resolveWorkbenchMobileTabs } from './workbenchMobileTabs';
+import { isWorkbenchMobileTabActive, resolveWorkbenchMobileTabs, workbenchMobileTabTarget } from './workbenchMobileTabs';
 
 const TAB_ICONS: Record<string, React.ReactNode> = {
   orders_view: <FileTextOutlined />,
@@ -48,7 +49,8 @@ export const WorkbenchMobileTabBar: React.FC<WorkbenchMobileTabBarProps> = ({ on
             onClick={(event) => {
               if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
               event.preventDefault();
-              navigate(tab.route);
+              // раздел уже открыт вкладкой — вернуться туда же, с её поиском и фильтрами (?q= на МДФ-доске и т. п.)
+              navigate(workbenchMobileTabTarget(tab.route, useTabStore.getState().tabs));
             }}
           >
             <span className="wb-mtabbar__icon" aria-hidden="true">{TAB_ICONS[tab.resource]}</span>
