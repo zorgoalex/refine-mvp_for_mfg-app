@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 // Source-text guards (Vitest runs in node, no DOM): the «Поступления 1С» tab is gated; its writes are the slice B commands.
 const page = readFileSync(new URL('./PaymentsPage.tsx', import.meta.url), 'utf8');
+const access = readFileSync(new URL('./onecReceiptsAccess.ts', import.meta.url), 'utf8');
 const tab = readFileSync(new URL('./OnecReceiptsTab.tsx', import.meta.url), 'utf8');
 const actions = readFileSync(new URL('./OnecReceiptActions.tsx', import.meta.url), 'utf8');
 const api = readFileSync(new URL('../../api/paymentsOnecApi.ts', import.meta.url), 'utf8');
@@ -10,7 +11,7 @@ const app = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
 
 describe('«Платежи → Поступления 1С» guards', () => {
   it('shows the tab only with the 1C flag and both permissions; otherwise the screen is the plain payments list', () => {
-    expect(page).toMatch(/featureFlags\.useBackendOnec && can\('payments\.onec\.view'\) && can\('payments\.view'\) && can\('orders\.view_financials'\)/);
+    expect(access).toMatch(/featureFlags\.useBackendOnec && can\('payments\.onec\.view'\) && can\('payments\.view'\) && can\('orders\.view_financials'\)/);
     expect(page).toMatch(/if \(!canSeeOnecReceiptsTab\(\)\) return <PaymentList \{\.\.\.props\} \/>;/);
     expect(page).toContain('destroyInactiveTabPane');
   });

@@ -9,6 +9,8 @@ export interface OnecReceiptListQuery {
   dateFrom?: string;
   dateTo?: string;
   search?: string;
+  /** Только строки, относящиеся к этому заказу приложения (по связи заказа 1С). */
+  orderId?: number;
 }
 
 /** Реквизиты платежа ERP отдаются, только если платёж виден пользователю по области `payments.view`. */

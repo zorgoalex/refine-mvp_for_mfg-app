@@ -284,6 +284,8 @@ export class PgOnecReceiptsReadRepository {
       const clauses = ['visible'];
       if (query.dateFrom) clauses.push(`doc_date >= $${params.push(query.dateFrom)}::date`);
       if (query.dateTo) clauses.push(`doc_date <= $${params.push(query.dateTo)}::date`);
+      // Строки одного заказа приложения (вкладка «Финансы» заказа): та же область видимости `visible`.
+      if (query.orderId !== undefined) clauses.push(`erp_order_id = $${params.push(query.orderId)}::bigint`);
       if (query.search) {
         const p = `$${params.push(`%${query.search.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`)}`;
         clauses.push(`(number ILIKE ${p} OR counterparty_name ILIKE ${p} OR onec_order_number ILIKE ${p} OR erp_order_name ILIKE ${p})`);
