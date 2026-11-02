@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-02", title: "Телефон: две колонки и удобный список заказов",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "NewLine на телефоне (вертикально, ~400 px): календарь, МДФ-доска и доски статусов показывают по две колонки в ширину экрана вместо одной.",
+      "«Заказы» в режиме «Список» на телефоне: колонка номера заказа вдвое уже, колонки «Действия» нет — заказ открывается двойным тапом по строке.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-01", title: "Справочники: фильтры и сортировка в заголовках колонок",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

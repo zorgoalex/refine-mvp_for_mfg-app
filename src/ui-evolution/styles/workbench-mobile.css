@@ -229,7 +229,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-/* ---------- доски (МДФ, статусы): одна колонка на экран, листаются свайпом ---------- */
+/* ---------- доски (МДФ, статусы): две колонки на экран (телефон в портрете ~400 CSS px), листаются свайпом ---------- */
 :root[data-ui-variant="workbench"] .evolution-shell--wb-phone .status-board-viewport {
   scroll-snap-type: x mandatory;
   overscroll-behavior-x: contain;
@@ -237,8 +237,8 @@
 }
 
 :root[data-ui-variant="workbench"] .evolution-shell--wb-phone .status-board-columns > .status-board-column {
-  width: calc(100cqw - 24px) !important;
-  min-width: calc(100cqw - 24px) !important;
+  width: calc(50cqw - 16px) !important;
+  min-width: calc(50cqw - 16px) !important;
   max-width: none !important;
   scroll-snap-align: start;
 }
@@ -254,7 +254,7 @@
   width: max-content !important;
   min-width: 100%;
   grid-template-columns: none !important;
-  grid-auto-columns: calc(100cqw - 24px) !important;
+  grid-auto-columns: calc(50cqw - 16px) !important;
   grid-auto-flow: column !important;
 }
 
@@ -710,4 +710,28 @@
 
 :root[data-ui-variant="workbench"] .wb-msec__line--empty {
   color: var(--evo-text-secondary);
+}
+
+/* ---------- календарь: два дня в ширину экрана (раскладка — workbenchPhoneLayout), без прокрутки вбок ---------- */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .calendar-grid {
+  overflow-x: visible;
+  scroll-snap-type: none;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .calendar-row {
+  flex-wrap: nowrap;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .day-column {
+  min-width: 0;
+}
+
+/* ---------- «Заказы», режим «Список»: узкая липкая колонка заказа, без колонки «Действия» ---------- */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .orders-table .orders-col--order-name,
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .orders-table .ant-table-selection-column {
+  padding-inline: 4px !important;
+}
+
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone .orders-table .ant-table-tbody > tr {
+  touch-action: manipulation; /* двойной тап — открыть заказ, а не масштаб страницы */
 }

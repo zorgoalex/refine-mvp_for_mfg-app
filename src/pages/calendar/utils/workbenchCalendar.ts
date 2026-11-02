@@ -59,6 +59,20 @@ export function workbenchLayout(containerWidth: number, scale: number): Workbenc
   return { columnWidth, perRow: Math.min(perRow, 7), weekRows: perRow >= 7 };
 }
 
+/** Узкая колонка дня на телефоне NewLine: уже — одна колонка на экран. */
+export const WORKBENCH_PHONE_MIN_COLUMN_WIDTH = 150;
+
+/**
+ * Телефон NewLine в портрете (~400 CSS px): два дня в ширину экрана, каждый — половина доступной ширины
+ * (padding контейнера и зазор между колонками — как в обычной мобильной раскладке).
+ */
+export function workbenchPhoneLayout(containerWidth: number, containerPadding: number, columnGap: number): { columnWidth: number; columnsPerRow: number } {
+  const available = Math.max(0, containerWidth - containerPadding);
+  const half = Math.floor((available - columnGap) / 2);
+  if (half < WORKBENCH_PHONE_MIN_COLUMN_WIDTH) return { columnWidth: Math.max(WORKBENCH_PHONE_MIN_COLUMN_WIDTH, available), columnsPerRow: 1 };
+  return { columnWidth: half, columnsPerRow: 2 };
+}
+
 const SCALE_STORAGE_PREFIX = 'erp.calendar.cardScale.';
 
 /** The zoom the user chose last time (per user, in this browser). */

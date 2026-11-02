@@ -53,6 +53,7 @@ import {
   groupDaysIntoRows,
   isMobileDevice,
   isNarrowDevice,
+  LAYOUT_CONFIG,
 } from '../utils/calendarLayout';
 import { formatDateKey, formatDateForApi } from '../utils/dateUtils';
 import { broadcastsApi } from '../../../api/broadcastsApi';
@@ -62,7 +63,7 @@ import { useCalendarSendSupport } from '../../configuration/components/broadcast
 import { useCalendarSendTooltip } from '../../configuration/components/broadcasts/calendarSendTarget';
 import { useResponsive } from '../hooks/useResponsive';
 import { useOptionalUiVariant } from '../../../ui-variant/UiVariantProvider';
-import { buildWorkbenchWeeks, readCalendarScale, workbenchLayout, workbenchPeriodSummary, writeCalendarScale } from '../utils/workbenchCalendar';
+import { buildWorkbenchWeeks, readCalendarScale, workbenchLayout, workbenchPeriodSummary, workbenchPhoneLayout, writeCalendarScale } from '../utils/workbenchCalendar';
 import { buildMaterialChipColors, WorkbenchMaterialColorsContext } from '../utils/workbenchMaterialColors';
 import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
 import {
@@ -784,13 +785,17 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   // the saved zoom is a desktop setting; phones always show cards at 100%
   const appliedScale = isMobile ? 1 : cardScale;
   const { columnWidth: baseColumnWidth, columnsPerRow } = useMemo(() => {
+    // NewLine на телефоне: два дня в ширину экрана (прежняя мобильная раскладка — один)
+    if (isWorkbench && isMobile) {
+      return workbenchPhoneLayout(containerWidth, LAYOUT_CONFIG.CONTAINER_PADDING, LAYOUT_CONFIG.COLUMN_GAP);
+    }
     return calculateColumnsPerRow(
       containerWidth,
       isMobileDevice(containerWidth),
       appliedScale,
       isNarrowDevice(containerWidth),
     );
-  }, [containerWidth, appliedScale]);
+  }, [containerWidth, appliedScale, isWorkbench, isMobile]);
   const wbLayout = isWorkbenchGrid ? workbenchLayout(containerWidth, appliedScale) : null;
   const columnWidth = wbLayout ? wbLayout.columnWidth : baseColumnWidth;
 

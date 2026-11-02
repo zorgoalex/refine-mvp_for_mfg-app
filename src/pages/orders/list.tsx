@@ -1576,6 +1576,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     ? flattenOrderGroups(groupOrderRows((tableProps.dataSource ?? []) as any[], listGrouping))
     : null;
   const groupedListColumns = listGroupingActive ? withGroupHeaderColumns(visibleOrderListColumns as any) : null;
+  // телефон, режим «Список»: липкая колонка заказа вдвое уже, «Действия» не показываются — заказ открывает
+  // двойной тап по строке (липкие колонки слева и справа закрывали почти весь экран)
+  const phoneListColumns = isMobile
+    ? (visibleOrderListColumns as any[])
+      .filter((column) => column.key !== 'actions')
+      .map((column) => (column.key === 'order_name' ? { ...column, width: 56 } : column))
+    : null;
+  const lastRowTapRef = React.useRef<{ orderId: unknown; at: number } | null>(null);
   const quickViewEnabled = isWorkbench && !isMobile && !isTablet;
   const importItemLabel = (title: string, hint: string) => (
     <span className="wb-orders-import__item">{title}<span className="wb-orders-import__hint">{hint}</span></span>
@@ -2003,6 +2011,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                     selectedRowKeys: selectedCutOrderIds,
                     onChange: (keys: React.Key[]) => setSelectedCutOrderIds(keys.filter((key) => typeof key === 'number' || /^\d+$/.test(String(key))).map(Number)),
                     preserveSelectedRowKeys: true,
+                    ...(isMobile ? { columnWidth: 32 } : {}),
                     getCheckboxProps: (record: unknown) => (isOrderGroupRow(record) ? { disabled: true, style: { display: 'none' } } : {}),
                   }
                 : undefined
@@ -2021,9 +2030,22 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             }
             onRow={(record: any) => ({
               onClick: (event: React.MouseEvent<HTMLElement>) => {
-                if (!quickViewEnabled || isOrderGroupRow(record)) return;
+                if (isOrderGroupRow(record)) return;
                 const target = event.target as HTMLElement | null;
                 if (target?.closest('button, a, input, label, .ant-checkbox-wrapper, .ant-select, .ant-dropdown-trigger')) return;
+                if (isMobile) {
+                  // двойной тап: dblclick на телефонах ненадёжен — два тапа по той же строке за 350 мс
+                  const now = Date.now();
+                  const last = lastRowTapRef.current;
+                  if (last && last.orderId === record.order_id && now - last.at < 350) {
+                    lastRowTapRef.current = null;
+                    show("orders_view", record.order_id, "push");
+                    return;
+                  }
+                  lastRowTapRef.current = { orderId: record.order_id, at: now };
+                  return;
+                }
+                if (!quickViewEnabled) return;
                 setQuickViewRow(record);
               },
               onDoubleClick: () => {
@@ -2031,7 +2053,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                 show("orders_view", record.order_id, "push");
               },
             })}
-            columns={(groupedListRows ? groupedListColumns : visibleOrderListColumns) as any}
+            columns={(groupedListRows ? groupedListColumns : phoneListColumns ?? visibleOrderListColumns) as any}
           />
           )}
         </OrderListProgressiveSurface>
