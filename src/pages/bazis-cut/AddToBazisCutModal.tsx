@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { notifyDetailStageWarnings } from '../../utils/detailStageWarnings';
 import { Alert, Modal, Radio, Select, Space, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { bazisCutApi, type BazisCutSetListItemDto } from '../../api/bazisCutApi';
@@ -63,6 +64,7 @@ export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, detailIds =
           ? bazisCutApi.create({ orderId, detailIds, hdfDetailIds }, { idempotencyKey })
           : addToExisting(setId, orderId, detailIds, hdfDetailIds, idempotencyKey, owner),
       );
+      notifyDetailStageWarnings(result.warnings);
       message.success(result.addedCount === 0 ? 'Эти детали уже есть в наборе' : `Добавлено деталей: ${result.addedCount ?? selectedCount}`);
       onDone?.(); onClose();
       Modal.confirm({

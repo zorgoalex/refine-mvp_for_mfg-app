@@ -1554,7 +1554,12 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         order.orderId,
         productionStatus.productionStatusId,
       );
-      if ((active && existingEventId !== null) || (!active && existingEventId === null)) {
+      // Letters (migration 282): with live details the stage letter is the details' automatic value or a manual
+      // override of it, so «nothing to do» is decided by the letter, not by the stage mark (the mark stays a journal).
+      const letter = await readStageLetter(tx, order.orderId, productionStatus.productionStatusId);
+      const letterNoop = letter !== null && letter.shown === active && letter.manual === active;
+      const markNoop = (active && existingEventId !== null) || (!active && existingEventId === null);
+      if (letter === null ? markNoop : letterNoop) {
         const response = {
           order: {
             orderId: order.orderId,
@@ -1584,6 +1589,23 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       if (!active && existingEventId !== null) {
         await deleteProductionEvent(tx, existingEventId);
       }
+
+      // The manual letter: an override of the automatic value until that value next changes (its own audit/outbox).
+      // An order without live details shows its stage marks: record the changed letters now (with the user), so the
+      // first detail later compares against them (migration 282, the recorded «before»).
+      if (letter === null) {
+        await tx.query(
+          "SELECT public.record_order_stage_letters_change($1, public.order_stage_letters_snapshot($1), 'manual', $2, $3, $4)",
+          [order.orderId, command.currentUser.id, command.currentUser.username, requestId],
+        );
+      }
+      const override = letter === null ? null : await setStageLetterOverride(tx, {
+        orderId: order.orderId,
+        productionStatusId: productionStatus.productionStatusId,
+        shown: active,
+        currentUser: command.currentUser,
+        requestId,
+      });
 
       const nextVersion = await incrementOrderVersion(tx, order.orderId);
       const auditId = await writeAudit(tx, {
@@ -1627,6 +1649,10 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           accessVia: access.accessVia,
           assignmentSource: access.assignmentSource,
           requestId,
+          roundNo: productionRound,
+          autoPassed: override?.autoPassed ?? null,
+          letterManual: override?.manual ?? false,
+          overrideAction: override === null ? 'none' : active ? 'set_shown' : 'set_hidden',
         },
       });
 
@@ -3861,3 +3887,35 @@ function toDateOnly(value: string | Date | null): string | null {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   return String(value).slice(0, 10);
 }
+
+/** The effective stage letter of an order (migration 282) after a refresh; null — the order has no live details
+ * (its letters are the stage marks). */
+async function readStageLetter(
+  tx: TransactionClient,
+  orderId: number,
+  productionStatusId: number,
+): Promise<{ shown: boolean; manual: boolean } | null> {
+  await tx.query("SELECT public.refresh_order_stage_letters(ARRAY[$1::bigint], 'detail_status')", [orderId]);
+  const hasDetails = (await tx.query<{ v: boolean }>(
+    'SELECT EXISTS (SELECT 1 FROM order_details WHERE order_id = $1 AND NOT COALESCE(delete_flag, false)) AS v',
+    [orderId],
+  )).rows[0]?.v === true;
+  if (!hasDetails) return null;
+  const row = (await tx.query<{ shown: boolean; manual: boolean }>(
+    'SELECT shown, manual FROM public.order_stage_letters_effective($1) WHERE production_status_id = $2',
+    [orderId, productionStatusId],
+  )).rows[0];
+  return { shown: row?.shown === true, manual: row?.manual === true };
+}
+
+async function setStageLetterOverride(
+  tx: TransactionClient,
+  input: { orderId: number; productionStatusId: number; shown: boolean; currentUser: CurrentUser; requestId: string },
+): Promise<{ autoPassed: boolean | null; manual: boolean }> {
+  const row = (await tx.query<{ result: { autoPassed: boolean | null; manual: boolean } }>(
+    'SELECT public.set_order_stage_letter_override($1, $2::smallint, $3, $4, $5, $6) AS result',
+    [input.orderId, input.productionStatusId, input.shown, input.currentUser.id, input.currentUser.username, input.requestId],
+  )).rows[0];
+  return { autoPassed: row?.result?.autoPassed ?? null, manual: row?.result?.manual === true };
+}
+

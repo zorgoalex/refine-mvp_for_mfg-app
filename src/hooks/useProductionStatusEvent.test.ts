@@ -95,3 +95,21 @@ describe('legacy Hasura stage-event writes after production rounds', () => {
     expect(isOverrideSettled(override, { sourceHasEvent: false, dataRound: undefined, dataUpdatedAt: 1_500 })).toBe(true);
   });
 });
+
+describe('stage menu state from the backend letters projection', () => {
+  it('builds one mark per projected code, so the menu checks exactly the shown letters', async () => {
+    const { projectionToStageEvents } = await import('./useProductionStatusEvent');
+    const idToCode = new Map([[1, 'new'], [2, 'drawn'], [3, 'saw'], [4, 'cut']]);
+    const events = projectionToStageEvents(15, ['saw', 'cut', 'unknown'], idToCode, 2);
+    expect(events.map((event) => event.production_status_id)).toEqual([3, 4]);
+    expect(events.every((event) => event.order_id === 15 && event.round_no === 2)).toBe(true);
+    expect(projectionToStageEvents(15, [], idToCode)).toEqual([]);
+  });
+
+  it('does not read Hasura events when a projection is given', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('./useProductionStatusEvent.ts', import.meta.url), 'utf8');
+    expect(source).toContain('enabled: enabled && !!orderId && !useProjection');
+    expect(source).toContain('onCommandAnsweredRef.current?.()');
+  });
+});

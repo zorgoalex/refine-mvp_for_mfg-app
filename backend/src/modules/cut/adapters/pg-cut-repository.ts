@@ -18,6 +18,7 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { cncRouteConflicts, type SawSyncWarning } from '../../../shared/production-status/saw-status-sync';
 import {
   type PieceLabelSnapshot,
   type AutoPieceSpec,
@@ -837,15 +838,20 @@ export class PgCutRepository implements CutRepositoryPort {
       const cutJobId = toNum(inserted.rows[0].cut_job_id);
 
       const readyStatusIds = await this.resolveReadyStatusIds();
+      // The orders of every reserved detail in one sorted lock before the reservations (their order FK takes them one by
+      // one in the request's order otherwise) — the «Базис раскрой» commands lock owners in the same id order (282).
+      await lockReservedOrders(tx, command.dto.detailIds ?? [], command.dto.hdfDetailIds ?? []);
       const reservedOrderIds: number[] = [];
       const reservedSheetTypeIds: number[] = [];
       let insertedCount = 0;
+      const insertedDetailIds: number[] = [];
       for (const detailId of command.dto.detailIds ?? []) {
         const { orderId, sheetMaterialTypeId, inserted } = await this.reserveDetail(tx, cutJobId, detailId, readyStatusIds);
         if (inserted) {
           reservedOrderIds.push(orderId);
           if (sheetMaterialTypeId !== null) reservedSheetTypeIds.push(sheetMaterialTypeId);
           insertedCount += 1;
+          insertedDetailIds.push(detailId);
         }
       }
       let insertedHdfCount = 0;
@@ -866,18 +872,25 @@ export class PgCutRepository implements CutRepositoryPort {
         metadata: { detailCount: insertedCount, hdfDetailCount: insertedHdfCount },
       });
 
-      return loadJob(tx, cutJobId);
+      const warnings = await this.routeConflicts(tx, command.currentUser, command.requestId, cutJobId, insertedDetailIds);
+      return withRouteWarnings(await loadJob(tx, cutJobId), warnings);
     });
   }
 
   addItems(command: AddCutItemsCommand): Promise<CutJobDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
+      // No early order lock (migration 282 review): the job first, as every CNC job command and the MDF board card
+      // (job → the automation's orders). A detail added to a CNC job and a «Базис раскрой» card at once is still seen by
+      // the second command: the cut_job_item insert takes its order FK key-share lock, which waits for the card
+      // command's order lock (and the card command then sees the reservation).
       const job = await loadJobForUpdate(tx, command.cutJobId);
       assertVersion(job, command.version);
       assertMutable(job);
 
       const readyStatusIds = await this.resolveReadyStatusIds();
+      // Job first (above), then the orders of every reserved detail in one sorted lock (see createJob).
+      await lockReservedOrders(tx, command.dto.detailIds ?? [], command.dto.hdfDetailIds ?? []);
       const reservedOrderIds: number[] = [];
       const reservedSheetTypeIds: number[] = [];
       const insertedDetailIds: number[] = [];
@@ -916,7 +929,8 @@ export class PgCutRepository implements CutRepositoryPort {
         metadata: { detailIds: insertedDetailIds, hdfDetailIds: insertedHdfDetailIds },
       });
 
-      return loadJob(tx, command.cutJobId);
+      const warnings = await this.routeConflicts(tx, command.currentUser, command.requestId, command.cutJobId, insertedDetailIds);
+      return withRouteWarnings(await loadJob(tx, command.cutJobId), warnings);
     });
   }
 
@@ -4426,6 +4440,14 @@ export class PgCutRepository implements CutRepositoryPort {
     return 'none';
   }
 
+  private routeConflicts(tx: TransactionClient, user: CurrentUser, requestId: string | undefined, cutJobId: number,
+    detailIds: readonly number[]): Promise<SawSyncWarning[]> {
+    return cncRouteConflicts(tx, detailIds, {
+      actorUserId: numOrNull(user.id), actorUsername: user.username, actorRole: user.role,
+      requestId: requestId ?? `cut-job-${cutJobId}`, idempotencyKey: `cut-job-${cutJobId}`, cutJobId,
+    });
+  }
+
   private async reserveDetail(
     tx: TransactionClient,
     cutJobId: number,
@@ -7870,3 +7892,22 @@ function dateOnly(value: string | Date | null | undefined): string | null {
   const text = String(value).trim();
   return text ? text.slice(0, 10) : null;
 }
+
+function withRouteWarnings(job: CutJobDto, warnings: readonly SawSyncWarning[]): CutJobDto {
+  return warnings.length === 0 ? job : { ...job, warnings: warnings.map((warning) => ({
+    code: 'DETAIL_ALSO_IN_BAZIS' as const, detailId: warning.detailId, orderId: warning.orderId,
+    bazisCutSetIds: warning.bazisCutSetIds })) };
+}
+
+/** The orders of the details / HDF details a CNC command reserves, in one id-ordered KEY SHARE lock (what their FK takes). */
+async function lockReservedOrders(tx: TransactionClient, detailIds: readonly number[], hdfDetailIds: readonly number[]): Promise<void> {
+  if (detailIds.length === 0 && hdfDetailIds.length === 0) return;
+  await tx.query(
+    `SELECT 1 FROM orders o
+      WHERE o.order_id IN (SELECT od.order_id FROM order_details od WHERE od.detail_id = ANY($1::bigint[])
+                           UNION SELECT hd.order_id FROM order_hdf_details hd WHERE hd.order_hdf_detail_id = ANY($2::bigint[]))
+      ORDER BY o.order_id FOR KEY SHARE`,
+    [[...detailIds], [...hdfDetailIds]],
+  );
+}
+

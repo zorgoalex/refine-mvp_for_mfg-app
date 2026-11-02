@@ -71,11 +71,62 @@ const getFallbackLetter = (code: string, name?: string) => {
   return first ? first.toUpperCase() : '?';
 };
 
+const compareStatusRefs = (a: ProductionStatusRef, b: ProductionStatusRef) =>
+  (a.sort_order ?? 0) - (b.sort_order ?? 0) || (a.production_status_id ?? 0) - (b.production_status_id ?? 0);
+
+/**
+ * Codes always placed by their step, whatever a stored order says: «Базис» (saw, migration 282) shares the step of
+ * «Отрисован» and its letter goes right after «О» everywhere (a config saved earlier may hold it at the end).
+ */
+export const STEP_PLACED_STATUS_CODES: readonly string[] = ['saw'];
+/** The code a step-placed code goes right after when it is in the order (whatever the other codes' order). */
+const STEP_PLACED_ANCHORS: Readonly<Record<string, string>> = { saw: 'drawn' };
+
+/**
+ * Active statuses missing from a stored display order (a status added later) and the step-placed codes go to their
+ * place by sort_order — after the last stored code of the same or an earlier step — not to the end.
+ */
+export const insertMissingStatusCodes = (storedOrder: string[], statuses: ProductionStatusRef[]): string[] => {
+  const stored = storedOrder.filter((code) => !STEP_PLACED_STATUS_CODES.includes(code));
+  const sortByCode = new Map(statuses.map((status) => [status.production_status_code, status.sort_order ?? 0]));
+  const result = [...stored];
+  [...statuses]
+    .filter((status) => status.is_active && !stored.includes(status.production_status_code))
+    .sort(compareStatusRefs)
+    .forEach((status) => {
+      const anchor = STEP_PLACED_ANCHORS[status.production_status_code];
+      if (anchor && result.includes(anchor)) {
+        result.splice(result.indexOf(anchor) + 1, 0, status.production_status_code);
+        return;
+      }
+      const sort = status.sort_order ?? 0;
+      let at = 0;
+      result.forEach((code, index) => {
+        const known = sortByCode.get(code);
+        if (known !== undefined && known <= sort) at = index + 1;
+      });
+      result.splice(at, 0, status.production_status_code);
+    });
+  return result;
+};
+
+/** Codes missing from the stored menu layout get their own row right after the row of the code before them. */
+const insertMissingLayoutRows = (rows: string[][], layoutCodes: Set<string>, order: string[]): string[][] => {
+  const result = rows.map((row) => [...row]);
+  order.forEach((code, index) => {
+    if (layoutCodes.has(code)) return;
+    const previous = order.slice(0, index).reverse().find((candidate) => result.some((row) => row.includes(candidate)));
+    const rowIndex = previous === undefined ? -1 : result.findIndex((row) => row.includes(previous));
+    result.splice(rowIndex + 1, 0, [code]);
+  });
+  return result;
+};
+
 export const buildDefaultProductionWorkflowConfig = (
   statuses: ProductionStatusRef[],
   workflowKey: string
 ): ProductionWorkflowConfig => {
-  const sorted = [...(statuses || [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  const sorted = [...(statuses || [])].sort(compareStatusRefs);
   const codes = sorted.map((s) => s.production_status_code).filter(Boolean);
   const initial = codes[0] || 'new';
 
@@ -126,32 +177,18 @@ export const normalizeProductionWorkflowConfig = (
   const storedStatusCodesOrder = Array.isArray(base?.status_codes_order)
     ? base!.status_codes_order.filter((x) => typeof x === 'string')
     : fallback.status_codes_order;
-  const statusCodesOrder = [
-    ...storedStatusCodesOrder,
-    ...statuses
-      .filter(
-        (status) =>
-          status.is_active &&
-          !storedStatusCodesOrder.includes(status.production_status_code),
-      )
-      .map((status) => status.production_status_code),
-  ];
+  const statusCodesOrder = insertMissingStatusCodes(storedStatusCodesOrder, statuses);
   const storedLayoutRowsSource: unknown[] = Array.isArray(base?.layout_rows)
     ? base.layout_rows
     : [];
   const storedLayoutRows = storedLayoutRowsSource
     .filter((row): row is unknown[] => Array.isArray(row))
-    .map((row) => row.filter((code): code is string => typeof code === 'string'))
+    .map((row) => row.filter((code): code is string => typeof code === 'string' && !STEP_PLACED_STATUS_CODES.includes(code)))
     .filter((row) => row.length > 0);
   const layoutCodes = new Set(storedLayoutRows.flat());
   const layoutRows =
     storedLayoutRows.length > 0
-      ? [
-          ...storedLayoutRows,
-          ...statusCodesOrder
-            .filter((code) => !layoutCodes.has(code))
-            .map((code) => [code]),
-        ]
+      ? insertMissingLayoutRows(storedLayoutRows, layoutCodes, statusCodesOrder)
       : statusCodesOrder.map((code) => [code]);
 
   const orderAllowed = Array.isArray(base?.order?.allowed_codes)

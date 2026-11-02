@@ -4,6 +4,8 @@ import type { CalendarError } from '../types/calendar';
 export interface StatusItem {
   id: number;
   name: string;
+  /** production_status_code (production statuses only) */
+  code?: string;
 }
 
 export interface OrderStatusesResult {
@@ -60,6 +62,8 @@ export const useOrderStatuses = (
     resource: 'production_statuses',
     pagination: { pageSize: 100 },
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    // The step order of the workflow («Базис» right after «Отрисован»: same sort_order, later id).
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
     queryOptions: { enabled: loadPaymentAndProduction },
   });
 
@@ -92,6 +96,7 @@ export const useOrderStatuses = (
   const productionStatuses: StatusItem[] = (productionStatusesData?.data || []).map((item: any) => ({
     id: item.production_status_id,
     name: item.production_status_name,
+    code: item.production_status_code,
   }));
 
   return {

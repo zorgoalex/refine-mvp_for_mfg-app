@@ -3036,6 +3036,24 @@ probe_file() {
       "$(q_trg trg_doweling_orders_default_client)" \
       "SELECT position('order_doweling_links' IN pg_get_viewdef('public.orders_view'::regclass, true)) > 0;" \
       ;;
+    # «Базис» for «Новый» details already in «Базис раскрой» cards before 282: one-time backfill, its summary audit row.
+    286_saw_status_backfill*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event='orders.saw_status_backfill' AND entity_type='migration' AND entity_id='286');" ;;
+    284_stage_letters_cut_ready_saw*) probe_all \
+      "$(q_trg trg_bazis_cut_set_details_saw_guard)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM cut_settings WHERE key='eligibility.statuses' AND jsonb_typeof(value->'codes')='array' AND (value->'codes') ? 'drawn' AND NOT (value->'codes') ? 'saw');" ;;
+    282_order_stage_letters*) probe_all \
+      "$(q_tbl order_stage_auto_state)" \
+      "$(q_tbl order_stage_letter_overrides)" \
+      "$(q_tbl order_stage_letters_rev)" \
+      "$(q_tbl order_detail_stage_routes)" \
+      "SELECT EXISTS (SELECT 1 FROM production_statuses WHERE production_status_code='saw');" \
+      "SELECT to_regprocedure('public.refresh_order_stage_letters(bigint[],text)') IS NOT NULL AND to_regprocedure('public.order_stage_letter_codes(bigint[])') IS NOT NULL;" \
+      "$(q_trg trg_od_saw_route)" \
+      "$(q_trg trg_od_zz_stage_letters_update)" \
+      "$(q_trg trg_ohd_zz_stage_letters_update)" \
+      "$(q_trg trg_orders_zz_stage_letters)" \
+      "$(q_trg trg_production_statuses_stage_guard)" ;;
     281_order_rework_round_deadline*) probe_all \
       "$(q_col order_production_rounds planned_completion_date)" \
       "$(q_col order_production_rounds planned_completion_source)" \
@@ -3154,6 +3172,15 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     281_order_rework_round_deadline*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    282_order_stage_letters*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    286_saw_status_backfill*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    284_stage_letters_cut_ready_saw*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     204_procurement_workspace*)

@@ -51,6 +51,7 @@ interface DowelingRow extends QueryResultRow {
 interface EventRow extends QueryResultRow {
   order_id: string | number;
   production_status_id: string | number;
+  manual?: boolean;
 }
 
 interface StatusRow extends QueryResultRow {
@@ -74,7 +75,7 @@ interface DigestDetail {
   materialName: string | null;
 }
 
-interface ProductionStatus {
+export interface ProductionStatus {
   id: number;
   code: string;
   name: string;
@@ -164,14 +165,15 @@ export class DailyDigestOrderReader {
             `,
             [ids],
           ),
-          // Stage letters are the order-level marks, as in the calendar.
+          // Stage letters as in the calendar (migration 282): every live detail passed the stage or a manual override;
+          // orders without live details — their stage marks of the current round.
           tx.query<EventRow>(
             `
-            SELECT pse.order_id, pse.production_status_id
-            FROM production_status_events pse
-            JOIN orders o ON o.order_id = pse.order_id AND o.production_round = pse.round_no
-            WHERE pse.order_id = ANY($1::bigint[])
-            ORDER BY pse.order_id ASC, pse.event_id ASC
+            SELECT x.order_id, letters.production_status_id, letters.visible_manual AS manual
+            FROM unnest($1::bigint[]) AS x(order_id)
+            CROSS JOIN LATERAL order_stage_letters_effective(x.order_id) letters
+            WHERE letters.visible
+            ORDER BY x.order_id ASC, letters.sort_order ASC, letters.production_status_id ASC
             `,
             [ids],
           ),
@@ -239,10 +241,12 @@ export class DailyDigestOrderReader {
       }
     }
     const eventCodesByOrder = new Map<number, string[]>();
+    const manualCodesByOrder = new Map<number, string[]>();
     for (const row of eventResult.rows) {
       const orderId = Number(row.order_id);
       const code = workflow.lookup.idToCode.get(Number(row.production_status_id));
       if (!code) continue;
+      if (row.manual) manualCodesByOrder.set(orderId, [...(manualCodesByOrder.get(orderId) ?? []), code]);
       const codes = eventCodesByOrder.get(orderId) ?? [];
       if (!codes.includes(code)) codes.push(code);
       eventCodesByOrder.set(orderId, codes);
@@ -270,6 +274,7 @@ export class DailyDigestOrderReader {
         // Order stage marks only: detail stages reach them through the
         // database triggers of migration 266.
         passedProductionCodes: eventCodesByOrder.get(orderId) ?? [],
+        manualProductionCodes: manualCodesByOrder.get(orderId) ?? [],
       } satisfies DailyDigestOrderCard;
     });
 
@@ -298,6 +303,38 @@ function mapStatus(row: StatusRow): ProductionStatus {
   };
 }
 
+/** Codes always placed by their step (as in the web app): «Базис» (saw) right after «Отрисован». */
+const STEP_PLACED_STATUS_CODES: readonly string[] = ['saw'];
+const STEP_PLACED_ANCHORS: Readonly<Record<string, string>> = { saw: 'drawn' };
+
+/**
+ * Active statuses missing from the stored display order (a status added later) and the step-placed codes go to their
+ * place by sort_order — after the last stored code of the same or an earlier step — as in the web app.
+ */
+export function insertMissingStatusCodes(storedOrder: string[], statuses: ProductionStatus[]): string[] {
+  const stored = storedOrder.filter((code) => !STEP_PLACED_STATUS_CODES.includes(code));
+  const sortByCode = new Map(statuses.filter((status) => status.code).map((status) => [status.code, status.sortOrder ?? 0]));
+  const result = [...stored];
+  statuses
+    .filter((status) => status.isActive && status.code && !stored.includes(status.code))
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.id - b.id)
+    .forEach((status) => {
+      const anchor = STEP_PLACED_ANCHORS[status.code];
+      if (anchor && result.includes(anchor)) {
+        result.splice(result.indexOf(anchor) + 1, 0, status.code);
+        return;
+      }
+      const sort = status.sortOrder ?? 0;
+      let at = 0;
+      result.forEach((code, index) => {
+        const known = sortByCode.get(code);
+        if (known !== undefined && known <= sort) at = index + 1;
+      });
+      result.splice(at, 0, status.code);
+    });
+  return result;
+}
+
 function resolveWorkflowDisplay(
   statuses: ProductionStatus[],
   setting?: WorkflowSettingRow,
@@ -306,12 +343,7 @@ function resolveWorkflowDisplay(
   const storedOrder = isRecord(raw) && Array.isArray(raw.status_codes_order)
     ? raw.status_codes_order.filter((code): code is string => typeof code === 'string')
     : statuses.map((status) => status.code).filter(Boolean);
-  const displayOrderCodes = [
-    ...storedOrder,
-    ...statuses
-      .filter((status) => status.isActive && status.code && !storedOrder.includes(status.code))
-      .map((status) => status.code),
-  ];
+  const displayOrderCodes = insertMissingStatusCodes(storedOrder, statuses);
 
   const codeToName: Record<string, string> = {};
   const idToCode = new Map<number, string>();

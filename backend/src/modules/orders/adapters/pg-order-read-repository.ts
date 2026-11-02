@@ -140,6 +140,8 @@ interface OrderHeaderRow extends QueryResultRow, ProductionSummaryRow {
   latest_doweling_order_name: string | null;
   latest_design_engineer_id: string | number | null;
   passed_production_status_codes: unknown[] | null;
+  manual_production_status_codes?: unknown[] | null;
+  stage_production_status_codes?: unknown[] | null;
   group_links_json: unknown;
 }
 
@@ -554,6 +556,8 @@ export class PgOrderReadRepository
         latest_doweling.doweling_order_name AS latest_doweling_order_name,
         latest_doweling.design_engineer_id AS latest_design_engineer_id,
         production_projection.passed_production_status_codes,
+        production_projection.manual_production_status_codes,
+        production_projection.stage_production_status_codes,
         group_projection.group_links_json
       FROM page_orders o
       LEFT JOIN users creator ON creator.user_id = o.created_by
@@ -674,22 +678,12 @@ export class PgOrderReadRepository
         ORDER BY odl.order_doweling_link_id DESC
         LIMIT 1
       ) latest_doweling ON true
-      LEFT JOIN LATERAL (
-        SELECT ARRAY_AGG(statuses.production_status_code ORDER BY statuses.sort_order, statuses.production_status_code) AS passed_production_status_codes
-        FROM (
-          SELECT
-            ps.production_status_code,
-            MIN(COALESCE(ps.sort_order, 0)) AS sort_order
-          FROM (
-            SELECT pse.production_status_id
-            FROM production_status_events pse
-            WHERE pse.order_id = o.order_id
-              AND pse.round_no = o.production_round
-          ) actual_statuses
-          INNER JOIN production_statuses ps ON ps.production_status_id = actual_statuses.production_status_id AND ps.is_active = true
-          GROUP BY ps.production_status_code
-        ) statuses
-      ) production_projection ON true
+      -- One set-based evaluation of the stage letters for the whole page (migration 282).
+      LEFT JOIN (
+        SELECT letters.order_id, letters.codes AS passed_production_status_codes,
+          letters.manual_codes AS manual_production_status_codes, letters.stage_codes AS stage_production_status_codes
+        FROM order_stage_letter_codes((SELECT array_agg(po.order_id) FROM page_orders po)) letters
+      ) production_projection ON production_projection.order_id = o.order_id
       LEFT JOIN LATERAL (
         SELECT COALESCE(
           jsonb_agg(
@@ -792,22 +786,11 @@ export class PgOrderReadRepository
         o.production_detail_count, o.production_unassigned_count, o.production_distinct_status_count,
         o.production_status_from_details_enabled,
         o.production_round, o.last_round_no,
-        (
-          SELECT ARRAY_AGG(statuses.production_status_code ORDER BY statuses.sort_order, statuses.production_status_code)
-          FROM (
-            SELECT
-              ps.production_status_code,
-              MIN(COALESCE(ps.sort_order, 0)) AS sort_order
-            FROM (
-              SELECT pse.production_status_id
-              FROM production_status_events pse
-              WHERE pse.order_id = o.order_id
-                AND pse.round_no = o.production_round
-            ) actual_statuses
-            INNER JOIN production_statuses ps ON ps.production_status_id = actual_statuses.production_status_id AND ps.is_active = true
-            GROUP BY ps.production_status_code
-          ) statuses
-        ) AS passed_production_status_codes,
+        -- Stage letters (migration 282): every live detail passed the stage, or a manual override until the automatic
+        -- value next changes; orders without live details keep their stage marks of the current round.
+        stage_letters.codes AS passed_production_status_codes,
+        stage_letters.manual_codes AS manual_production_status_codes,
+        stage_letters.stage_codes AS stage_production_status_codes,
         o.planned_completion_date, o.completion_date, o.issue_date, o.payment_date,
         o.discount, o.surcharge, o.notes, o.manager_id,
         o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,
@@ -823,6 +806,7 @@ export class PgOrderReadRepository
       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
       LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
       LEFT JOIN production_statuses prod_s ON prod_s.production_status_id = o.production_status_id
+      LEFT JOIN LATERAL order_stage_letter_codes(ARRAY[o.order_id]::bigint[]) stage_letters ON true
       ${headerMetadataJoin}
       ${headerSheetJoin}
       ${headerWhere}
@@ -1667,6 +1651,8 @@ function mapOrderDto(
       productionStatusName: row.production_status_name,
       productionStatusFromDetailsEnabled: row.production_status_from_details_enabled,
       passedProductionStatusCodes: toStringArray(row.passed_production_status_codes),
+    manualProductionStatusCodes: toStringArray(row.manual_production_status_codes),
+    stageProductionStatusCodes: toStringArray(row.stage_production_status_codes),
       productionRound: toNullableNumber(row.production_round) ?? 1,
       lastRoundNo: toNullableNumber(row.last_round_no) ?? 1,
       plannedCompletionDate: toDateOnly(row.planned_completion_date),
@@ -1786,6 +1772,8 @@ function mapListItem(row: OrderHeaderRow, includeDeleted: boolean = false): Orde
     dowelingOrderName: row.latest_doweling_order_name,
     designEngineerId: toNullableNumber(row.latest_design_engineer_id),
     passedProductionStatusCodes: toStringArray(row.passed_production_status_codes),
+    manualProductionStatusCodes: toStringArray(row.manual_production_status_codes),
+    stageProductionStatusCodes: toStringArray(row.stage_production_status_codes),
     primaryGroup: groups.find((group) => group.isPrimary) ?? null,
     groups,
     createdBy: toNullableNumber(row.created_by),

@@ -27,9 +27,9 @@ describe('tablet orders view integration', () => {
     expect(cards).toContain('buildOrderCardModel');
     expect(cards).toContain("statusTag('order'");
     expect(cards).toContain("statusTag('payment'");
-    expect(cards).toContain('resolveOrderStageCodes(row.passed_production_status_codes, passedCodesByOrderId?.[Number(row.order_id)])');
+    expect(cards).toContain('resolveOrderStageCodes(row.passed_production_status_codes)');
     expect(cards).toContain('codeToLetter={productionWorkflowDisplay?.codeToLetter}');
-    expect(list).toContain('passedCodesByOrderId={passedCodesByOrderId}');
+    expect(list).not.toContain('passedCodesByOrderId');
     expect(cards).not.toContain('OrderProductionSummary');
     expect(cards).not.toContain("statusTag('production'");
     expect(list).toContain('statusColors={orderCardStatusColors}');

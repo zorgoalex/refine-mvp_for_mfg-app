@@ -2,7 +2,7 @@
 // Compact minimalist design - 3 rows with minimal padding
 // Right-click to open context menu for status changes
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Tag, Space, Typography } from 'antd';
 import { PhoneOutlined, StarOutlined } from '@ant-design/icons';
 import { useList, useOne } from '../../../../query/orderLifecycleQueries';
@@ -18,6 +18,7 @@ import { useOrderAppSettings } from '../../../../hooks/useOrderAppSettings';
 import { useProductionStatusEvent } from '../../../../hooks/useProductionStatusEvent';
 import { buildProductionStagesDisplayConfig } from '../../../../utils/productionWorkflow';
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../types/productionWorkflow';
+import { ordersApi } from '../../../../api/ordersApi';
 import { OrderHeaderContextMenu } from '../OrderHeaderContextMenu';
 import { RowSeparator } from './RowSeparator';
 import { withRoundSuffix } from '../../../../api/orderReworkApi';
@@ -30,6 +31,7 @@ import {
   buildStageMarksSignature,
   buildActiveProductionStatusCodeMap,
   resolveActiveProductionEventCodes,
+  resolveOrderStageCodes,
 } from '../../currentProductionStatus';
 import { businessOrderDetails } from '../../../../utils/orderDetailRows';
 import { useOptionalUiVariant } from '../../../../ui-variant/UiVariantProvider';
@@ -59,24 +61,74 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({
   const isWorkbench = useOptionalUiVariant()?.variant === 'workbench';
   const { header, details, hdfDetails, payments, isPaymentStatusManual, dowelingLinks, catalogLines } = useOrderFormStore();
   const { getSetting } = useOrderAppSettings();
+  // Load all production statuses for mapping
+  const { data: allProductionStatusesData } = useList({
+    resource: 'production_statuses',
+    pagination: { pageSize: 100 },
+    // IMPORTANT: explicit is_active filter disables dataProvider auto-filter, so we can map inactive statuses too
+    filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
+    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
+  });
+
+  // Create maps for production status lookup
+  const productionStatusIdToCode = useMemo(() => {
+    return buildActiveProductionStatusCodeMap(allProductionStatusesData?.data || []);
+  }, [allProductionStatusesData]);
+
+  // Stage letters are the backend projection of the order. A local copy is
+  // re-read after stage commands and detail stage changes; before that the
+  // order loaded into the form carries them.
+  const [liveLetters, setLiveLetters] = useState<{ orderId: number; passed: string[]; manual: string[]; stage: string[]; loadedAt: number } | null>(null);
+  // Only the answer of the latest re-read counts: an earlier read answering late must not bring back older letters.
+  const lettersRequestSeq = useRef(0);
+  const refreshLetters = useCallback(() => {
+    const orderId = header.order_id;
+    if (!orderId) return;
+    const seq = ++lettersRequestSeq.current;
+    void ordersApi.getById(orderId).then((order) => {
+      if (seq !== lettersRequestSeq.current) return;
+      setLiveLetters({
+        orderId,
+        passed: order.header.passedProductionStatusCodes ?? [],
+        manual: order.header.manualProductionStatusCodes ?? [],
+        stage: order.header.stageProductionStatusCodes ?? order.header.passedProductionStatusCodes ?? [],
+        loadedAt: Date.now(),
+      });
+    }).catch((error) => {
+      console.warn('[OrderHeaderSummary] Failed to re-read stage letters:', error);
+    });
+  }, [header.order_id]);
+  const headerLetters = liveLetters && liveLetters.orderId === header.order_id ? liveLetters : null;
+  const projectedPassedCodes = resolveOrderStageCodes(
+    headerLetters ? headerLetters.passed : header.passed_production_status_codes,
+  );
+  const manualProductionCodes = resolveOrderStageCodes(
+    headerLetters ? headerLetters.manual : header.manual_production_status_codes,
+  );
+  // The stage menu checks the real letters (a finished order shows only its last letter, but every passed stage is set).
+  const menuStageCodes = resolveOrderStageCodes(
+    headerLetters ? headerLetters.stage : (header.stage_production_status_codes ?? header.passed_production_status_codes),
+  );
   const productionStatusEvents = useProductionStatusEvent({
     orderId: header.order_id,
     productionRound: (header as { production_round?: number | null }).production_round ?? null,
+    projectedCodes: menuStageCodes,
+    statusIdToCode: productionStatusIdToCode,
+    onCommandAnswered: refreshLetters,
+    projectionLoadedAt: headerLetters?.loadedAt,
   });
-  // Detail and HDF stages set and clear the order marks in the database: a saved
-  // order (new version) or changed stages re-read them.
+  // Detail and HDF stages change the letters on the backend: a saved order
+  // (new version) or changed stages re-read them.
   const stageMarksSignature = useMemo(
     () => `${header.version ?? ''}|${buildStageMarksSignature(details, hdfDetails)}`,
     [details, hdfDetails, header.version],
   );
   const stageMarksSignatureRef = useRef(stageMarksSignature);
-  const { refetch: refetchStageMarks } = productionStatusEvents;
   useEffect(() => {
     if (stageMarksSignatureRef.current === stageMarksSignature) return;
     stageMarksSignatureRef.current = stageMarksSignature;
-    // refetch ignores `enabled`: never load unfiltered events for a new order.
-    if (header.order_id) refetchStageMarks();
-  }, [header.order_id, refetchStageMarks, stageMarksSignature]);
+    refreshLetters();
+  }, [refreshLetters, stageMarksSignature]);
   const businessDetails = useMemo(
     () => businessOrderDetails(details),
     [details],
@@ -195,20 +247,6 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({
     },
   });
 
-  // Load all production statuses for mapping
-  const { data: allProductionStatusesData } = useList({
-    resource: 'production_statuses',
-    pagination: { pageSize: 100 },
-    // IMPORTANT: explicit is_active filter disables dataProvider auto-filter, so we can map inactive statuses too
-    filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
-    sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
-  });
-
-  // Create maps for production status lookup
-  const productionStatusIdToCode = useMemo(() => {
-    return buildActiveProductionStatusCodeMap(allProductionStatusesData?.data || []);
-  }, [allProductionStatusesData]);
-
   const statusesForWorkflow: ProductionStatusRef[] = useMemo(() => {
     return (allProductionStatusesData?.data || []).map((s: any) => ({
       production_status_id: s.production_status_id,
@@ -231,15 +269,17 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({
     }).display;
   }, [workflow, statusesForWorkflow]);
 
-  // The same active-event state drives both these letters and menu marks.
-  // Never infer letters from aggregate order/detail names: that can display a
-  // stage which the context menu correctly considers inactive.
+  // The same state (backend projection + optimistic command overrides) drives
+  // both these letters and the menu marks — except a finished order, whose
+  // projection shows only its last letter (the menu still checks every stage).
+  const finishedOrderLetters = projectedPassedCodes.length < menuStageCodes.length;
   const passedProductionCodes = useMemo(() => {
+    if (finishedOrderLetters) return projectedPassedCodes;
     return resolveActiveProductionEventCodes(
       productionStatusEvents.events,
       productionStatusIdToCode,
     );
-  }, [productionStatusEvents.events, productionStatusIdToCode]);
+  }, [finishedOrderLetters, projectedPassedCodes, productionStatusEvents.events, productionStatusIdToCode]);
 
   // Load materials list
   const { data: materialsData } = useList({
@@ -616,6 +656,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({
                 {passedProductionCodes.length > 0 ? (
                   <ProductionStagesDisplay
                     passedCodes={passedProductionCodes}
+                    manualCodes={manualProductionCodes}
                     displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
                     codeToLetter={productionWorkflowDisplay?.codeToLetter}
                     codeToName={productionWorkflowDisplay?.codeToName}
@@ -682,6 +723,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({
               {passedProductionCodes.length > 0 ? (
                 <ProductionStagesDisplay
                   passedCodes={passedProductionCodes}
+                  manualCodes={manualProductionCodes}
                   displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
                   codeToLetter={productionWorkflowDisplay?.codeToLetter}
                   codeToName={productionWorkflowDisplay?.codeToName}
@@ -856,6 +898,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({
               <span style={{ color: 'var(--app-border)' }}>|</span>
               <ProductionStagesDisplay
                 passedCodes={passedProductionCodes}
+                manualCodes={manualProductionCodes}
                 displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
                 codeToLetter={productionWorkflowDisplay?.codeToLetter}
                 codeToName={productionWorkflowDisplay?.codeToName}

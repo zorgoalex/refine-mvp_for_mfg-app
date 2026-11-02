@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { ProductionStatusRef } from '../../../types/productionWorkflow';
 import type { CalendarOrder } from '../types/calendar';
 import {
   buildProductionStatusCodeLookup,
+  resolveCalendarManualProductionStatusCodes,
   resolveCalendarProductionStatusCodes,
 } from './productionStatusCodes';
 
@@ -30,20 +33,29 @@ describe('calendar production status resolver', () => {
     expect(buildProductionStatusCodeLookup(statuses).idToCode.get(2)).toBe('cut');
   });
 
-  it('shows only the loaded order marks, not the order or detail stage', () => {
+  it('shows the backend projection, not the order or detail stage', () => {
     expect(resolveCalendarProductionStatusCodes({
-      order: order({ passed_production_status_codes: ['drawn', 'cut'] }),
-      eventCodes: ['drawn'],
-    })).toEqual(['drawn']);
+      order: order({ passed_production_status_codes: ['drawn', ' drawn ', 'cut'] }),
+    })).toEqual(['drawn', 'cut']);
   });
 
-  it('shows nothing when the loaded events have no marks for the order', () => {
-    expect(resolveCalendarProductionStatusCodes({ order: order(), eventCodes: [] })).toEqual([]);
+  it('shows nothing when the projection is empty or absent', () => {
+    expect(resolveCalendarProductionStatusCodes({ order: order() })).toEqual([]);
+    expect(resolveCalendarProductionStatusCodes({ order: order({ passed_production_status_codes: [] }) })).toEqual([]);
   });
 
-  it('falls back to the backend marks before events load', () => {
-    expect(resolveCalendarProductionStatusCodes({
-      order: order({ passed_production_status_codes: ['cut', ' cut '] }),
+  it('exposes the manual subset separately', () => {
+    expect(resolveCalendarManualProductionStatusCodes({
+      order: order({ passed_production_status_codes: ['drawn', 'cut'], manual_production_status_codes: ['cut'] }),
     })).toEqual(['cut']);
+    expect(resolveCalendarManualProductionStatusCodes({ order: order() })).toEqual([]);
+  });
+});
+
+describe('calendar letters never read Hasura events', () => {
+  it('useCalendarData has no production_status_events list', () => {
+    const source = readFileSync(resolve(__dirname, '../hooks/useCalendarData.ts'), 'utf8');
+    expect(source).not.toContain('production_status_events');
+    expect(source).toContain('manualProductionCodes');
   });
 });

@@ -824,6 +824,9 @@ export interface OrderHeaderDto {
   productionStatusName?: string | null;
   productionStatusFromDetailsEnabled?: boolean | null;
   passedProductionStatusCodes?: string[];
+  manualProductionStatusCodes?: string[];
+  /** Real stage letters (the stage menu); passedProductionStatusCodes are the shown ones. */
+  stageProductionStatusCodes?: string[];
   /** «Переделка»: current production round (1 = original run) and the highest used. */
   productionRound?: number;
   lastRoundNo?: number;
@@ -1029,6 +1032,8 @@ export interface OrderTotalsDto {
 }
 
 export interface OrderListItemDto {
+  /** «Переделка»: the order's current production round (backend list projection). */
+  productionRound?: number;
   productionDetailCount?: number;
   productionUnassignedCount?: number;
   productionDistinctStatusCount?: number;
@@ -1085,6 +1090,9 @@ export interface OrderListItemDto {
   dowelingOrderName?: string | null;
   designEngineerId?: number | null;
   passedProductionStatusCodes?: string[];
+  manualProductionStatusCodes?: string[];
+  /** Real stage letters (the stage menu); passedProductionStatusCodes are the shown ones. */
+  stageProductionStatusCodes?: string[];
   primaryGroup?: EntityGroupLink | null;
   groups?: EntityGroupLink[];
   createdBy?: number | null;

@@ -122,6 +122,7 @@ const DayColumnBrief: React.FC<DayColumnBriefProps> = ({ date, orders, columnWid
                     {' - '}
                     <ProductionStagesDisplay
                       passedCodes={order.passedProductionCodes}
+                      manualCodes={order.manualProductionCodes}
                       displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
                       codeToLetter={productionWorkflowDisplay?.codeToLetter}
                       codeToName={productionWorkflowDisplay?.codeToName}

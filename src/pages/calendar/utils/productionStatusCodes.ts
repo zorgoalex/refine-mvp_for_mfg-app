@@ -17,13 +17,16 @@ export const buildProductionStatusCodeLookup = (
   return { idToCode };
 };
 
-// Card letters are the order stage marks, the same set the stage menu checks.
-// Detail stages reach the marks through the database (migration 266).
-// eventCodes undefined = events not loaded yet; then the backend projection.
+// Card letters are the backend projection (passed_production_status_codes);
+// manual ones (set by hand) are shown in another colour.
 export const resolveCalendarProductionStatusCodes = ({
   order,
-  eventCodes,
 }: {
   order: CalendarOrder;
-  eventCodes?: string[];
-}): string[] => resolveOrderStageCodes(order.passed_production_status_codes, eventCodes);
+}): string[] => resolveOrderStageCodes(order.passed_production_status_codes);
+
+export const resolveCalendarManualProductionStatusCodes = ({
+  order,
+}: {
+  order: CalendarOrder;
+}): string[] => resolveOrderStageCodes(order.manual_production_status_codes);
