@@ -2034,10 +2034,10 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                 const target = event.target as HTMLElement | null;
                 if (target?.closest('button, a, input, label, .ant-checkbox-wrapper, .ant-select, .ant-dropdown-trigger')) return;
                 if (isMobile) {
-                  // двойной тап: dblclick на телефонах ненадёжен — два тапа по той же строке за 350 мс
+                  // двойной тап: dblclick на телефонах ненадёжен — два тапа по той же строке за 500 мс (как у системного двойного тапа)
                   const now = Date.now();
                   const last = lastRowTapRef.current;
-                  if (last && last.orderId === record.order_id && now - last.at < 350) {
+                  if (last && last.orderId === record.order_id && now - last.at < 500) {
                     lastRowTapRef.current = null;
                     show("orders_view", record.order_id, "push");
                     return;

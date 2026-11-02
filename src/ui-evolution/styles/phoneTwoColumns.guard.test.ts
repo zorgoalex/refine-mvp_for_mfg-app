@@ -24,7 +24,7 @@ describe('NewLine phone (~400 CSS px portrait): two columns, a narrow orders lis
     const list = readFileSync('src/pages/orders/list.tsx', 'utf8');
     expect(list).toContain(".filter((column) => column.key !== 'actions')");
     expect(list).toContain("(column.key === 'order_name' ? { ...column, width: 56 } : column)");
-    expect(list).toContain('if (last && last.orderId === record.order_id && now - last.at < 350) {');
+    expect(list).toContain('if (last && last.orderId === record.order_id && now - last.at < 500) {');
     expect(list).toContain('columns={(groupedListRows ? groupedListColumns : phoneListColumns ?? visibleOrderListColumns) as any}');
   });
 });
