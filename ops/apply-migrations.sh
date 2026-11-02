@@ -2127,7 +2127,7 @@ probe_file() {
                      "$(q_col inbound_signal_occurrences execution_guard)" \
                      "$(q_col inbound_signal_occurrences lock_token)" \
                      "$(q_con_on inbound_signal_occurrences inbound_signal_occurrences_state_check)" \
-                     "$(q_con_on inbound_signal_occurrences inbound_signal_occurrences_message_id_signal_code_key)" \
+                     "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.inbound_signal_occurrences'::regclass AND conname IN ('inbound_signal_occurrences_message_id_signal_code_key','inbound_signal_occurrences_message_signal_segment_key'));" \
                      "$(q_idx inbound_messages_expiry_idx)" \
                      "$(q_idx inbound_signals_queue_idx)" \
                      "SELECT count(*)=4 FROM permissions_catalog WHERE permission_name IN ('message_signals.view','message_signals.resolve','message_signals.technical','message_signals.manage_config');" ;;
@@ -3185,6 +3185,14 @@ probe_file() {
       "SELECT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid='public.mdf_republish_jobs'::regclass AND t.tgname='mdf_republish_job_immutable' AND NOT t.tgisinternal);" \
       ;;
     # «Присадка» → «Базис-проект»: клиент карточки, ссылка XML-проекта на карточку, инвариант клиента, orders_view.
+    # Incoming signals: several occurrences of one signal per message (one per order); 173's probe accepts both keys.
+    289_inbound_signal_segments*) probe_all \
+      "$(q_col inbound_signal_occurrences segment_index)" \
+      "$(q_col inbound_signal_occurrences segment_text)" \
+      "$(q_col inbound_signal_occurrences group_references)" \
+      "$(q_col inbound_signal_occurrences visible_text)" \
+      "$(q_con_on inbound_signal_occurrences inbound_signal_occurrences_message_signal_segment_key)" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.inbound_signal_occurrences'::regclass AND conname='inbound_signal_occurrences_message_id_signal_code_key');" ;;
     # Client merge journal written only by the card-aware merge/undo (rollback of 279 refused, not desynced).
     288_client_merge_cards_guard*) probe_all \
       "SELECT to_regprocedure('public.trg_client_merges_cards_guard()') IS NOT NULL;" \
@@ -3454,6 +3462,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     282_order_stage_letters*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    289_inbound_signal_segments*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     288_client_merge_cards_guard*)

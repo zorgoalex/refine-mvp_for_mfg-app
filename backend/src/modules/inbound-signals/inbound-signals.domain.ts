@@ -108,3 +108,207 @@ export function extractReferences(text: string, resolver: Resolver): string[] {
   }
   return [...values];
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Several signals in one message (plan spec_erp/plans/whatsapp/2026-11-02-inbound-signals-multi-order-plan.md).
+// The message decides which rules fired, exactly as before (matchRules on the whole text). A message is split only when
+// it has several lines or a line with several numbers, no fired rule is «exact» (whole message), and some line carries a
+// keyword on its own; otherwise the old single-occurrence path runs unchanged.
+
+type Rule = SignalConfiguration['rules'][number];
+export interface GroupReference { resolverCode: string; reference: string }
+export interface SignalGroup {
+  /** Position of the group in the message (0-based). */
+  groupIndex: number;
+  signalCode: string;
+  ruleCodes: string[];
+  /** The lines of the group as written (keyword line and its number lines). */
+  text: string;
+  references: GroupReference[];
+}
+export type SignalPlan = { kind: 'legacy' } | { kind: 'split'; groups: SignalGroup[]; tooMany: boolean };
+
+/** Most references of one message; more → one occurrence for review. */
+export const MAX_MESSAGE_REFERENCES = 20;
+
+function valuePattern(resolver: Resolver): string {
+  return resolver.format === 'digits' ? '\\d{1,18}' : '[\\p{L}\\p{N}][\\p{L}\\p{N}_.\\/-]{0,79}';
+}
+/** After a value: no letter/digit/code char; for digits a dot is allowed only as the end of a sentence. */
+function valueEnd(resolver: Resolver): string {
+  return resolver.format === 'digits' ? '(?![\\p{L}\\p{N}_/-])(?!\\.[\\p{L}\\p{N}])' : '(?![\\p{L}\\p{N}_/.-])';
+}
+function listSeparator(resolver: Resolver): string {
+  // «и» / «+» only between digits: in codes they could be a part of the text.
+  return resolver.format === 'digits' ? '\\s*(?:,|;|\\+|\\sи\\s)\\s*' : '\\s*[,;]\\s*';
+}
+
+/**
+ * References after a configured prefix, including a list after one prefix («Заказ 3046, 3051», «заказ 3053 и 3062»).
+ * The single-reference `extractReferences` above stays the legacy path's extractor.
+ */
+export function extractReferenceList(text: string, resolver: Resolver): string[] {
+  const input = normalize(text);
+  const value = valuePattern(resolver), sep = listSeparator(resolver);
+  const values: string[] = [];
+  for (const prefix of resolver.prefixes) {
+    const re = new RegExp(`(?:^|[^\\p{L}\\p{N}])${escapeRegex(normalize(prefix))}\\s*[:№#-]?\\s*(${value}(?:${sep}${value})*)${valueEnd(resolver)}`, 'gu');
+    for (const match of input.matchAll(re)) {
+      for (const one of match[1].split(new RegExp(sep, 'u'))) if (one && !values.includes(one)) values.push(one);
+    }
+  }
+  return values;
+}
+
+/** A line made of numbers only («3043», «#3065, 3066»): only for digit resolvers. */
+const BARE_LINE = /^#?\s*\d{1,18}(?:\s*[,;]\s*#?\s*\d{1,18})*\s*[.,;!]?$/u;
+function bareNumbers(line: string): string[] {
+  const input = normalize(line);
+  return BARE_LINE.test(input) ? [...input.matchAll(/\d{1,18}/gu)].map(m => m[0]) : [];
+}
+/**
+ * A line made of a prefix and numbers only («Заказ 3046», «заказ 3046, 3051.»): its references, [] for any other line.
+ * Classification and extraction use this one pattern, so an accepted line never loses a number.
+ */
+function prefixedLineReferences(line: string, resolver: Resolver): string[] {
+  const input = normalize(line);
+  const value = valuePattern(resolver), sep = listSeparator(resolver);
+  for (const prefix of resolver.prefixes) {
+    const match = new RegExp(`^${escapeRegex(normalize(prefix))}\\s*[:№#-]?\\s*(${value}(?:${sep}${value})*?)\\s*[.,;!]?$`, 'u').exec(input);
+    if (match) return [...new Set(match[1].split(new RegExp(sep, 'u')).filter(Boolean))];
+  }
+  return [];
+}
+function isPrefixedReferenceLine(line: string, resolver: Resolver): boolean {
+  return prefixedLineReferences(line, resolver).length > 0;
+}
+/** The keyword line names the prefix without a number of its own («Заказчик забрал заказ»). */
+function hasBarePrefix(line: string, resolver: Resolver): boolean {
+  const input = normalize(line);
+  // The prefix as a word, not followed by a number («Заказ готов», «Заказчик забрал заказ»).
+  return resolver.prefixes.some(prefix => new RegExp(
+    `(?:^|[^\\p{L}\\p{N}])${escapeRegex(normalize(prefix))}(?![\\p{L}\\p{N}])(?![\\s:№#-]*\\d)`, 'u').test(input));
+}
+
+function lineRules(line: string, rules: Rule[]): Rule[] {
+  return rules.filter(r => !r.exclusions.some(p => matches(line, p, 'phrase')) && r.keywords.some(k => matches(line, k, r.matchMode)));
+}
+
+export function planSignalGroups(text: string, source: string, config: SignalConfiguration): SignalPlan {
+  const rules = matchRules(text, source, config);
+  if (!rules.length || rules.some(r => r.matchMode === 'exact')) return { kind: 'legacy' };
+  const resolverOf = (rule: Rule) => config.resolvers.find(r => r.code === rule.resolverCode)!;
+  const resolvers = [...new Map(rules.map(r => [r.resolverCode, resolverOf(r)])).values()];
+  const lines = text.split(/\r?\n/u).map(l => l.trim()).filter(Boolean);
+  type Kind = { kind: 'K'; rules: Rule[] } | { kind: 'REF' } | { kind: 'OTHER' };
+  const kinds: Kind[] = lines.map(line => {
+    const fired = lineRules(line, rules);
+    if (fired.length) return { kind: 'K', rules: fired };
+    if (bareNumbers(line).length && resolvers.some(r => r.format === 'digits')) return { kind: 'REF' };
+    if (resolvers.some(r => isPrefixedReferenceLine(line, r))) return { kind: 'REF' };
+    return { kind: 'OTHER' };
+  });
+  if (!kinds.some(k => k.kind === 'K')) return { kind: 'legacy' };  // keyword only across lines
+  if (lines.length === 1) {
+    const many = rules.some(rule => extractReferenceList(lines[0], resolverOf(rule)).length > 1);
+    if (!many) return { kind: 'legacy' };  // one line, one number — exactly as before
+  }
+
+  // Grouping: a keyword line opens a group; number-only lines right after it join it; number-only lines before a
+  // keyword line without numbers of its own (a footer like «Готовы») join that line; any other line closes the group.
+  const raw: Array<{ key: number; refs: number[]; rules: Rule[] }> = [];
+  let current: (typeof raw)[number] | null = null;
+  let pending: number[] = [];
+  lines.forEach((line, i) => {
+    const kind = kinds[i];
+    if (kind.kind === 'K') {
+      const ownNumbers = kind.rules.some(rule => extractReferenceList(line, resolverOf(rule)).length > 0);
+      current = { key: i, refs: ownNumbers ? [] : pending, rules: kind.rules };
+      raw.push(current);
+      pending = [];
+    } else if (kind.kind === 'REF') {
+      if (current) current.refs.push(i); else pending.push(i);
+    } else {
+      current = null;
+      pending = [];
+    }
+  });
+
+  const groups: SignalGroup[] = [];
+  let total = 0;
+  raw.forEach((group, groupIndex) => {
+    const keyLine = lines[group.key];
+    const memberLines = [...group.refs.filter(i => i < group.key), group.key, ...group.refs.filter(i => i > group.key)];
+    for (const signalCode of [...new Set(group.rules.map(r => r.signalCode))]) {
+      const signalRules = group.rules.filter(r => r.signalCode === signalCode);
+      const references: GroupReference[] = [];
+      const used = new Set<number>([group.key]);
+      const add = (line: number, resolverCode: string, reference: string) => {
+        used.add(line);
+        if (!references.some(r => r.resolverCode === resolverCode && r.reference === reference)) references.push({ resolverCode, reference });
+      };
+      for (const rule of signalRules) {
+        const resolver = resolverOf(rule);
+        const prefixed = group.refs.some(i => isPrefixedReferenceLine(lines[i], resolver));
+        const bareAllowed = resolver.format === 'digits' && (hasBarePrefix(keyLine, resolver) || prefixed);
+        for (const i of memberLines) {
+          if (i === group.key) {
+            for (const reference of extractReferenceList(lines[i], resolver)) add(i, resolver.code, reference);
+            continue;
+          }
+          for (const reference of prefixedLineReferences(lines[i], resolver)) add(i, resolver.code, reference);
+          if (bareAllowed) for (const reference of bareNumbers(lines[i])) add(i, resolver.code, reference);
+        }
+      }
+      total += references.length;
+      // A number line the group did not accept (bare numbers without a prefix) is not part of its fragment.
+      const text = memberLines.filter(i => used.has(i)).map(i => lines[i]).join('\n');
+      groups.push({ groupIndex, signalCode, ruleCodes: signalRules.map(r => r.code), text, references });
+    }
+  });
+  return { kind: 'split', groups, tooMany: total > MAX_MESSAGE_REFERENCES };
+}
+
+/**
+ * The fragment a user without message_signals.resolve may see: the references of the group that led to `orderId`
+ * stay, every other reference of the group becomes «…».
+ */
+export function projectVisibleText(segmentText: string, references: Array<GroupReference & { orderId: string | null }>,
+  orderId: string | null): string {
+  // Matching runs on the normalized text (as extraction does: NFKC, «№», lower case). The text is normalized per
+  // grapheme (a letter with its combining marks — «И\u0306» → «й»), and every normalized character remembers the
+  // grapheme it came from, so «３０６２» or a decomposed letter is masked as well as its plain form. If the per-grapheme
+  // form differs from the whole-text form extraction uses (context-dependent case or composition), nothing of the
+  // fragment can be trusted to match: the whole fragment is hidden (code review r3 — symbols like «Ⓑ» fold to letters).
+  const chars = [...new Intl.Segmenter('ru', { granularity: 'grapheme' }).segment(segmentText)].map(g => g.segment);
+  const fold = (value: string) => value.replace(/№/gu, '#').normalize('NFKC').toLocaleLowerCase('ru');
+  let normalized = '';
+  const origin: number[] = [];
+  chars.forEach((ch, i) => {
+    const piece = fold(ch);
+    normalized += piece;
+    for (let k = 0; k < piece.length; k++) origin.push(i);
+  });
+  if (normalized !== fold(segmentText)) return '…';
+  const keep = new Set(references.filter(r => orderId !== null && r.orderId === orderId).map(r => r.reference));
+  const kept: Array<[number, number]> = [], masked: Array<[number, number]> = [];
+  const find = (reference: string, into: Array<[number, number]>) => {
+    const re = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegex(reference)}(?![\\p{L}\\p{N}])`, 'gu');
+    for (const m of normalized.matchAll(re)) into.push([m.index!, m.index! + m[0].length]);
+  };
+  for (const reference of keep) find(reference, kept);
+  for (const { reference } of references) if (!keep.has(reference)) find(reference, masked);
+  // Any other number of the fragment is hidden too: a number the group did not accept may still name another order.
+  for (const m of normalized.matchAll(/\p{N}+/gu)) {
+    const [start, end] = [m.index!, m.index! + m[0].length];
+    if (!kept.some(([a, b]) => start >= a && end <= b)) masked.push([start, end]);
+  }
+  const hide = new Array<boolean>(chars.length).fill(false);
+  for (const [start, end] of masked) {
+    if (kept.some(([a, b]) => start >= a && end <= b)) continue;
+    for (let k = start; k < end; k++) hide[origin[k]] = true;
+  }
+  let out = '';
+  chars.forEach((ch, i) => { if (!hide[i]) out += ch; else if (!hide[i - 1]) out += '…'; });
+  return out;
+}

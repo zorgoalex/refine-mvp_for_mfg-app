@@ -61,7 +61,8 @@ export function InboundSignalsList() {
   const columns = [
     { title: 'Получено', dataIndex: 'received_at', width: 165, render: (v: string) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{date(v)}</span> },
     { title: 'Источник', dataIndex: 'source_name', width: 160, render: (v: string, r: SignalRow) => <><div>{v}</div><Typography.Text type="secondary">{r.channel === 'whatsapp' ? 'WhatsApp' : r.channel}</Typography.Text></> },
-    { title: 'Сообщение', dataIndex: 'message_text', render: (v: string) => <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxWidth: 500 }}>{v}</div> },
+    { title: 'Сообщение', dataIndex: 'message_text', render: (v: string, r: SignalRow) => <><div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxWidth: 500 }}>{v}</div>
+      {r.segment_text && r.segment_text !== v && <Typography.Text type="secondary" style={{ whiteSpace: 'pre-wrap' }}>Этот сигнал: {r.segment_text}</Typography.Text>}</> },
     { title: 'Сигнал', dataIndex: 'signal_name', width: 170, render: (v: string | null) => v ?? 'Нет совпадения' },
     { title: 'Заказ', dataIndex: 'order_name', width: 140, render: (v: string | null, r: SignalRow) => v ?? (r.order_id ? `№${r.order_id}` : 'Не определён') },
     { title: 'Результат', dataIndex: 'state', width: 220, render: (v: string | null, r: SignalRow) => <><Tag color={v === 'succeeded' ? 'green' : ['failed','needs_review'].includes(v ?? '') ? 'orange' : undefined}>{technical ? v ?? 'unmatched' : signalLabel(v)}</Tag>{r.reason_code && <div>{technical ? r.reason_code : signalLabel(r.reason_code)}</div>}</> },
@@ -100,6 +101,7 @@ export function InboundSignalsList() {
           { key: 'source', label: 'Источник', children: detail.message.source_name }, { key: 'sender', label: 'Автор', children: detail.message.sender || 'Не указан каналом' },
           { key: 'date', label: 'Отправлено', children: date(detail.message.sent_at) }, { key: 'order', label: 'ID заказа', children: detail.orderId ?? 'Нужно уточнить' },
         ].map(item => <Descriptions.Item key={item.key} label={item.label}>{item.children}</Descriptions.Item>)}</Descriptions>
+        {detail.fragment && detail.fragment !== detail.message.message_text && <Card title="Этот сигнал — из строк сообщения"><div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{detail.fragment}</div></Card>}
         <Card title="Исходное сообщение"><div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{detail.message.message_text}</div></Card>
         <Timeline>{detail.steps.map((step, i) => <Timeline.Item key={i}><div>{technical ? step.event_code : signalLabel(step.event_code)}</div><Typography.Text type="secondary">{date(step.occurred_at)}</Typography.Text>{typeof step.details.reason === 'string' && <div>{signalLabel(step.details.reason)}</div>}{technical && <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(step.details, null, 2)}</pre>}</Timeline.Item>)}</Timeline>
         <Card title="Правила автостатусов">{detail.actions.length ? detail.actions.map((a, i) => <p key={i}>{a.rule_name} — {a.event.endsWith('rule_applied') ? 'Действие выполнено' : 'Условия не выполнены'}{technical && ` (${a.reason ?? a.action_type})`}</p>) : 'Действий пока нет.'}</Card>

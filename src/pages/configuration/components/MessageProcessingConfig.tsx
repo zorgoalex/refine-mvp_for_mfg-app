@@ -94,7 +94,12 @@ export function MessageProcessingConfig() {
       <Select aria-label="Источник для проверки" placeholder="Источник" style={{ width: '100%' }} value={source} onChange={setSource} options={sources.map(s => ({ value: s.code, label: s.name || s.code }))} />
       <Input.TextArea aria-label="Текст для проверки" maxLength={16000} rows={3} value={sample} onChange={e => setSample(e.target.value)} placeholder="Вставьте пример сообщения" />
       <Button disabled={!source || !sample || !ready || busy} onClick={async () => { setBusy(true); try { const config = await form.validateFields(); setTestResult(await api.test(config, sample, source!)); setError(''); } catch (e) { setError(e instanceof Error ? e.message : 'Проверьте поля настройки'); } finally { setBusy(false); } }}>Проверить</Button>
-      {testResult && (testResult.length ? testResult.map(r => <Alert key={r.ruleCode} type="success" message={`Сигнал: ${signals.find(s => s.code === r.signalCode)?.name ?? r.signalCode}`} description={`Правило: ${r.ruleCode}. Найденные идентификаторы: ${r.references.join(', ') || 'не найдены'}. Существование и однозначность заказа проверяются при приёме сообщения.`} />) : <Alert type="warning" message="Совпадений нет. Проверьте ключевые слова, исключения и включение правила." />)}
+      {testResult && (testResult.units.length ? <>
+        {testResult.split && <Alert type="info" message={`Сообщение будет разобрано на ${testResult.units.length} ${testResult.units.length === 1 ? 'группу' : 'групп(ы)'}: сигнал на каждый найденный заказ`} description={testResult.tooManyReferences ? 'Номеров больше 20 — сообщение уйдёт на ручной разбор.' : 'Если хоть один номер группы не найден или неоднозначен, вся группа уйдёт на ручной разбор.'} />}
+        {testResult.units.map(u => <Alert key={`${u.segmentIndex}:${u.signalCode}`} type="success" message={`Сигнал: ${signals.find(s => s.code === u.signalCode)?.name ?? u.signalCode}`}
+          description={<><div>Правила: {u.ruleCodes.join(', ')}. Найденные номера: {u.references.join(', ') || 'не найдены'}. Существование и однозначность заказа проверяются при приёме сообщения.</div>
+            {testResult.split && <div style={{ whiteSpace: 'pre-wrap' }}>Строки: {u.segmentText}</div>}</>} />)}
+      </> : <Alert type="warning" message="Совпадений нет. Проверьте ключевые слова, исключения и включение правила." />)}
     </Space></Card>
   </Space>;
 }
