@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
 import { mdfCorrectionApi } from '../../api/mdfCorrectionApi';
 import { authSession } from '../../api/authSession';
+import { subscribeSessionGenerationChange } from '../../api/sessionGenerationChange';
 import { mdfPublishedApi } from '../../api/mdfPublishedApi';
 import type { MdfSessionSnapshot, MdfSourceKind } from '../../api/types/mdfPublishedApi.types';
 import {
@@ -219,6 +220,21 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, params.warmHidden, workday, period, focusKind, focusId, searchOrderIds.join(','), orderIdsKey]);
 
+  // A re-login or a permission/scope change drops the engine data at once — also while the board is hidden or a read is
+  // running: pending cycles and name resolutions are superseded, the snapshot, search ids and resolved names are cleared,
+  // and a shown board reads again under the new session (the hybrid board would otherwise keep appending old cards).
+  useEffect(() => subscribeSessionGenerationChange(() => {
+    const requestGeneration = bump();
+    searchRequestSeqRef.current += 1;
+    resolvedNamesRef.current = new Map();
+    sessionRef.current = null;
+    searchOrderIdsRef.current = [];
+    setSession(null);
+    setSearchOrderIds([]);
+    setSettledQueryKey(null);
+    if (enabledRef.current) void runCycle(requestGeneration);
+  }), [bump, runCycle]);
+
   // Refresh every 15s and on tab visibility, like the legacy board.
   useEffect(() => {
     if (!enabled) return undefined;
@@ -258,17 +274,23 @@ export function useMdfPublishedBoard(params: UseMdfPublishedBoardParams): UseMdf
     setSearchResolving(true);
     void (async () => {
       try {
+        const startSession = authSession.getSessionGeneration();
+        // A lookup answered after a session change (or after a newer call) never writes into the current cache.
+        const superseded = () => searchRequestSeqRef.current !== seq || authSession.getSessionGeneration() !== startSession;
         for (const name of plan.namesNeedingResolution) {
           const key = name.trim().toLocaleLowerCase('ru-RU');
           if (!resolvedNamesRef.current.has(key)) {
+            let resolved: number | null = null;
             try {
               const response = await cncTelegramApi.searchMdfBoardHistoryOrders(name, 5, { cache: 'no-store' });
               const match = response.data.find((order) => order.orderName.trim().toLocaleLowerCase('ru-RU') === key)
                 ?? response.data[0] ?? null;
-              resolvedNamesRef.current.set(key, match?.orderId ?? null);
+              resolved = match?.orderId ?? null;
             } catch {
-              resolvedNamesRef.current.set(key, null);
+              resolved = null;
             }
+            if (superseded()) return;
+            resolvedNamesRef.current.set(key, resolved);
           }
           // A newer call already superseded this one (and applied its own, current selection) —
           // abandon the rest of this resolution rather than racing it.

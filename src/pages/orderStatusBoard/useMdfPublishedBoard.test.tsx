@@ -9,6 +9,13 @@ const api = vi.hoisted(() => ({
   publishedGet: vi.fn(),
   searchMdfBoardHistoryOrders: vi.fn(),
   sessionGeneration: 1,
+  sessionListeners: new Set<() => void>(),
+}));
+vi.mock('../../api/sessionGenerationChange', () => ({
+  subscribeSessionGenerationChange: (onChange: () => void) => {
+    api.sessionListeners.add(onChange);
+    return () => { api.sessionListeners.delete(onChange); };
+  },
 }));
 vi.mock('../../api/authSession', () => ({ authSession: { getSessionGeneration: () => api.sessionGeneration } }));
 vi.mock('../../api/mdfCorrectionApi', () => ({ mdfCorrectionApi: { getEngineMode: api.getEngineMode } }));
@@ -313,6 +320,31 @@ describe('useMdfPublishedBoard: snapshot requested beside the engine mode', () =
     expect(api.publishedGet).toHaveBeenCalledTimes(1);
   });
 
+  it('an order-name lookup answered after a session change does not fill the new session cache (a later search looks it up again)', async () => {
+    api.sessionGeneration = 1;
+    api.getEngineMode.mockReset().mockResolvedValue({ mode: 'active', publishedReads: true });
+    api.searchMdfBoardHistoryOrders.mockReset();
+    api.publishedGet.mockResolvedValue({ sessionGeneration: 1, snapshot: snapshot() } satisfies MdfSessionSnapshot);
+    let failOld!: (error: Error) => void;
+    api.searchMdfBoardHistoryOrders
+      .mockReturnValueOnce(new Promise((_, reject) => { failOld = reject; }))
+      .mockResolvedValueOnce({ data: [{ orderId: 77, orderName: '3058' }] });
+    act(() => {
+      renderer = create(<Harness workday="2026-09-27" focusKind={null} focusId={null} />);
+    });
+    await vi.waitFor(() => expect(current?.mode).not.toBeNull());
+    act(() => { current!.requestSearchOrderNames(['3058']); });
+    await vi.waitFor(() => expect(api.searchMdfBoardHistoryOrders).toHaveBeenCalledTimes(1));
+    api.sessionGeneration = 2;
+    api.publishedGet.mockResolvedValue({ sessionGeneration: 2, snapshot: snapshot() } satisfies MdfSessionSnapshot);
+    await act(async () => { for (const listener of api.sessionListeners) listener(); });
+    await act(async () => { failOld(new Error('old session')); });
+    act(() => { current!.requestSearchOrderNames(['3058']); });
+    await vi.waitFor(() => expect(api.searchMdfBoardHistoryOrders).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(current?.searchOrderIds).toEqual([77]));
+    api.sessionGeneration = 1;
+  });
+
   it('drops a snapshot read under an older auth session and reads again under the current one', async () => {
     let settleMode!: (value: unknown) => void;
     api.getEngineMode.mockReturnValue(new Promise(resolve => { settleMode = resolve; }));
@@ -329,6 +361,29 @@ describe('useMdfPublishedBoard: snapshot requested beside the engine mode', () =
     await act(async () => { settleMode({ mode: 'active', publishedReads: true }); });
     await vi.waitFor(() => expect(current?.session?.snapshot.revision).toBe('current-permissions'));
     expect(api.publishedGet).toHaveBeenCalledTimes(2);
+  });
+
+  it('a permission/scope change after the snapshot is shown drops its cards at once and reads again (no poll needed)', async () => {
+    api.sessionGeneration = 1;
+    api.getEngineMode.mockReset().mockResolvedValue({ mode: 'active', publishedReads: true });
+    const loaded = snapshot({ revision: 'old-scope' });
+    let settleFresh!: (value: MdfSessionSnapshot) => void;
+    api.publishedGet
+      .mockResolvedValueOnce({ sessionGeneration: 1, snapshot: loaded } satisfies MdfSessionSnapshot)
+      .mockReturnValueOnce(new Promise<MdfSessionSnapshot>(resolve => { settleFresh = resolve; }));
+    act(() => {
+      renderer = create(<Harness workday="2026-09-27" focusKind={null} focusId={null} />);
+    });
+    await vi.waitFor(() => expect(current?.session?.snapshot.revision).toBe('old-scope'));
+    // Same hook parameters, no re-render from the page: the scope shrinks and the session generation changes.
+    api.sessionGeneration = 2;
+    await act(async () => { for (const listener of api.sessionListeners) listener(); });
+    expect(current?.session).toBeNull();
+    expect(current?.searchOrderIds).toEqual([]);
+    await vi.waitFor(() => expect(api.publishedGet).toHaveBeenCalledTimes(2));
+    await act(async () => { settleFresh({ sessionGeneration: 2, snapshot: snapshot({ revision: 'new-scope' }) }); });
+    await vi.waitFor(() => expect(current?.session?.snapshot.revision).toBe('new-scope'));
+    api.sessionGeneration = 1;
   });
 
   it('known legacy board reads no snapshot at all', async () => {

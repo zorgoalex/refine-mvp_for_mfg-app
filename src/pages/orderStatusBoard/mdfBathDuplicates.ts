@@ -1,3 +1,4 @@
+import { authSession } from '../../api/authSession';
 import type { MdfBathDuplicatesOfBath } from '../../api/types/orderStatusBoardApi.types';
 import type {
   CncTelegramBathCard,
@@ -144,24 +145,31 @@ export function applyBathDuplicates(columns: CncTelegramTodayColumn[],
  *   shown facts when empty and asks for a read; an answer for a previous set is dropped;
  * - `request()` — a refresh signal. At most one read runs; signals during it coalesce into ONE follow-up read after
  *   it, so a slow read (longer than the poll interval) still applies and reads never overlap;
- * - a failed read keeps the shown facts; the next signal retries.
+ * - a failed read keeps the shown facts; the next signal retries;
+ * - an answer is applied only for the context revision AND auth session generation it was asked under: the same id set
+ *   again after a change (A → none → A across a permission/scope change) or another session never takes an old answer
+ *   (the facts are scope-redacted on the server).
  * The returned promises settle when the triggered work (incl. a follow-up read) is done — for tests and callers.
  */
 export function createEngineBathDuplicatesRefresher(
   fetcher: (bathCardIds: string[]) => Promise<MdfBathDuplicatesOfBath[]>,
   apply: (facts: MdfBathDuplicatesOfBath[]) => void,
+  sessionGeneration: () => number = () => authSession.getSessionGeneration(),
 ): { setContext(bathCardIdsKey: string): Promise<void>; request(): Promise<void> } {
   let context = '';
+  let revision = 0;
   let running: Promise<void> | null = null;
   let again = false;
   const run = async (): Promise<void> => {
     do {
       again = false;
       const requested = context;
+      const requestedRevision = revision;
+      const requestedSession = sessionGeneration();
       if (!requested) return;
       try {
         const facts = await fetcher(requested.split(','));
-        if (requested === context) apply(facts);
+        if (requested === context && requestedRevision === revision && requestedSession === sessionGeneration()) apply(facts);
       } catch {
         // Indicators only: keep what is shown, the next signal retries.
       }
@@ -180,6 +188,7 @@ export function createEngineBathDuplicatesRefresher(
     setContext(bathCardIdsKey) {
       if (bathCardIdsKey === context) return Promise.resolve();
       context = bathCardIdsKey;
+      revision += 1;
       if (!bathCardIdsKey) {
         apply([]);
         return Promise.resolve();

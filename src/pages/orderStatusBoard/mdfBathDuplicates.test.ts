@@ -140,6 +140,31 @@ describe('MDF bath duplicates: engine-only re-reads', () => {
     expect(applied.at(-1)).toEqual([]);
   });
 
+  it('never applies an answer asked before a permission/scope change: same ids again (A → none → A) or another session', async () => {
+    const pending: Array<(value: ReturnType<typeof facts>) => void> = [];
+    const applied: ReturnType<typeof facts>[] = [];
+    let session = 1;
+    const refresher = createEngineBathDuplicatesRefresher(() => new Promise(resolve => { pending.push(resolve); }),
+      value => applied.push(value), () => session);
+    const oldRead = refresher.setContext(key);              // read #1 under session 1 for set A
+    await refresher.setContext('');                           // the snapshot was dropped by the scope change
+    session = 2;
+    void refresher.setContext(key);                           // the fresh snapshot restores set A
+    pending[0](facts('rework_mark'));                           // the old answer arrives last…
+    await vi.waitFor(() => expect(pending).toHaveLength(2));  // (the coalesced follow-up read for the new set started)
+    expect(applied).toEqual([[]]);                            // …and is dropped (only the clearing was applied)
+    const fresh = [{ ...facts(null)[0] }];
+    pending[1](fresh);
+    await oldRead;
+    expect(applied.at(-1)).toEqual(fresh);
+    // same context, but the session changes while the read is running
+    const third = refresher.request();
+    session = 3;
+    pending[2](facts('rework_mark'));
+    await third;
+    expect(applied.at(-1)).toEqual(fresh);
+  });
+
   it('keeps the shown facts after a failed read and recovers on the next signal; no read without ids', async () => {
     let fail = true;
     let calls = 0;
