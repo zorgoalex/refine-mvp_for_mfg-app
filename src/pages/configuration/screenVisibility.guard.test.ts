@@ -18,9 +18,11 @@ describe('screen visibility tab writes', () => {
 
   it('locks the mode switch, role checkboxes and user controls while saving or loading', () => {
     expect(page).toContain('const visibilityLocked = visibilitySaving || isSettingsLoading;');
-    expect(page.match(/disabled=\{visibilityLocked\}/g)).toHaveLength(2);
+    // mode switch + role checkboxes (the latter also off for a role that never reads the setting)
+    expect(page.match(/disabled=\{visibilityLocked\}/g)).toHaveLength(1);
+    expect(page).toContain('disabled={visibilityLocked || !applies}');
     expect(page).toContain('saving={visibilityLocked}');
-    expect(users).toContain('disabled={saving}');
+    expect(users).toMatch(/disabled=\{saving( \|\| !userSettingsApply)?\}/);
     // Unlocks after success and after failure, from the writer's own counter.
     expect(page).toMatch(/finally \{\s*setLocalMatrix\(writer\.current\);\s*setVisibilitySaving\(writer\.pending > 0\);/);
   });

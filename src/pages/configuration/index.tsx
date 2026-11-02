@@ -52,6 +52,8 @@ import { CutConfigTab } from './components/CutConfigTab';
 import { LabelsConfigTab } from './components/LabelsConfigTab';
 import { FinancialLayerAccessMatrix } from './components/FinancialLayerAccessMatrix';
 import { UserScreenVisibility } from './components/UserScreenVisibility';
+import { VISIBILITY_NOT_APPLICABLE } from './components/UserScreenVisibility';
+import { roleReadsVisibilitySettings } from '../../utils/resourcePermissions';
 import { createVisibilityWriter, type VisibilityWriter } from '../../utils/visibilityWriter';
 import { Segmented } from '../../ui/Segmented';
 import { ExportTemplatesConfigTab } from './components/ExportTemplatesConfigTab';
@@ -622,18 +624,24 @@ const TableVisibilityByRoleTab: React.FC = () => {
     },
     ...roles.map((role) => {
       const roleKey = normalizeRoleKey(role);
+      // A role that never reads the setting (1C integration operator): hiding would silently do nothing.
+      const applies = roleReadsVisibilitySettings(roleKey);
       return {
-        title: role.role_name || roleKey,
+        title: applies ? role.role_name || roleKey : (
+          <span title={VISIBILITY_NOT_APPLICABLE}>{role.role_name || roleKey} · не применяется</span>
+        ),
         dataIndex: roleKey,
         key: roleKey,
         align: 'center' as const,
         width: 140,
         render: (_: unknown, record: { name: string }) => (
-          <Checkbox
-            checked={matrix[record.name]?.[roleKey] ?? true}
-            disabled={visibilityLocked}
-            onChange={(event) => void handleToggle(record.name, role, event.target.checked)}
-          />
+          <span title={applies ? undefined : VISIBILITY_NOT_APPLICABLE}>
+            <Checkbox
+              checked={matrix[record.name]?.[roleKey] ?? true}
+              disabled={visibilityLocked || !applies}
+              onChange={(event) => void handleToggle(record.name, role, event.target.checked)}
+            />
+          </span>
         ),
       };
     }),

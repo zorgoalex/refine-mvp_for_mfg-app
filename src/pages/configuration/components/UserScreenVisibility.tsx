@@ -1,4 +1,5 @@
 import { Table } from '../../../ui/tooltipDelay';
+import { roleReadsVisibilitySettings } from '../../../utils/resourcePermissions';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Empty, Popconfirm, Select, Space, Tag, Typography } from 'antd';
 import { Segmented } from '../../../ui/Segmented';
@@ -42,6 +43,9 @@ function roleKeyOf(user: VisibilityUserRow): string | undefined {
 
 const USERS_PAGE_SIZE = 200;
 
+export const VISIBILITY_NOT_APPLICABLE =
+  'Не применяется: эта роль (оператор интеграции 1С) не читает настройку видимости — ей доступны только экраны её прав.';
+
 export const UserScreenVisibility: React.FC<{
   resources: VisibilityResource[];
   /** The latest stored setting (with pending writes applied). */
@@ -80,6 +84,8 @@ export const UserScreenVisibility: React.FC<{
   const moreUsers = (usersData?.total ?? 0) > users.length;
   const selectedUserId = selectedUser ? String(selectedUser.user_id) : undefined;
   const selectedRoleKey = selectedUser ? roleKeyOf(selectedUser) : undefined;
+  // Users of a role that never reads the setting: personal rules would silently do nothing.
+  const userSettingsApply = !selectedUser || roleReadsVisibilitySettings(selectedRoleKey);
   const overrideCount = selectedUserId ? countUserVisibilityOverrides(matrix, selectedUserId) : 0;
 
   const changeOverride = (resourceName: string, override: UserVisibilityOverride) => {
@@ -143,7 +149,7 @@ export const UserScreenVisibility: React.FC<{
           size="small"
           options={OVERRIDE_OPTIONS}
           value={selectedUserId ? getUserVisibilityOverride(matrix, record.name, selectedUserId) : 'inherit'}
-          disabled={saving}
+          disabled={saving || !userSettingsApply}
           onChange={(value) => changeOverride(record.name, value as UserVisibilityOverride)}
         />
       ),
@@ -201,6 +207,9 @@ export const UserScreenVisibility: React.FC<{
       </Space>
       {moreUsers && !selectedUser && (
         <Paragraph type="secondary">Показаны первые {USERS_PAGE_SIZE} аккаунтов — начните вводить имя, чтобы найти остальных.</Paragraph>
+      )}
+      {selectedUser && !userSettingsApply && (
+        <Alert type="warning" showIcon style={{ marginBottom: 12 }} message={VISIBILITY_NOT_APPLICABLE} />
       )}
       {!selectedUser ? (
         users.length === 0 && !isUsersLoading && !debouncedSearch
