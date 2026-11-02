@@ -14,6 +14,8 @@ export interface OnecReceiptListParams {
   dateFrom?: string;
   dateTo?: string;
   search?: string;
+  /** Только строки заказа приложения (вкладка «Финансы» заказа). */
+  orderId?: number;
 }
 
 /** Реквизиты платежа приходят, только если платёж виден пользователю по области видимости платежей. */

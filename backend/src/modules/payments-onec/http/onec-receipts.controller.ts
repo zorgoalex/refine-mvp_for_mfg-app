@@ -21,6 +21,7 @@ const listSchema = z.object({
   dateFrom: calendarDate.optional(),
   dateTo: calendarDate.optional(),
   search: z.string().trim().min(1).max(100).optional(),
+  orderId: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
 }).strict();
 
 const token = z.string().min(1).max(200);

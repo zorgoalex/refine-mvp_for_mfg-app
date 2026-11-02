@@ -398,6 +398,31 @@ describe.skipIf(!url)('1C incoming payments — read model, real PostgreSQL', { 
     expect([beyond.data, beyond.pagination.total, beyond.pagination.totalPages]).toEqual([[], 1, 1]);
   });
 
+  it('list by ERP order (order «Финансы» tab): only lines of that order incl. its refunds; scope still applies', async () => {
+    const mine = await erpOrder('9911', { createdBy: MANAGER });
+    const foreign = await erpOrder('9912', { createdBy: OWNER });
+    const o1 = await onecOrder(`${SERIES}-9911`);
+    const o2 = await onecOrder(`${SERIES}-9912`);
+    const receipt = await onecDoc('bank_receipt', `${tag}-byorder`, '2026-09-05');
+    const lMine = await payLine(receipt.id, 1, 100, { orderRef: o1.ref });
+    const lForeign = await payLine((await onecDoc('bank_receipt', `${tag}-byorder-2`, '2026-09-05')).id, 1, 200, { orderRef: o2.ref });
+    await payLine((await onecDoc('cash_receipt', `${tag}-byorder-нет`, '2026-09-05')).id, 1, 300);
+    const refund = await payLine((await onecDoc('cash_refund', `${tag}-byorder-возврат`, '2026-09-08')).id, 1, 40, { settlementRef: receipt.ref });
+    const q = { page: 1, pageSize: 100 };
+    const ids = async (context: ReceiptsReadContext, orderId: number) => (await repo.list(context, { ...q, orderId })).data.map((row) => row.lineId);
+    expect(await ids(all, mine)).toEqual([refund, lMine]); // новые сверху
+    expect(await ids(all, foreign)).toEqual([lForeign]);
+    const own = ctx(MANAGER, 'own');
+    expect(await ids(own, mine)).toEqual([refund, lMine]);
+    // Чужой заказ с областью «own»: ни строк, ни счётчиков.
+    const hidden = await repo.list(own, { ...q, orderId: foreign });
+    expect([hidden.data, hidden.pagination.total, Object.values(hidden.counters).reduce((sum, n) => sum + n, 0)]).toEqual([[], 0, 0]);
+    expect(await ids(ctx(MANAGER, 'none'), mine)).toEqual([]);
+    // Счётчики — только этого заказа.
+    const counters = (await repo.list(all, { ...q, orderId: mine })).counters;
+    expect(Object.values(counters).reduce((sum, n) => sum + n, 0)).toBe(2);
+  });
+
   it('service: flag off → 503; missing permission or scope none → 403 with a denial audit; allowed → rows by scope', async () => {
     const user = (permissions: string[], view: string): CurrentUser => ({
       id: String(MANAGER), username: `${tag}-manager`, role: 'manager', roleId: 10, permissions: permissions as never,

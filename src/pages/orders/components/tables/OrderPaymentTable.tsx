@@ -8,6 +8,8 @@ import { Button, Space, Form, InputNumber, Input, Select, DatePicker, Typography
 import { EditOutlined, CheckOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import type { OnecReceiptListItemDto } from '../../../../api/types/paymentsOnecApi.types';
+import { OnecPaymentMatchCell } from '../onec/OrderOnecReceipts';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { Payment } from '../../../../types/orders';
@@ -33,6 +35,8 @@ interface OrderPaymentTableProps {
   selectedRowKeys?: React.Key[];
   onSelectChange?: (selectedRowKeys: React.Key[]) => void;
   highlightedRowKey?: React.Key | null;
+  /** Документы 1С, точно сверенные с платежом (колонка «1С»); `undefined` — колонки нет (нет доступа к 1С). */
+  onecByPaymentId?: ReadonlyMap<number, readonly OnecReceiptListItemDto[]>;
 }
 
 // Exposed methods via ref
@@ -50,6 +54,7 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
   selectedRowKeys = [],
   onSelectChange,
   highlightedRowKey = null,
+  onecByPaymentId,
 }, ref) => {
   const { payments, updatePayment, deletePayment, setPaymentEditing } = useOrderFormStore();
   const orderFormData = useOrderFormData();
@@ -407,6 +412,14 @@ function readInlineEditingKey(value: unknown): number | string | null {
         );
       },
     },
+    ...(onecByPaymentId ? [{
+      title: <div style={{ textAlign: 'center', fontSize: '85%' }}>1С</div>,
+      key: 'onec',
+      width: 170,
+      render: (_: unknown, record: Payment) => (
+        <OnecPaymentMatchCell rows={record.payment_id ? onecByPaymentId.get(Number(record.payment_id)) : undefined} />
+      ),
+    }] : []),
     {
       title: <div style={{ textAlign: 'center', fontSize: '85%' }}>Действия</div>,
       key: 'actions',
