@@ -248,9 +248,20 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('deepLinkFocusAppliedRef.current === key ? null : window.requestAnimationFrame');
     expect(page).toContain('deepLinkFocusAppliedRef.current = key;');
     expect(page.indexOf('deepLinkFocusAppliedRef.current = key;')).toBeGreaterThan(page.indexOf('target.focus({ preventScroll: true });'));
-    expect(page).toContain('updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });');
     expect(page).toContain('if (mdfWorkdayTodayOpenPatchNeeded) return;');
     expect(page).toMatch(/if \(!active\) \{\s*mdfWorkdayOpenSyncedRef.current = false;\s*mdfOpeningScrollPendingRef.current = true;/);
+    // back to the still-open board tab (e.g. from an order): today again, the order-number search stays;
+    // a fresh opening clears it — behaviour in mdfOpeningSearchMemory.test.ts
+    expect(page).toContain('const [mdfOpeningSearch] = useState(createMdfOpeningSearchMemory);');
+    expect(page).toContain('mdfOpeningSearch.hidden(hasMdfBoardTab(useTabStore.getState().tabs));');
+    expect(page).toMatch(/return;\s*\}\s*mdfOpeningSearch\.shown\(currentUser\?\.id, todayCncWorkday\);/);
+    expect(page).toContain('const mdfOpeningKeepsSearch = mdfOpeningSearch.keepsSearch(currentUser?.id, todayCncWorkday);');
+    expect(page).toContain('|| (!mdfOpeningKeepsSearch && viewState.cncOrderFilters.length > 0)');
+    expect(page).toContain("const openingSearchReset: Partial<OrderStatusBoardViewState> = mdfOpeningKeepsSearch ? {} : { cncOrderFilters: [] };");
+    expect(page).toContain('updateViewState({ cncWorkday: todayCncWorkday, ...openingSearchReset });');
+    expect(page).toMatch(/if \(!hasMdfBoardTab\(previous\.tabs\) \|\| hasMdfBoardTab\(state\.tabs\)\) return;\s*mdfOpeningSearch\.tabClosed\(\);/);
+    expect(page).toMatch(/mdfWorkdayOpenSyncedRef\.current = false;\s*mdfOpeningSearch\.reset\(\);\s*setMdfDayTick/);
+    expect(page).toMatch(/mdfOpeningUserRef\.current = currentUser\?\.id;\s*mdfOpeningSearch\.reset\(\);\s*mdfWorkdayOpenSyncedRef\.current = false;/);
     expect(page).toContain('if (mdfWorkdayTodayOpenPatchNeeded || loading) return;');
     expect(page).toContain("scrollStatusBoardColumnCardsToTop(boardViewportRef.current, 'auto');");
     expect(page).toMatch(/if \(hasExplicitMdfCardDeepLink\) \{\s*mdfOpeningScrollPendingRef.current = false;\s*return;/);

@@ -658,6 +658,46 @@ test.describe('MDF background refresh', () => {
         await expect.poll(maximumScroll).toBe(0);
     });
 
+    test('keeps the order-number search on return to the still-open MDF tab; closing the tab clears it', async ({ page }) => {
+        const db = createWorkflowMockDb();
+        seedTabletData(db);
+        await setupBoardTabletMocks(page, db);
+        await setupMdfOverflowPreviewMocks(page);
+        await page.goto('/mdf-work-board');
+        const viewport = page.locator('#status-board-viewport');
+        await expect(viewport).toHaveAttribute('aria-busy', 'false', { timeout: 60_000 });
+        const search = page.locator('.status-board-toolbar__cnc-order-search');
+        await search.click();
+        await page.keyboard.type('2701');
+        await page.keyboard.press('Enter');
+        await expect(page).toHaveURL(/[?&]order=2701(&|$)/);
+
+        // an order and back: the board starts from today again, the search stays
+        await page.getByRole('menuitem', { name: /Заказы/ }).first().click();
+        await expect(page).toHaveURL(/\/orders/);
+        await page.getByRole('tab', { name: 'МДФ-работы', exact: true }).click();
+        await expect(page).toHaveURL(/\/mdf-work-board/);
+        await expect(viewport).toHaveAttribute('aria-busy', 'false');
+        await page.waitForTimeout(1_000);
+        await expect(page).toHaveURL(/[?&]order=2701(&|$)/);
+        await expect(search.locator('.ant-select-selection-item', { hasText: '2701' }).first()).toBeVisible();
+
+        // the board tab closed and opened again: a fresh opening without the search
+        await page.getByRole('menuitem', { name: /Заказы/ }).first().click();
+        await expect(page).toHaveURL(/\/orders/);
+        await page.locator('.workspace-tabs .ant-tabs-tab', { hasText: 'МДФ-работы' }).locator('.ant-tabs-tab-remove').click();
+        await expect(page.getByRole('tab', { name: 'МДФ-работы', exact: true })).toHaveCount(0);
+        // the same page (no reload): the hidden board stays mounted, the opening must still be a fresh one
+        await page.evaluate(() => {
+            window.history.pushState({}, '', '/mdf-work-board?order=2701');
+            window.dispatchEvent(new PopStateEvent('popstate'));
+        });
+        await expect(page).toHaveURL(/\/mdf-work-board/);
+        await expect(viewport).toHaveAttribute('aria-busy', 'false', { timeout: 60_000 });
+        await page.waitForTimeout(1_000);
+        await expect(page).not.toHaveURL(/[?&]order=2701/);
+    });
+
     test('preserves the date and focus of an explicit MDF historical card link', async ({ page }) => {
         const db = createWorkflowMockDb();
         seedTabletData(db);

@@ -159,7 +159,7 @@
 }
 
 .orders-mobile-header-disclosure--mobile .orders-view-switch .ant-segmented-item {
-  flex: 1 1 0;
+  width: 100%;
 }
 
 .orders-mobile-header-disclosure--mobile .orders-view-switch .ant-segmented-group {

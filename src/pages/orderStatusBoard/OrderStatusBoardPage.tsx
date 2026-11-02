@@ -92,6 +92,8 @@ import { createPortal } from 'react-dom';
 import { DndProvider, useDrag, useDragLayer, useDrop } from 'react-dnd';
 import { TouchBackend } from 'react-dnd-touch-backend';
 import { UNSAFE_NavigationContext, useNavigate, useSearchParams } from 'react-router-dom';
+import { useTabStore } from '../../stores/tabStore';
+import { createMdfOpeningSearchMemory } from './mdfOpeningSearchMemory';
 import { readMdfBoardPeriod, writeMdfBoardPeriod } from '../../utils/mdfBoardDailyPeriod';
 import { isApiError } from '../../api/apiError';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
@@ -634,6 +636,10 @@ function useWorkspaceTabsHeight(): number {
 
 const NO_ENGINE_BATH_DUPLICATES: ReadonlyMap<string, MdfBathDuplicatesOfBath> = new Map();
 
+/** Workspace tab of the dedicated MDF board (PersistentMdfBoardHost route). */
+const MDF_BOARD_TAB_KEY = '/mdf-work-board';
+const hasMdfBoardTab = (tabs: readonly { key: string }[]): boolean => tabs.some((tab) => tab.key === MDF_BOARD_TAB_KEY);
+
 export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   active = true,
   defaultCncOrderSearchPeriod = DEFAULT_CNC_ORDER_SEARCH_PERIOD,
@@ -661,6 +667,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   // re-rendered when the calendar day changes while the board stays open
   const [, setMdfDayTick] = useState(0);
   const mdfWorkdayOpenSyncedRef = useRef(false);
+  // whether the next opening keeps the order-number search (see mdfOpeningSearchMemory)
+  const [mdfOpeningSearch] = useState(createMdfOpeningSearchMemory);
   const mdfBoardDayRef = useRef(todayCncWorkday);
   useEffect(() => {
     if (fixedView !== 'cnc_today') return undefined;
@@ -670,11 +678,31 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       if (now === mdfBoardDayRef.current) return;
       mdfBoardDayRef.current = now;
       mdfWorkdayOpenSyncedRef.current = false;
+      mdfOpeningSearch.reset();
       setMdfDayTick((tick) => tick + 1);
     }, 60_000);
     return () => window.clearInterval(timer);
-  }, [fixedView]);
+  }, [fixedView, mdfOpeningSearch]);
   const mdfOpeningScrollPendingRef = useRef(true);
+  useEffect(() => {
+    if (fixedView !== 'cnc_today') return undefined;
+    // closing the board tab ends it: the next opening is a fresh one and clears the order-number search
+    // (only the transition «tab open → closed»; store updates before the tab first appears are ignored)
+    return useTabStore.subscribe((state, previous) => {
+      if (!hasMdfBoardTab(previous.tabs) || hasMdfBoardTab(state.tabs)) return;
+      mdfOpeningSearch.tabClosed();
+    });
+  }, [fixedView, mdfOpeningSearch]);
+  // another user on the same page (no unmount): the next opening is a fresh one, even while shown
+  const mdfOpeningUserRef = useRef(currentUser?.id);
+  useEffect(() => {
+    if (fixedView !== 'cnc_today' || mdfOpeningUserRef.current === currentUser?.id) return;
+    mdfOpeningUserRef.current = currentUser?.id;
+    mdfOpeningSearch.reset();
+    mdfWorkdayOpenSyncedRef.current = false;
+    mdfOpeningScrollPendingRef.current = true;
+    setMdfDayTick((tick) => tick + 1);
+  }, [currentUser?.id, fixedView, mdfOpeningSearch]);
   const sortPreferenceBoard: OrderStatusBoardType =
     fixedView === 'production' || (!fixedView && searchParams.get('board') === 'production')
       ? 'production'
@@ -757,11 +785,12 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const [cncHistoryOrderNumber, setCncHistoryOrderNumber] = useState<string | null>(null);
   const shouldApplyMdfWorkdayTodayOnOpen =
     active && fixedView === 'cnc_today' && !mdfWorkdayOpenSyncedRef.current;
+  const mdfOpeningKeepsSearch = mdfOpeningSearch.keepsSearch(currentUser?.id, todayCncWorkday);
   const mdfWorkdayTodayOpenPatchNeeded =
     shouldApplyMdfWorkdayTodayOnOpen &&
     !hasExplicitMdfCardDeepLink &&
     (viewState.cncWorkday !== todayCncWorkday
-      || viewState.cncOrderFilters.length > 0
+      || (!mdfOpeningKeepsSearch && viewState.cncOrderFilters.length > 0)
       // the period stays as the user left it; only the date starts from today
       || viewState.cncOrderSearchPeriod !== mdfOpeningPeriod(readMdfBoardPeriod(currentUser?.id),
         viewState.cncOrderSearchPeriod, viewState.cncPlannedTodayOnly));
@@ -978,28 +1007,36 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   }, []);
   useEffect(() => {
     // The persistent workspace host hides this page instead of unmounting it.
-    // Rearm opening defaults without changing the URL of the other active page.
+    // Rearm opening defaults without changing the URL of the other active page. Coming back to the
+    // still-open board tab (e.g. from an order opened on a card) starts from today again but keeps the
+    // order-number search; a fresh opening (tab closed and reopened, a new day) clears it too.
     if (!active) {
       mdfWorkdayOpenSyncedRef.current = false;
       mdfOpeningScrollPendingRef.current = true;
+      // closing the active board tab removes the tab before the page hides: then it is a fresh opening
+      mdfOpeningSearch.hidden(hasMdfBoardTab(useTabStore.getState().tabs));
       return;
     }
+    mdfOpeningSearch.shown(currentUser?.id, todayCncWorkday);
     if (!shouldApplyMdfWorkdayTodayOnOpen) return;
     if (!mdfWorkdayTodayOpenPatchNeeded) {
       mdfWorkdayOpenSyncedRef.current = true;
       return;
     }
+    const openingSearchReset: Partial<OrderStatusBoardViewState> = mdfOpeningKeepsSearch ? {} : { cncOrderFilters: [] };
     // Finish synchronization only after the router reflects the opening date.
     const openingPeriod = mdfOpeningPeriod(readMdfBoardPeriod(currentUser?.id), viewState.cncOrderSearchPeriod,
       viewState.cncPlannedTodayOnly);
     if (viewState.cncOrderSearchPeriod === openingPeriod) {
-      updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });
+      updateViewState({ cncWorkday: todayCncWorkday, ...openingSearchReset });
     } else {
-      updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [], cncOrderSearchPeriod: openingPeriod });
+      updateViewState({ cncWorkday: todayCncWorkday, ...openingSearchReset, cncOrderSearchPeriod: openingPeriod });
     }
   }, [
     active,
     currentUser?.id,
+    mdfOpeningKeepsSearch,
+    mdfOpeningSearch,
     mdfWorkdayTodayOpenPatchNeeded,
     shouldApplyMdfWorkdayTodayOnOpen,
     todayCncWorkday,
