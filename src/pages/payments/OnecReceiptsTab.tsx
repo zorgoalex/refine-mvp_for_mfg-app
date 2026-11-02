@@ -1,4 +1,4 @@
-import { Alert, DatePicker, Descriptions, Drawer, Input, Pagination, Select, Space, Spin, Tag, Typography } from 'antd';
+import { Alert, Button, DatePicker, Descriptions, Drawer, Input, Pagination, Select, Space, Spin, Tag, Typography } from 'antd';
 import type { Dayjs } from 'dayjs';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -12,9 +12,11 @@ import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSiz
 import { Table } from '../../ui/tooltipDelay';
 import { formatDate } from '../../utils/dateFormat';
 import {
-  formatOnecMoney, ONEC_RECEIPT_GROUPS, ONEC_RECEIPT_STATE_COLORS, ONEC_RECEIPT_STATE_LABELS, onecReceiptHasRefund,
-  onecReceiptKindLabel, onecReceiptPaymentText, onecReceiptReasonLabel, onecReceiptSignedAmount,
+  formatOnecMoney, ONEC_RECEIPT_GROUPS, ONEC_RECEIPT_STATE_COLORS, ONEC_RECEIPT_STATE_LABELS, onecAutoMatchResultText,
+  onecReceiptChangesText, onecReceiptCommandErrorText,
+  onecReceiptHasRefund, onecReceiptKindLabel, onecReceiptPaymentText, onecReceiptReasonLabel, onecReceiptSignedAmount,
 } from './onecReceipts';
+import { useOnecReceiptCommands } from './OnecReceiptActions';
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -56,10 +58,123 @@ function OrderCell({ row }: { row: OnecReceiptListItemDto }) {
   );
 }
 
+/** Карточка строки: реквизиты, платежи заказа (с «Сопоставить»), возвраты, история и команды среза B. */
+function ReceiptCard({ data, onChanged }: { data: OnecReceiptCardResponse; onChanged: () => void }) {
+  const line = data.line;
+  const commands = useOnecReceiptCommands(data, onChanged);
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      {commands.toolbar}
+      <Descriptions size="small" column={1} bordered>
+        <Descriptions.Item label="Состояние">
+          <StateTag row={line} />
+          {onecReceiptReasonLabel(line.reason) && <Text type="secondary"> {onecReceiptReasonLabel(line.reason)}</Text>}
+          {onecReceiptChangesText(line.changes) && <Text type="warning"> {onecReceiptChangesText(line.changes)}</Text>}
+          {line.match?.note && <div><Text type="secondary">Комментарий: {line.match.note}</Text></div>}
+        </Descriptions.Item>
+        <Descriptions.Item label="Дата">{formatDate(line.date)}</Descriptions.Item>
+        <Descriptions.Item label="Контрагент">{line.counterpartyName ?? '—'}</Descriptions.Item>
+        <Descriptions.Item label="Сумма 1С">{onecReceiptSignedAmount(line)} {line.currency ?? ''}</Descriptions.Item>
+        <Descriptions.Item label="Заказ"><OrderCell row={line} /></Descriptions.Item>
+        {line.erpOrder && (
+          <Descriptions.Item label="Заказ в приложении">
+            сумма {formatOnecMoney(line.erpOrder.finalAmount)}, оплачено {formatOnecMoney(line.erpOrder.paidAmount)}
+            {data.onecPaid !== null && <>; оплачено по 1С {formatOnecMoney(data.onecPaid)}</>}
+          </Descriptions.Item>
+        )}
+        <Descriptions.Item label="Платёж в приложении">{onecReceiptPaymentText(line)}</Descriptions.Item>
+      </Descriptions>
+
+      {!line.isRefund && line.erpOrder && (
+        <div>
+          <Text strong>Платежи заказа</Text>
+          <Table
+            rowKey="paymentId"
+            size="small"
+            pagination={false}
+            dataSource={data.candidates}
+            locale={{ emptyText: 'У заказа нет платежей' }}
+            columns={[
+              { title: 'Дата', dataIndex: 'paymentDate', render: (value: string) => formatDate(value) },
+              { title: 'Сумма', dataIndex: 'amount', align: 'right' as const, render: (value: string) => formatOnecMoney(value) },
+              { title: 'Тип оплаты', dataIndex: 'typeName', render: (value: string | null) => value ?? '—' },
+              {
+                title: 'Сравнение',
+                key: 'hint',
+                render: (_: unknown, candidate: OnecReceiptCardResponse['candidates'][number]) => (
+                  <Space size={4} wrap>
+                    <Tag color={candidate.sameAmount ? 'success' : undefined}>{candidate.sameAmount ? 'сумма совпадает' : 'сумма другая'}</Tag>
+                    <Tag color={candidate.daysApart <= 3 ? 'success' : undefined}>
+                      {candidate.daysApart === 0 ? 'тот же день' : `разница ${candidate.daysApart} дн.`}
+                    </Tag>
+                    {candidate.matchedTo && <Tag>сверен с {candidate.matchedTo.number ?? 'другим поступлением'}</Tag>}
+                  </Space>
+                ),
+              },
+              { title: '', key: 'action', render: (_: unknown, candidate: OnecReceiptCardResponse['candidates'][number]) => commands.matchButton(candidate) },
+            ]}
+          />
+        </div>
+      )}
+
+      {data.refunds.length > 0 && (
+        <div>
+          <Text strong>Возвраты по этому поступлению</Text>
+          <Table
+            rowKey="lineId"
+            size="small"
+            pagination={false}
+            dataSource={data.refunds}
+            columns={[
+              { title: 'Дата', dataIndex: 'date', render: (value: string) => formatDate(value) },
+              { title: 'Документ', key: 'doc', render: (_: unknown, refund: OnecReceiptCardResponse['refunds'][number]) => `${onecReceiptKindLabel(refund.kind)} ${refund.number}` },
+              {
+                title: 'Сумма',
+                key: 'amount',
+                align: 'right' as const,
+                render: (_: unknown, refund: OnecReceiptCardResponse['refunds'][number]) =>
+                  `−${formatOnecMoney(refund.amount)}${refund.currency && refund.currency !== 'KZT' ? ` ${refund.currency}` : ''}`,
+              },
+              { title: '', key: 'live', render: (_: unknown, refund: OnecReceiptCardResponse['refunds'][number]) => (refund.live ? null : <Tag>не действует</Tag>) },
+            ]}
+          />
+        </div>
+      )}
+
+      {data.history.length > 0 && (
+        <div>
+          <Text strong>История сверки</Text>
+          <Table
+            rowKey="matchId"
+            size="small"
+            pagination={false}
+            dataSource={data.history}
+            columns={[
+              { title: 'Когда', dataIndex: 'createdAt', render: (value: string) => formatDate(value) },
+              { title: 'Кто', dataIndex: 'createdBy', render: (value: string | null) => value ?? '—' },
+              {
+                title: 'Что',
+                key: 'what',
+                render: (_: unknown, entry: OnecReceiptCardResponse['history'][number]) => {
+                  if (entry.kind === 'dismissed') return 'разобрано без связи';
+                  if (!entry.payment || !('paymentId' in entry.payment)) return 'сверено с платежом вне вашего доступа';
+                  return `сверено с платежом ${formatOnecMoney(entry.payment.amount)} от ${formatDate(entry.payment.paymentDate)}`;
+                },
+              },
+              { title: 'Комментарий', dataIndex: 'note', render: (value: string | null) => value ?? '—' },
+              { title: 'Снято', dataIndex: 'removedAt', render: (value: string | null) => (value ? formatDate(value) : '—') },
+            ]}
+          />
+        </div>
+      )}
+      {commands.modal}
+    </Space>
+  );
+}
+
 /**
- * «Платежи → Поступления 1С» (срез A — только чтение): поступления и возвраты покупателей из 1С и состояние их
- * сверки с платежами заказов. Данные — только backend. Команды сверки появятся следующими срезами
- * (`capabilities.commands`); до тех пор вкладка ничего не меняет.
+ * «Платежи → Поступления 1С»: поступления и возвраты покупателей из 1С и состояние их сверки с платежами заказов.
+ * Данные — только backend. Ручные команды (срез B) — в карточке строки, при `capabilities.commands`.
  */
 export function OnecReceiptsTab() {
   const [group, setGroup] = useState<OnecReceiptGroup | null>('review');
@@ -71,6 +186,21 @@ export function OnecReceiptsTab() {
   const { pageSize, setPageSize } = usePageSizePreference('payments:onec-receipts', DEFAULT_PAGE_SIZE);
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [openLineId, setOpenLineId] = useState<number | null>(null);
+  // Перечитать список и карточку после команды (номер «поколения» данных).
+  const [reload, setReload] = useState(0);
+  const reloadAfterCommand = () => setReload((value) => value + 1);
+  const [autoMatch, setAutoMatch] = useState<{ busy: boolean; message: string | null; error: boolean }>({ busy: false, message: null, error: false });
+  const runAutoMatch = () => {
+    setAutoMatch({ busy: true, message: null, error: false });
+    paymentsOnecApi.autoMatch()
+      .then((result) => {
+        setAutoMatch({ busy: false, message: onecAutoMatchResultText(result), error: false });
+        reloadAfterCommand();
+      })
+      .catch((error: unknown) => setAutoMatch({
+        busy: false, message: onecReceiptCommandErrorText(isApiError(error) ? error.code : null), error: true,
+      }));
+  };
   const [card, setCard] = useState<{ status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; data: OnecReceiptCardResponse } | null>(null);
   // Номер запроса: ответ устаревшего запроса (другой фильтр/страница) не должен затирать свежий.
   const generation = useRef(0);
@@ -108,7 +238,7 @@ export function OnecReceiptsTab() {
           setState({ status: 'error', message: 'Не удалось загрузить поступления 1С.' });
         }
       });
-  }, [page, pageSize, group, kind, search, dateRange]);
+  }, [page, pageSize, group, kind, search, dateRange, reload]);
 
   useEffect(() => {
     if (openLineId === null) {
@@ -116,7 +246,8 @@ export function OnecReceiptsTab() {
       return undefined;
     }
     let active = true;
-    setCard({ status: 'loading' });
+    // Перечитывание после команды не мигает спиннером: прежняя карточка видна до ответа.
+    setCard((previous) => (previous?.status === 'ready' && previous.data.line.lineId === openLineId ? previous : { status: 'loading' }));
     paymentsOnecApi.getReceipt(openLineId)
       .then((data) => {
         if (active) setCard({ status: 'ready', data });
@@ -131,7 +262,7 @@ export function OnecReceiptsTab() {
     return () => {
       active = false;
     };
-  }, [openLineId]);
+  }, [openLineId, reload]);
 
   const response = state.status === 'ready' ? state.response : null;
   const rows = response?.data ?? EMPTY_ROWS;
@@ -196,6 +327,9 @@ export function OnecReceiptsTab() {
           placeholder="Номер документа, контрагент, заказ"
         />
         <RangePicker value={dateRange} onChange={(value) => { setDateRange(value); setPage(1); }} format="DD.MM.YYYY" />
+        {response?.capabilities.commands && (
+          <Button onClick={runAutoMatch} loading={autoMatch.busy}>Сверить сейчас</Button>
+        )}
         <Select<KindFilter>
           style={{ minWidth: 200 }}
           value={kind}
@@ -209,6 +343,10 @@ export function OnecReceiptsTab() {
       </Space>
 
       {state.status === 'error' && <Alert showIcon type="error" message={state.message} style={{ marginBottom: 16 }} />}
+      {autoMatch.message && (
+        <Alert showIcon closable type={autoMatch.error ? 'error' : 'success'} message={autoMatch.message} style={{ marginBottom: 16 }}
+          onClose={() => setAutoMatch((value) => ({ ...value, message: null }))} />
+      )}
 
       <Table<OnecReceiptListItemDto>
         rowKey="lineId"
@@ -249,107 +387,7 @@ export function OnecReceiptsTab() {
         {card?.status === 'loading' && <Spin />}
         {card?.status === 'error' && <Alert showIcon type="error" message={card.message} />}
         {card?.status === 'ready' && line && (
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Descriptions size="small" column={1} bordered>
-              <Descriptions.Item label="Состояние">
-                <StateTag row={line} />
-                {onecReceiptReasonLabel(line.reason) && <Text type="secondary"> {onecReceiptReasonLabel(line.reason)}</Text>}
-              </Descriptions.Item>
-              <Descriptions.Item label="Дата">{formatDate(line.date)}</Descriptions.Item>
-              <Descriptions.Item label="Контрагент">{line.counterpartyName ?? '—'}</Descriptions.Item>
-              <Descriptions.Item label="Сумма 1С">{onecReceiptSignedAmount(line)} {line.currency ?? ''}</Descriptions.Item>
-              <Descriptions.Item label="Заказ"><OrderCell row={line} /></Descriptions.Item>
-              {line.erpOrder && (
-                <Descriptions.Item label="Заказ в приложении">
-                  сумма {formatOnecMoney(line.erpOrder.finalAmount)}, оплачено {formatOnecMoney(line.erpOrder.paidAmount)}
-                  {card.data.onecPaid !== null && <>; оплачено по 1С {formatOnecMoney(card.data.onecPaid)}</>}
-                </Descriptions.Item>
-              )}
-              <Descriptions.Item label="Платёж в приложении">{onecReceiptPaymentText(line)}</Descriptions.Item>
-            </Descriptions>
-
-            {!line.isRefund && line.erpOrder && (
-              <div>
-                <Text strong>Платежи заказа</Text>
-                <Table
-                  rowKey="paymentId"
-                  size="small"
-                  pagination={false}
-                  dataSource={card.data.candidates}
-                  locale={{ emptyText: 'У заказа нет платежей' }}
-                  columns={[
-                    { title: 'Дата', dataIndex: 'paymentDate', render: (value: string) => formatDate(value) },
-                    { title: 'Сумма', dataIndex: 'amount', align: 'right' as const, render: (value: string) => formatOnecMoney(value) },
-                    { title: 'Тип оплаты', dataIndex: 'typeName', render: (value: string | null) => value ?? '—' },
-                    {
-                      title: 'Сравнение',
-                      key: 'hint',
-                      render: (_: unknown, candidate: OnecReceiptCardResponse['candidates'][number]) => (
-                        <Space size={4} wrap>
-                          <Tag color={candidate.sameAmount ? 'success' : undefined}>{candidate.sameAmount ? 'сумма совпадает' : 'сумма другая'}</Tag>
-                          <Tag color={candidate.daysApart <= 3 ? 'success' : undefined}>
-                            {candidate.daysApart === 0 ? 'тот же день' : `разница ${candidate.daysApart} дн.`}
-                          </Tag>
-                          {candidate.matchedTo && <Tag>сверен с {candidate.matchedTo.number ?? 'другим поступлением'}</Tag>}
-                        </Space>
-                      ),
-                    },
-                  ]}
-                />
-              </div>
-            )}
-
-            {card.data.refunds.length > 0 && (
-              <div>
-                <Text strong>Возвраты по этому поступлению</Text>
-                <Table
-                  rowKey="lineId"
-                  size="small"
-                  pagination={false}
-                  dataSource={card.data.refunds}
-                  columns={[
-                    { title: 'Дата', dataIndex: 'date', render: (value: string) => formatDate(value) },
-                    { title: 'Документ', key: 'doc', render: (_: unknown, refund: OnecReceiptCardResponse['refunds'][number]) => `${onecReceiptKindLabel(refund.kind)} ${refund.number}` },
-                    {
-                      title: 'Сумма',
-                      key: 'amount',
-                      align: 'right' as const,
-                      render: (_: unknown, refund: OnecReceiptCardResponse['refunds'][number]) =>
-                        `−${formatOnecMoney(refund.amount)}${refund.currency && refund.currency !== 'KZT' ? ` ${refund.currency}` : ''}`,
-                    },
-                    { title: '', key: 'live', render: (_: unknown, refund: OnecReceiptCardResponse['refunds'][number]) => (refund.live ? null : <Tag>не действует</Tag>) },
-                  ]}
-                />
-              </div>
-            )}
-
-            {card.data.history.length > 0 && (
-              <div>
-                <Text strong>История сверки</Text>
-                <Table
-                  rowKey="matchId"
-                  size="small"
-                  pagination={false}
-                  dataSource={card.data.history}
-                  columns={[
-                    { title: 'Когда', dataIndex: 'createdAt', render: (value: string) => formatDate(value) },
-                    { title: 'Кто', dataIndex: 'createdBy', render: (value: string | null) => value ?? '—' },
-                    {
-                      title: 'Что',
-                      key: 'what',
-                      render: (_: unknown, entry: OnecReceiptCardResponse['history'][number]) => {
-                        if (entry.kind === 'dismissed') return 'разобрано без связи';
-                        if (!entry.payment || !('paymentId' in entry.payment)) return 'сверено с платежом вне вашего доступа';
-                        return `сверено с платежом ${formatOnecMoney(entry.payment.amount)} от ${formatDate(entry.payment.paymentDate)}`;
-                      },
-                    },
-                    { title: 'Комментарий', dataIndex: 'note', render: (value: string | null) => value ?? '—' },
-                    { title: 'Снято', dataIndex: 'removedAt', render: (value: string | null) => (value ? formatDate(value) : '—') },
-                  ]}
-                />
-              </div>
-            )}
-          </Space>
+          <ReceiptCard data={card.data} onChanged={reloadAfterCommand} />
         )}
       </Drawer>
     </div>

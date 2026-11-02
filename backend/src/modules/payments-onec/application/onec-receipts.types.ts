@@ -37,7 +37,8 @@ export interface OnecReceiptListItemDto {
   refundedAmount: string;
   /** У возврата — поступление, которое возвращают. */
   refundOf: { documentId: number; number: string | null } | null;
-  onecOrder: { refKey: string; documentId: number | null; number: string | null; date: string | null } | null;
+  /** `manualLink` — у заказа 1С ручная связь (в т.ч. «не относится к приложению»: тогда `erpOrder` пуст). */
+  onecOrder: { refKey: string; documentId: number | null; number: string | null; date: string | null; manualLink: boolean } | null;
   erpOrder: {
     orderId: number; orderName: string | null; clientName: string | null; finalAmount: string | null; paidAmount: string | null;
     paymentsCount: number; deleted: boolean; linkOrigin: 'manual' | 'rule' | null;
@@ -45,6 +46,8 @@ export interface OnecReceiptListItemDto {
   state: ReceiptState;
   /** Код причины, по которой строка не сверяется (подпись — на экране); `null` — ограничений нет. */
   reason: string | null;
+  /** У `changed` — что изменилось относительно сверки (коды); реквизиты чужого платежа — обобщённо `payment_changed`. */
+  changes: string[] | null;
   match: { matchId: number; kind: 'matched' | 'dismissed'; origin: string; note: string | null; createdAt: string } | null;
   payment: OnecReceiptPaymentDto | null;
   /** Непрозрачный токен состояния строки: команды (следующие срезы) сверяют его после блокировок. */
@@ -52,7 +55,7 @@ export interface OnecReceiptListItemDto {
 }
 
 export interface OnecReceiptsCapabilities {
-  /** Команды сверки доступны (срезы B/C); в срезе A всегда false — вкладка только для чтения. */
+  /** Ручные команды вкладки доступны (флаг `…_COMMANDS` и права `payments.onec.manage` + `payments.update`). */
   commands: boolean;
 }
 
@@ -80,4 +83,12 @@ export interface OnecReceiptCardDto {
     payment: { hidden: true } | { hidden: false; paymentId: number; amount: string; paymentDate: string } | null;
   }>;
   capabilities: OnecReceiptsCapabilities;
+}
+
+/** Ответ ручной команды: изменилось ли что-то (повтор той же команды — `false`) и строка в области пользователя. */
+export interface OnecReceiptCommandResponseDto {
+  changed: boolean;
+  matchId: number | null;
+  /** `null` — после команды строка вне области видимости пользователя. */
+  line: OnecReceiptListItemDto | null;
 }

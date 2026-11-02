@@ -1,6 +1,7 @@
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient } from '../../../database/database.types';
+import { matchDriftReasonsSql, PAYMENT_DRIFT_REASONS } from '../domain/onec-match-drift-sql';
 import { seriesRuleOrderSql } from '../domain/onec-order-link-sql';
 import {
   ERP_CURRENCY, INCOMING_KINDS, paymentToken, RECEIPT_KINDS, REFUND_KINDS, STATE_GROUP_KEYS,
@@ -15,9 +16,11 @@ export interface ReceiptsReadContext {
   userId: string;
   scope: PaymentScope;
   series: string | null;
+  /** Команды вкладки доступны этому пользователю (флаг команд и права управления). */
+  commands: boolean;
 }
 
-interface BaseRow {
+export interface BaseRow {
   line_id: string; line_no: number; doc_id: string; source_id: string; doc_kind: string; number: string; doc_date: string;
   posted: boolean; deleted_in_onec: boolean; missing: boolean; line_removed: boolean; currency: string | null;
   counterparty_name: string | null; applied_revision: string | null; line_amount: string; doc_ref: string;
@@ -29,7 +32,7 @@ interface BaseRow {
   match_id: string | null; match_kind: 'matched' | 'dismissed' | null; match_origin: string | null; match_note: string | null;
   match_created_at: string | null; payment_visible: boolean; payment_id: string | null; payment_amount: string | null;
   payment_date: string | null; payment_type_name: string | null; payment_order_id: string | null; payment_order_name: string | null;
-  refunds_fingerprint: string; refunds_amount: string; state: ReceiptState; reason: string | null;
+  refunds_fingerprint: string; refunds_amount: string; state: ReceiptState; reason: string | null; drift_reasons: string[] | null;
 }
 
 /**
@@ -50,7 +53,7 @@ const REFUND_VISIBLE_SQL = (receiptDocId: string, lineOrderRef: string, scope: s
  * поступление) → заказ ERP (ручная связь, иначе правило серии) → запись сверки → состояние и видимость.
  * Параметры: $1 виды документов, $2 серия (NULL — правило выключено), $3 область (`all|own|none`), $4 пользователь.
  */
-const BASE_SQL = `
+export const BASE_SQL = `
 WITH pl AS (
   SELECT l.onec_document_line_id AS line_id, l.line_no, l.amount AS line_amount,
          l.removed_in_onec_at IS NOT NULL AS line_removed, l.onec_order_ref_key AS line_order_ref, l.settlement_doc_ref_key,
@@ -146,18 +149,22 @@ st AS (
          AND rd.doc_kind = ANY('{${REFUND_KINDS.join(',')}}'::text[])
     ) rf ON true
 ),
+drift AS (
+  SELECT st.*,
+    CASE WHEN st.match_kind = 'matched' THEN ${matchDriftReasonsSql({
+      live: 'st.live', currency: 'st.currency', lineAmount: 'st.line_amount', docDate: 'st.doc_date', orderRef: 'st.order_ref',
+      erpOrderId: 'st.erp_order_id', orderOk: 'st.order_ok', match: 'm2', payment: 'p2',
+    })} END AS drift_reasons
+  FROM st
+  LEFT JOIN payment_onec_matches m2 ON m2.match_id = st.match_id
+  LEFT JOIN payments p2 ON p2.payment_id = st.payment_id
+),
 base AS (
   SELECT st.*,
     CASE
       WHEN st.match_kind = 'dismissed' THEN 'dismissed'
-      WHEN st.match_kind = 'matched' THEN
-        CASE WHEN st.live AND st.currency = '${ERP_CURRENCY}' AND st.order_ok
-                  AND st.line_amount = m2.onec_amount AND st.currency IS NOT DISTINCT FROM m2.onec_currency
-                  AND st.doc_date = m2.onec_doc_date AND st.order_ref IS NOT DISTINCT FROM m2.onec_order_ref_key
-                  AND st.erp_order_id = m2.order_id_at_match
-                  AND st.payment_id IS NOT NULL AND p2.delete_flag = false AND p2.order_id = m2.order_id_at_match
-                  AND p2.amount = m2.payment_amount AND p2.payment_date = m2.payment_date
-             THEN 'matched' ELSE 'changed' END
+      -- Одно выражение с детектором переходов писателей (domain/onec-match-drift-sql).
+      WHEN st.match_kind = 'matched' THEN CASE WHEN cardinality(st.drift_reasons) = 0 THEN 'matched' ELSE 'changed' END
       WHEN NOT st.live THEN 'inactive'
       WHEN st.is_refund THEN
         CASE WHEN st.erp_order_id IS NULL OR st.erp_order_deleted THEN 'no_erp_order'
@@ -180,9 +187,7 @@ base AS (
       WHEN st.erp_order_deleted THEN 'erp_order_deleted'
       WHEN NOT st.order_ok THEN 'erp_order_not_ready'
     END AS reason
-  FROM st
-  LEFT JOIN payment_onec_matches m2 ON m2.match_id = st.match_id
-  LEFT JOIN payments p2 ON p2.payment_id = st.payment_id
+  FROM drift st
 )`;
 
 const iso = (value: unknown): string | null => (value === null || value === undefined ? null : value instanceof Date ? value.toISOString() : String(value));
@@ -203,7 +208,16 @@ function payment(row: BaseRow): OnecReceiptPaymentDto | null {
   };
 }
 
-function item(row: BaseRow): OnecReceiptListItemDto {
+/** What changed in a `changed` match; payment details stay hidden from a user who does not see the payment (R2-2). */
+function changes(row: BaseRow): string[] | null {
+  if (row.state !== 'changed' || !row.drift_reasons) return null;
+  const paymentReasons: readonly string[] = PAYMENT_DRIFT_REASONS;
+  if (row.payment_visible) return row.drift_reasons;
+  const own = row.drift_reasons.filter((reason) => !paymentReasons.includes(reason));
+  return own.length < row.drift_reasons.length ? [...own, 'payment_changed'] : own;
+}
+
+export function item(row: BaseRow): OnecReceiptListItemDto {
   return {
     lineId: Number(row.line_id),
     documentId: Number(row.doc_id),
@@ -225,6 +239,7 @@ function item(row: BaseRow): OnecReceiptListItemDto {
       documentId: row.onec_order_doc_id === null ? null : Number(row.onec_order_doc_id),
       number: row.onec_order_number,
       date: row.onec_order_date === null ? null : dateOnly(row.onec_order_date),
+      manualLink: row.link_id !== null,
     },
     erpOrder: row.erp_order_id === null ? null : {
       orderId: Number(row.erp_order_id),
@@ -238,6 +253,7 @@ function item(row: BaseRow): OnecReceiptListItemDto {
     },
     state: row.state,
     reason: row.reason,
+    changes: changes(row),
     match: row.match_id === null ? null : {
       matchId: Number(row.match_id), kind: row.match_kind!, origin: row.match_origin!, note: row.match_note,
       createdAt: iso(row.match_created_at)!,
@@ -292,7 +308,7 @@ export class PgOnecReceiptsReadRepository {
         data: rows.rows.map(item),
         pagination: { page: query.page, pageSize: query.pageSize, total, totalPages: Math.max(1, Math.ceil(total / query.pageSize)) },
         counters: Object.fromEntries(STATE_GROUP_KEYS.map((group) => [group, groupCount(group)])) as Record<StateGroup, number>,
-        capabilities: { commands: false },
+        capabilities: { commands: context.commands },
       };
     });
   }
@@ -311,7 +327,17 @@ export class PgOnecReceiptsReadRepository {
         this.onecPaid(client, params, row),
         this.history(client, context, lineId),
       ]);
-      return { line, candidates, refunds, onecPaid, history, capabilities: { commands: false } };
+      return { line, candidates, refunds, onecPaid, history, capabilities: { commands: context.commands } };
+    });
+  }
+
+  /** Одна строка в области видимости пользователя (ответ команды); `null` — строка не видна. */
+  line(context: ReceiptsReadContext, lineId: number): Promise<OnecReceiptListItemDto | null> {
+    return this.database.transaction(async (client) => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const { rows } = await client.query<BaseRow>(`${BASE_SQL} SELECT * FROM base WHERE line_id = $5 AND visible`,
+        [[...INCOMING_KINDS], context.series, context.scope, context.userId, lineId]);
+      return rows[0] ? item(rows[0]) : null;
     });
   }
 

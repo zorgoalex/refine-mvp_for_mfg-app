@@ -37,13 +37,16 @@ export interface OnecReceiptListItemDto {
   lineRemoved: boolean;
   refundedAmount: string;
   refundOf: { documentId: number; number: string | null } | null;
-  onecOrder: { refKey: string; documentId: number | null; number: string | null; date: string | null } | null;
+  /** `manualLink` — у заказа 1С ручная связь (в т.ч. «не относится к приложению»: тогда `erpOrder` пуст). */
+  onecOrder: { refKey: string; documentId: number | null; number: string | null; date: string | null; manualLink: boolean } | null;
   erpOrder: {
     orderId: number; orderName: string | null; clientName: string | null; finalAmount: string | null; paidAmount: string | null;
     paymentsCount: number; deleted: boolean; linkOrigin: 'manual' | 'rule' | null;
   } | null;
   state: OnecReceiptState;
   reason: string | null;
+  /** У `changed` — что изменилось относительно сверки (коды). */
+  changes: string[] | null;
   match: { matchId: number; kind: 'matched' | 'dismissed'; origin: string; note: string | null; createdAt: string } | null;
   payment: OnecReceiptPaymentDto | null;
   stateToken: string;
@@ -74,4 +77,18 @@ export interface OnecReceiptCardResponse {
     payment: { hidden: true } | { hidden: false; paymentId: number; amount: string; paymentDate: string } | null;
   }>;
   capabilities: OnecReceiptsCapabilities;
+}
+
+/** Ответ ручной команды вкладки: `changed: false` — повтор, ничего не изменилось; `line: null` — строка вне доступа. */
+export interface OnecReceiptCommandResponse {
+  changed: boolean;
+  matchId: number | null;
+  line: OnecReceiptListItemDto | null;
+}
+
+export interface OnecReceiptMatchRequest {
+  paymentId: number;
+  expectedStateToken: string;
+  expectedPaymentToken: string;
+  note?: string | null;
 }

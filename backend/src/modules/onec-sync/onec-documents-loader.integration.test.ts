@@ -11,6 +11,7 @@ import { OnecCatalogReader } from '../onec-agent/onec-catalog-reader';
 import { OnecRuntimeConfigService } from '../onec-agent/onec-runtime-config.service';
 import { lineClosedCode, lockDocumentLine, PgOnecDocumentsRepository } from '../orders/adapters/pg-onec-documents-repository';
 import { OnecDocumentsProcurementConsumer } from '../orders/application/onec-documents-procurement-consumer';
+import { OnecReceiptsLoaderConsumer } from '../payments-onec/application/onec-receipts-loader-consumer';
 import { OnecDocumentConsumers } from './application/onec-document-consumers';
 import { OnecDocumentsLoaderService, type LoadTrigger } from './application/onec-documents-loader.service';
 import { OnecDocumentsEvents, type OnecDocumentsLoaded } from './application/onec-documents-events';
@@ -886,6 +887,34 @@ describe.skipIf(!url)('1C documents loader — real PostgreSQL', { timeout: 1200
       expect((await byRef(P)).map((d) => d.doc_kind)).toEqual(['cash_outflow']);
       expect((await auditRefs(refund.id)).filter((x) => x.event === 'onec.document.removed')).toEqual([
         { event: 'onec.document.removed', ref_role: 'customer_order', ref: A, state: 'before' }]);
+    });
+
+    it('1C receipts matching consumer: a receipt line with a match record survives its removal in 1C; one without is deleted', async () => {
+      const consumer = new OnecReceiptsLoaderConsumer(consumersRef);
+      consumer.onModuleInit();
+      try {
+        const loader3 = makeLoader(customerKinds);
+        const R = K();
+        const A = K();
+        await pay('doc_cash_receipts', R, 'ОтПокупателя', [payLine(1, A, 50), payLine(2, A, 30)]);
+        await loader3.run(trigger('doc_cash_receipts'));
+        const [r] = await byRef(R);
+        const loaded = await lines(r.id);
+        const kept = loaded.find((l) => l.line_no === 1)!;
+        const dropped = loaded.find((l) => l.line_no === 2)!;
+        // Any match record — here a removed «разобрано» (history) — protects the line (plan 2026-10-04 §6).
+        await replica(
+          `INSERT INTO payment_onec_matches (onec_document_line_id, kind, origin, source_id, onec_amount, onec_doc_date, note, created_by, removed_at, removed_by)
+           VALUES ($1, 'dismissed', 'manual', $2, 50, '2026-09-02', 'E2E-Тест', 1, now(), 1)`, [kept.id, source]);
+        await pay('doc_cash_receipts', R, 'ОтПокупателя', [payLine(3, A, 80)]);
+        expect(await loader3.run(trigger('doc_cash_receipts'))).toMatchObject({ status: 'succeeded', result: { failed: 0 } });
+        const after = await lines(r.id);
+        expect(after.find((l) => l.id === kept.id)).toMatchObject({ removed: true, load_conflict_code: null });
+        expect(after.some((l) => l.id === dropped.id)).toBe(false);
+        expect((await watcher.query('SELECT load_conflict FROM onec_documents WHERE onec_document_id = $1', [r.id])).rows[0].load_conflict).toBeNull();
+      } finally {
+        consumer.onModuleDestroy();
+      }
     });
 
     it('supplier payment → refund with an active allocation: withdrawn from its kind (lines closed, 422), refund created; reverse restores', async () => {
