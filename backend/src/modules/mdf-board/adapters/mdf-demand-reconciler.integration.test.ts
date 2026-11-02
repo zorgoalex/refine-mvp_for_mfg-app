@@ -17,7 +17,7 @@ import { MdfJobRunner } from '../application/mdf-job-runner';
 import { executeMdfAcceptedJob } from '../application/mdf-accepted-job';
 import { MdfDemandDriftService } from '../application/mdf-demand-drift.service';
 import { reconcileMdfOrderDemand } from './mdf-order-cascade';
-import { partitionMdfDrift, runMdfDemandReconcileTick, type MdfDriftSource, type MdfSourceOwnerEdge } from './mdf-demand-reconciler';
+import { enqueueMdfDriftEvent, partitionMdfDrift, runMdfDemandReconcileTick, type MdfDriftSource, type MdfSourceOwnerEdge } from './mdf-demand-reconciler';
 
 const enabled = process.env.MDF_ENGINE_INTEGRATION === '1';
 
@@ -443,6 +443,15 @@ describe.skipIf(!enabled)('MDF §5.8 demand-drift reconciler + confirm service, 
     const after2 = await openConflicts();
     expect(after2.filter(r => r.source_id === conflicted.sourceId).length).toBe(before2.filter(r => r.source_id === conflicted.sourceId).length);
     expect(after2.filter(r => r.source_id === conflicted.sourceId).length).toBe(1);
+    // Notification-ready event of the transition: one per conflict row and request, with normalized dimensions; the
+    // repeated tick (no transition) adds none.
+    const events = (await fixture.client.query<{ payload_json: { conflictId: string; sourceKind: string; sourceId: string;
+      orderIds: number[]; code: string } }>(`SELECT payload_json FROM outbox_events WHERE event_type='mdf.demand_drift.conflict'
+      AND aggregate_id=$1`, [conflictRow!.conflict_id])).rows;
+    expect(events).toHaveLength(1);
+    expect(events[0].payload_json).toMatchObject({ conflictId: conflictRow!.conflict_id, sourceKind: 'bazisCutSet',
+      sourceId: conflicted.sourceId, code: 'CONFIRMATION_REQUIRED' });
+    expect(events[0].payload_json.orderIds.length).toBeGreaterThan(0);
   }, 30000);
 
   it('a connected pair (A = removal, B = addition, same owner) ⇒ nothing is written for either; conflicts recorded for both (B BLOCKED_BY_CLOSURE); resolving A refreshes both on the next tick', async () => {
@@ -506,6 +515,11 @@ describe.skipIf(!enabled)('MDF §5.8 demand-drift reconciler + confirm service, 
       `SELECT status FROM mdf_demand_drift_conflicts WHERE source_kind='bazisCutSet' AND source_id=$1 ORDER BY detected_at DESC LIMIT 1`,
       [s.sourceId]);
     expect(resolved.rows[0]?.status).toBe('resolved');
+    const events = (await fixture.client.query<{ payload_json: { sourceId: string; reason: string } }>(
+      `SELECT payload_json FROM outbox_events WHERE event_type='mdf.demand_drift.resolved' AND payload_json->>'sourceId'=$1`,
+      [s.sourceId])).rows;
+    expect(events).toHaveLength(1);
+    expect(events[0].payload_json).toMatchObject({ sourceId: s.sourceId, reason: 'transition_gone' });
   }, 30000);
 
   it('A -> B -> A -> B via allowed catalog renames produces distinct, non-replayed transitions', async () => {
@@ -528,6 +542,19 @@ describe.skipIf(!enabled)('MDF §5.8 demand-drift reconciler + confirm service, 
     expect(keys.size).toBe(new Set(keys).size);
     expect(keys.size).toBeGreaterThan(0);
   }, 30000);
+
+  it('the drift event enqueue is idempotent per transition and request (a retry adds nothing)', async () => {
+    const event = { type: 'mdf.demand_drift.resolved' as const, conflictId: randomUUID(), sourceKind: 'bazisCutSet',
+      sourceId: 'E2E-drift-idem', orderIds: [3, 1], code: 'HARD_CONFLICT', actorUserId: '1', requestId: 'E2E idem', auditId: randomUUID() };
+    const tx = { query: (sql: string, params: readonly unknown[] = []) => fixture.client.query(sql, [...params]) } as never;
+    await enqueueMdfDriftEvent(tx, event);
+    await enqueueMdfDriftEvent(tx, event);
+    await enqueueMdfDriftEvent(tx, { ...event, requestId: 'E2E idem retry under another request' });
+    const rows = (await fixture.client.query<{ payload_json: { orderIds: number[]; requestId: string } }>(
+      'SELECT payload_json FROM outbox_events WHERE aggregate_id=$1 ORDER BY created_at', [event.conflictId])).rows;
+    expect(rows.map(r => r.payload_json.requestId)).toEqual(['E2E idem', 'E2E idem retry under another request']);
+    expect(rows[0].payload_json.orderIds).toEqual([1, 3]);
+  });
 
   it('a conflict resolved by a revert reopens the SAME row with after.reopened=true when the identical transition recurs; a further unchanged tick writes no additional audit', async () => {
     const s = await makeSource();
@@ -557,6 +584,10 @@ describe.skipIf(!enabled)('MDF §5.8 demand-drift reconciler + confirm service, 
     const reopened = (await openConflicts()).find(r => r.source_id === s.sourceId);
     expect(reopened).toBeDefined();
     expect(reopened!.conflict_id).toBe(conflictId); // the SAME row is reopened, not a new one
+    // The recurrence is a new transition under a new request: a second conflict event, the resolution in between too.
+    const conflictEvents = (await fixture.client.query<{ event_type: string }>(`SELECT event_type FROM outbox_events
+      WHERE aggregate_id=$1 ORDER BY created_at`, [conflictId])).rows.map(r => r.event_type);
+    expect(conflictEvents).toEqual(['mdf.demand_drift.conflict', 'mdf.demand_drift.resolved', 'mdf.demand_drift.conflict']);
 
     const reopenedRow = (await fixture.client.query<{ status: string; resolved_at: string | null }>(
       'SELECT status,resolved_at::text resolved_at FROM mdf_demand_drift_conflicts WHERE conflict_id=$1', [conflictId])).rows[0];
@@ -953,6 +984,10 @@ describe.skipIf(!enabled)('MDF §5.8 demand-drift reconciler + confirm service, 
       expect(finalRows.rows).toHaveLength(2);
       expect(finalRows.rows.every(r => r.status === 'resolved')).toBe(true); // resolved exactly once each, never double
       expect((await openConflicts()).some(r => r.source_id === sourceIdA || r.source_id === sourceIdB)).toBe(false);
+      // One resolution event per conflict — the sibling resolved by the other conflict's confirmation included.
+      const events = (await fixture.client.query<{ aggregate_id: string }>(`SELECT aggregate_id FROM outbox_events
+        WHERE event_type='mdf.demand_drift.resolved' AND aggregate_id=ANY($1::text[])`, [[rowA!.conflict_id, rowB!.conflict_id]])).rows;
+      expect(events.map(e => e.aggregate_id).sort()).toEqual([rowA!.conflict_id, rowB!.conflict_id].sort());
     }, 30000);
   });
 });

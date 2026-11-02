@@ -29,6 +29,21 @@ export const MDF_CONFLICT_LOCK_ORDER = 'source_kind COLLATE "C",source_id COLLAT
 const byConflictOrder = (a: { kind: string; id: string }, b: { kind: string; id: string }) =>
   a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 
+/** Notification-ready domain event of a demand-drift conflict transition (detected / resolved), in the transaction of the
+ * transition and its audit row: normalized source/order dimensions, actor, request; one event per transition and request. */
+export async function enqueueMdfDriftEvent(tx: TransactionClient, event: {
+  type: 'mdf.demand_drift.conflict' | 'mdf.demand_drift.resolved'; conflictId: string; sourceKind: string; sourceId: string;
+  orderIds: readonly number[]; code: string | null; actorUserId: string; requestId: string; auditId: string; reason?: string;
+}): Promise<void> {
+  await tx.query(`INSERT INTO outbox_events(event_type,aggregate_type,aggregate_id,payload_json,idempotency_key)
+    VALUES ($1,'mdf_demand_drift_conflict',$2,$3::jsonb,$4) ON CONFLICT (idempotency_key) DO NOTHING`,
+  [event.type, event.conflictId, JSON.stringify({ conflictId: event.conflictId, sourceKind: event.sourceKind,
+    sourceId: event.sourceId, orderIds: [...event.orderIds].sort((a, b) => a - b), code: event.code,
+    actorUserId: Number(event.actorUserId), requestId: event.requestId, auditId: event.auditId,
+    ...(event.reason ? { reason: event.reason } : {}) }),
+  `${event.type}:${event.conflictId}:${event.requestId}`]);
+}
+
 async function openConflictKeys(tx: TransactionClient): Promise<Set<string>> {
   return new Set((await tx.query<{ k: string; i: string; p: string; d: string }>(`SELECT source_kind k,source_id i,
     predecessor_revision_key p,live_demand_digest d FROM mdf_demand_drift_conflicts WHERE status='open'`)).rows
@@ -174,6 +189,9 @@ export async function runMdfDemandReconcileTick(input: {
             metadata: { causeCode: error.code, predecessor: s.predecessor },
             relatedEntities: s.owners.map(entityId => ({ entityType: 'order' as const, entityId })) });
           if (!auditId) throw new Error('MDF_RECONCILE_AUDIT_FAILED');
+          await enqueueMdfDriftEvent(tx, { type: 'mdf.demand_drift.conflict', conflictId: written.conflict_id,
+            sourceKind: s.kind, sourceId: s.id, orderIds: s.owners, code: rowCode, actorUserId: input.user.id,
+            requestId: input.requestId, auditId });
         }
       });
     }
@@ -205,6 +223,9 @@ export async function runMdfDemandReconcileTick(input: {
           liveDigest: c.live_demand_digest },
         relatedEntities: owners.map(entityId => ({ entityType: 'order' as const, entityId })) });
       if (!auditId) throw new Error('MDF_RECONCILE_AUDIT_FAILED');
+      await enqueueMdfDriftEvent(tx, { type: 'mdf.demand_drift.resolved', conflictId: c.conflict_id,
+        sourceKind: c.source_kind, sourceId: c.source_id, orderIds: owners, code: c.code, actorUserId: input.user.id,
+        requestId: input.requestId, auditId, reason: 'transition_gone' });
     }
     return stale.length;
   });

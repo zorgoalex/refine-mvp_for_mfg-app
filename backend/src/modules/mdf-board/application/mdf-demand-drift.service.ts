@@ -5,7 +5,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionsService } from '../../../permissions/permissions.service';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
-import { findMdfDemandDrift, loadMdfSourceOwnerGraph, MDF_CONFLICT_LOCK_ORDER, mdfReconcileCommandKey, partitionMdfDrift }
+import { enqueueMdfDriftEvent, findMdfDemandDrift, loadMdfSourceOwnerGraph, MDF_CONFLICT_LOCK_ORDER, mdfReconcileCommandKey, partitionMdfDrift }
   from '../adapters/mdf-demand-reconciler';
 import { reconcileMdfOrderDemand } from '../adapters/mdf-order-cascade';
 import { mdfAllowedOrdersSql } from '../adapters/mdf-published-snapshot';
@@ -77,9 +77,11 @@ export class MdfDemandDriftService {
         FOR UPDATE OF c`, [keys.map(k => k[0]), keys.map(k => k[1]), conflictId])).rows;
       // A concurrent confirmation (or the reconciler) resolved it meanwhile: the whole command rolls back.
       if (locked.find(r => r.conflict_id === conflictId)?.status !== 'open') throw alreadyResolved();
-      const resolved = (await tx.query<{ conflict_id: string }>(`UPDATE mdf_demand_drift_conflicts
+      const resolved = (await tx.query<{ conflict_id: string; source_kind: string; source_id: string; owner_ids: string[];
+        code: string }>(`UPDATE mdf_demand_drift_conflicts
         SET status='resolved',resolved_at=now(),resolved_request_id=$2,resolved_by_user_id=$3::bigint
-        WHERE conflict_id=ANY($1::uuid[]) AND status='open' RETURNING conflict_id::text`,
+        WHERE conflict_id=ANY($1::uuid[]) AND status='open'
+        RETURNING conflict_id::text,source_kind,source_id,owner_ids::text[] owner_ids,code`,
       [locked.filter(r => r.status === 'open').map(r => r.conflict_id), requestId, Number(user.id)])).rows;
       const auditId = await auditService.record(tx, { event: 'mdf.demand_drift.resolved', entityType: 'mdf_demand_drift_conflict',
         entityId: conflictId, actorUserId: user.id, actorUsername: user.username, actorRole: user.role, requestId,
@@ -88,6 +90,12 @@ export class MdfDemandDriftService {
           reconciled: Boolean(group) },
         relatedEntities: orderIds.map(entityId => ({ entityType: 'order' as const, entityId })) });
       if (!auditId) throw new Error('MDF_DRIFT_AUDIT_FAILED');
+      // One event per conflict this confirmation resolved (siblings of the same closure included), linked to its audit.
+      for (const row of resolved) {
+        await enqueueMdfDriftEvent(tx, { type: 'mdf.demand_drift.resolved', conflictId: row.conflict_id,
+          sourceKind: row.source_kind, sourceId: row.source_id, orderIds: row.owner_ids.map(Number), code: row.code,
+          actorUserId: user.id, requestId, auditId, reason: group ? 'confirmed_reconciled' : 'confirmed_gone' });
+      }
       return { resolved: resolved.length };
     }, { mdf: { writer: 'mdf.demand_reconcile', capability: 'order-demand' } });
   }
