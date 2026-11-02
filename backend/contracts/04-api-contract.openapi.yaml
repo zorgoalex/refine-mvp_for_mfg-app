@@ -18516,7 +18516,7 @@ paths:
         review-state receipt line with the only free payment of its ERP order of the same amount within 3 days (mutually
         unique); every pair is re-checked under locks. Enabled by BACKEND_ONEC_PAYMENT_MATCHING_COMMANDS.
       responses:
-        '200': {description: "{passId, candidates, matched, skipped}"}
+        '200': {description: "{candidates, matched, skipped}"}
         '401': {description: Authentication required}
         '403': {description: "Permission denied (audited as payments.onec_denied)"}
         '503': {description: "ONEC_PAYMENT_MATCHING_COMMANDS_DISABLED"}
