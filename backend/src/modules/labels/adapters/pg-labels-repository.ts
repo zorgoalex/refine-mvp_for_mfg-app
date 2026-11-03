@@ -2739,17 +2739,7 @@ export async function resolveLabelCutMaps(
       svg: placement.base_svg,
       isVacuum: placement.is_vacuum === true,
     });
-    return [{
-      ...row,
-      cutMap,
-      values: {
-        ...row.values,
-        'cut.number': cutMap.cutNumber,
-        'cut.job_name': cutMap.cutJobName,
-        'cut.sheet_number': cutMap.sheetNumber,
-        'cut.variant': cutMap.variant,
-      },
-    }];
+    return [withCutMap(row, cutMap, { cutResultIsVacuum: placement.is_vacuum === true })];
   });
   return resolveTelegramFallbackRows(client, resolvedRows, assets, orderId, cutMapSource, telegram);
 }
@@ -3137,7 +3127,15 @@ function telegramImageCandidateMatchesMedia(
   return true;
 }
 
-function withCutMap(row: LabelRow, cutMap: LabelRowCutMapSnapshot): LabelRow {
+// A detail may sit in several cut jobs at once. The detail-level version fields
+// default to its latest ready job; when the label is printed from a concrete
+// sheet, that sheet's job number must win (regular sheet -> «Раскрой»,
+// vacuum sheet -> «Ванна»), otherwise the label names another cut.
+function withCutMap(
+  row: LabelRow,
+  cutMap: LabelRowCutMapSnapshot,
+  options: { cutResultIsVacuum?: boolean } = {},
+): LabelRow {
   const values: LabelRow['values'] = {
     ...row.values,
     'cut.number': cutMap.cutNumber,
@@ -3145,8 +3143,10 @@ function withCutMap(row: LabelRow, cutMap: LabelRowCutMapSnapshot): LabelRow {
     'cut.sheet_number': cutMap.sheetNumber,
     'cut.variant': cutMap.variant,
   };
-  if (isTelegramCutMap(cutMap)) {
+  if (isTelegramCutMap(cutMap) || options.cutResultIsVacuum !== true) {
     values[`detail.${DETAIL_CUT_RESULT_VERSION_REGULAR_FIELD}`] = cutMap.cutNumber;
+  } else {
+    values[`detail.${DETAIL_CUT_RESULT_VERSION_VACUUM_FIELD}`] = cutMap.cutNumber;
   }
   return {
     ...row,
