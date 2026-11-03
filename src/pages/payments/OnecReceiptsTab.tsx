@@ -180,7 +180,7 @@ export function OnecReceiptsTab({ requestedLineId = null, requestKey }: {
   /** Строка из адреса (`?onecLine=`): открыть её карточку. */
   requestedLineId?: number | null;
   /** Ключ перехода: повторный переход на ту же строку снова открывает карточку. */
-  requestKey?: string;
+  requestKey?: number;
 } = {}) {
   const [group, setGroup] = useState<OnecReceiptGroup | null>('review');
   const [kind, setKind] = useState<KindFilter>('all');

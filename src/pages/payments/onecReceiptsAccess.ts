@@ -21,3 +21,12 @@ export function readOnecLineParam(search: string): number | null {
   const value = Number(raw);
   return Number.isSafeInteger(value) ? value : null;
 }
+
+/** Адрес без одноразовых параметров ссылки на карточку 1С (`tab`, `onecLine`); остальные параметры (фильтры списка) — как были. */
+export function withoutOnecLinkParams(search: string): string {
+  const params = new URLSearchParams(search);
+  params.delete('tab');
+  params.delete('onecLine');
+  const rest = params.toString();
+  return rest ? `?${rest}` : '';
+}

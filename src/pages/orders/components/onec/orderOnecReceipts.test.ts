@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import type { OnecReceiptListItemDto } from '../../../../api/types/paymentsOnecApi.types';
-import { onecReceiptCardPath, readOnecLineParam } from '../../../payments/onecReceiptsAccess';
+import { onecReceiptCardPath, readOnecLineParam, withoutOnecLinkParams } from '../../../payments/onecReceiptsAccess';
 import { committedPaymentsKey, orderOnecAmountText, orderOnecStateNotes, orderOnecTruncatedText, splitOrderOnecReceipts } from './orderOnecReceipts';
 
 const ORDER = 77;
@@ -68,6 +68,21 @@ describe('link to the receipt card', () => {
     for (const bad of ['', '?onecLine=0', '?onecLine=-1', '?onecLine=1.5', '?onecLine=abc', '?onecLine=99999999999999999', '?onecLine=01']) {
       expect(readOnecLineParam(bad)).toBeNull();
     }
+  });
+});
+
+describe('the card link is consumed once (Платежи list keeps foreign query params)', () => {
+  it('strips tab/onecLine and keeps the list params', () => {
+    expect(withoutOnecLinkParams('?tab=onec&onecLine=42')).toBe('');
+    expect(withoutOnecLinkParams('?current=2&tab=onec&pageSize=50&onecLine=42')).toBe('?current=2&pageSize=50');
+    expect(withoutOnecLinkParams('?current=1')).toBe('?current=1');
+  });
+  it('PaymentsPage switches to «Поступления 1С» only on a new link, then removes the link params from the address', () => {
+    const page = readFileSync(new URL('../../../payments/PaymentsPage.tsx', import.meta.url), 'utf8');
+    // Не по каждому обновлению адреса (location.key): иначе обновление адреса списком платежей возвращает на вкладку 1С.
+    expect(page).not.toContain('location.key');
+    expect(page).toContain('withoutOnecLinkParams(location.search)');
+    expect(page).toContain('{ replace: true }');
   });
 });
 
