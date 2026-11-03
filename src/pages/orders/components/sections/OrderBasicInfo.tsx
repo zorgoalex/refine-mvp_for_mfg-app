@@ -5,7 +5,7 @@ import { Table } from '../../../../ui/tooltipDelay';
 // Row 3: ERP project when enabled
 // Row 4: Doweling Orders Table (Name, Engineer)
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Popconfirm, notification } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { OrderLifecycleReadSurface, useSelect } from '../../../../query/orderLifecycleQueries';
@@ -28,6 +28,9 @@ import {
 import { featureFlags } from '../../../../config/featureFlags';
 import { authSession } from '../../../../api/authSession';
 import { isPackerUser } from '../../../../utils/packerStatusAccess';
+import { can } from '../../../../utils/permissions';
+import type { ReferenceOption } from '../../../../query/orderFormDataReferences';
+import { ORDER_MANAGER_CHANGE_PERMISSION, orderManagerOptions } from './orderManagerOptions';
 import { ordersApi } from '../../../../api/ordersApi';
 import { useOrderFormReworkPick } from '../rework/useOrderFormReworkPick';
 import { useReworkOrderStatusIds } from '../rework/useReworkOrderStatusIds';
@@ -104,12 +107,38 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
     optionLabel: 'full_name',
     optionValue: 'employee_id',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
-    ...(header.manager_id ? { defaultValue: header.manager_id } : {}),
     queryOptions: { enabled: !useBackendReferences && !packerMode },
   });
   const resolvedEmployeeSelectProps = useBackendReferences
     ? createBackendSelectProps(orderFormData.references.employees, orderFormData.isLoading)
     : employeeSelectProps;
+
+  // «Менеджер» is an ERP user (orders.manager_id), not an employee. Candidates come with the backend form data; when the
+  // form reads its references through Hasura they are asked from the backend (users are not exposed in Hasura).
+  // Choosing another manager needs orders.manager.change; without it the field only shows the current manager.
+  const canChangeManager = can(ORDER_MANAGER_CHANGE_PERMISSION, currentUser);
+  const [managerOptionsFromApi, setManagerOptionsFromApi] = useState<ReferenceOption[] | null>(null);
+  const [managerOptionsFailed, setManagerOptionsFailed] = useState(false);
+  const [managerOptionsAttempt, setManagerOptionsAttempt] = useState(0);
+  useEffect(() => {
+    if (useBackendReferences || packerMode) return undefined;
+    const controller = new AbortController();
+    setManagerOptionsFailed(false);
+    setManagerOptionsFromApi(null);
+    ordersApi.getManagerOptions({ signal: controller.signal })
+      .then((response) => setManagerOptionsFromApi(
+        response.managers.map((manager, index) => ({ value: manager.id, label: manager.fullName, sortOrder: index })),
+      ))
+      // A failure is not «no candidates»: the field says so and offers a retry.
+      .catch(() => { if (!controller.signal.aborted) setManagerOptionsFailed(true); });
+    return () => controller.abort();
+  }, [useBackendReferences, packerMode, managerOptionsAttempt]);
+  const retryManagerOptions = useCallback(() => setManagerOptionsAttempt((attempt) => attempt + 1), []);
+  const managerOptions = useMemo(() => orderManagerOptions(
+    useBackendReferences ? orderFormData.references.managers : (managerOptionsFromApi ?? []),
+    header.manager_id,
+    header.manager_name,
+  ), [useBackendReferences, orderFormData.references.managers, managerOptionsFromApi, header.manager_id, header.manager_name]);
 
   // Load order statuses
   const { selectProps: orderStatusProps } = useSelect({
@@ -547,13 +576,25 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
           </Col>
 
           <Col span={5} className="order-basic-form__field order-basic-form__field--manager">
-            <Form.Item label="Менеджер">
+            <Form.Item
+              label="Менеджер"
+              tooltip={canChangeManager ? undefined : 'Сменить менеджера может только пользователь с правом «Заказы: смена менеджера»'}
+              validateStatus={managerOptionsFailed ? 'warning' : undefined}
+              help={managerOptionsFailed ? (
+                <span>
+                  Не удалось загрузить список менеджеров.{' '}
+                  <Button type="link" size="small" style={{ padding: 0 }} onClick={retryManagerOptions}>Повторить</Button>
+                </span>
+              ) : undefined}
+            >
               <Select
-                {...resolvedEmployeeSelectProps}
+                options={managerOptions.map((option) => ({ value: option.value, label: option.label }))}
+                loading={useBackendReferences ? orderFormData.isLoading : managerOptionsFromApi === null && !managerOptionsFailed}
                 value={header.manager_id}
-                onChange={(value) => updateHeaderField('manager_id', value)}
-                placeholder="Выберите менеджера"
-                allowClear
+                onChange={(value) => updateHeaderField('manager_id', value ?? null)}
+                placeholder={header.order_id ? 'Не назначен' : 'Вы (по умолчанию)'}
+                disabled={!canChangeManager}
+                allowClear={canChangeManager}
                 showSearch
                 filterOption={(input, option) =>
                   (option?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())

@@ -33,6 +33,8 @@ export interface OrderFormDataReferences {
   productionStatuses: ReferenceOption[];
   workshops: ReferenceOption[];
   employees: ReferenceOption[];
+  /** Who may be chosen as the manager of an order (ERP users; value = orders.manager_id). */
+  managers: ReferenceOption[];
   units: ReferenceOption[];
   sheetMaterialTypes: SheetMaterialTypeOption[];
   defaultOrderStatus: number | undefined;
@@ -70,6 +72,7 @@ export function mapOrderFormDataToReferences(
   const productionStatuses = toOptions(data.productionStatuses, (item) => item.name);
   const workshops = toOptions(data.workshops, (item) => item.name);
   const employees = toOptions(data.employees, (item) => item.fullName);
+  const managers = toOptions(data.managers ?? [], (item) => item.fullName);
   const units = toOptions(data.units, (item) => item.name);
   const sheetMaterialTypes: SheetMaterialTypeOption[] = data.sheetMaterialTypes
     ? data.sheetMaterialTypes.map((item) => ({
@@ -95,6 +98,7 @@ export function mapOrderFormDataToReferences(
     productionStatuses,
     workshops,
     employees,
+    managers,
     units,
     sheetMaterialTypes,
     defaultOrderStatus: resolveDefaultNewOrderStatusId(orderStatuses),
@@ -132,6 +136,7 @@ function createEmptyReferences(): OrderFormDataReferences {
     productionStatuses: [],
     workshops: [],
     employees: [],
+    managers: [],
     units: [],
     sheetMaterialTypes: [],
     defaultOrderStatus: undefined,
