@@ -1209,6 +1209,32 @@ const buildOrderBy = (resource: string, sorters?: any[]) => {
   return `, order_by: [${parts.join(", ")}]`;
 };
 
+/** Reference lists whose URL-synced filters are typed back (see `referenceUrlScalar`). */
+const REFERENCE_URL_SCALAR_RESOURCES: ReadonlySet<string> = new Set([
+  'materials', 'sheet_material_types', 'film_types', 'material_types', 'edge_types', 'milling_types',
+  'extra_resources', 'vendors', 'film_vendors', 'units', 'catalog_items', 'workshops', 'work_centers',
+  'order_workshops', 'production_statuses', 'order_statuses', 'payment_statuses', 'requisition_statuses',
+  'resource_requirements_statuses', 'movements_statuses', 'material_transaction_types', 'transaction_direction',
+  'payment_types', 'employees', 'suppliers',
+]);
+
+/** Boolean columns of the reference lists whose names do not start with `is_` (filters «Да / Нет»). */
+const REFERENCE_BOOLEAN_FIELDS: ReadonlySet<string> = new Set(['affects_stock', 'requires_document', 'texture']);
+
+/** Number columns of the reference lists (column header filters keep their values in the URL as text). */
+const REFERENCE_NUMBER_FIELDS: ReadonlySet<string> = new Set([
+  'thickness_mm', 'width_mm', 'height_mm', 'decimals', 'cost_per_sqm', 'min_width_mm', 'sequence_order',
+]);
+
+/** `is_*` and the boolean columns above → boolean; `*_id`, `sort_order`, the number columns above and range bounds → number, when the string is exactly that. */
+export function referenceUrlScalar(field: unknown, operator: unknown, value: unknown): unknown {
+  if (typeof value !== 'string' || typeof field !== 'string') return value;
+  if (field.startsWith('is_') || REFERENCE_BOOLEAN_FIELDS.has(field)) return value === 'true' ? true : value === 'false' ? false : value;
+  const numeric = value.trim() !== '' && Number.isFinite(Number(value));
+  if (numeric && (field.endsWith('_id') || field === 'sort_order' || REFERENCE_NUMBER_FIELDS.has(field) || operator === 'gte' || operator === 'lte')) return Number(value);
+  return value;
+}
+
 const mapOperator = (op: string) => {
   switch (op) {
     case "eq":
@@ -1258,6 +1284,12 @@ const buildWhere = (resource: string, filters?: any[]) => {
         return value;
       };
       val = Array.isArray(val) ? val.map(scalar) : scalar(val);
+    } else if (REFERENCE_URL_SCALAR_RESOURCES.has(resource)) {
+      // Reference list filters (search, «Показывать неактивные», the «Фильтры» spoiler) are synced with the URL
+      // and come back as strings after a reload: booleans and numbers get their GraphQL types again.
+      val = Array.isArray(val)
+        ? val.map((item: unknown) => referenceUrlScalar(f.field, f.operator, item))
+        : referenceUrlScalar(f.field, f.operator, val);
     }
     // Drop null/undefined from `_in` arrays — Hasura rejects `_in: [null]` for
     // non-null typed columns ("unexpected null value for type 'smallint'").
@@ -1855,6 +1887,27 @@ export const dataProvider = (_apiUrl: string) => {
       }
 
       const where = buildWhere(resource, enhancedFilters);
+
+      // Header filters of the reference lists: the distinct values of one scalar column under the other filters
+      // (`meta.distinctOn`; the caller sets the limit and treats `limit` rows as «too many»).
+      const distinctOn = typeof meta?.distinctOn === "string" ? meta.distinctOn : null;
+      if (distinctOn !== null) {
+        if (!GRAPHQL_FIELD_NAME.test(distinctOn) || !scalarFieldsFor(resource)?.has(distinctOn)) {
+          throw new Error(`Нельзя получить значения поля ${distinctOn}`);
+        }
+        const distinctLimit = limit ?? 101;
+        const distinctQuery = `
+          query {
+            ${resource}(distinct_on: [${distinctOn}], order_by: [{ ${distinctOn}: asc }], limit: ${distinctLimit}${where}) {
+              ${distinctOn}
+            }
+          }
+        `;
+        const distinctData = await gqlRequest(distinctQuery, undefined, hasuraRequestOptionsFromMeta(meta));
+        const rows = distinctData[resource] ?? [];
+        return { data: rows, total: rows.length };
+      }
+
       const selection = fieldsFor(resource, meta);
       // For aggregate, remove leading comma from where clause
       const aggregateWhere = where ? `(${where.replace(/^,\s*/, '')})` : '';

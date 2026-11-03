@@ -11,6 +11,9 @@ import {
 } from '../../api/productionTechSettingsApi';
 import { can } from '../../utils/permissions';
 import { SuppliersSelect } from '../../components/materialSuppliers/SuppliersSelect';
+import { ReferenceFilterBar } from '../../components/referenceFilters/ReferenceFilterBar';
+import type { RefineFilter } from '../../components/referenceFilters/referenceFilterModel';
+import { EXTRA_RESOURCE_FILTERS, EXTRA_RESOURCE_KIND_OPTIONS, filterExtraResources } from './extraResourceFilters';
 
 interface UnitOption {
   unit_id: number;
@@ -40,13 +43,7 @@ interface ExtraResourceDraft {
   supplierIds: number[];
 }
 
-const RESOURCE_KIND_OPTIONS = [
-  { label: 'Листовой материал', value: 'sheet_material' },
-  { label: 'Шпон', value: 'veneer' },
-  { label: 'Краска', value: 'paint' },
-  { label: 'Замазка', value: 'putty' },
-  { label: 'Другое', value: 'other' },
-];
+const RESOURCE_KIND_OPTIONS = EXTRA_RESOURCE_KIND_OPTIONS;
 
 export function ExtraResourcesDictionary() {
   const canManage = can('settings.manage');
@@ -54,10 +51,18 @@ export function ExtraResourcesDictionary() {
   const canViewUnits = can('references.view') || canManage;
   const [resources, setResources] = useState<ExtraResourceDto[]>([]);
   const [drafts, setDrafts] = useState<ExtraResourceDraft[]>([]);
+  // filters of the loaded dictionary (same panel as other references; nothing goes to the server)
+  const [filters, setFilters] = useState<RefineFilter[]>([]);
+
   const [loading, setLoading] = useState(canView);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   // Производитель и поставщики — только если backend их отдаёт (migr 280): старый backend отклонил бы эти поля.
   const supportsSuppliers = resources.some((resource) => Array.isArray(resource.suppliers));
+  // edited rows stay visible until saved, whatever the filters: a hidden row would hide its «Сохранить» too
+  const visibleDrafts = useMemo(
+    () => filterExtraResources(drafts, filters, (row) => isChanged(row, resources, supportsSuppliers)),
+    [drafts, filters, resources, supportsSuppliers],
+  );
 
   const load = useCallback(async () => {
     if (!canView) {
@@ -332,11 +337,12 @@ export function ExtraResourcesDictionary() {
 
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <ReferenceFilterBar storageKey="extra_resources" config={EXTRA_RESOURCE_FILTERS} filters={filters} setFilters={(next) => setFilters(next)} />
       <Button disabled={!canManage} onClick={addDraft}>Добавить ресурс</Button>
       <Table<ExtraResourceDraft>
         rowKey="clientKey"
         loading={loading}
-        dataSource={drafts}
+        dataSource={visibleDrafts}
         columns={columns}
         pagination={false}
         size="small"

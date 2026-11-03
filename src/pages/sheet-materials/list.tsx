@@ -3,6 +3,9 @@ import React, { useMemo } from 'react';
 import { IResourceComponentsProps, useMany, useNavigation } from '@refinedev/core';
 import { ShowButton, EditButton, CreateButton } from '@refinedev/antd';
 import { usePersistentTable as useTable } from '../../hooks/usePersistentTable';
+import { useReferenceHeaderFilters } from '../../components/referenceFilters/useReferenceHeaderFilters';
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge, Tag, Button } from 'antd';
 import { useHighlightRow } from '../../hooks/useHighlightRow';
 import { LocalizedList } from '../../components/LocalizedList';
@@ -10,9 +13,31 @@ import { can } from '../../utils/permissions';
 import { CategoryCell, NoteCell } from '../../components/NomenclatureFields';
 import { useSheetMaterialNomenclature } from './useSheetMaterialNomenclature';
 
+const SHEET_MATERIAL_TYPES_FILTERS: ReferenceFilterConfig = {
+  search: { field: "name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "boolean", field: "is_cuttable", label: "Раскраивается", yes: "Да", no: "Нет" },
+    { kind: "select", field: "material_type_id", label: "Тип материала", resource: "material_types", optionLabel: "material_type_name", optionValue: "material_type_id" },
+    { kind: "select", field: "vendor_id", label: "Производитель", resource: "vendors", optionLabel: "vendor_name", optionValue: "vendor_id" },
+    { kind: "range", field: "thickness_mm", label: "Толщина, мм" },
+    { kind: "text", field: "supplier_article", label: "Артикул" },
+  ],
+};
+
+const SHEET_MATERIALS_HEADER_FILTERS = {
+  resource: 'sheet_material_types',
+  fields: ['name', 'conversion_key', 'material_type_id', 'unit_id', 'thickness_mm', 'width_mm', 'height_mm', 'vendor_id', 'supplier_article', 'texture', 'is_cuttable', 'color'],
+  lookups: {
+    material_type_id: { resource: 'material_types', optionValue: 'material_type_id', optionLabel: 'material_type_name' },
+    unit_id: { resource: 'units', optionValue: 'unit_id', optionLabel: 'unit_name' },
+    vendor_id: { resource: 'vendors', optionValue: 'vendor_id', optionLabel: 'vendor_name' },
+  },
+};
+
 export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
   const canManage = can('sheet_materials.manage');
-  const { tableProps } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [
@@ -21,6 +46,8 @@ export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
       ],
     },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, SHEET_MATERIALS_HEADER_FILTERS);
   const { highlightProps } = useHighlightRow('sheet_material_type_id', tableProps.dataSource);
   const nomenclature = useSheetMaterialNomenclature();
   const { show } = useNavigation();
@@ -73,6 +100,7 @@ export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
       title="Листовые материалы"
       headerButtons={canManage ? <CreateButton resource="sheet_material_types" /> : undefined}
     >
+      <ReferenceFilterBar storageKey="sheet_material_types" config={SHEET_MATERIAL_TYPES_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         {...highlightProps}
@@ -80,26 +108,32 @@ export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
         onRow={(record) => ({ onDoubleClick: () => show('sheet_material_types', record.sheet_material_type_id) })}
       >
         <Table.Column dataIndex="sheet_material_type_id" title="ID" sorter />
-        <Table.Column dataIndex="name" title="Название" sorter />
+        <Table.Column dataIndex="name" {...columnFilter("name")} title="Название" sorter />
         <Table.Column dataIndex="sort_order" title="Порядок" sorter />
         <Table.Column
           dataIndex="conversion_key"
+          sorter
+          {...columnFilter("conversion_key")}
           title="Conversion Key"
           render={(value: string | null | undefined) => value ? <Tag>{value}</Tag> : '—'}
         />
         <Table.Column
           dataIndex="material_type_id"
+          sorter
+          {...columnFilter("material_type_id")}
           title="Тип материала"
           render={(_, record: any) => typeMap[record?.material_type_id] ?? record?.material_type_id}
         />
         <Table.Column
           dataIndex="unit_id"
+          sorter
+          {...columnFilter("unit_id")}
           title="Ед. изм."
           render={(_, record: any) => unitMap[record?.unit_id] ?? record?.unit_id}
         />
-        <Table.Column dataIndex="thickness_mm" title="Толщина, мм" sorter />
-        <Table.Column dataIndex="width_mm" title="Ширина, мм" />
-        <Table.Column dataIndex="height_mm" title="Высота, мм" />
+        <Table.Column dataIndex="thickness_mm" {...columnFilter("thickness_mm")} title="Толщина, мм" sorter />
+        <Table.Column dataIndex="width_mm" sorter {...columnFilter("width_mm")} title="Ширина, мм" />
+        <Table.Column dataIndex="height_mm" sorter {...columnFilter("height_mm")} title="Высота, мм" />
         <Table.Column
           dataIndex="supplier_id"
           title="Поставщики"
@@ -112,25 +146,29 @@ export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
         />
         <Table.Column
           dataIndex="vendor_id"
+          sorter
+          {...columnFilter("vendor_id")}
           title="Производитель"
           render={(_, record: any) => vendorMap[record?.vendor_id] ?? (record?.vendor_id ? record.vendor_id : '—')}
         />
-        <Table.Column dataIndex="supplier_article" title="Артикул" render={(v) => v ?? '—'} />
+        <Table.Column dataIndex="supplier_article" sorter {...columnFilter("supplier_article")} title="Артикул" render={(v) => v ?? '—'} />
         <Table.Column
           dataIndex="texture"
+          sorter
+          {...columnFilter("texture")}
           title="Текстура"
           render={(v) => (v === null || v === undefined ? '—' : v ? <Tag color="blue">Да</Tag> : <Tag>Нет</Tag>)}
         />
         <Table.Column
           dataIndex="is_cuttable"
+          {...columnFilter("is_cuttable")}
           title="Для раскроя"
           sorter
           render={(value: boolean | null | undefined) => (
             value === null || value === undefined ? '—' : value ? <Tag color="green">Да</Tag> : <Tag color="red">Нет</Tag>
           )}
-          filters={[{ text: 'Да', value: true }, { text: 'Нет', value: false }]}
         />
-        <Table.Column dataIndex="color" title="Цвет" render={(v) => v ?? '—'} />
+        <Table.Column dataIndex="color" sorter {...columnFilter("color")} title="Цвет" render={(v) => v ?? '—'} />
         <Table.Column title="Тип номенклатуры" key="nomenclatureType" ellipsis render={(_, record: any) => nomenclature.byId.get(Number(record.sheet_material_type_id))?.nomenclatureType || '—'} />
         <Table.Column title="Категория номенклатуры" key="nomenclatureCategory" ellipsis render={(_, record: any) => <CategoryCell value={nomenclature.byId.get(Number(record.sheet_material_type_id))?.nomenclatureCategory} />} />
         <Table.Column title="Примечание" key="note" width={160} render={(_, record: any) => <NoteCell value={nomenclature.byId.get(Number(record.sheet_material_type_id))?.note} />} />
@@ -139,7 +177,6 @@ export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
           title="Активен"
           sorter
           render={(value: boolean) => <Badge status={value ? 'success' : 'default'} text={value ? 'Активен' : 'Неактивен'} />}
-          filters={[{ text: 'Активен', value: true }, { text: 'Неактивен', value: false }]}
         />
         <Table.Column
           title="Действия"

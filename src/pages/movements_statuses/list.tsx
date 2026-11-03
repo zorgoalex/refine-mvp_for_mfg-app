@@ -2,22 +2,42 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 
+const MOVEMENTS_STATUSES_FILTERS: ReferenceFilterConfig = {
+  search: { field: "movement_status_name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "text", field: "movement_status_code", label: "Код статуса" },
+    { kind: "text", field: "description", label: "Описание" },
+  ],
+};
+
+const MOVEMENTS_STATUSES_HEADER_FILTERS = {
+  resource: "movements_statuses",
+  fields: ["movement_status_code", "movement_status_name", "description"],
+};
+
 export const MovementStatusList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "movement_status_id", order: "asc" }],
     },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, MOVEMENTS_STATUSES_HEADER_FILTERS);
   const { highlightProps } = useHighlightRow("movement_status_id", tableProps.dataSource);
   const { show } = useNavigation();
 
   return (
     <LocalizedList title="Статусы перемещений">
+      <ReferenceFilterBar storageKey="movements_statuses" config={MOVEMENTS_STATUSES_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         {...highlightProps}
@@ -29,8 +49,8 @@ export const MovementStatusList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="movement_status_id" title="id" sorter />
-        <Table.Column dataIndex="movement_status_code" title="Код статуса" sorter />
-        <Table.Column dataIndex="movement_status_name" title="Название статуса" sorter />
+        <Table.Column dataIndex="movement_status_code" {...columnFilter("movement_status_code")} title="Код статуса" sorter />
+        <Table.Column dataIndex="movement_status_name" {...columnFilter("movement_status_name")} title="Название статуса" sorter />
         <Table.Column dataIndex="sort_order" title="Сортировка по умолчанию" sorter />
         <Table.Column
           dataIndex="is_active"
@@ -42,12 +62,8 @@ export const MovementStatusList: React.FC<IResourceComponentsProps> = () => {
               text={value ? "Активен" : "Неактивен"}
             />
           )}
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
         />
-        <Table.Column dataIndex="description" title="Описание" />
+        <Table.Column dataIndex="description" sorter {...columnFilter("description")} title="Описание" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (

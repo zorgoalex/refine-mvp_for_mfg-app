@@ -2,18 +2,36 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
 import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 
+const FILM_TYPES_FILTERS: ReferenceFilterConfig = {
+  search: { field: "film_type_name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "text", field: "ref_key_1c", label: "Ключ 1С" },
+  ],
+};
+
+const FILM_TYPES_HEADER_FILTERS = {
+  resource: "film_types",
+  fields: ["film_type_name", "ref_key_1c"],
+};
+
 export const FilmTypeList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "film_type_id", order: "asc" }],
     },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, FILM_TYPES_HEADER_FILTERS);
 
   const { highlightProps } = useHighlightRow(
     "film_type_id",
@@ -23,6 +41,7 @@ export const FilmTypeList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <LocalizedList title="Типы плёнки">
+      <ReferenceFilterBar storageKey="film_types" config={FILM_TYPES_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         {...highlightProps}
@@ -35,8 +54,8 @@ export const FilmTypeList: React.FC<IResourceComponentsProps> = () => {
       >
         <Table.Column dataIndex="film_type_id" title="id" sorter />
         <ReferenceSortOrderColumn />
-        <Table.Column dataIndex="film_type_name" title="Тип плёнки" sorter />
-        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
+        <Table.Column dataIndex="film_type_name" {...columnFilter("film_type_name")} title="Тип плёнки" sorter />
+        <Table.Column dataIndex="ref_key_1c" sorter {...columnFilter("ref_key_1c")} title="1C-key" />
         <Table.Column
           dataIndex="is_active"
           title="Активен"
@@ -47,10 +66,6 @@ export const FilmTypeList: React.FC<IResourceComponentsProps> = () => {
               text={value ? "Активен" : "Неактивен"}
             />
           )}
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
         />
         <Table.Column
           title="Действия"

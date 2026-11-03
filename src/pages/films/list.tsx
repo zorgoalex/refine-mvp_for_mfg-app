@@ -16,21 +16,35 @@ import { getLoadedRuntimeConfig } from '../../config/runtimeConfig';
 import { useRefHeight, useSelectorHeight, useStickyBottom } from '../../hooks/useElementHeight';
 import './films.css';
 import { materialSuppliersApi, type FilmSuppliersDto } from "../../api/materialSuppliersApi";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
+import { HEADER_FILTER_OPERATOR } from "../../components/referenceFilters/headerFilterModel";
 
 // Узкие колонки фиксированной ширины: список помещается без горизонтальной прокрутки, «Название» берёт остаток.
 // Сумма 960px: при ширине окна 1440 «Названию» остаётся ~200px.
 const WIDTH = { id: 64, sort: 84, nomenclatureType: 84, category: 84, note: 110, filmType: 84, vendor: 118, suppliers: 104, texture: 70, key: 90, active: 92, actions: 76, catalog: 64 } as const;
 
+const FILMS_HEADER_FILTERS = {
+  resource: "films",
+  fields: ["film_name", "nomenclature_type", "nomenclature_category", "note", "film_type_id", "vendor_id", "film_texture", "ref_key_1c"],
+  lookups: {
+    film_type_id: { resource: "film_types", optionValue: "film_type_id", optionLabel: "film_type_name" },
+    vendor_id: { resource: "vendors", optionValue: "vendor_id", optionLabel: "vendor_name" },
+  },
+  labels: { nomenclature_category: (value: string | number | boolean) => categoryDisplay(String(value)) },
+};
+
 export const FilmList: React.FC<IResourceComponentsProps> = () => {
   const [filtersVisible, setFiltersVisible] = useState(false);
   const [form] = Form.useForm<FilmFilterValues>();
-  const { tableProps, filters, setFilters, setCurrent } = useTable({
+  const table = useTable({
     resource: "films",
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "film_id", order: "asc" }],
     },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, FILMS_HEADER_FILTERS);
   const appliedFilters = useMemo(() => readFilmFilters(filters), [filters]);
   const [search, setSearch] = useState(appliedFilters.film_name ?? "");
   const hasFieldFilters = hasFilmFieldFilters(appliedFilters);
@@ -41,13 +55,17 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
   }, [appliedFilters, filtersVisible, form]);
 
   const applyFilters = (values: FilmFilterValues) => {
-    setFilters(buildFilmFilters(values), "replace");
+    // The column header filters («in») stay: the panel replaces only its own filters.
+    const headerFilters = (filters ?? []).filter((filter: any) => filter.operator === HEADER_FILTER_OPERATOR
+      && FILMS_HEADER_FILTERS.fields.includes(filter.field));
+    setFilters([...buildFilmFilters(values), ...headerFilters], "replace");
     setCurrent(1);
   };
   const resetFilters = () => {
     form.resetFields();
     setSearch("");
-    applyFilters({});
+    setFilters(buildFilmFilters({}), "replace");
+    setCurrent(1);
   };
   const { selectProps: typeSelectProps } = useSelect({
     resource: "film_types",
@@ -170,6 +188,10 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
         >
           {filtersVisible ? "Скрыть фильтры" : hasFieldFilters ? "Фильтры активны" : "Фильтры"}
         </Button>
+        {/* сброс снаружи спойлера: не нужно открывать фильтры, чтобы их снять */}
+        {hasFieldFilters || appliedFilters.film_name || search ? (
+          <Button icon={<ClearOutlined aria-hidden />} onClick={resetFilters}>Сбросить</Button>
+        ) : null}
       </Space>
       {filtersVisible && (
         <section id="films-filters" aria-label="Фильтры плёнок">
@@ -249,12 +271,14 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
       >
         <Table.Column dataIndex="film_id" title="id" sorter width={WIDTH.id} render={(value: number) => <span style={{ whiteSpace: 'nowrap' }}>{value}</span>} />
         <Table.Column dataIndex="sort_order" title="Порядок" sorter width={WIDTH.sort} />
-        <Table.Column dataIndex="film_name" title="Название" sorter render={(value: string) => <span className="films-list__name">{value}</span>} />
-        <Table.Column dataIndex="nomenclature_type" title="Тип номенклатуры" width={WIDTH.nomenclatureType} ellipsis />
-        <Table.Column dataIndex="nomenclature_category" title="Категория" width={WIDTH.category} ellipsis render={(value: string | null) => categoryDisplay(value)} />
+        <Table.Column dataIndex="film_name" title="Название" sorter {...columnFilter("film_name")} render={(value: string) => <span className="films-list__name">{value}</span>} />
+        <Table.Column dataIndex="nomenclature_type" title="Тип номенклатуры" sorter {...columnFilter("nomenclature_type")} width={WIDTH.nomenclatureType} ellipsis />
+        <Table.Column dataIndex="nomenclature_category" title="Категория" sorter {...columnFilter("nomenclature_category")} width={WIDTH.category} ellipsis render={(value: string | null) => categoryDisplay(value)} />
         <Table.Column
           dataIndex="note"
           title="Примечание"
+          sorter
+          {...columnFilter("note")}
           width={WIDTH.note}
           render={(value: string | null) => {
             if (!value) return '';
@@ -266,6 +290,8 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column
           dataIndex="film_type_id"
           title="Тип плёнки"
+          sorter
+          {...columnFilter("film_type_id")}
           width={WIDTH.filmType}
           ellipsis
           render={(_, record: any) =>
@@ -275,6 +301,8 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column
           dataIndex="vendor_id"
           title="Производитель"
+          sorter
+          {...columnFilter("vendor_id")}
           width={WIDTH.vendor}
           ellipsis
           render={(_, record: any) =>
@@ -294,16 +322,19 @@ export const FilmList: React.FC<IResourceComponentsProps> = () => {
             return <Tooltip title={[names, onec].filter(Boolean).join('\n') || undefined}><span>{names || (onec ? '1С' : '')}</span></Tooltip>;
           }}
         />
-        <Table.Column dataIndex="film_texture" title="Фактура" width={WIDTH.texture} render={(value: boolean) => value ? "Да" : "Нет"} />
+        <Table.Column dataIndex="film_texture" title="Фактура" sorter {...columnFilter("film_texture")} width={WIDTH.texture} render={(value: boolean) => value ? "Да" : "Нет"} />
         <Table.Column
           dataIndex="ref_key_1c"
           title="1C-key"
+          sorter
+          {...columnFilter("ref_key_1c")}
           width={WIDTH.key}
           render={(value: string | null) => (value ? <Tooltip title={value}><span className="films-list__key">{value}</span></Tooltip> : null)}
         />
         <Table.Column
           dataIndex="is_active"
           title="Активен"
+          sorter
           width={WIDTH.active}
           render={(value: boolean) => (
             <Badge

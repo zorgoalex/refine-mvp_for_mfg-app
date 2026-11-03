@@ -2,21 +2,45 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
 import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 
+const WORK_CENTERS_FILTERS: ReferenceFilterConfig = {
+  search: { field: "workcenter_name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "text", field: "workcenter_code", label: "Код участка" },
+    { kind: "select", field: "workshop_id", label: "Цех", resource: "workshops", optionLabel: "workshop_name", optionValue: "workshop_id" },
+    { kind: "text", field: "ref_key_1c", label: "Ключ 1С" },
+  ],
+};
+
+const WORK_CENTERS_HEADER_FILTERS = {
+  resource: "work_centers",
+  fields: ["workcenter_code", "workcenter_name", "ref_key_1c", "workshop_id"],
+  lookups: {
+    workshop_id: { resource: "workshops", optionValue: "workshop_id", optionLabel: "workshop_name" },
+  },
+};
+
 export const WorkCenterList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "workcenter_id", order: "asc" }],
     },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, WORK_CENTERS_HEADER_FILTERS);
   const { show } = useNavigation();
 
   return (
     <LocalizedList title="Участки цехов">
+      <ReferenceFilterBar storageKey="work_centers" config={WORK_CENTERS_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         rowKey="workcenter_id"
@@ -28,14 +52,16 @@ export const WorkCenterList: React.FC<IResourceComponentsProps> = () => {
       >
         <Table.Column dataIndex="workcenter_id" title="ID" sorter />
         <ReferenceSortOrderColumn />
-        <Table.Column dataIndex="workcenter_code" title="Код участка" sorter />
+        <Table.Column dataIndex="workcenter_code" {...columnFilter("workcenter_code")} title="Код участка" sorter />
         <Table.Column
           dataIndex="workcenter_name"
+          {...columnFilter("workcenter_name")}
           title="Название участка"
           sorter
         />
         <Table.Column
           dataIndex={["workshop", "workshop_name"]}
+          {...columnFilter("workshop_id")}
           title="Цех"
           render={(_, record: any) => record?.workshop?.workshop_name || "-"}
         />
@@ -49,12 +75,8 @@ export const WorkCenterList: React.FC<IResourceComponentsProps> = () => {
               text={value ? "Активен" : "Неактивен"}
             />
           )}
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
         />
-        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
+        <Table.Column dataIndex="ref_key_1c" sorter {...columnFilter("ref_key_1c")} title="1C-key" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (
