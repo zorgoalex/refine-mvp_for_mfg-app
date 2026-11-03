@@ -291,6 +291,15 @@ describe.skipIf(!databaseUrl)('OrderReworkService (real PostgreSQL)', () => {
       dto: { reasonId: reasons.measurement_error, comment: 'замер' },
     });
     expect(clarified.action).toBe('reason_clarified');
+    // Only the round row changed: the command still announces the new order version on the live stream (deferred,
+    // like every round command) so other open tabs re-read the card.
+    const announced = (await pool.query(
+      `SELECT domains, detail_ids FROM order_realtime_deferred WHERE order_id = $1 AND source_type = 'order_rework.reason_clarified'`,
+      [orderId],
+    )).rows;
+    expect(announced).toHaveLength(1);
+    expect(announced[0].domains).toEqual(['detail_status']);
+    expect((announced[0].detail_ids as Array<string | number>).map(Number).sort((x, y) => x - y)).toEqual([detailIds[0], detailIds[1]].sort((x, y) => x - y));
     const closed = await service.falsePositive({
       currentUser: admin, orderId, roundNo: 2, version: await version(orderId), idempotencyKey: key(), dto: {},
     });

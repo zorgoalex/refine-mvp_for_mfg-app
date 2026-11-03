@@ -793,6 +793,14 @@ export class OrderReworkService {
       [Number(round.order_production_round_id), Number(reason.order_rework_reason_id), comment, actorId(command.currentUser)],
     );
     const version = await bumpOrderVersion(tx, order.orderId);
+    // Only the round row changed — no detail-stage trigger fires: announce the new order version on the order's live
+    // stream (deferred like every round command, delivered after commit), so other open tabs re-read the card.
+    await tx.query(
+      `SELECT order_realtime_emit_one($1, ARRAY['detail_status'],
+         (SELECT array_agg(rd.detail_id) FROM order_production_round_details rd WHERE rd.order_production_round_id = $2),
+         'order_rework.reason_clarified')`,
+      [order.orderId, Number(round.order_production_round_id)],
+    );
     const seq = await bumpEventSeq(tx, Number(round.order_production_round_id));
     const outboxKey = reworkOutboxKey(order.orderId, command.roundNo, 'reason_clarified', seq);
     const after = { reasonId: Number(reason.order_rework_reason_id), reasonCode: reason.code };
