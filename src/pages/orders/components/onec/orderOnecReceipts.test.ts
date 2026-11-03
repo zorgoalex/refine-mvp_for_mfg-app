@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import type { OnecReceiptListItemDto } from '../../../../api/types/paymentsOnecApi.types';
-import { onecReceiptCardPath, readOnecLineParam, withoutOnecLinkParams } from '../../../payments/onecReceiptsAccess';
+import { onecCardRequestReducer, onecReceiptCardPath, readOnecLineParam, withoutOnecLinkParams } from '../../../payments/onecReceiptsAccess';
 import { committedPaymentsKey, orderOnecAmountText, orderOnecStateNotes, orderOnecTruncatedText, splitOrderOnecReceipts } from './orderOnecReceipts';
 
 const ORDER = 77;
@@ -77,12 +77,27 @@ describe('the card link is consumed once (Платежи list keeps foreign quer
     expect(withoutOnecLinkParams('?current=2&tab=onec&pageSize=50&onecLine=42')).toBe('?current=2&pageSize=50');
     expect(withoutOnecLinkParams('?current=1')).toBe('?current=1');
   });
+  it('a card request is cleared once consumed: close → switch tabs → back does not reopen; a new link to the same line does', () => {
+    let state = onecCardRequestReducer({ pending: null, seq: 0 }, { type: 'link', lineId: 42 });
+    expect(state.pending).toEqual({ lineId: 42, seq: 1 });
+    state = onecCardRequestReducer(state, { type: 'consumed', seq: 1 });
+    // Вкладка пересоздаётся (destroyInactiveTabPane) — запроса нет, карточка не откроется.
+    expect(state.pending).toBeNull();
+    state = onecCardRequestReducer(state, { type: 'link', lineId: 42 });
+    expect(state.pending).toEqual({ lineId: 42, seq: 2 });
+    // Устаревшее подтверждение не снимает новый запрос.
+    const newer = onecCardRequestReducer(state, { type: 'link', lineId: 7 });
+    expect(onecCardRequestReducer(newer, { type: 'consumed', seq: 2 }).pending).toEqual({ lineId: 7, seq: 3 });
+  });
   it('PaymentsPage switches to «Поступления 1С» only on a new link, then removes the link params from the address', () => {
     const page = readFileSync(new URL('../../../payments/PaymentsPage.tsx', import.meta.url), 'utf8');
     // Не по каждому обновлению адреса (location.key): иначе обновление адреса списком платежей возвращает на вкладку 1С.
     expect(page).not.toContain('location.key');
     expect(page).toContain('withoutOnecLinkParams(location.search)');
     expect(page).toContain('{ replace: true }');
+    expect(page).toContain('onRequestConsumed={consumeCardRequest}');
+    const tab = readFileSync(new URL('../../../payments/OnecReceiptsTab.tsx', import.meta.url), 'utf8');
+    expect(tab).toContain('onRequestConsumed?.(requestKey);');
   });
 });
 
