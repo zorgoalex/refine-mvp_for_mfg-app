@@ -4004,7 +4004,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 ) : null}
               </section>
               {isMobile && canViewFinancials ? (
-                <WorkbenchOrderPaymentsSection payments={payments as Record<string, unknown>[]} />
+                <WorkbenchOrderPaymentsSection payments={payments as Record<string, unknown>[]} orderId={record?.order_id ? Number(record.order_id) : null} />
               ) : null}
               <Tooltip title={workbenchSideCollapsed ? 'Показать боковую панель' : 'Свернуть боковую панель'} placement="left">
                 <button

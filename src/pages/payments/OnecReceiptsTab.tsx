@@ -176,7 +176,14 @@ function ReceiptCard({ data, onChanged }: { data: OnecReceiptCardResponse; onCha
  * «Платежи → Поступления 1С»: поступления и возвраты покупателей из 1С и состояние их сверки с платежами заказов.
  * Данные — только backend. Ручные команды (срез B) — в карточке строки, при `capabilities.commands`.
  */
-export function OnecReceiptsTab() {
+export function OnecReceiptsTab({ requestedLineId = null, requestKey, onRequestConsumed }: {
+  /** Строка из ссылки (`?onecLine=`): открыть её карточку. */
+  requestedLineId?: number | null;
+  /** Номер ссылки: повторная ссылка на ту же строку снова открывает карточку. */
+  requestKey?: number;
+  /** Карточка по ссылке открыта — запрос снимается и при повторном показе вкладки не срабатывает. */
+  onRequestConsumed?: (requestKey: number) => void;
+} = {}) {
   const [group, setGroup] = useState<OnecReceiptGroup | null>('review');
   const [kind, setKind] = useState<KindFilter>('all');
   const [searchInput, setSearchInput] = useState('');
@@ -185,7 +192,12 @@ export function OnecReceiptsTab() {
   const [page, setPage] = useState(1);
   const { pageSize, setPageSize } = usePageSizePreference('payments:onec-receipts', DEFAULT_PAGE_SIZE);
   const [state, setState] = useState<LoadState>({ status: 'loading' });
-  const [openLineId, setOpenLineId] = useState<number | null>(null);
+  const [openLineId, setOpenLineId] = useState<number | null>(requestedLineId);
+  useEffect(() => {
+    if (requestedLineId === null || requestKey === undefined) return;
+    setOpenLineId(requestedLineId);
+    onRequestConsumed?.(requestKey);
+  }, [requestedLineId, requestKey, onRequestConsumed]);
   // Перечитать список и карточку после команды (номер «поколения» данных).
   const [reload, setReload] = useState(0);
   const reloadAfterCommand = () => setReload((value) => value + 1);

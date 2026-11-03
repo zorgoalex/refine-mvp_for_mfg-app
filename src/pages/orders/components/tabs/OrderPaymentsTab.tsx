@@ -1,7 +1,7 @@
 // Order Payments Tab
 // Container for managing order payments with inline editing (like OrderDetailsTab)
 
-import React, { useState, useRef, forwardRef, useImperativeHandle, useEffect } from 'react';
+import React, { useState, useRef, forwardRef, useImperativeHandle, useEffect, useMemo } from 'react';
 import { Card, Button, Space, Modal, message } from 'antd';
 import { PlusOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { OrderPaymentTable, OrderPaymentTableRef } from '../tables/OrderPaymentTable';
@@ -14,12 +14,17 @@ import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext'
 import { useWorkspaceCheckpointAdapter } from '../../../../workspace/workspaceCheckpointReact';
 import { readWorkspaceCheckpointAdapterState } from '../../../../workspace/workspaceCheckpointRegistry';
 import { useDeferredWorkspaceEntity } from '../../../../workspace/useDeferredWorkspaceEntity';
+import { OrderOnecReceiptsTable } from '../onec/OrderOnecReceipts';
+import { committedPaymentsKey } from '../onec/orderOnecReceipts';
+import { useOrderOnecReceipts } from '../onec/useOrderOnecReceipts';
 
 // Exposed methods via ref
 export interface OrderPaymentsTabRef {
   applyCurrentEdits: () => Promise<boolean>;
   addInlinePayment: () => Promise<void>;
 }
+
+const EMPTY_ONEC_BY_PAYMENT: ReadonlyMap<number, never[]> = new Map();
 
 // Default values for quick add
 const QUICK_ADD_DEFAULTS = {
@@ -30,6 +35,14 @@ const QUICK_ADD_DEFAULTS = {
 
 export const OrderPaymentsTab = forwardRef<OrderPaymentsTabRef>((_, ref) => {
   const { payments, addPayment, deletePayment } = useOrderFormStore();
+  const savedOrderId = useOrderFormStore((state) => state.header.order_id);
+  // Платежи 1С этого заказа (только просмотр): у нового, ещё не сохранённого заказа их нет.
+  // Ключ перечитывания — из СОХРАНЁННОГО состояния (версия заказа и снимок платежей после сохранения), не из черновика:
+  // правка или удаление платежа меняют сверку только после сохранения, и перечитать нужно именно после него.
+  const committedVersion = useOrderFormStore((state) => state.version);
+  const committedPayments = useOrderFormStore((state) => state.originalPayments);
+  const savedPaymentsKey = useMemo(() => committedPaymentsKey(committedVersion, committedPayments), [committedVersion, committedPayments]);
+  const onecReceipts = useOrderOnecReceipts(savedOrderId == null ? null : Number(savedOrderId), savedPaymentsKey);
   const storeApi = useOrderDraftStoreApi();
   const { tabKey } = useKeepAlive();
   const workspaceKey = tabKey || '/orders/create';
@@ -258,7 +271,10 @@ export const OrderPaymentsTab = forwardRef<OrderPaymentsTabRef>((_, ref) => {
           selectedRowKeys={selectedRowKeys}
           onSelectChange={handleSelectChange}
           highlightedRowKey={highlightedRowKey}
+          onecByPaymentId={onecReceipts.status === 'off' ? undefined : onecReceipts.status === 'ready' ? onecReceipts.split.byPaymentId : EMPTY_ONEC_BY_PAYMENT}
         />
+
+        <OrderOnecReceiptsTable state={onecReceipts} />
 
         {/* Modal (for legacy "Add via form" button) */}
         {modalOpen && (

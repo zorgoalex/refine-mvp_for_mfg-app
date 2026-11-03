@@ -18515,6 +18515,7 @@ paths:
         - {name: dateFrom, in: query, required: false, schema: {type: string, format: date}}
         - {name: dateTo, in: query, required: false, schema: {type: string, format: date}}
         - {name: search, in: query, required: false, schema: {type: string, maxLength: 100}, description: "Document number, counterparty, 1C order number or ERP order name (substring)"}
+        - {name: orderId, in: query, required: false, schema: {type: integer, minimum: 1}, description: "Only lines of this ERP order (through the 1C order link); same visibility scope as the list"}
       responses:
         '200': {description: "{data[], pagination, counters{group: n}, capabilities{commands}}; a row carries state, reason, onecOrder, erpOrder, match, payment ({hidden: true} when the payment is outside the user's scope) and an opaque stateToken; amounts are NUMERIC strings"}
         '400': {description: Invalid filter}

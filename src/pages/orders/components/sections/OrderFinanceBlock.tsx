@@ -10,6 +10,8 @@ import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { useOrderFinancialVisibility } from '../../../../hooks/useOrderFinancialVisibility';
 import dayjs from 'dayjs';
 import { BitrixOrderPaymentsPanel } from './BitrixOrderPaymentsPanel';
+import { OnecPaymentMatchCell, OrderOnecReceiptsTable } from '../onec/OrderOnecReceipts';
+import { useOrderOnecReceipts } from '../onec/useOrderOnecReceipts';
 
 const { Text } = Typography;
 
@@ -20,7 +22,6 @@ interface OrderFinanceBlockProps {
 
 export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, payments: providedPayments }) => {
   const { canViewFinancials } = useOrderFinancialVisibility();
-
   // Загружаем платежи для текущего заказа
   const { data: paymentsData } = useList({
     resource: 'payments',
@@ -56,6 +57,11 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, pa
   }, [paymentTypesData]);
 
   const payments = providedPayments ?? paymentsData?.data ?? [];
+  const orderIdNumber = Number(record?.order_id);
+  // Платежи 1С заказа (только просмотр): колонка «1С» у сверенных платежей и таблица остальных строк ниже.
+  const onecRefreshKey = [record?.version, ...payments.map((p: any) => `${p.payment_id}:${p.amount}:${p.payment_date}`)].join(',');
+  const onecReceipts = useOrderOnecReceipts(canViewFinancials && Number.isSafeInteger(orderIdNumber) && orderIdNumber > 0 ? orderIdNumber : null, onecRefreshKey);
+
 
   // Считаем сумму всех платежей
   const totalPaymentsAmount = useMemo(() => {
@@ -274,6 +280,16 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, pa
                 align: 'right',
                 render: (value) => `${formatNumber(value || 0, 2)} ${CURRENCY_SYMBOL}`,
               },
+              ...(onecReceipts.status === 'off' ? [] : [{
+                title: '1С',
+                key: 'onec',
+                width: 170,
+                render: (_: unknown, payment: any) => (
+                  <OnecPaymentMatchCell
+                    rows={onecReceipts.status === 'ready' ? onecReceipts.split.byPaymentId.get(Number(payment.payment_id)) : undefined}
+                  />
+                ),
+              }]),
             ]}
           />
           {isAmountMismatch && (
@@ -288,6 +304,7 @@ export const OrderFinanceBlock: React.FC<OrderFinanceBlockProps> = ({ record, pa
           )}
         </div>
       )}
+      <OrderOnecReceiptsTable state={onecReceipts} />
       {Number.isSafeInteger(Number(record?.order_id)) && Number(record?.order_id) > 0 && (
         <BitrixOrderPaymentsPanel orderId={Number(record.order_id)} />
       )}
