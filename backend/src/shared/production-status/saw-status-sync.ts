@@ -4,10 +4,10 @@ import type { TransactionClient } from '../../database/database.types';
 
 /**
  * Status «Базис» (code `saw`, migration 282): a detail in a card of the machine file «Базис раскрой» (saw centre) goes
- * from «Новый» to «Базис»; a «Базис» detail no longer in any such card goes back to «Новый» (the only earlier status on
- * that step, so no history of previous statuses is needed). A detail also reserved by a CNC cut job is never moved:
- * the command goes on with a warning and an audit row (the two machines exclude each other — a person decides).
- * Details further on are never touched. The Bazis route of a detail is written by the DB trigger on its status.
+ * from «Новый» or «Отрисован» (the same step) to «Базис» — also when a CNC cut job («Раскрой») holds it: the Bazis card
+ * wins (user decision 03.11; the overlap is still warned about and audited). A «Базис» detail no longer in any such card
+ * goes back to «Отрисован» while a CNC cut job holds it, otherwise to «Новый». Details further on are never touched.
+ * The Bazis route of a detail is written by the DB trigger on its status.
  *
  * Lock order (plan §4.2): the orders of the details FOR NO KEY UPDATE by id, then the details FOR UPDATE by id — the
  * same order as every detail-status command (order → details). Callers take `lockOrdersOfDetails` before their own
@@ -18,8 +18,11 @@ export interface SawSyncContext {
   actorUsername: string | null;
   actorRole?: string | null;
   requestId: string;
-  /** What changed the cards: the «Базис раскрой» screen or the MDF engine composition. */
-  cause: 'bazis_cut' | 'mdf_engine';
+  /**
+   * What changed the statuses: the «Базис раскрой» screen, the MDF engine composition, or a status-automation rule
+   * moving details to «Новый»/«Отрисован» (its «Базис раскрой» details get «Базис» instead).
+   */
+  cause: 'bazis_cut' | 'mdf_engine' | 'automation';
   setId?: number | null;
   /** The command's idempotency key: the outbox keys derive from it (a replay writes nothing twice). */
   idempotencyKey: string;
@@ -159,9 +162,9 @@ export async function syncSawStatusForDetails(
   if (ids.length === 0) return { changedDetailIds: [], warnings: [] };
   // A database without the «Базис» status (before migration 282) is left untouched: a status is never set to NULL.
   const statusIds = (await tx.query<{ code: string; id: number }>(
-    "SELECT production_status_code AS code, production_status_id AS id FROM production_statuses WHERE production_status_code IN ('saw', 'new')",
+    "SELECT production_status_code AS code, production_status_id AS id FROM production_statuses WHERE production_status_code IN ('saw', 'new', 'drawn')",
   )).rows;
-  if (!statusIds.some((row) => row.code === 'saw') || !statusIds.some((row) => row.code === 'new')) {
+  if (!['saw', 'new', 'drawn'].every((code) => statusIds.some((row) => row.code === code))) {
     return { changedDetailIds: [], warnings: [] };
   }
   await lockOrdersOfDetails(tx, ids);
@@ -181,6 +184,7 @@ export async function syncSawStatusForDetails(
 
   const toSaw: DetailRouteRow[] = [];
   const toNew: DetailRouteRow[] = [];
+  const toDrawn: DetailRouteRow[] = [];
   const warnings: SawSyncWarning[] = [];
   for (const row of rows) {
     const inBazis = (row.bazis_set_ids ?? []).length > 0;
@@ -191,8 +195,8 @@ export async function syncSawStatusForDetails(
         cutJobIds: (row.cut_job_ids ?? []).map(Number), bazisCutSetIds: (row.bazis_set_ids ?? []).map(Number),
       });
     }
-    if (row.code === 'new' && inBazis && !inCnc) toSaw.push(row);
-    else if (row.code === 'saw' && !inBazis) toNew.push(row);
+    if ((row.code === 'new' || row.code === 'drawn') && inBazis) toSaw.push(row);
+    else if (row.code === 'saw' && !inBazis) (inCnc ? toDrawn : toNew).push(row);
   }
 
   const changed: Array<{ row: DetailRouteRow; from: string; to: string }> = [];
@@ -202,7 +206,7 @@ export async function syncSawStatusForDetails(
         WHERE detail_id = ANY($1::bigint[])`,
       [toSaw.map((row) => Number(row.detail_id))],
     );
-    for (const row of toSaw) changed.push({ row, from: 'new', to: 'saw' });
+    for (const row of toSaw) changed.push({ row, from: row.code ?? 'new', to: 'saw' });
   }
   if (toNew.length > 0) {
     await tx.query(
@@ -212,14 +216,54 @@ export async function syncSawStatusForDetails(
     );
     for (const row of toNew) changed.push({ row, from: 'saw', to: 'new' });
   }
-
-  const byOrder = new Map<number, Array<{ detailId: number; from: string; to: string }>>();
-  for (const item of changed) {
-    const orderId = Number(item.row.order_id);
-    const list = byOrder.get(orderId) ?? [];
-    list.push({ detailId: Number(item.row.detail_id), from: item.from, to: item.to });
-    byOrder.set(orderId, list);
+  if (toDrawn.length > 0) {
+    await tx.query(
+      `UPDATE order_details SET production_status_id = (SELECT production_status_id FROM production_statuses WHERE production_status_code = 'drawn')
+        WHERE detail_id = ANY($1::bigint[])`,
+      [toDrawn.map((row) => Number(row.detail_id))],
+    );
+    for (const row of toDrawn) changed.push({ row, from: 'saw', to: 'drawn' });
   }
+
+  await recordSawTransitions(tx, changed.map((item) => ({
+    orderId: Number(item.row.order_id), detailId: Number(item.row.detail_id), from: item.from, to: item.to,
+  })), context);
+
+  for (const warning of warnings) {
+    await auditService.record(tx, {
+      event: 'bazis_cut.detail_route_conflict',
+      entityType: 'order_detail', entityId: warning.detailId,
+      actorUserId: context.actorUserId, actorUsername: context.actorUsername, actorRole: context.actorRole ?? null,
+      requestId: context.requestId, source: sawSource(context.cause),
+      relatedOrderId: warning.orderId,
+      metadata: { cause: context.cause, setId: context.setId ?? null, cutJobIds: warning.cutJobIds,
+        bazisCutSetIds: warning.bazisCutSetIds, code: warning.code },
+    });
+  }
+  return { changedDetailIds: changed.map((item) => Number(item.row.detail_id)), warnings };
+}
+
+const sawSource = (cause: SawSyncContext['cause']) =>
+  cause === 'mdf_engine' ? 'mdf-engine' : cause === 'automation' ? 'backend-status-automation' : 'bazis-cut';
+
+/**
+ * The record of status changes made by the «Базис» rules (already written to order_details): per order, the order
+ * version +1 (a stale client must not overwrite them), one audit row `orders.detail_production_status_auto_change`
+ * with the per-detail transitions and one outbox event `order.detail_production_status_auto_changed` keyed by the
+ * command's idempotency key and the order. Returns the audit ids.
+ */
+export async function recordSawTransitions(
+  tx: TransactionClient,
+  transitions: ReadonlyArray<{ orderId: number; detailId: number; from: string; to: string }>,
+  context: SawSyncContext,
+): Promise<string[]> {
+  const byOrder = new Map<number, Array<{ detailId: number; from: string; to: string }>>();
+  for (const item of transitions) {
+    const list = byOrder.get(item.orderId) ?? [];
+    list.push({ detailId: item.detailId, from: item.from, to: item.to });
+    byOrder.set(item.orderId, list);
+  }
+  const auditIds: string[] = [];
   for (const [orderId, items] of [...byOrder.entries()].sort((a, b) => a[0] - b[0])) {
     // A stale client of the order (its version) must not overwrite the new statuses (as the batch command does).
     const order = (await tx.query<{ version: number; client_id: string | null }>(
@@ -230,16 +274,18 @@ export async function syncSawStatusForDetails(
       cause: context.cause, setId: context.setId ?? null, detailIds: items.map((item) => item.detailId),
       transitions: items, orderVersion: order?.version ?? null, requestId: context.requestId,
     };
-    await auditService.record(tx, {
+    auditIds.push(await auditService.record(tx, {
       event: 'orders.detail_production_status_auto_change',
       entityType: 'order', entityId: orderId,
       actorUserId: context.actorUserId, actorUsername: context.actorUsername, actorRole: context.actorRole ?? null,
-      requestId: context.requestId, source: context.cause === 'mdf_engine' ? 'mdf-engine' : 'bazis-cut',
+      requestId: context.requestId, source: sawSource(context.cause),
       relatedOrderId: orderId, relatedClientId: order?.client_id ? Number(order.client_id) : null,
       statusField: 'productionDetailStatus',
       metadata,
+      // the per-detail transitions as the diff too: the audit screen reads a linked command's diff (a rule applied)
+      diff: { transitions: items, affectedDetailCount: items.length },
       relatedEntities: items.map((item) => ({ entityType: 'order_detail', entityId: item.detailId })),
-    });
+    }));
     await tx.query(
       `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
        VALUES ('order.detail_production_status_auto_changed', 'order', $1, $2::jsonb, $3)
@@ -249,19 +295,7 @@ export async function syncSawStatusForDetails(
       `saw-sync:${context.idempotencyKey}:${orderId}`],
     );
   }
-
-  for (const warning of warnings) {
-    await auditService.record(tx, {
-      event: 'bazis_cut.detail_route_conflict',
-      entityType: 'order_detail', entityId: warning.detailId,
-      actorUserId: context.actorUserId, actorUsername: context.actorUsername, actorRole: context.actorRole ?? null,
-      requestId: context.requestId, source: context.cause === 'mdf_engine' ? 'mdf-engine' : 'bazis-cut',
-      relatedOrderId: warning.orderId,
-      metadata: { cause: context.cause, setId: context.setId ?? null, cutJobIds: warning.cutJobIds,
-        bazisCutSetIds: warning.bazisCutSetIds, code: warning.code },
-    });
-  }
-  return { changedDetailIds: changed.map((item) => Number(item.row.detail_id)), warnings };
+  return auditIds;
 }
 
 /** The CNC side (plan §10.4): adding details to a cut job warns (and audits) when they are in a «Базис раскрой» card. */

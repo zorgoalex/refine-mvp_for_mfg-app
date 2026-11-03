@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -8,6 +9,8 @@ import { reconcileImportedStageRoutes } from '../../modules/orders/adapters/pg-o
 import type { OrderSnapshotDto } from '../../modules/orders/dto/order-snapshot.dto';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
+const migration290 = () => readFileSync(new URL('../../../db/migrations/290_bazis_wins_saw_backfill.sql', import.meta.url), 'utf8')
+  .replaceAll('public.', '');
 
 /**
  * Stage letters of migration 282 on real PostgreSQL (isolated schema): a letter when every live detail passed the
@@ -59,6 +62,9 @@ describe.skipIf(!databaseUrl)('order stage letters (PostgreSQL, isolated schema)
     // the objects of the database's own public schema.
     await q(`SET search_path="${schema}"`);
     await q(migration);
+    // 290: the «Базис» route trigger also drops the route on saw → drawn; its backfill runs on the empty schema here
+    // (a summary row only) and again in its own test below.
+    await q(migration290());
     await q(`SET search_path="${schema}",public`);
     for (const row of (await q<{ production_status_id: number; production_status_code: string }>(
       'SELECT production_status_id, production_status_code FROM production_statuses')).rows) {
@@ -249,8 +255,8 @@ describe.skipIf(!databaseUrl)('order stage letters (PostgreSQL, isolated schema)
       await batch.query('COMMIT');
       const result = await syncing;
       await card.query('COMMIT');
-      // the command set «Отрисован» first: the card leaves it as it is
-      expect(result.changedDetailIds).toEqual([]);
+      // the command set «Отрисован» first: «Отрисован» is the same step, the card makes it «Базис»
+      expect(result.changedDetailIds).toEqual([detail]);
     } finally {
       batch.release();
       card.release();
@@ -290,17 +296,120 @@ describe.skipIf(!databaseUrl)('order stage letters (PostgreSQL, isolated schema)
     expect((await one<{ n: number }>("SELECT count(*)::int AS n FROM outbox_events WHERE event_type = 'order.detail_production_status_auto_changed'")).n).toBe(1);
   });
 
-  it('a detail also in a CNC job is not moved to «Базис»: a warning and an audit row', async () => {
+  const codeOf = async (detail: number) => (await one<{ code: string }>(
+    'SELECT ps.production_status_code AS code FROM order_details od JOIN production_statuses ps USING (production_status_id) WHERE od.detail_id = $1',
+    [detail])).code;
+
+  it('a detail also in a CNC job: the Bazis card wins («Новый»/«Отрисован» → «Базис»), with a warning and an audit row', async () => {
     const order = await newOrder();
     const detail = await addDetail(order, 'new');
-    await q('INSERT INTO bazis_cut_set_details (source_order_detail_id) VALUES ($1)', [detail]);
-    await q('INSERT INTO cut_job_item (cut_job_id, order_detail_id) VALUES (5, $1)', [detail]);
+    const drawn = await addDetail(order, 'drawn');
+    const further = await addDetail(order, 'cut');
+    for (const id of [detail, drawn, further]) {
+      await q('INSERT INTO bazis_cut_set_details (source_order_detail_id) VALUES ($1)', [id]);
+      await q('INSERT INTO cut_job_item (cut_job_id, order_detail_id) VALUES (5, $1)', [id]);
+    }
     await q('BEGIN');
-    const result = await syncSawStatusForDetails(wrap(client), [detail], sawContext('k3'));
+    const result = await syncSawStatusForDetails(wrap(client), [detail, drawn, further], sawContext('k3'));
     await q('COMMIT');
-    expect(result.warnings).toMatchObject([{ code: 'DETAIL_ALSO_IN_CNC', detailId: detail, cutJobIds: [5] }]);
-    expect(result.changedDetailIds).toEqual([]);
-    expect((await one<{ n: number }>("SELECT count(*)::int AS n FROM audit_log WHERE event = 'bazis_cut.detail_route_conflict'")).n).toBe(1);
+    expect(result.warnings).toMatchObject([
+      { code: 'DETAIL_ALSO_IN_CNC', detailId: detail, cutJobIds: [5] },
+      { code: 'DETAIL_ALSO_IN_CNC', detailId: drawn, cutJobIds: [5] },
+      { code: 'DETAIL_ALSO_IN_CNC', detailId: further, cutJobIds: [5] },
+    ]);
+    expect(result.changedDetailIds.sort((a, b) => a - b)).toEqual([detail, drawn]);
+    expect([await codeOf(detail), await codeOf(drawn), await codeOf(further)]).toEqual(['saw', 'saw', 'cut']);
+    expect((await one<{ n: number }>("SELECT count(*)::int AS n FROM audit_log WHERE event = 'bazis_cut.detail_route_conflict'")).n).toBe(3);
+    const audit = await one<{ transitions: unknown }>(
+      "SELECT metadata_json->'transitions' AS transitions FROM audit_log WHERE event = 'orders.detail_production_status_auto_change'");
+    expect(audit.transitions).toEqual([{ detailId: detail, from: 'new', to: 'saw' }, { detailId: drawn, from: 'drawn', to: 'saw' }]);
+  });
+
+  it('out of the last card: «Базис» goes back to «Отрисован» while a CNC job holds the detail, otherwise to «Новый»', async () => {
+    const order = await newOrder();
+    const held = await addDetail(order, 'saw');
+    const free = await addDetail(order, 'saw');
+    await q('INSERT INTO cut_job_item (cut_job_id, order_detail_id) VALUES (7, $1)', [held]);
+    await q('BEGIN');
+    const result = await syncSawStatusForDetails(wrap(client), [held, free], sawContext('k4'));
+    await q('COMMIT');
+    expect(result.changedDetailIds.sort((a, b) => a - b)).toEqual([held, free].sort((a, b) => a - b));
+    expect([await codeOf(held), await codeOf(free)]).toEqual(['drawn', 'new']);
+  });
+
+  it('saw → drawn in the same round drops the «Базис» route (migration 290 trigger)', async () => {
+    const order = await newOrder();
+    const detail = await addDetail(order, 'saw');
+    expect((await one<{ n: number }>('SELECT count(*)::int AS n FROM order_detail_stage_routes WHERE detail_id = $1', [detail])).n).toBe(1);
+    await setStatus(detail, 'drawn');
+    expect((await one<{ n: number }>('SELECT count(*)::int AS n FROM order_detail_stage_routes WHERE detail_id = $1', [detail])).n).toBe(0);
+    expect((await letters(order)).codes).not.toContain('saw');
+  });
+
+  it('migration 290 drops a stale «Базис» route left by saw → drawn under the 282 trigger (new backend before 290)', async () => {
+    const order = await newOrder();
+    const detail = await addDetail(order, 'drawn');
+    await q('INSERT INTO order_detail_stage_routes (detail_id, round_no) VALUES ($1, 1)', [detail]);
+    expect((await letters(order)).codes).toContain('saw');
+    await q(migration290());
+    expect((await one<{ n: number }>('SELECT count(*)::int AS n FROM order_detail_stage_routes WHERE detail_id = $1', [detail])).n).toBe(0);
+    expect((await letters(order)).codes).not.toContain('saw');
+    expect((await one<{ m: Record<string, number> }>(
+      "SELECT metadata_json AS m FROM audit_log WHERE event = 'orders.saw_status_backfill' AND entity_id = '290'")).m)
+      .toMatchObject({ staleRoutesDropped: 1, details: 0 });
+  });
+
+  it('migration 290 waits for an in-flight detail write (barrier) and then repairs its stale route, audited per order', async () => {
+    const order = await newOrder();
+    const detail = await addDetail(order, 'saw');
+    const writer = await pool.connect();
+    const migrator = await pool.connect();
+    try {
+      // an in-flight command under the old rule: order lock, saw → drawn that keeps the route (the 282 trigger)
+      await writer.query('BEGIN');
+      await writer.query('SELECT 1 FROM orders WHERE order_id = $1 FOR UPDATE', [order]);
+      await writer.query("SET LOCAL erp.pse_writer = 'historical_import'"); // the trigger stays silent: the route is kept
+      await writer.query('UPDATE order_details SET production_status_id = $2 WHERE detail_id = $1', [detail, status.drawn]);
+      const running = migrator.query(migration290());
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await writer.query('COMMIT');
+      await running;
+    } finally {
+      writer.release();
+      migrator.release();
+    }
+    expect((await one<{ n: number }>('SELECT count(*)::int AS n FROM order_detail_stage_routes WHERE detail_id = $1', [detail])).n).toBe(0);
+    const repair = await one<{ m: { detailIds: number[]; routes: Array<{ roundNo: number; status: string }> } }>(
+      "SELECT metadata_json AS m FROM audit_log WHERE event = 'orders.stage_route_repair' AND related_order_id = $1", [order]);
+    expect(repair.m.detailIds).toEqual([detail]);
+    expect(repair.m.routes).toMatchObject([{ roundNo: 1, status: 'drawn' }]);
+    expect((await one<{ n: number }>(
+      "SELECT count(*)::int AS n FROM audit_log_related_entity e JOIN audit_log a USING (audit_id) WHERE a.event = 'orders.stage_route_repair' AND e.entity_id = $1",
+      [detail])).n).toBe(1);
+  });
+
+  it('migration 290: new/drawn card details become «Базис» (CNC-held too), with audit, outbox, a summary row; runs once', async () => {
+    const order = await newOrder();
+    const fresh = await addDetail(order, 'new');
+    const drawn = await addDetail(order, 'drawn');
+    const outside = await addDetail(order, 'drawn');
+    const further = await addDetail(order, 'cut');
+    for (const id of [fresh, drawn, further]) await q('INSERT INTO bazis_cut_set_details (source_order_detail_id) VALUES ($1)', [id]);
+    await q('INSERT INTO cut_job_item (cut_job_id, order_detail_id) VALUES (9, $1)', [drawn]);
+    const before = (await one<{ version: number }>('SELECT version FROM orders WHERE order_id = $1', [order])).version;
+    await q(migration290());
+    expect([await codeOf(fresh), await codeOf(drawn), await codeOf(outside), await codeOf(further)])
+      .toEqual(['saw', 'saw', 'drawn', 'cut']);
+    expect((await one<{ version: number }>('SELECT version FROM orders WHERE order_id = $1', [order])).version).toBe(before + 1);
+    const summary = await one<{ m: Record<string, number> }>(
+      "SELECT metadata_json AS m FROM audit_log WHERE event = 'orders.saw_status_backfill' AND entity_id = '290'");
+    expect(summary.m).toMatchObject({ details: 2, orders: 1, inCncJob: 1, fromNew: 1, fromDrawn: 1 });
+    expect((await one<{ n: number }>("SELECT count(*)::int AS n FROM outbox_events WHERE idempotency_key = $1", [`saw-backfill:290:${order}`])).n).toBe(1);
+    expect((await letters(order)).codes).toContain('saw');
+    // a repeat is a no-op
+    await setStatus(fresh, 'new');
+    await q(migration290());
+    expect(await codeOf(fresh)).toBe('new');
   });
 
   it('snapshot import: routes become exactly the snapshot\'s (no intermediate round 1), or «Базис» details\' own round for an old file', async () => {

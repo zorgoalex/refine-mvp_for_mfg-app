@@ -116,6 +116,45 @@ describe('buildAuditReadableSummary', () => {
     );
   });
 
+  it('shows the «Базис» transitions of a rule that changed only Bazis-card details', () => {
+    const summary = buildAuditReadableSummary(
+      event({
+        event: 'status_automation.rule_applied',
+        entityType: 'status_automation_rule',
+        entityId: '16',
+        entityName: null,
+        relatedOrderId: 3071,
+        relatedOrderName: '3071',
+        source: 'backend-status-automation',
+        metadata: {
+          ruleName: 'МДФ файлы на станке → Детали Отрисован',
+          eventType: 'mdf.board.files_on_machine',
+          actionType: 'change_details_production_status',
+          targetStatusId: 2,
+          statusCommand: {
+            auditId: 'a1',
+            event: 'orders.detail_production_status_auto_change',
+            statusField: 'productionDetailStatus',
+            diff: {
+              affectedDetailCount: 3,
+              transitions: [
+                { detailId: 1, from: 'new', to: 'saw' },
+                { detailId: 2, from: 'new', to: 'saw' },
+                { detailId: 3, from: 'drawn', to: 'saw' },
+              ],
+            },
+            statusCatalog: {},
+          },
+        },
+      }),
+    );
+    expect(summary.changes).toEqual([
+      { label: 'Производственный статус деталей', before: 'Новый (new) × 2', after: 'Базис (saw) × 2' },
+      { label: 'Производственный статус деталей', before: 'Отрисован (drawn) × 1', after: 'Базис (saw) × 1' },
+    ]);
+    expect(summary.notes).toEqual(expect.arrayContaining(['Изменено деталей: 3']));
+  });
+
   it('shows an exact order status transition for an applied automation rule', () => {
     const summary = buildAuditReadableSummary(
       event({

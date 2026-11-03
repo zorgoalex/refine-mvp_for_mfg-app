@@ -44,6 +44,7 @@ import {
   ProductionActionStatusNotFoundError,
   ProductionActionVersionConflictError,
 } from '../errors/production-action.errors';
+import { recordSawTransitions } from '../../../shared/production-status/saw-status-sync';
 
 const SOURCE = 'backend-production-command';
 const AUTOMATION_SOURCE = 'backend-status-automation';
@@ -2413,10 +2414,15 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
   if (currentDetails.length === 0) {
     return { status: 'skipped', skipReason: 'no_details' };
   }
+  // «Базис» wins on its step (user decision 03.11): a rule moving details to «Новый» / «Отрисован» (e.g. «МДФ файлы на
+  // станке → Детали Отрисован») leaves the details of a «Базис раскрой» card out and sets «Базис» on those still
+  // «Новый» / «Отрисован» — the same status the card sync gives them, even when a CNC cut job holds them too.
+  const bazisHeld = await loadBazisHeldDetails(tx, status.productionStatusCode,
+    currentDetails.map((detail) => detail.detailId));
   // Все живые детали уже в целевом статусе → no-op без version-бампа/audit/outbox
   // (тот же same-status контракт, что у order-level automation-действий).
   const detailNeedsChange = (detail: typeof currentDetails[number]) =>
-    detailTransitionMode === 'set_exact'
+    bazisHeld.held.has(detail.detailId) ? bazisHeld.toSaw.has(detail.detailId) : detailTransitionMode === 'set_exact'
       ? detail.productionStatusId !== targetStatusId
       : detail.productionStatusId === null
         || detail.productionStatusSortOrder === null
@@ -2438,6 +2444,7 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
       AND detail_id = ANY($3::bigint[])
       AND COALESCE(delete_flag, false) = false
       AND production_status_id IS DISTINCT FROM $1
+      AND NOT (detail_id = ANY($6::bigint[]))
       AND (
         $4::text = 'set_exact'
         OR production_status_id IS NULL
@@ -2455,15 +2462,51 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
       detailIds,
       detailTransitionMode,
       status.sortOrder,
+      [...bazisHeld.held],
     ],
   );
+  // The «Базис» details are recorded as their own homogeneous event (the one the card sync writes, with per-detail
+  // transitions and its own outbox key) — the rule's batch event below names only the details set to its target.
+  const sawRows = bazisHeld.toSaw.size === 0 || bazisHeld.sawStatusId === null ? [] : (await tx.query<{ detail_id: string | number }>(
+    `UPDATE order_details SET production_status_id = $1
+      WHERE order_id = $2 AND detail_id = ANY($3::bigint[]) AND COALESCE(delete_flag, false) = false
+        AND production_status_id IS DISTINCT FROM $1
+      RETURNING detail_id`,
+    [bazisHeld.sawStatusId, order.orderId, [...bazisHeld.toSaw]],
+  )).rows.map((row) => toNumber(row.detail_id)).sort((a, b) => a - b);
+  const sawAuditIds = sawRows.length === 0 ? [] : await recordSawTransitions(tx,
+    sawRows.map((detailId) => ({ orderId: order.orderId, detailId, from: bazisHeld.fromCode.get(detailId) ?? 'new', to: 'saw' })),
+    {
+      actorUserId: ctx.actor.id === null ? null : toNumber(ctx.actor.id),
+      actorUsername: ctx.actor.username ?? null, actorRole: ctx.actor.role ?? null,
+      requestId: ctx.requestId, cause: 'automation', idempotencyKey: `${ctx.outboxIdempotencyKey}:bazis`,
+    });
+  const changedDetailIds = updated.rows.map((row) => toNumber(row.detail_id));
+  if (changedDetailIds.length === 0) {
+    // only «Базис» details changed: the order status still follows its details, and the composition rules
+    // (order.production_status_changed …) see the new composition as after any detail-status action
+    await ensureProductionStatusFromDetailsEnabled(tx, order.orderId);
+    await runRecalcOrderProductionStatus(tx, order.orderId);
+    if (ctx.eventType !== 'order.status_changed') {
+      await evaluateProductionCompositionAfterChange(tx, {
+        orderId: order.orderId, actor: ctx.actor, requestId: ctx.requestId,
+        sourceIdempotencyKey: ctx.outboxIdempotencyKey,
+      });
+    }
+    return { status: 'executed', auditId: sawAuditIds[0] };
+  }
   return finishDetailsProductionStatusAutomation(tx, order, ctx, {
     detailIds,
-    changedDetailIds: updated.rows.map((row) => toNumber(row.detail_id)),
+    changedDetailIds,
     beforeStatusDistribution,
     currentById,
     status,
     clearedStatus: null,
+    ...(bazisHeld.held.size > 0 ? {
+      // the after-distribution of the selected details counts the «Базис» ones too (they are in the before snapshot)
+      otherTransitions: new Map(sawRows.map((id) => [id, bazisHeld.sawStatusId as number] as const)),
+      extraMetadata: { bazisHeldDetailIds: [...bazisHeld.held], bazisSawDetailIds: sawRows },
+    } : {}),
   });
 }
 
@@ -2530,6 +2573,9 @@ async function finishDetailsProductionStatusAutomation(
     currentById: ReadonlyMap<number, number | null>;
     status: AutomationProductionStatus | null;
     clearedStatus: AutomationProductionStatus | null;
+    /** Selected details changed to another status by the same action, recorded by their own event (`«Базис»`). */
+    otherTransitions?: ReadonlyMap<number, number>;
+    extraMetadata?: Record<string, unknown>;
   },
 ): Promise<AutomationActionResult> {
   const { detailIds, changedDetailIds, beforeStatusDistribution, currentById, status, clearedStatus } = change;
@@ -2570,8 +2616,10 @@ async function finishDetailsProductionStatusAutomation(
     currentById,
     changedDetailIds,
     productionStatusId,
+    change.otherTransitions,
   );
   const metadata = automationMetadata(ctx, order.orderId, order.clientId, {
+    ...(change.extraMetadata ?? {}),
     detailIds,
     changedDetailIds,
     selectedDetailCount: detailIds.length,
@@ -3284,6 +3332,37 @@ async function runRecalcOrderProductionStatus(tx: TransactionClient, orderId: nu
 // Detail-stage activation locks only the parent first, then the selected detail.
 // Keep that invariant for every entrypoint; ascending detail_id also orders
 // overlapping detail sets consistently across batch/order-level commands.
+/**
+ * For a «Новый» / «Отрисован» target: the given details that are in a «Базис раскрой» card and on that step
+ * (new / drawn / saw) — they are left out of the rule; those still new / drawn become «Базис» (`toSaw`).
+ */
+async function loadBazisHeldDetails(
+  tx: TransactionClient,
+  targetCode: string,
+  detailIds: readonly number[],
+): Promise<{ held: Set<number>; toSaw: Set<number>; fromCode: Map<number, string>; sawStatusId: number | null }> {
+  const none = { held: new Set<number>(), toSaw: new Set<number>(), fromCode: new Map<number, string>(), sawStatusId: null };
+  if ((targetCode !== 'new' && targetCode !== 'drawn') || detailIds.length === 0) return none;
+  const rows = (await tx.query<{ detail_id: string | number; code: string | null; saw_id: string | number | null }>(
+    `SELECT od.detail_id, ps.production_status_code AS code,
+            (SELECT production_status_id FROM production_statuses WHERE production_status_code = 'saw') AS saw_id
+       FROM order_details od
+       LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
+      WHERE od.detail_id = ANY($1::bigint[])
+        AND ps.production_status_code IN ('new', 'drawn', 'saw')
+        AND EXISTS (SELECT 1 FROM bazis_cut_set_details bsd WHERE bsd.source_order_detail_id = od.detail_id)`,
+    [[...detailIds]],
+  )).rows;
+  const sawStatusId = rows.find((row) => row.saw_id !== null)?.saw_id ?? null;
+  if (rows.length === 0 || sawStatusId === null) return none;
+  return {
+    held: new Set(rows.map((row) => toNumber(row.detail_id))),
+    toSaw: new Set(rows.filter((row) => row.code !== 'saw').map((row) => toNumber(row.detail_id))),
+    fromCode: new Map(rows.map((row) => [toNumber(row.detail_id), row.code ?? 'new'] as const)),
+    sawStatusId: toNumber(sawStatusId),
+  };
+}
+
 async function loadOrderDetailsForBatch(
   tx: TransactionClient,
   orderId: number,
@@ -3346,10 +3425,15 @@ function projectDistributionAfterChange(
   currentById: ReadonlyMap<number, number | null>,
   changedDetailIds: readonly number[],
   newStatusId: number | null,
+  otherTransitions?: ReadonlyMap<number, number>,
 ): Record<string, number> {
   const distribution: Record<string, number> = { ...before };
-  const newKey = newStatusId === null ? 'null' : String(newStatusId);
-  for (const id of changedDetailIds) {
+  const moves: Array<[number, number | null]> = [
+    ...changedDetailIds.map((id) => [id, newStatusId] as [number, number | null]),
+    ...[...(otherTransitions ?? new Map<number, number>())].map(([id, target]) => [id, target] as [number, number | null]),
+  ];
+  for (const [id, target] of moves) {
+    const newKey = target === null ? 'null' : String(target);
     const oldStatus = currentById.get(id) ?? null;
     const oldKey = oldStatus === null ? 'null' : String(oldStatus);
     distribution[oldKey] = (distribution[oldKey] ?? 0) - 1;

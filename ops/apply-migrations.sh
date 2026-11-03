@@ -3186,6 +3186,10 @@ probe_file() {
       ;;
     # «Присадка» → «Базис-проект»: клиент карточки, ссылка XML-проекта на карточку, инвариант клиента, orders_view.
     # Incoming signals: several occurrences of one signal per message (one per order); 173's probe accepts both keys.
+    # «Базис» wins over CNC: one-time new/drawn → saw for details of «Базис раскрой» cards, its summary audit row.
+    290_bazis_wins_saw_backfill*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event='orders.saw_status_backfill' AND entity_type='migration' AND entity_id='290');" \
+      "SELECT pg_get_functiondef('public.trg_order_detail_saw_route()'::regprocedure) LIKE '%IN (''new'', ''drawn'')%';" ;;
     289_inbound_signal_segments*) probe_all \
       "$(q_col inbound_signal_occurrences segment_index)" \
       "$(q_col inbound_signal_occurrences segment_text)" \
@@ -3462,6 +3466,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     282_order_stage_letters*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    290_bazis_wins_saw_backfill*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     289_inbound_signal_segments*)
