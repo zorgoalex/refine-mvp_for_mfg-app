@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-03", title: "Бирки: номер раскроя с листа, из которого печатают",
+    services: ["ERP", "Cutting"], repositories: ["repo_erp"],
+    fixed: [
+      "Если деталь стоит в нескольких раскроях, бирка, напечатанная с листа раскроя, показывала в поле «Раскрой» номер последнего раскроя детали (например, 333 вместо 320). Теперь там номер раскроя этого листа; для листа ванны — в поле «Ванна».",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-03", title: "NewLine: Ctrl+K находит заказы и клиентов",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

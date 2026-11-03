@@ -127,7 +127,7 @@ describe('partial sheet labels', () => {
     expect(resolved.rows).toHaveLength(1);
     expect(resolved.rows[0]).toMatchObject({
       detailId: 10, copyIndex: 2, rowIndex: 1, copyCount: 1,
-      values: { 'label.counter': 1, 'label.counter_total': 1, 'label.counter_text': 'Бир. № 1 / 1' },
+      values: { 'cut.number': '30', 'detail.cut_result_version_no': '30', 'label.counter': 1, 'label.counter_total': 1, 'label.counter_text': 'Бир. № 1 / 1' },
     });
     expect(resolved.skippedRows).toEqual([expect.objectContaining({
       detailId: 11, copyIndex: 1, code: 'LABEL_CUT_SHEET_PLACEMENT_MISSING',
@@ -219,6 +219,38 @@ describe('label cut-map resolution', () => {
     });
     expect(resolved.rows[0].values).toMatchObject({ 'cut.number': 'В-30' });
     expect(resolved.assets.get('cut_result:600')).toMatchObject({ isVacuum: true });
+  });
+
+  it.each([
+    { isVacuum: false, cutNumber: '30', regular: '30', bath: 'В-679' },
+    { isVacuum: true, cutNumber: 'В-30', regular: '333', bath: 'В-30' },
+  ])('prints the selected sheet cut number, not the detail latest job (vacuum=$isVacuum)', async (
+    { isVacuum, cutNumber, regular, bath },
+  ) => {
+    // The detail is also in a later regular job 333 and a bath В-679: the
+    // detail-level fields hold those, the sheet being printed must override.
+    const client = databaseReturning(placementRow(isVacuum
+      ? { is_vacuum: true, regular_cut_number: null, vacuum_cut_number: 'В-30' }
+      : {}));
+    const resolved = await resolveLabelCutMaps(
+      client,
+      template(),
+      [labelRow({
+        values: {
+          'detail.cut_result_version_no': '333',
+          'detail.bath_cut_result_version_no': 'В-679',
+        },
+      })],
+      [{ detailId: 10, copyIndex: 1, cutResultPlacementId: 700 }],
+      20,
+      isVacuum ? 'bath' : 'regular',
+    );
+
+    expect(resolved.rows[0].values).toMatchObject({
+      'cut.number': cutNumber,
+      'detail.cut_result_version_no': regular,
+      'detail.bath_cut_result_version_no': bath,
+    });
   });
 
   it('fails closed when a placement belongs to another physical instance', async () => {
