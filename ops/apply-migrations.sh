@@ -3048,6 +3048,10 @@ probe_file() {
       "$(q_trg trg_doweling_orders_default_client)" \
       "SELECT position('order_doweling_links' IN pg_get_viewdef('public.orders_view'::regclass, true)) > 0;" \
       ;;
+    # «Базис» wins over CNC: one-time new/drawn → saw for details of «Базис раскрой» cards, its summary audit row.
+    290_bazis_wins_saw_backfill*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event='orders.saw_status_backfill' AND entity_type='migration' AND entity_id='290');" \
+      "SELECT pg_get_functiondef('public.trg_order_detail_saw_route()'::regprocedure) LIKE '%IN (''new'', ''drawn'')%';" ;;
     # «Базис» for «Новый» details already in «Базис раскрой» cards before 282: one-time backfill, its summary audit row.
     286_saw_status_backfill*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event='orders.saw_status_backfill' AND entity_type='migration' AND entity_id='286');" ;;
@@ -3190,6 +3194,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     289_inbound_signal_segments*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    290_bazis_wins_saw_backfill*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     286_saw_status_backfill*)

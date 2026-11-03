@@ -306,6 +306,74 @@ describe('production-action automation in-transaction actions', () => {
     expect(database.sql.some((sql) => /(?:DELETE FROM|UPDATE|INSERT INTO) mdf_board_manual_moves/.test(sql))).toBe(false);
   });
 
+  it('«Базис» wins: a «Отрисован» rule leaves card details out and sets «Базис» on those still new/drawn', async () => {
+    const database = createAutomationTx({
+      targetProductionCode: 'drawn',
+      targetProductionSortOrder: 10,
+      detailRows: [
+        { detail_id: 101, production_status_id: 1, production_status_sort_order: 5 },
+        { detail_id: 102, production_status_id: 1, production_status_sort_order: 5 },
+        { detail_id: 103, production_status_id: 9, production_status_sort_order: 10 },
+      ],
+      bazisRows: [{ detail_id: 102, code: 'new', saw_id: 9 }, { detail_id: 103, code: 'saw', saw_id: 9 }],
+    });
+    await expect(changeDetailsProductionStatusFromAutomationInTransaction(database.tx, 15, 2, automationContext(), 'set_exact'))
+      .resolves.toMatchObject({ status: 'executed' });
+    const updates = database.sql.filter((sql) => sql.startsWith('UPDATE order_details'));
+    expect(updates).toHaveLength(2);
+    expect(updates[0]).toContain('NOT (detail_id = ANY($6::bigint[]))');
+    // the «Базис» detail: its own homogeneous event (saw-sync shape, own outbox key) …
+    expect(database.outboxCalls.map((call) => [call.eventType, call.idempotencyKey])).toEqual([
+      ['order.detail_production_status_auto_changed', 'saw-sync:source-key-1:automation:21:bazis:15'],
+      ['order.detail_production_status_batch_changed', 'source-key-1:automation:21'],
+    ]);
+    expect(database.outboxCalls[0]?.payload).toMatchObject({
+      cause: 'automation', transitions: [{ detailId: 102, from: 'new', to: 'saw' }],
+    });
+    // … and the rule's batch event names only the details set to its target; its after-distribution counts both
+    // (101 new → drawn 2, 102 new → saw 9; 103 already saw)
+    expect(database.outboxCalls[1]?.payload).toMatchObject({
+      changedDetailIds: [101],
+      afterStatusDistribution: { '2': 1, '9': 2 },
+    });
+  });
+
+  it('«Базис» only: the card details become «Базис» with the saw event alone, the order status recalculated', async () => {
+    const database = createAutomationTx({
+      targetProductionCode: 'drawn',
+      targetProductionSortOrder: 10,
+      detailRows: [{ detail_id: 102, production_status_id: 1, production_status_sort_order: 5 }],
+      bazisRows: [{ detail_id: 102, code: 'drawn', saw_id: 9 }],
+      updatedDetailIds: [102],
+    });
+    await expect(changeDetailsProductionStatusFromAutomationInTransaction(database.tx, 15, 2,
+      { ...automationContext(), eventType: 'payment.created' }, 'set_exact'))
+      .resolves.toMatchObject({ status: 'executed' });
+    expect(database.outboxCalls.map((call) => call.eventType)).toEqual(['order.detail_production_status_auto_changed']);
+    expect(database.outboxCalls[0]?.payload).toMatchObject({ transitions: [{ detailId: 102, from: 'drawn', to: 'saw' }] });
+    expect(database.recalcCalls).toEqual([15]);
+    // the composition rules see the new composition, as after any detail-status action
+    expect(statusAutomationMocks.evaluateProductionCompositionAutomation).toHaveBeenCalledTimes(1);
+  });
+
+  it('«Базис» held details already «Базис» → same_status, no writes', async () => {
+    const database = createAutomationTx({
+      targetProductionCode: 'drawn',
+      targetProductionSortOrder: 10,
+      detailRows: [{ detail_id: 103, production_status_id: 9, production_status_sort_order: 10 }],
+      bazisRows: [{ detail_id: 103, code: 'saw', saw_id: 9 }],
+    });
+    await expect(changeDetailsProductionStatusFromAutomationInTransaction(database.tx, 15, 2, automationContext(), 'set_exact'))
+      .resolves.toMatchObject({ status: 'skipped', skipReason: 'same_status' });
+    expect(database.sql.some((sql) => sql.startsWith('UPDATE order_details'))).toBe(false);
+  });
+
+  it('a target beyond the «Новый»/«Отрисован» step does not look at Bazis cards', async () => {
+    const database = createAutomationTx({ bazisRows: [{ detail_id: 101, code: 'new', saw_id: 9 }] });
+    await changeDetailsProductionStatusFromAutomationInTransaction(database.tx, 15, 7, automationContext());
+    expect(database.sql.some((sql) => sql.startsWith('SELECT od.detail_id, ps.production_status_code AS code'))).toBe(false);
+  });
+
   it('emits MDF-board laminated automation after a detail-status automation action', async () => {
     const database = createAutomationTx({
       detailRows: [
@@ -445,6 +513,9 @@ interface AutomationTxOptions {
     production_status_sort_order?: number | null;
   }>;
   targetProductionSortOrder?: number;
+  targetProductionCode?: string;
+  /** Details of «Базис раскрой» cards on the «Новый»/«Отрисован» step (the Bazis-held query). */
+  bazisRows?: Array<{ detail_id: number; code: string; saw_id: number }>;
   updatedDetailIds?: number[];
   recalcOrderProductionStatusId?: number;
   mdfLaminatedBathRows?: Array<{ cut_result_id: number | string; order_id: number | string }>;
@@ -500,7 +571,7 @@ function createAutomationTx(options: AutomationTxOptions = {}): AutomationTxStat
         return { rows: [{
           production_status_id: params[0],
           production_status_name: 'Крой',
-          production_status_code: 'cut',
+          production_status_code: options.targetProductionCode ?? 'cut',
           sort_order: options.targetProductionSortOrder ?? 50,
         } as T] };
       }
@@ -508,9 +579,13 @@ function createAutomationTx(options: AutomationTxOptions = {}): AutomationTxStat
         return { rows: (normalized.includes('detail.detail_id = ANY($2::bigint[])')
           ? detailRows.filter(row => (params[1] as number[]).includes(row.detail_id)) : detailRows) as T[] };
       }
+      if (normalized.startsWith('SELECT od.detail_id, ps.production_status_code AS code')) {
+        return { rows: (options.bazisRows ?? []).filter(row => (params[0] as number[]).includes(row.detail_id)) as T[] };
+      }
       if (normalized.startsWith('UPDATE order_details')) {
         return { rows: (options.updatedDetailIds ?? detailRows.map((row) => row.detail_id))
           .filter(id => !normalized.includes('detail_id = ANY($3::bigint[])') || (params[2] as number[]).includes(id))
+          .filter(id => !normalized.includes('NOT (detail_id = ANY($6::bigint[]))') || !(params[5] as number[]).includes(id))
           .map((detail_id) => ({ detail_id } as T)) };
       }
       if (normalized.startsWith('UPDATE orders SET order_status_id')) {
@@ -552,9 +627,18 @@ function createAutomationTx(options: AutomationTxOptions = {}): AutomationTxStat
         return { rows: [] as T[] };
       }
       if (normalized.startsWith('INSERT INTO audit_log')) {
+        if (params[0] === 'orders.detail_production_status_auto_change') return { rows: [{ audit_id: 'saw-audit' } as T] };
         const metadata = JSON.parse(String(params[22])) as Record<string, unknown>;
         auditCalls.push({ event: params[0], source: params[7], metadata });
         return { rows: [{ audit_id: 42 } as T] };
+      }
+      if (normalized.startsWith("INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key) VALUES ('order.detail_production_status_auto_changed'")) {
+        outboxCalls.push({
+          eventType: 'order.detail_production_status_auto_changed',
+          idempotencyKey: params[2],
+          payload: JSON.parse(String(params[1])) as Record<string, unknown>,
+        });
+        return { rows: [] as T[] };
       }
       if (normalized.startsWith('INSERT INTO outbox_events')) {
         outboxCalls.push({
