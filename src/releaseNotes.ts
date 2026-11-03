@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-03", title: "Менеджер заказа: в списке виден логин",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "В поле «Менеджер» рядом с именем сотрудника показан логин учётки, например «Тасбауов Алексей (admin)», — видно, какую учётку выбираете.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-03", title: "Бирки: номер раскроя с листа, из которого печатают",
     services: ["ERP", "Cutting"], repositories: ["repo_erp"],
     fixed: [
