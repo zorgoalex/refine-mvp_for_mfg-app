@@ -24,6 +24,7 @@ import { EvolutionAirNavigation } from './EvolutionAirNavigation';
 import { EvolutionHeader } from './EvolutionHeader';
 import { EvolutionHeaderUtilities } from './EvolutionHeaderUtilities';
 import { WorkbenchMobileTabBar } from './WorkbenchMobileTabBar';
+import { WorkbenchKbarRecordSearch } from './WorkbenchKbarRecordSearch';
 import { EvolutionMobileNavigation } from './EvolutionMobileNavigation';
 import { EvolutionSider } from './EvolutionSider';
 import { EvolutionTabletNavigation } from './EvolutionTabletNavigation';
@@ -236,6 +237,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
           />
         ) : null}
         <FrontendVersionNotice />
+        {variant === 'workbench' ? <WorkbenchKbarRecordSearch /> : null}
         {isWorkbenchDesktop ? null : (!isOperational ? <EvolutionWorkspaceTabs /> : null)}
         <Layout.Content
           className="evolution-shell__content"

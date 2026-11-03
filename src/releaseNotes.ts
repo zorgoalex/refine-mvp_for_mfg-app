@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-03", title: "NewLine: Ctrl+K находит заказы и клиентов",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "В NewLine быстрый переход (Ctrl+K или лупа в шапке) теперь ищет и записи: заказы по номеру (до 5, сначала новые) и клиентов по имени (до 5) — Enter открывает карточку. Переходы по разделам работают как раньше. Заказы и клиенты показываются только тем, у кого есть эти разделы в меню.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-03", title: "МДФ-доска: поиск по номерам заказов не сбрасывается",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [
