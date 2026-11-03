@@ -32,7 +32,7 @@ for (const mobile of [false, true]) {
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await setupWorkflowMockApi(page, db, {
-      onGraphqlQuery: (query) => { if (/\bfilms\s*\(/.test(query)) queries.push(query); },
+      onGraphqlQuery: (query) => { if (/\bfilms\s*\(/.test(query) && !/distinct_on/.test(query)) queries.push(query); },
       onGraphqlError: (error) => errors.push(error),
     });
     await page.goto('/films');
@@ -120,7 +120,8 @@ for (const mobile of [false, true]) {
     await expect(page.getByText('Введите полный UUID ключа 1С')).toBeVisible();
     expect(queries).toHaveLength(requestCount);
 
-    await page.getByRole('button', { name: 'Сбросить', exact: true }).click();
+    // Two «Сбросить» while the panel is open (toolbar and panel): the panel's one.
+    await page.getByLabel('Фильтры плёнок').getByRole('button', { name: 'Сбросить', exact: true }).click();
     await expect(search).toHaveValue('');
     await expect(rows).toHaveCount(10);
     await expect(rows.first()).toContainText('E2E Белая 1');
@@ -135,3 +136,56 @@ for (const mobile of [false, true]) {
     expect(errors).toEqual([]);
   });
 }
+
+test('films column header filters: distinct values multi-select on the server, kept after reload, sort on click', async ({ page }) => {
+  test.setTimeout(120_000);
+  page.setDefaultTimeout(15_000);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const db = createWorkflowMockDb();
+  db.vendors = [
+    { vendor_id: 1, vendor_name: 'E2E Первый', is_active: true },
+    { vendor_id: 2, vendor_name: 'E2E Второй', is_active: true },
+  ];
+  db.films = Array.from({ length: 12 }, (_, index) => ({
+    film_id: index + 1, film_name: `E2E Белая ${index + 1}`, sort_order: index + 1,
+    vendor_id: index < 9 ? 1 : 2, film_type_id: 1, film_texture: index === 0, is_active: true, ref_key_1c: null,
+  }));
+  const queries: string[] = [];
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await setupWorkflowMockApi(page, db, {
+    onGraphqlQuery: (query) => { if (/\bfilms\s*\(/.test(query) && !/distinct_on/.test(query)) queries.push(query); },
+    onGraphqlError: (error) => errors.push(error),
+  });
+  await page.goto('/films');
+  const rows = page.locator('.ant-table-tbody > tr.ant-table-row');
+  await expect(rows).toHaveCount(10, { timeout: 60_000 });
+  const dropdown = page.locator('.ant-table-filter-dropdown:visible');
+  const openFilter = (title: string) => page.locator('th', { hasText: title }).locator('.ant-table-filter-trigger').click();
+
+  await openFilter('Производитель');
+  await expect(dropdown.getByText('E2E Первый', { exact: true })).toBeVisible();
+  await dropdown.getByText('E2E Второй', { exact: true }).click();
+  await expect(rows).toHaveCount(3);
+  expect(queries.at(-1)).toMatch(/vendor_id:\s*\{\s*_in:\s*\[2\]/);
+  await dropdown.getByRole('button', { name: 'OK' }).click();
+
+  await openFilter('Фактура');
+  await dropdown.getByText('Нет', { exact: true }).click();
+  await expect(rows).toHaveCount(3);
+  await dropdown.getByRole('button', { name: 'OK' }).click();
+
+  await page.reload();
+  await expect(rows).toHaveCount(3, { timeout: 60_000 });
+  expect(queries.at(-1)).toMatch(/vendor_id:\s*\{\s*_in:\s*\[2\]/);
+  expect(queries.at(-1)).toMatch(/film_texture:\s*\{\s*_in:\s*\[false\]/);
+
+  await openFilter('Производитель');
+  await dropdown.getByRole('button', { name: 'Сбросить' }).click();
+  await expect(rows).toHaveCount(10);
+  await dropdown.getByRole('button', { name: 'OK' }).click();
+
+  await page.locator('th', { hasText: 'Производитель' }).click();
+  await expect.poll(() => queries.at(-1)).toMatch(/order_by:\s*\[\s*\{\s*vendor_id:\s*asc/);
+  expect(errors).toEqual([]);
+});

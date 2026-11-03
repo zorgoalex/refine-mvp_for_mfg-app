@@ -2,6 +2,9 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
 import { useEffect, useMemo, useState } from "react";
@@ -10,13 +13,30 @@ import type { EmployeeContact } from "../../api/employeeContactsApiTypes";
 import { can } from "../../utils/permissions";
 import { EMPLOYEE_CONTACT_KIND_LABELS, formatContact, isContactsApiMissing, sortContacts } from "./employeeContactsModel";
 
+const EMPLOYEES_FILTERS: ReferenceFilterConfig = {
+  search: { field: "full_name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "text", field: "position", label: "Должность" },
+    { kind: "text", field: "note", label: "Примечание" },
+    { kind: "text", field: "ref_key_1c", label: "Ключ 1С" },
+  ],
+};
+
+const EMPLOYEES_HEADER_FILTERS = {
+  resource: "employees",
+  fields: ["full_name", "position", "note", "ref_key_1c"],
+};
+
 export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "employee_id", order: "desc" }],
     },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, EMPLOYEES_HEADER_FILTERS);
   const { show } = useNavigation();
   const [contactsApiMissing, setContactsApiMissing] = useState(false);
   const canViewContacts = can("employees.view") && !contactsApiMissing;
@@ -40,6 +60,7 @@ export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <LocalizedList title="Сотрудники">
+      <ReferenceFilterBar storageKey="employees" config={EMPLOYEES_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         rowKey="employee_id"
@@ -50,8 +71,8 @@ export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
         })}
       >
         <Table.Column dataIndex="employee_id" title="ID" sorter />
-        <Table.Column dataIndex="full_name" title="ФИО" sorter />
-        <Table.Column dataIndex="position" title="Должность" sorter />
+        <Table.Column dataIndex="full_name" {...columnFilter("full_name")} title="ФИО" sorter />
+        <Table.Column dataIndex="position" {...columnFilter("position")} title="Должность" sorter />
         <Table.Column
           dataIndex="is_active"
           title="Активен"
@@ -62,10 +83,6 @@ export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
               text={value ? "Активен" : "Неактивен"}
             />
           )}
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
         />
         {canViewContacts ? (
           <Table.Column
@@ -83,8 +100,8 @@ export const EmployeeList: React.FC<IResourceComponentsProps> = () => {
             }}
           />
         ) : null}
-        <Table.Column dataIndex="note" title="Примечание" />
-        <Table.Column dataIndex="ref_key_1c" title="Ключ 1C" />
+        <Table.Column dataIndex="note" sorter {...columnFilter("note")} title="Примечание" />
+        <Table.Column dataIndex="ref_key_1c" sorter {...columnFilter("ref_key_1c")} title="Ключ 1C" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (

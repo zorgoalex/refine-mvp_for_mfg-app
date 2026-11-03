@@ -2,21 +2,45 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { LocalizedList } from "../../components/LocalizedList";
 import { Space, Badge } from "antd";
 import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 
+const WORKSHOPS_FILTERS: ReferenceFilterConfig = {
+  search: { field: "workshop_name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "text", field: "address", label: "Адрес" },
+    { kind: "select", field: "responsible_employee_id", label: "Ответственный", resource: "employees", optionLabel: "full_name", optionValue: "employee_id" },
+    { kind: "text", field: "ref_key_1c", label: "Ключ 1С" },
+  ],
+};
+
+const WORKSHOPS_HEADER_FILTERS = {
+  resource: "workshops",
+  fields: ["workshop_name", "address", "ref_key_1c", "responsible_employee_id"],
+  lookups: {
+    responsible_employee_id: { resource: "employees", optionValue: "employee_id", optionLabel: "full_name" },
+  },
+};
+
 export const WorkshopList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "workshop_id", order: "asc" }],
     },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, WORKSHOPS_HEADER_FILTERS);
   const { show } = useNavigation();
 
   return (
     <LocalizedList title="Цеха">
+      <ReferenceFilterBar storageKey="workshops" config={WORKSHOPS_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         rowKey="workshop_id"
@@ -30,12 +54,14 @@ export const WorkshopList: React.FC<IResourceComponentsProps> = () => {
         <ReferenceSortOrderColumn />
         <Table.Column
           dataIndex="workshop_name"
+          {...columnFilter("workshop_name")}
           title="Название цеха"
           sorter
         />
-        <Table.Column dataIndex="address" title="Адрес цеха" />
+        <Table.Column dataIndex="address" sorter {...columnFilter("address")} title="Адрес цеха" />
         <Table.Column
           dataIndex={["employee", "full_name"]}
+          {...columnFilter("responsible_employee_id")}
           title="Ответственный"
           render={(_, record: any) => record?.employee?.full_name || "-"}
         />
@@ -49,12 +75,8 @@ export const WorkshopList: React.FC<IResourceComponentsProps> = () => {
               text={value ? "Активен" : "Неактивен"}
             />
           )}
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
         />
-        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
+        <Table.Column dataIndex="ref_key_1c" sorter {...columnFilter("ref_key_1c")} title="1C-key" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (

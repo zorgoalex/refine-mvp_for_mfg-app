@@ -2,6 +2,9 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
 import { useMemo } from "react";
@@ -10,13 +13,31 @@ import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 import { PrimaryContactsCell, usePrimaryContacts } from "../../components/contacts/usePrimaryContacts";
 import { can } from "../../utils/permissions";
 
+const VENDORS_FILTERS: ReferenceFilterConfig = {
+  search: { field: "vendor_name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "select", field: "material_type_id", label: "Тип материала", resource: "material_types", optionLabel: "material_type_name", optionValue: "material_type_id" },
+    { kind: "text", field: "contact_info", label: "Контакты" },
+    { kind: "text", field: "ref_key_1c", label: "Ключ 1С" },
+  ],
+};
+
+const VENDORS_HEADER_FILTERS = {
+  resource: "vendors",
+  fields: ["vendor_name", "contact_info", "material_type_id", "ref_key_1c"],
+  lookups: { material_type_id: { resource: "material_types", optionValue: "material_type_id", optionLabel: "material_type_name" } },
+};
+
 export const VendorList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "vendor_id", order: "asc" }],
     },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, VENDORS_HEADER_FILTERS);
 
   const { highlightProps } = useHighlightRow(
     "vendor_id",
@@ -54,6 +75,7 @@ export const VendorList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <LocalizedList title="Производители">
+      <ReferenceFilterBar storageKey="vendors" config={VENDORS_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         {...highlightProps}
@@ -66,7 +88,7 @@ export const VendorList: React.FC<IResourceComponentsProps> = () => {
       >
         <Table.Column dataIndex="vendor_id" title="id" sorter />
         <ReferenceSortOrderColumn />
-        <Table.Column dataIndex="vendor_name" title="Производитель" sorter />
+        <Table.Column dataIndex="vendor_name" title="Производитель" sorter {...columnFilter("vendor_name")} />
         {contactsSupported ? (
           <Table.Column
             key="contacts"
@@ -77,24 +99,24 @@ export const VendorList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column
           dataIndex="contact_info"
           title="Контактная информация"
+          sorter
+          {...columnFilter("contact_info")}
         />
         <Table.Column
           dataIndex="material_type_id"
           title="Тип материала"
+          sorter
+          {...columnFilter("material_type_id")}
           render={(_, record: any) =>
             materialTypeMap[record?.material_type_id] ??
             record?.material_type_id
           }
         />
-        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
+        <Table.Column dataIndex="ref_key_1c" title="1C-key" sorter {...columnFilter("ref_key_1c")} />
         <Table.Column
           dataIndex="is_active"
           title="Активен"
           sorter
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
           render={(value: boolean) => (
             <Badge
               status={value ? "success" : "default"}

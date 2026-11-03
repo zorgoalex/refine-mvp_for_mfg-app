@@ -4,7 +4,7 @@ import { Alert, Button, Descriptions, Divider, Form, Input, InputNumber, Modal, 
 import dayjs from 'dayjs';
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from '../../utils/dateFormat';
 import type { ColumnsType } from 'antd/es/table';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { ClearOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { LocalizedList } from '../../components/LocalizedList';
 import { Table } from '../../ui/tooltipDelay';
 import { catalogApi, type CatalogInput, type CatalogItem, type CatalogKind, type CatalogUnit } from '../../api/catalogApi';
@@ -21,6 +21,7 @@ export function CatalogItemsList() {
   const [nomenclatureSupported, setNomenclatureSupported] = useState(false);
   const [total, setTotal] = useState(0);
   const [query, setQuery] = useState<{ q: string; kind?: CatalogKind; active: 'true' | 'false' | 'all'; offset: number; limit: number }>({ q: '', active: 'true', offset: 0, limit: 25 });
+  const [searchText, setSearchText] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [formError, setFormError] = useState('');
@@ -122,9 +123,12 @@ export function CatalogItemsList() {
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Typography.Paragraph type="secondary" style={{ margin: 0 }}>Общий каталог продаваемых позиций. Базовая цена справочная — существующие заказы не пересчитываются. Сопоставление с Bitrix будет отдельным этапом.</Typography.Paragraph>
       <Space wrap>
-        <Input.Search aria-label="Поиск товара или услуги" placeholder="Название, артикул или 1C_key" allowClear onSearch={q => setQuery(previous => ({ ...previous, q, offset: 0 }))} style={{ width: 290 }} />
+        <Input.Search aria-label="Поиск товара или услуги" placeholder="Название, артикул или 1C_key" allowClear value={searchText} onChange={event => setSearchText(event.target.value)} onSearch={q => setQuery(previous => ({ ...previous, q, offset: 0 }))} style={{ width: 290 }} />
         <Select aria-label="Тип позиции" placeholder="Все типы" allowClear options={CATALOG_KIND_OPTIONS} value={query.kind} onChange={kind => setQuery(previous => ({ ...previous, kind, offset: 0 }))} style={{ width: 185 }} />
         <Select aria-label="Состояние позиций" value={query.active} onChange={active => setQuery(previous => ({ ...previous, active, offset: 0 }))} options={[{ value: 'true', label: 'Активные' }, { value: 'false', label: 'Архив' }, { value: 'all', label: 'Все записи' }]} style={{ width: 145 }} />
+        {query.q || query.kind || query.active !== 'true' || searchText ? (
+          <Button icon={<ClearOutlined />} onClick={() => { setSearchText(''); setQuery(previous => ({ ...previous, q: '', kind: undefined, active: 'true', offset: 0 })); }}>Сбросить</Button>
+        ) : null}
         <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>Обновить</Button>
         {canManage && <Button type="primary" icon={<PlusOutlined />} disabled={loading || !!loadError || !units.length} onClick={() => start()}>Создать позицию</Button>}
       </Space>

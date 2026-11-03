@@ -2,19 +2,47 @@ import { Table } from '../../ui/tooltipDelay';
 import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
 import { Space, Badge } from "antd";
 import { useMemo } from "react";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
 import { ReferenceSortOrderColumn } from "../../components/ReferenceSortOrder";
 
+const MATERIALS_FILTERS: ReferenceFilterConfig = {
+  search: { field: "material_name", placeholder: "Поиск по названию" },
+  activeField: true,
+  fields: [
+    { kind: "select", field: "material_type_id", label: "Тип материала", resource: "material_types", optionLabel: "material_type_name", optionValue: "material_type_id" },
+    { kind: "select", field: "unit_id", label: "Единица", resource: "units", optionLabel: "unit_name", optionValue: "unit_id" },
+    { kind: "select", field: "vendor_id", label: "Производитель", resource: "vendors", optionLabel: "vendor_name", optionValue: "vendor_id" },
+    { kind: "select", field: "default_supplier_id", label: "Поставщик", resource: "suppliers", optionLabel: "supplier_name", optionValue: "supplier_id" },
+    { kind: "text", field: "ref_key_1c", label: "Ключ 1С" },
+  ],
+};
+
+const MATERIALS_HEADER_FILTERS = {
+  resource: "materials",
+  fields: ["material_name", "unit_id", "material_type_id", "vendor_id", "default_supplier_id", "description", "ref_key_1c"],
+  lookups: {
+    unit_id: { resource: "units", optionValue: "unit_id", optionLabel: "unit_name" },
+    material_type_id: { resource: "material_types", optionValue: "material_type_id", optionLabel: "material_type_name" },
+    vendor_id: { resource: "vendors", optionValue: "vendor_id", optionLabel: "vendor_name" },
+    default_supplier_id: { resource: "suppliers", optionValue: "supplier_id", optionLabel: "supplier_name" },
+  },
+};
+
 export const MaterialList: React.FC<IResourceComponentsProps> = () => {
-  const { tableProps } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "material_id", order: "asc" }],
     },
   });
+  const { filters, setFilters, setCurrent } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, MATERIALS_HEADER_FILTERS);
 
   const { highlightProps } = useHighlightRow(
     "material_id",
@@ -128,6 +156,7 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <LocalizedList title="Материалы">
+      <ReferenceFilterBar storageKey="materials" config={MATERIALS_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         {...highlightProps}
@@ -140,9 +169,11 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
       >
         <Table.Column dataIndex="material_id" title="id" sorter />
         <ReferenceSortOrderColumn />
-        <Table.Column dataIndex="material_name" title="Материал" sorter />
+        <Table.Column dataIndex="material_name" {...columnFilter("material_name")} title="Материал" sorter />
         <Table.Column
           dataIndex="unit_id"
+          sorter
+          {...columnFilter("unit_id")}
           title="Единица"
           render={(_, record: any) =>
             unitMap[record?.unit_id] ?? record?.unit_id
@@ -150,6 +181,8 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
         />
         <Table.Column
           dataIndex="material_type_id"
+          sorter
+          {...columnFilter("material_type_id")}
           title="Тип материала"
           render={(_, record: any) =>
             typeMap[record?.material_type_id] ?? record?.material_type_id
@@ -157,6 +190,8 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
         />
         <Table.Column
           dataIndex="vendor_id"
+          sorter
+          {...columnFilter("vendor_id")}
           title="Производитель"
           render={(_, record: any) =>
             vendorMap[record?.vendor_id] ?? record?.vendor_id
@@ -164,13 +199,15 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
         />
         <Table.Column
           dataIndex="default_supplier_id"
+          sorter
+          {...columnFilter("default_supplier_id")}
           title="Поставщик"
           render={(_, record: any) =>
             supplierMap[record?.default_supplier_id] ??
             record?.default_supplier_id
           }
         />
-        <Table.Column dataIndex="description" title="Описание" />
+        <Table.Column dataIndex="description" sorter {...columnFilter("description")} title="Описание" />
         <Table.Column
           dataIndex="is_active"
           title="Активен"
@@ -181,12 +218,8 @@ export const MaterialList: React.FC<IResourceComponentsProps> = () => {
               text={value ? "Активен" : "Неактивен"}
             />
           )}
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
         />
-        <Table.Column dataIndex="ref_key_1c" title="1C-key" />
+        <Table.Column dataIndex="ref_key_1c" sorter {...columnFilter("ref_key_1c")} title="1C-key" />
         <Table.Column
           title="Действия"
           render={(_, record: any) => (
