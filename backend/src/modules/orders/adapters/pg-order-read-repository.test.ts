@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
-import { parseOrderSearchInput, PgOrderReadRepository } from './pg-order-read-repository';
+import { parseOrderSearchInput, PgOrderReadRepository, ORDER_MANAGER_LABEL_SQL, ORDER_MANAGER_OPTIONS_SQL } from './pg-order-read-repository';
 
 describe('PgOrderReadRepository', () => {
   it('returns a minimal creator label for service users without directory access', async () => {
@@ -1363,7 +1363,7 @@ function mergeBaseDefaultGetByIdSql(): string {
     '        smt.name AS material_name,',
     '        NULL::bigint AS material_id,',
     '        o.milling_type_id, o.edge_type_id, o.film_id',
-    "        , (SELECT COALESCE(NULLIF(e.full_name,''), NULLIF(u.full_name,''), u.username) FROM users u",
+    "        , (SELECT CASE WHEN COALESCE(NULLIF(e.full_name,''), NULLIF(u.full_name,''), u.username) = u.username THEN u.username ELSE COALESCE(NULLIF(e.full_name,''), NULLIF(u.full_name,'')) || ' (' || u.username || ')' END FROM users u",
     '             LEFT JOIN employees e ON e.employee_id = u.employee_id WHERE u.user_id=o.manager_id) AS manager_name',
     "        , (SELECT CASE WHEN u.is_service_account THEN 'Сервис интеграции ERP' ELSE COALESCE(NULLIF(u.full_name,''),u.username) END FROM users u WHERE u.user_id=o.created_by) AS created_by_label",
     "        , (SELECT CASE WHEN u.is_service_account THEN 'Сервис интеграции ERP' ELSE COALESCE(NULLIF(u.full_name,''),u.username) END FROM users u WHERE u.user_id=o.edited_by) AS edited_by_label",
@@ -1380,3 +1380,13 @@ function mergeBaseDefaultGetByIdSql(): string {
     '      ',
   ].join('\n');
 }
+
+describe('order manager label', () => {
+  it('names the account by its login next to the person, so the chosen account is unambiguous', () => {
+    // «Тасбауов Алексей (admin)» for an account linked to an employee; the bare login when there is no other name.
+    expect(ORDER_MANAGER_LABEL_SQL).toContain("|| ' (' || u.username || ')'");
+    expect(ORDER_MANAGER_LABEL_SQL).toContain('= u.username THEN u.username');
+    expect(ORDER_MANAGER_OPTIONS_SQL).toContain(`${ORDER_MANAGER_LABEL_SQL} AS full_name`);
+    expect(ORDER_MANAGER_OPTIONS_SQL).toContain('WHERE u.is_active AND NOT u.is_service_account');
+  });
+});
