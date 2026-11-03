@@ -29,7 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
-    version: APP_VERSION, date: "2026-11-17", title: "Загрузка SVG: лишний заказ из имени файла и понятное предупреждение",
+    version: APP_VERSION, date: "2026-11-03", title: "Менеджер заказа: в списке виден логин",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "В поле «Менеджер» рядом с именем сотрудника показан логин учётки, например «Тасбауов Алексей (admin)», — видно, какую учётку выбираете.",
+    ],
+  },
+  {
+    version: "0.5.63", date: "2026-11-17", title: "Загрузка SVG: лишний заказ из имени файла и понятное предупреждение",
     services: ["ERP", "Cutting"], repositories: ["repo_erp"],
     fixed: [
       "Загрузка SVG раскроя: номер заказа из имени файла тоже берётся целиком — файл «CNC#2_3160-1+3179-18MM.svg» больше не добавляет в раскрой лишний заказ «3160».",
