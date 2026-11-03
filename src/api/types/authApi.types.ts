@@ -46,6 +46,7 @@ export type PermissionName =
   | 'clients.contacts.view'
   | 'clients.contacts.manage'
   | 'clients.merge'
+  | 'orders.manager.change'
   | 'finance.analytics.view'
   | 'payments.onec.view'
   | 'payments.onec.manage'

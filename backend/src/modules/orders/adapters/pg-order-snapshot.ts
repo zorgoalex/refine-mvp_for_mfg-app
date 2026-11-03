@@ -61,6 +61,7 @@ import type {
   SaveOrderDto,
 } from '../dto/save-order.dto';
 import { prepareOrderSave } from '../domain/order-save-preparer';
+import { invalidOrderManagerError, resolveOrderManagerAssignment } from '../domain/order-manager-assignment';
 import { OrderNotFoundError } from '../errors/order.errors';
 import { insertAutoRoot } from './pg-order-transaction-manager';
 import { assertMdfSupportsRounds } from '../application/order-rework.service';
@@ -475,25 +476,7 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
           requestRef: { importRunId: runId },
         });
         await finishImportRun(tx, runId, result.status, result.orderId, result.summary);
-        await writeAudit(
-          tx,
-          snapshotImportAuditEvent(result.status),
-          command.currentUser,
-          result.orderId,
-          // The local client of the imported order (after a merge of clients, the survivor).
-          result.orderId ? await localOrderClient(tx, result.orderId) : null,
-          {
-            requestId: command.requestId,
-            payloadHash,
-            importRunId: runId,
-            status: result.status,
-            formatVersion: snapshot.formatVersion,
-            serviceVersion: snapshot.exporterService.version,
-            // «Переделка»: restored production rounds (history; no rework events are re-emitted).
-            productionRoundNos: remappedSnapshot.data.productionRounds?.rounds.map((round) => round.roundNo) ?? [],
-          },
-          collectSnapshotSheetIds(remappedSnapshot),
-        );
+        await writeSnapshotImportResultAudit(tx, { command, snapshot, remappedSnapshot, payloadHash, runId, result });
         if (result.status === 'created' || result.status === 'updated') {
           await evaluateProductionCompositionAutomation(tx, {
             orderId: result.orderId, actor: command.currentUser,
@@ -1505,6 +1488,33 @@ async function isMergedSnapshotClient(tx: TransactionClient, snapshot: OrderSnap
   return mapped ? (await mergedInto(tx, Number(mapped.local_entity_id))) !== null : false;
 }
 
+/**
+ * The same manager rule as save-order (order-manager-assignment.ts) for an imported order: a snapshot that names another
+ * manager than the importing user needs orders.manager.change, and that manager must be an active, non-service user.
+ * A snapshot without a manager (or whose manager does not exist here) keeps the import's previous behaviour (none).
+ */
+export async function assertImportedManagerAllowed(
+  tx: TransactionClient,
+  managerId: number | null,
+  command: ImportOrderSnapshotCommand,
+): Promise<void> {
+  if (managerId === null) return;
+  const assignment = resolveOrderManagerAssignment({
+    mode: 'create',
+    currentUserId: String(command.currentUser.id),
+    storedManagerId: null,
+    managerUserId: managerId,
+    legacyManagerId: undefined,
+    canChangeManager: command.currentUser.permissions.includes('orders.manager.change'),
+  });
+  if (!assignment.changed) return;
+  const active = await tx.query<{ ok: boolean }>(
+    'SELECT EXISTS (SELECT 1 FROM users WHERE user_id = $1::bigint AND is_active AND NOT is_service_account) AS ok',
+    [managerId],
+  );
+  if (active.rows[0]?.ok !== true) throw invalidOrderManagerError(String(managerId));
+}
+
 /** The client a merged client lives on in (`client_merge_redirects`, always the last one), or null. */
 async function mergedInto(tx: TransactionClient, clientId: number): Promise<number | null> {
   const row = (await tx.query<{ survivor_id: string }>('SELECT survivor_id FROM client_merge_redirects WHERE merged_client_id = $1', [clientId])).rows[0];
@@ -1524,6 +1534,7 @@ async function upsertOrderHeader(
   const prepared = prepareOrderSave(dto, {
     mode: 'create',
   });
+  await assertImportedManagerAllowed(tx, prepared.order.header.managerId ?? null, command);
 
   const orderId = await insertOrderHeader(
     tx,
@@ -3573,6 +3584,7 @@ export async function writeAudit(
   clientId: number | null,
   metadata: Record<string, unknown>,
   relatedSheetMaterialTypeIds?: number[],
+  relatedUserId?: number | null,
 ): Promise<void> {
   const sheetIds = relatedSheetMaterialTypeIds ?? [];
   await auditService.record(tx, {
@@ -3586,9 +3598,66 @@ export async function writeAudit(
     source: SOURCE,
     relatedOrderId: orderId,
     relatedClientId: clientId ?? null,
+    relatedUserId: relatedUserId ?? null,
     metadata,
     relatedEntities: sheetIds.map((entityId) => ({ entityType: 'sheet_material_type', entityId })),
   });
+}
+
+/** Audit row of an import that wrote the order (created / updated), with the manager it wrote. */
+export async function writeSnapshotImportResultAudit(
+  tx: TransactionClient,
+  input: {
+    command: ImportOrderSnapshotCommand;
+    snapshot: OrderSnapshotDto;
+    remappedSnapshot: OrderSnapshotDto;
+    payloadHash: string;
+    runId: string;
+    result: { status: ImportStatus; orderId: number };
+  },
+): Promise<void> {
+  const { command, snapshot, remappedSnapshot, payloadHash, runId, result } = input;
+  const managerAudit = await snapshotImportManagerAudit(tx, result, command.currentUser);
+  await writeAudit(
+    tx,
+    snapshotImportAuditEvent(result.status),
+    command.currentUser,
+    result.orderId,
+    // The local client of the imported order (after a merge of clients, the survivor).
+    result.orderId ? await localOrderClient(tx, result.orderId) : null,
+    {
+      requestId: command.requestId,
+      payloadHash,
+      importRunId: runId,
+      status: result.status,
+      formatVersion: snapshot.formatVersion,
+      serviceVersion: snapshot.exporterService.version,
+      // «Переделка»: restored production rounds (history; no rework events are re-emitted).
+      productionRoundNos: remappedSnapshot.data.productionRounds?.rounds.map((round) => round.roundNo) ?? [],
+      ...managerAudit.metadata,
+    },
+    collectSnapshotSheetIds(remappedSnapshot),
+    managerAudit.relatedUserId,
+  );
+}
+
+/**
+ * The manager a created import wrote (orders.manager_id, read back in the import transaction) for its audit row:
+ * related_user_id + metadata (orders.manager.change, migration 283). Other statuses wrote no manager.
+ */
+export async function snapshotImportManagerAudit(
+  tx: TransactionClient,
+  result: { status: string; orderId: number | null },
+  currentUser: CurrentUser,
+): Promise<{ relatedUserId: number | null; metadata: Record<string, unknown> }> {
+  if (result.status !== 'created' || !result.orderId) return { relatedUserId: null, metadata: {} };
+  const row = (await tx.query<{ manager_id: string | number | null }>('SELECT manager_id FROM orders WHERE order_id = $1', [result.orderId])).rows[0];
+  if (row?.manager_id === null || row?.manager_id === undefined) return { relatedUserId: null, metadata: {} };
+  const managerId = Number(row.manager_id);
+  return {
+    relatedUserId: managerId,
+    metadata: { managerId, managerAssignedByImport: String(managerId) !== String(currentUser.id) },
+  };
 }
 
 function validateDateOnly(value: string, field: string): void {

@@ -290,6 +290,22 @@ describe('PgOrderReadRepository', () => {
     expect(listQuery?.params).toEqual(['%1258%', 10, 0]);
   });
 
+  it('returns the manager name with the order, for an inactive manager too (the form labels him with it)', async () => {
+    for (const managerName of ['Узакбай Жанара', 'Уволенный менеджер', null]) {
+      const database = createDatabase();
+      const original = database.service.query.bind(database.service);
+      (database.service as unknown as { query: typeof original }).query = (async (text: string, params?: unknown[]) => {
+        const result = await original(text as never, params as never);
+        if (String(text).includes('AS manager_name')) {
+          return { ...result, rows: result.rows.map((row: Record<string, unknown>) => ({ ...row, manager_id: 10, manager_name: managerName })) };
+        }
+        return result;
+      }) as typeof original;
+      const order = await new PgOrderReadRepository(database.service).getOrderById({ currentUser: currentUser('42'), orderId: 100 });
+      expect(order?.header).toMatchObject({ managerId: 10, managerName });
+    }
+  });
+
   it('loads full order aggregate from base tables', async () => {
     const repository = new PgOrderReadRepository(createDatabase().service);
 
@@ -532,6 +548,7 @@ describe('PgOrderReadRepository', () => {
       productionStatuses: [{ id: 80, name: 'Cut', code: 'cut', color: '#00ff00', sortOrder: 10 }],
       workshops: [{ id: 90, name: 'Main workshop', sortOrder: 10 }],
       employees: [{ id: 100, fullName: 'Test Employee' }],
+      managers: [],
       units: [{ id: 110, code: 'pcs', name: 'Pieces', symbol: 'pcs', sortOrder: 10 }],
       // SP3: repo always returns sheet types (dumb); the service masks by perm.
       sheetMaterialTypes: [
@@ -539,7 +556,8 @@ describe('PgOrderReadRepository', () => {
       ],
     });
 
-    const referenceQueries = database.queries.slice(-13).map((query) => query.text);
+    const referenceQueries = database.queries.slice(-14).map((query) => query.text);
+    expect(referenceQueries.join('\n')).toContain('FROM users u');
     expect(referenceQueries.join('\n')).toContain('FROM clients');
     expect(referenceQueries.join('\n')).toContain('FROM payment_statuses');
     expect(referenceQueries.join('\n')).toContain('FROM sheet_material_types');
@@ -1345,6 +1363,8 @@ function mergeBaseDefaultGetByIdSql(): string {
     '        smt.name AS material_name,',
     '        NULL::bigint AS material_id,',
     '        o.milling_type_id, o.edge_type_id, o.film_id',
+    "        , (SELECT COALESCE(NULLIF(e.full_name,''), NULLIF(u.full_name,''), u.username) FROM users u",
+    '             LEFT JOIN employees e ON e.employee_id = u.employee_id WHERE u.user_id=o.manager_id) AS manager_name',
     "        , (SELECT CASE WHEN u.is_service_account THEN 'Сервис интеграции ERP' ELSE COALESCE(NULLIF(u.full_name,''),u.username) END FROM users u WHERE u.user_id=o.created_by) AS created_by_label",
     "        , (SELECT CASE WHEN u.is_service_account THEN 'Сервис интеграции ERP' ELSE COALESCE(NULLIF(u.full_name,''),u.username) END FROM users u WHERE u.user_id=o.edited_by) AS edited_by_label",
     '      FROM orders o',

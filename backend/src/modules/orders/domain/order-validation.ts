@@ -104,6 +104,7 @@ function validateHeader(
   requirePositiveIntegerIfPresent(header.paymentStatusId, 'header.paymentStatusId', errors);
   requirePositiveIntegerIfPresent(header.productionStatusId, 'header.productionStatusId', errors);
   requirePositiveIntegerIfPresent(header.managerId, 'header.managerId', errors);
+  requirePositiveIntegerIfPresent(header.managerUserId, 'header.managerUserId', errors);
   // VARIANT B: header material_id is sunset — must be null/absent.
   // Any non-null value (including 0) is rejected; the 0-sentinel is not a valid bypass.
   if (header.materialId != null) {

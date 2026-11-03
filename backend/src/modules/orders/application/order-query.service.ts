@@ -122,6 +122,13 @@ export class OrderQueryService {
     }));
   }
 
+  /** Candidates for «Менеджер» (also used when the form reads its references through Hasura). Packer: none. */
+  async getManagerOptions(command: GetOrderFormDataCommand): Promise<{ managers: Array<{ id: number; fullName: string }> }> {
+    this.requireViewPermission(command);
+    if (command.currentUser.role === 'packer') return { managers: [] };
+    return { managers: await this.ports.reader.listOrderManagerOptions() };
+  }
+
   async getFormData(command: GetOrderFormDataCommand): Promise<OrderFormDataResponseDto> {
     this.requireViewPermission(command);
     const response = await this.ports.reader.getOrderFormData(command);
@@ -244,6 +251,7 @@ function maskOrderFormDataForPacker(response: OrderFormDataResponseDto): OrderFo
     productionStatuses: [],
     workshops: [],
     employees: [],
+    managers: [],
     units: [],
   };
 }

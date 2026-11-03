@@ -201,6 +201,8 @@ export interface OrderListItemDto {
 }
 
 export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
+  /** The manager's name (employee via users.employee_id, else the user) — also for an inactive manager. */
+  managerName?: string | null;
   productionDetailCount?: number;
   productionUnassignedCount?: number;
   productionDistinctStatusCount?: number;
