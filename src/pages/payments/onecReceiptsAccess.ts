@@ -30,3 +30,24 @@ export function withoutOnecLinkParams(search: string): string {
   const rest = params.toString();
   return rest ? `?${rest}` : '';
 }
+
+/** Запрос «открыть карточку строки 1С», пришедший ссылкой. `seq` растёт с каждой ссылкой (та же строка — снова). */
+export interface OnecCardRequestState {
+  pending: { lineId: number; seq: number } | null;
+  /** Счётчик ссылок; не сбрасывается вместе с выполненным запросом. */
+  seq: number;
+}
+export type OnecCardRequestAction = { type: 'link'; lineId: number } | { type: 'consumed'; seq: number };
+
+/**
+ * Ссылка ставит запрос; вкладка «Поступления 1С», открыв карточку, подтверждает его (`consumed`) — запрос снимается,
+ * и повторный показ вкладки (переключение, пересоздание панели) карточку больше не открывает.
+ */
+export function onecCardRequestReducer(state: OnecCardRequestState, action: OnecCardRequestAction): OnecCardRequestState {
+  if (action.type === 'link') {
+    const seq = state.seq + 1;
+    return { pending: { lineId: action.lineId, seq }, seq };
+  }
+  // Подтверждение устаревшего запроса (пришла новая ссылка) не снимает новый.
+  return state.pending && state.pending.seq === action.seq ? { ...state, pending: null } : state;
+}
