@@ -255,7 +255,8 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   );
   const [mobileControlsExpanded, setMobileControlsExpanded] = useState(false);
   const [periodDays, setPeriodDays] = useState<7 | 14 | 30>(isWorkbench ? 14 : 7);
-  const [productionOnly, setProductionOnly] = useState(true);
+  // «Только производство» по умолчанию выключен: календарь открывается со всеми заказами (решение пользователя 04.11)
+  const [productionOnly, setProductionOnly] = useState(false);
   // Масштабирование карточек: 1.0 = дефолт (100%), диапазон от 0.7 (70%) до 1.5 (150%)
   // the last zoom the user chose is kept per user and restored when the calendar opens
   const scaleUserKey = String(authSession.getUser()?.id ?? 'anonymous');

@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-04", title: "Календарь: «Только производство» по умолчанию выключен",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Календарь открывается со всеми заказами; фильтр «Только производство» включается кнопкой на панели.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-04", title: "NewLine: справочники на узком окне",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [
