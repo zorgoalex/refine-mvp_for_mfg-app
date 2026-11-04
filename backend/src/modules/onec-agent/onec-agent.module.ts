@@ -25,6 +25,8 @@ import { OnecEtlIngestService } from './application/onec-etl-ingest.service';
 import { OnecEtlParserService } from './application/onec-etl-parser.service';
 import { OnecEtlRevocationService } from './application/onec-etl-revocation.service';
 import { OnecMatchingService } from './application/onec-matching.service';
+import { OnecWriteMappingsService } from './application/onec-write-mappings.service';
+import { OnecWriteMappingsController } from './http/onec-write-mappings.controller';
 import { OnecMonitorService } from './application/onec-monitor.service';
 import { OnecNightlyFullSyncService } from './application/onec-nightly-full-sync.service';
 import { OnecAdminController } from './http/onec-admin.controller';
@@ -45,7 +47,7 @@ import { ONEC_STOCK_SNAPSHOTS } from './onec-stock-snapshots.port';
 @Module({
   // WhatsApp — the notification channel of 1C alerts (plan 2026-10-19 §5); WhatsApp never imports 1C modules.
   imports: [DatabaseModule, PermissionsModule, WhatsAppModule],
-  controllers: [OnecAgentController, OnecAdminController],
+  controllers: [OnecAgentController, OnecAdminController, OnecWriteMappingsController],
   providers: [
     OnecRuntimeConfigService,
     PgOnecRepository,
@@ -75,6 +77,7 @@ import { ONEC_STOCK_SNAPSHOTS } from './onec-stock-snapshots.port';
     OnecEtlRevocationService,
     PgOnecMatchingRepository,
     OnecMatchingService,
+    OnecWriteMappingsService,
     OnecCatalogReader,
     PgOnecStockSnapshotStore,
     OnecStockSnapshotsService,

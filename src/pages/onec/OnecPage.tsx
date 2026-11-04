@@ -13,6 +13,7 @@ import { DailyJournalTab } from './DailyJournalTab';
 import { CustomerOrdersTab } from './CustomerOrdersTab';
 import { MirrorTab } from './MirrorTab';
 import { MatchingTab } from './MatchingTab';
+import { WriteMappingsTab } from './WriteMappingsTab';
 import { AlertsIncidentsTab } from './AlertsIncidentsTab';
 
 const { Title } = Typography;
@@ -31,6 +32,8 @@ export function OnecPage() {
   const canView = can('onec.view') || can('onec.manage') || can('onec.commands.send');
   const canManage = can('onec.manage');
   const canSendCommands = can('onec.commands.send');
+  // The mappings tab needs the 1C section itself (onec.view or what implies it) plus onec.write.mappings — as the backend.
+  const canEditWriteMappings = can('onec.write.mappings');
   const sectionVisible = featureFlags.useBackendOnec && canView;
 
   const [overview, setOverview] = useState<OnecOverview | null>(null);
@@ -132,6 +135,11 @@ export function OnecPage() {
       label: 'Сопоставление',
       children: <MatchingTab agents={agents} />,
     },
+    ...(canEditWriteMappings ? [{
+      key: 'write-mappings',
+      label: 'Связи для записи в 1С',
+      children: <WriteMappingsTab agents={agents} />,
+    }] : []),
     {
       key: 'alerts',
       label: openAlerts > 0 ? `Алерты и инциденты (${openAlerts})` : 'Алерты и инциденты',

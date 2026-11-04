@@ -184,6 +184,7 @@ export const PERMISSIONS = [
   'onec.view',
   'onec.manage',
   'onec.commands.send',
+  'onec.write.mappings',
   'message_signals.view',
   'message_signals.resolve',
   'message_signals.technical',

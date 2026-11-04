@@ -3187,6 +3187,14 @@ probe_file() {
     # «Присадка» → «Базис-проект»: клиент карточки, ссылка XML-проекта на карточку, инвариант клиента, orders_view.
     # Incoming signals: several occurrences of one signal per message (one per order); 173's probe accepts both keys.
     # «Базис» wins over CNC: one-time new/drawn → saw for details of «Базис раскрой» cards, its summary audit row.
+    # 293: ERP → 1C business commands — mapping store and its permission (new objects only).
+    293_onec_write_mappings*) probe_all \
+      "$(q_tbl onec_write_mappings)" \
+      "SELECT to_regclass('public.onec_write_mappings_version_seq') IS NOT NULL;" \
+      "$(q_con_on onec_write_mappings chk_onec_write_mappings_kind)" \
+      "$(q_con_on onec_write_mappings chk_onec_write_mappings_target)" \
+      "SELECT EXISTS (SELECT 1 FROM permissions_catalog WHERE permission_name = 'onec.write.mappings' AND is_active);" \
+      "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'admin' AND rp.permission_name = 'onec.write.mappings');" ;;
     290_bazis_wins_saw_backfill*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event='orders.saw_status_backfill' AND entity_type='migration' AND entity_id='290');" \
       "SELECT pg_get_functiondef('public.trg_order_detail_saw_route()'::regprocedure) LIKE '%IN (''new'', ''drawn'')%';" ;;
@@ -3470,6 +3478,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     282_order_stage_letters*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    293_onec_write_mappings*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     290_bazis_wins_saw_backfill*)

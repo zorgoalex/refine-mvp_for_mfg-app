@@ -21917,6 +21917,73 @@ paths:
         '503': {description: 1C integration is disabled}
         '400': {description: "Agent is required"}
         '404': {description: "Agent not found"}
+  /api/v1/onec/write-mappings:
+    get:
+      tags:
+        - 1C integration
+      operationId: onecWriteMappingsList
+      summary: "Mappings of ERP items to 1C objects for ERP → 1C commands, per kind (nothing is sent to 1C)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view AND onec.write.mappings
+      parameters:
+        - {name: agentId, in: query, required: true, schema: {type: string}}
+      responses:
+        '200': {description: "Kinds with ERP items, current mapping (1C ref/name/stale flag, fixed value, version), missing count, candidates count"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {description: "ONEC_AGENT_NOT_FOUND"}
+  /api/v1/onec/write-mappings/candidates:
+    get:
+      tags:
+        - 1C integration
+      operationId: onecWriteMappingCandidates
+      summary: "Live 1C mirror objects that a mapping kind may point to (at most 50)"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view AND onec.write.mappings
+      parameters:
+        - {name: agentId, in: query, required: true, schema: {type: string}}
+        - {name: kind, in: query, required: true, schema: {type: string}}
+        - {name: search, in: query, required: false, schema: {type: string, maxLength: 100}}
+      responses:
+        '200': {description: "{kind, data: [{ref, name, code, entity}]}"}
+        '400': {description: "VALIDATION_FAILED — unknown kind or agent"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+  /api/v1/onec/write-mappings/{kind}/{erpKey}:
+    put:
+      tags:
+        - 1C integration
+      operationId: onecWriteMappingPut
+      summary: "Set or clear (onecRef and onecValue both null) the mapping of one ERP item; optimistic on expectedVersion; audited"
+      security:
+        - {bearerAuth: []}
+      x-permission: onec.view AND onec.write.mappings
+      parameters:
+        - {name: kind, in: path, required: true, schema: {type: string}}
+        - {name: erpKey, in: path, required: true, schema: {type: string}}
+        - {name: agentId, in: query, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [onecRef, onecValue, expectedVersion]
+              properties:
+                onecRef: {type: string, format: uuid, nullable: true}
+                onecValue: {type: object, nullable: true}
+                expectedVersion: {type: integer, minimum: 1, nullable: true}
+      responses:
+        '200': {description: "{changed, mapping}"}
+        '400': {description: "VALIDATION_FAILED"}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {description: "ONEC_MAPPING_ITEM_NOT_FOUND — no such ERP item of the kind"}
+        '409': {description: "ONEC_MAPPING_CHANGED — the mapping changed since expectedVersion"}
+        '422': {description: "ONEC_MAPPING_REF_INVALID — not a live 1C object of the allowed kind"}
   /api/v1/onec/etl/matching/items:
     get:
       tags:
