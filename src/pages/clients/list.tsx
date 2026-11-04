@@ -16,6 +16,33 @@ import { formatDate } from "../../utils/dateFormat";
 import { can } from "../../utils/permissions";
 import { ClientCounterpartyBulkModal } from "./ClientCounterpartyBulkModal";
 import { canChooseCounterparty } from "./clientCounterpartyModel";
+import { useReferenceHeaderFilters } from "../../components/referenceFilters/useReferenceHeaderFilters";
+import { ReferenceFilterBar } from "../../components/referenceFilters/ReferenceFilterBar";
+import type { ReferenceFilterConfig } from "../../components/referenceFilters/referenceFilterModel";
+
+const CLIENTS_FILTERS: ReferenceFilterConfig = {
+  search: { field: "client_name", placeholder: "Фильтр по имени" },
+  activeField: true,
+  fields: [
+    {
+      kind: "select",
+      field: "person_type",
+      label: "Тип лица",
+      options: [
+        { value: "individual", label: CLIENT_PERSON_TYPE_LABELS.individual },
+        { value: "legal", label: CLIENT_PERSON_TYPE_LABELS.legal },
+      ],
+    },
+    { kind: "text", field: "notes", label: "Примечание" },
+    { kind: "text", field: "ref_key_1c", label: "Ключ 1С" },
+  ],
+};
+
+const CLIENTS_HEADER_FILTERS = {
+  resource: "clients",
+  fields: ["client_name", "person_type"],
+  labels: { person_type: (value: unknown) => CLIENT_PERSON_TYPE_LABELS[value as ClientPersonType] ?? String(value ?? "—") },
+};
 
 export const ClientList: React.FC<IResourceComponentsProps> = () => {
   const [searchValue, setSearchValue] = useState<string>("");
@@ -23,7 +50,7 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
   const [matchingOpen, setMatchingOpen] = useState(false);
   const invalidate = useInvalidate();
 
-  const { tableProps, current, pageSize, setCurrent, sorters, setSorters } = useTable({
+  const table = useTable({
     syncWithLocation: true,
     sorters: {
       initial: [{ field: "sort_order", order: "asc" }, { field: "client_id", order: "asc" }],
@@ -33,6 +60,8 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
       pageSize: 10,
     },
   });
+  const { current, pageSize, setCurrent, sorters, setSorters, filters, setFilters } = table;
+  const { tableProps, columnFilter } = useReferenceHeaderFilters(table, CLIENTS_HEADER_FILTERS);
 
   const { highlightProps: existingHighlightProps } = useHighlightRow("client_id", tableProps.dataSource);
   const { show } = useNavigation();
@@ -162,7 +191,7 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
         <>
           <Space.Compact style={{ marginRight: 8 }}>
             <Input
-              placeholder="Поиск по названию"
+              placeholder="Перейти к клиенту"
               value={searchValue}
               onChange={(e) => setSearchValue(e.target.value)}
               onPressEnter={handleSearchClient}
@@ -184,6 +213,7 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
         </>
       )}
     >
+      <ReferenceFilterBar storageKey="clients" config={CLIENTS_FILTERS} filters={filters} setFilters={setFilters} setCurrent={setCurrent} />
       <Table
         {...tableProps}
         rowKey="client_id"
@@ -197,7 +227,7 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
       >
         <Table.Column dataIndex="client_id" title="id" sorter className="wb-list__muted" />
         <ReferenceSortOrderColumn />
-        <Table.Column dataIndex="client_name" title="Имя клиента" sorter className="wb-list__title" />
+        <Table.Column dataIndex="client_name" {...columnFilter("client_name")} title="Имя клиента" sorter className="wb-list__title" />
         <Table.Column
           key="facts_phone"
           title="Телефон"
@@ -237,13 +267,10 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
         />
         <Table.Column
           dataIndex="person_type"
+          {...columnFilter("person_type")}
           title="Тип лица"
           sorter
           render={(value: ClientPersonType) => CLIENT_PERSON_TYPE_LABELS[value] || "Физическое лицо"}
-          filters={[
-            { text: "Физическое лицо", value: "individual" },
-            { text: "Юридическое лицо", value: "legal" },
-          ]}
         />
         <Table.Column
           dataIndex="is_active"
@@ -255,10 +282,6 @@ export const ClientList: React.FC<IResourceComponentsProps> = () => {
               text={value ? "Активен" : "Неактивен"}
             />
           )}
-          filters={[
-            { text: "Активен", value: true },
-            { text: "Неактивен", value: false },
-          ]}
         />
         <Table.Column
           dataIndex="ref_key_1c"
