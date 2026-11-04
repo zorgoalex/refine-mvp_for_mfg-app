@@ -29,6 +29,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-04", title: "Клиенты: блок фильтров, как в других справочниках",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "В списке клиентов появились фильтр по имени, «Показывать неактивные» и раскрывающийся блок «Фильтры» (тип лица, примечание, ключ 1С); в заголовке «Тип лица» — выбор значений.",
+    ],
+    changed: [
+      "Прежний поиск с переходом на страницу клиента остался и называется «Перейти к клиенту».",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-02", title: "Входящие сигналы: несколько заказов в одном сообщении",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
