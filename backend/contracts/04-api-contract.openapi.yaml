@@ -18636,6 +18636,39 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/cut-jobs/order-issues:
+    get:
+      tags:
+        - CutJobs
+      operationId: listOrderCutIssues
+      summary: Ready cut jobs of an order calculated from details deleted, moved or changed since (order card «Раскрой не актуален»)
+      security:
+        - bearerAuth: []
+      x-permission: cut.view
+      parameters:
+        - name: orderId
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/cut-jobs/film-options:
     get:
       tags:
