@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-04", title: "NewLine: быстрый ввод деталей «716×396×2»",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "В форме заказа NewLine под «Параметрами деталей по умолчанию» — строка «Быстрый ввод»: высота × ширина × количество (716×396×2, 716x396, 716 396 2) и Enter. Несколько деталей — по строке (Shift+Enter) или через «;». Детали получают параметры по умолчанию и сначала занимают пустые строки таблицы. Если часть ввода непонятна, ничего не добавляется и показывается, что именно.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-03", title: "Детали в «Базис раскрое» — статус «Базис»",
     services: ["ERP"], repositories: ["repo_erp"],
     fixed: [

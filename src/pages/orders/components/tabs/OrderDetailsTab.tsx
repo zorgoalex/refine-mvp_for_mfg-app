@@ -21,6 +21,8 @@ import {
 import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTable';
 import { OrderDetailModal } from '../modals/OrderDetailModal';
 import { DetailDefaultsBar } from './DetailDefaultsBar';
+import { QuickDetailEntry } from './QuickDetailEntry';
+import { type QuickDetailRow } from '../../quickDetailEntry';
 import {
   INITIAL_DETAIL_DEFAULTS,
   newDetailDefaults,
@@ -77,6 +79,7 @@ import { useDeferredWorkspaceEntity } from '../../../../workspace/useDeferredWor
 import { acquireWorkspaceOperationPin } from '../../../../workspace/workspaceOperationPins';
 import {
   businessOrderDetails,
+  getOrderImportPlaceholderIds,
   isOrderDetailPlaceholder,
 } from '../../../../utils/orderDetailRows';
 import {
@@ -490,6 +493,31 @@ export const OrderDetailsTab = forwardRef<
     const lastDetail = [...updatedDetails].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
     if (!lastDetail || !tableRef.current) return false;
     tableRef.current.startEditRow(lastDetail);
+    return true;
+  };
+
+  // «NewLine»: быстрый ввод «716×396×2» — строки с параметрами по умолчанию; пустые подготовленные строки
+  // сетки заполняются первыми, как при импорте из Excel
+  const handleQuickEntry = async (rows: QuickDetailRow[]): Promise<boolean> => {
+    if (tableRef.current?.isEditing()) {
+      const saved = await tableRef.current.leaveCurrentEdits();
+      if (!saved) {
+        message.warning('Сначала заполните обязательные поля текущей позиции');
+        return false;
+      }
+    }
+    const placeholderIds = getOrderImportPlaceholderIds(storeApi.getState().details);
+    for (const row of rows) {
+      const detail = {
+        ...QUICK_ADD_DEFAULTS,
+        ...row,
+        area: calculateOrderDetailArea(row.height, row.width, row.quantity),
+        is_placeholder: false,
+      } as Omit<OrderDetail, 'temp_id'>;
+      const placeholderId = placeholderIds.shift();
+      if (placeholderId !== undefined) updateDetail(placeholderId, detail);
+      else addDetail(detail);
+    }
     return true;
   };
 
@@ -939,6 +967,7 @@ export const OrderDetailsTab = forwardRef<
             ruleMaterialId={nextDetailSheetMaterialTypeId}
           />
         ) : null}
+        {isWorkbench ? <QuickDetailEntry onAdd={handleQuickEntry} /> : null}
 
         {/* Table — grouping controls are rendered inline on the gear row (right-aligned) */}
         <OrderDetailTable
