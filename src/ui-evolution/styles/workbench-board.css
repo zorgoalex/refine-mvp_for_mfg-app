@@ -202,6 +202,7 @@
 
 /* Доска сама занимает весь экран: минимальная высота оболочки (рассчитана на панель в одну строку)
    иначе добавляет общую прокрутку страницы, когда вкладки идут в несколько строк. */
-:root[data-ui-variant="workbench"] .evolution-shell__content:has(.status-board-page) {
+/* только видимая доска: скрытая вкладка ([hidden]) не меняет другие экраны */
+:root[data-ui-variant="workbench"] .evolution-shell__content:has(.status-board-page:not([hidden] *)) {
   min-height: 0;
 }

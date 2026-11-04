@@ -2964,24 +2964,26 @@
   display: none;
 }
 
-:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-show-page--operational) .ant-pro-page-container-warp-page-header,
-:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-form-operational) .ant-pro-page-container-warp-page-header {
+/* только видимая карточка/форма заказа: открытые вкладки живут в рамке скрытыми ([hidden]) — без :not([hidden] *)
+   правило прятало шапки (фильтры, поиск) и у других экранов, пока где-то открыт заказ */
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-show-page--operational:not([hidden] *)) .ant-pro-page-container-warp-page-header,
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-form-operational:not([hidden] *)) .ant-pro-page-container-warp-page-header {
   display: none;
 }
 
-:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-show-page--operational) > div > .ant-page-header,
-:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-form-operational) > div > .ant-page-header {
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-show-page--operational:not([hidden] *)) > div > .ant-page-header,
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-form-operational:not([hidden] *)) > div > .ant-page-header {
   padding: 0;
   background: transparent;
 }
 
-:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-show-page--operational) > div > .ant-page-header > :where(.ant-page-header-breadcrumb, .ant-page-header-heading),
-:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-form-operational) > div > .ant-page-header > :where(.ant-page-header-breadcrumb, .ant-page-header-heading) {
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-show-page--operational:not([hidden] *)) > div > .ant-page-header > :where(.ant-page-header-breadcrumb, .ant-page-header-heading),
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-form-operational:not([hidden] *)) > div > .ant-page-header > :where(.ant-page-header-breadcrumb, .ant-page-header-heading) {
   display: none;
 }
 
-:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-show-page--operational) > div > .ant-page-header > .ant-page-header-content,
-:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-form-operational) > div > .ant-page-header > .ant-page-header-content {
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-show-page--operational:not([hidden] *)) > div > .ant-page-header > .ant-page-header-content,
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-form-operational:not([hidden] *)) > div > .ant-page-header > .ant-page-header-content {
   padding: 0;
 }
 
