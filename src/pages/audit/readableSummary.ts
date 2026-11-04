@@ -440,6 +440,23 @@ function addStatusAutomationSummary(
     return;
   }
 
+  if (commandEvent === 'orders.detail_production_status_auto_change') {
+    // «Базис» rules (card sync, a rule's «Новый»/«Отрисован» on Bazis-card details): per-detail transitions
+    const counts = new Map<string, number>();
+    for (const item of Array.isArray(commandDiff.transitions) ? commandDiff.transitions : []) {
+      const transition = objectOrEmpty(item);
+      const key = `${detailStatusCodeLabel(stringValue(transition.from))}→${detailStatusCodeLabel(stringValue(transition.to))}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    for (const [key, count] of counts) {
+      const [before, after] = key.split('→');
+      changes.push({ label: 'Производственный статус деталей', before: `${before} × ${count}`, after: `${after} × ${count}` });
+    }
+    const affectedDetailCount = numberValue(commandDiff.affectedDetailCount);
+    if (affectedDetailCount != null) notes.push(`Изменено деталей: ${affectedDetailCount}`);
+    return;
+  }
+
   const config = STATUS_EVENT_CONFIG[commandEvent];
   if (!config) return;
   const statusPair = objectOrEmpty(commandDiff[`${config.statusPrefix}Id`]);
@@ -455,6 +472,12 @@ function addStatusAutomationSummary(
       stringValue(statusCommand.statusCode),
     ),
   });
+}
+
+const DETAIL_STATUS_CODE_LABELS: Record<string, string> = { new: 'Новый', drawn: 'Отрисован', saw: 'Базис' };
+function detailStatusCodeLabel(code: string | null | undefined): string {
+  if (!code) return 'не указан';
+  return DETAIL_STATUS_CODE_LABELS[code] ? `${DETAIL_STATUS_CODE_LABELS[code]} (${code})` : code;
 }
 
 function formatStatusDistribution(value: unknown, catalog: JsonObject): string {
