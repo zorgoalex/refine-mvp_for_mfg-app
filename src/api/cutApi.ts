@@ -6,6 +6,7 @@ import type {
   CutFilmOption,
   CutDetailLastReadyResponse,
   CutDetailPlacements,
+  CutOrderIssuesResponse,
   CutJobDeleteImpact,
   CutJobDto,
   CutJobListFilters,
@@ -150,6 +151,11 @@ export const cutApi = {
     if (params.orderIds && params.orderIds.length > 0) query.append('orderIds', params.orderIds.join(','));
     const qs = query.toString();
     return httpClient.get<CutDetailPlacements>(qs ? `${apiRoutes.cutJobs.placements}?${qs}` : apiRoutes.cutJobs.placements);
+  },
+
+  /** Ready cut jobs of the order calculated from details that were deleted or changed since (order card warning). */
+  async listOrderIssues(orderId: number): Promise<CutOrderIssuesResponse> {
+    return httpClient.get<CutOrderIssuesResponse>(`${apiRoutes.cutJobs.orderIssues}?orderId=${encodeURIComponent(String(orderId))}`);
   },
 
   /** Per-detail latest-created ready (calculated) cut job, for the order-detail Раскрой column. */

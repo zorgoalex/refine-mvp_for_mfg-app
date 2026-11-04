@@ -24,7 +24,7 @@ describe('partial label generation contract', () => {
   const context = { currentUser: { id: '1', username: 'Тест', role: 'manager', roleId: 1, permissions: ['labels.generate', 'cut.view'] },
     requestId: 'test-partial-labels' };
 
-  function repository() {
+  function repository(deletedIds: number[] = []) {
     let available = true;
     const query = vi.fn(async (sql: string, params: unknown[] = []) => {
       let rows: unknown[] = [];
@@ -42,7 +42,10 @@ describe('partial label generation contract', () => {
         static_text: null, x_mm: 1, y_mm: 1, width_mm: 40, height_mm: 20, rotation_deg: 0,
         z_index: 0, style_json: template().elements[0].style, condition_json: {},
       }];
-      else if (sql.includes('FROM order_details_view od')) rows = [11, 10].map((id) => ({
+      else if (sql.includes('od.delete_flag = true')) rows = deletedIds.map((id) => ({
+        detail_id: id, order_id: 20, order_name: 'Тест-3123', detail_number: id,
+      }));
+      else if (sql.includes('FROM order_details_view od')) rows = [11, 10].filter((id) => !deletedIds.includes(id)).map((id) => ({
         detail_id: id, order_id: 20, detail_number: id, detail_name: 'Тест', width: 500,
         height: 300, quantity: 1, material_name: 'Тест', note: null, basis_project: null, basis_data: null,
       }));
@@ -85,6 +88,35 @@ describe('partial label generation contract', () => {
         ]),
       }));
     } finally { audit.mockRestore(); }
+  });
+
+  it('prints the rest of the sheet and reports a detail deleted from its order after the cut', async () => {
+    const { repo, query } = repository([11]);
+    const audit = vi.spyOn(auditService, 'record').mockResolvedValue('audit-test');
+    try {
+      const preview = await repo.previewDetailLabels({ ...context, input });
+      expect(preview.labelCount).toBe(1);
+      expect(preview.rows.map((row) => row.detailId)).toEqual([10]);
+      expect(preview.skippedRows).toEqual([{
+        orderId: 20, detailId: 11, copyIndex: 1, code: 'LABEL_DETAIL_DELETED',
+        message: 'Деталь №11 удалена из заказа Тест-3123 после раскроя — пересчитайте раскрой',
+      }]);
+      const viewRead = query.mock.calls.find(([sql]) => sql.includes('FROM order_details_view od'))!;
+      expect(viewRead[1][0]).toEqual([10]);
+      await repo.generateDetailLabels({ ...context, input: {
+        ...input, previewToken: preview.previewToken, exportFormats: ['png'], idempotencyKey: 'test-deleted',
+      } });
+      const insert = query.mock.calls.find(([sql]) => sql.includes('INSERT INTO order_label_generations'))!;
+      expect(JSON.parse(String(insert[1][6])).skippedRows).toEqual(preview.skippedRows);
+    } finally { audit.mockRestore(); }
+  });
+
+  it('keeps rejecting a missing detail outside a cut sheet', async () => {
+    const { repo } = repository([11]);
+    const { cutSheetScope: _scope, ...withoutSheet } = input;
+    await expect(repo.previewDetailLabels({ ...context, input: {
+      ...withoutSheet, detailInstances: input.cutSheetScope.detailInstances,
+    } })).rejects.toMatchObject({ code: 'LABEL_DETAIL_INVALID' });
   });
 
   it('rejects a changed printable subset after preview before saving a generation', async () => {

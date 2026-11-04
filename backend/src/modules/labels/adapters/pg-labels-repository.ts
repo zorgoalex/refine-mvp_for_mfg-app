@@ -1590,7 +1590,7 @@ export class PgLabelsRepository implements LabelsPort {
       assertTelegramSvgPagesLimit(rows, svgPages);
       return {
         generationScope: 'details',
-        skippedRows: resolved.skippedRows,
+        skippedRows: [...base.skippedRows, ...resolved.skippedRows],
         templateId: template.labelTemplateId,
         templateVersion: template.version,
         labelCount: rows.length,
@@ -1683,6 +1683,7 @@ export class PgLabelsRepository implements LabelsPort {
         this.telegramMediaDir,
         generationPreparedImages,
       );
+      const skippedRows = [...base.skippedRows, ...resolved.skippedRows];
       const rows = refreshLabelRowCustomFields(resolved.rows, template, base.details, useBasisFields);
       const rowHash = hashLabelRows(rows);
       if (
@@ -1710,7 +1711,7 @@ export class PgLabelsRepository implements LabelsPort {
           requestHash,
           sha256(command.input.previewToken),
           JSON.stringify({ detailIds, useBasisFields, ...scopeSnapshot }),
-          JSON.stringify({ detailIds, orderIds: [...new Set(rows.map((row) => row.orderId))], ...scopeSnapshot, skippedRows: resolved.skippedRows }),
+          JSON.stringify({ detailIds, orderIds: [...new Set(rows.map((row) => row.orderId))], ...scopeSnapshot, skippedRows }),
           JSON.stringify(template),
           JSON.stringify(rows),
           rows.length,
@@ -1742,12 +1743,12 @@ export class PgLabelsRepository implements LabelsPort {
         before: null,
         after: { ...generation, exportFormats: command.input.exportFormats, detailIds },
         diff: { labelCount: generation.labelCount },
-        metadata: { idempotencyKey: command.input.idempotencyKey, generationScope: 'details', skippedRows: resolved.skippedRows, telegramPacketIds, telegramSourceMessageIds, telegramAssetKeys },
+        metadata: { idempotencyKey: command.input.idempotencyKey, generationScope: 'details', skippedRows, telegramPacketIds, telegramSourceMessageIds, telegramAssetKeys },
         relatedEntities: [
           { entityType: 'order_label_generation', entityId: generation.generationId },
-          ...[...new Set([...rows, ...resolved.skippedRows].map((row) => row.detailId))]
+          ...[...new Set([...rows, ...skippedRows].map((row) => row.detailId))]
             .map((detailId) => ({ entityType: 'order_detail', entityId: detailId })),
-          ...[...new Set([...rows, ...resolved.skippedRows].map((row) => row.orderId))]
+          ...[...new Set([...rows, ...skippedRows].map((row) => row.orderId))]
             .map((orderId) => ({ entityType: 'order', entityId: orderId })),
           ...cutResultIds.map((cutResultId) => ({ entityType: 'cut_result', entityId: cutResultId })),
           ...cutJobIds.map((cutJobId) => ({ entityType: 'cut_job', entityId: cutJobId })),
@@ -2100,10 +2101,32 @@ async function buildDetailLabelRowsForInput(
   template: LabelTemplateDto,
   input: PreviewDetailLabelsCommand['input'],
   useBasisFields: boolean,
-): Promise<{ rows: LabelRow[]; details: OrderLabelDataDetailDto[] }> {
-  const detailInstances = detailInstancesForInput(input);
+): Promise<{ rows: LabelRow[]; details: OrderLabelDataDetailDto[]; skippedRows: SkippedLabelRowDto[] }> {
+  const requestedInstances = detailInstancesForInput(input);
+  if (requestedInstances) assertDetailIdsCoverInstances(input.detailIds, requestedInstances);
+  // A cut sheet keeps the details it was calculated with. When some of them were deleted from their order
+  // afterwards, the rest of the sheet still prints; each deleted one is reported as skipped instead of failing
+  // the whole sheet with LABEL_DETAIL_INVALID.
+  const skippedRows: SkippedLabelRowDto[] = [];
+  let detailInstances = requestedInstances;
+  if (input.cutSheetScope && requestedInstances) {
+    const deleted = await readDeletedLabelDetails(client, requestedInstances.map((instance) => instance.detailId));
+    if (deleted.size > 0) {
+      for (const instance of requestedInstances) {
+        const detail = deleted.get(instance.detailId);
+        if (!detail) continue;
+        skippedRows.push({
+          orderId: detail.orderId,
+          detailId: instance.detailId,
+          copyIndex: instance.instance,
+          code: 'LABEL_DETAIL_DELETED',
+          message: deletedLabelDetailMessage(detail),
+        });
+      }
+      detailInstances = requestedInstances.filter((instance) => !deleted.has(instance.detailId));
+    }
+  }
   const detailIds = detailInstances ? detailInstances.map((instance) => instance.detailId) : input.detailIds;
-  if (detailInstances) assertDetailIdsCoverInstances(input.detailIds, detailInstances);
   const details = await readDetailLabelDetails(
     client,
     detailIds,
@@ -2112,7 +2135,39 @@ async function buildDetailLabelRowsForInput(
     detailInstances ? { quantityMode: 'actual' } : undefined,
   );
   const rows = buildLabelRows({ orderName: null, template, details, useBasisFields });
-  return { rows: detailInstances ? selectLabelRowsByInstances(rows, detailInstances) : rows, details };
+  return { rows: detailInstances ? selectLabelRowsByInstances(rows, detailInstances) : rows, details, skippedRows };
+}
+
+interface DeletedLabelDetail {
+  orderId: number;
+  orderName: string | null;
+  detailNumber: number | null;
+}
+
+async function readDeletedLabelDetails(client: DatabaseClient, detailIds: number[]): Promise<Map<number, DeletedLabelDetail>> {
+  const result = await client.query<{
+    detail_id: string | number;
+    order_id: string | number;
+    order_name: string | null;
+    detail_number: string | number | null;
+  }>(
+    `SELECT od.detail_id, od.order_id, o.order_name, od.detail_number
+     FROM order_details od
+     LEFT JOIN orders o ON o.order_id = od.order_id
+     WHERE od.detail_id = ANY($1::bigint[]) AND od.delete_flag = true`,
+    [[...new Set(detailIds)]],
+  );
+  return new Map(result.rows.map((row) => [toNumber(row.detail_id), {
+    orderId: toNumber(row.order_id),
+    orderName: row.order_name,
+    detailNumber: row.detail_number === null ? null : toNumber(row.detail_number),
+  }]));
+}
+
+function deletedLabelDetailMessage(detail: DeletedLabelDetail): string {
+  const number = detail.detailNumber === null ? '' : ` №${detail.detailNumber}`;
+  const order = detail.orderName ? ` ${detail.orderName}` : '';
+  return `Деталь${number} удалена из заказа${order} после раскроя — пересчитайте раскрой`;
 }
 
 export async function resolveDetailLabelCutMaps(

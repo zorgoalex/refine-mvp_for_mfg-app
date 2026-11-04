@@ -9,6 +9,7 @@ import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { CutService } from '../application/cut.service';
 import type {
   CutDetailLastReadyResponseDto,
+  CutOrderIssuesResponseDto,
   CutDetailPlacementsResponseDto,
   CutFilmOptionDto,
   CutJobDeleteImpactDto,
@@ -233,6 +234,24 @@ export class CutController {
       detailIds: parseCsvIds(query.detailIds),
       requestId: request.requestId,
     });
+  }
+
+  @ApiOperation({
+    operationId: 'cutOrderIssues',
+    summary: 'Ready cut jobs of an order calculated from details that were deleted or changed since',
+  })
+  @Get('order-issues')
+  async orderIssues(
+    @Req() request: RequestWithCurrentUser,
+    @Query() query: Record<string, string>,
+  ): Promise<CutOrderIssuesResponseDto> {
+    // Registered BEFORE ':cutJobId' so the literal path is not captured as an id.
+    const currentUser = this.requireRead(request);
+    const orderId = Number(query.orderId);
+    if (!Number.isSafeInteger(orderId) || orderId <= 0) {
+      throw new ApiError(422, 'CUT_ORDER_ID_INVALID', 'orderId must be a positive integer');
+    }
+    return this.cut.listOrderCutIssues({ currentUser, orderId, requestId: request.requestId });
   }
 
   @ApiOperation({

@@ -93,6 +93,7 @@ import type {
   CutRepositoryPort,
   CutResultStateCommand,
   DetailLastReadyQuery,
+  OrderCutIssuesQuery,
   DetailPlacementsQuery,
   EligibleDetailsQuery,
   ListFilmOptionsForCutQuery,
@@ -123,6 +124,8 @@ import type {
   CutDetailInfoDto,
   CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
+  CutOrderIssueDto,
+  CutOrderIssuesResponseDto,
   CutFilmOptionDto,
   CutFilmUsageDto,
   CutEditorParamsDto,
@@ -3514,6 +3517,125 @@ export class PgCutRepository implements CutRepositoryPort {
     }
     const jobs = [...jobsById.values()].sort((a, b) => a.cutJobId - b.cutJobId);
     return { jobs, hasArchived };
+  }
+
+  /**
+   * Ready, non-archived cut jobs holding details of this order whose current result was calculated from a state
+   * of those details that is no longer current: the detail was deleted (or moved to another order), or its size,
+   * quantity or sheet material changed. Read-only; feeds the order card warning «раскрой не актуален».
+   */
+  async listOrderCutIssues(query: OrderCutIssuesQuery): Promise<CutOrderIssuesResponseDto> {
+    const rows = await this.database.query<{
+      cut_job_id: string | number;
+      name: string;
+      source_display_number: string | number | null;
+      is_vacuum: boolean;
+      order_detail_id: string | number;
+      snap_number: string | null;
+      snap_width: string | null;
+      snap_height: string | null;
+      snap_qty: string | null;
+      snap_sheet: string | null;
+      current_order_id: string | number | null;
+      delete_flag: boolean | null;
+      width: string | number | null;
+      height: string | number | null;
+      quantity: string | number | null;
+      detail_number: string | number | null;
+      sheet_material_type_id: string | number | null;
+    }>(
+      `
+      WITH jobs AS (
+        SELECT cj.cut_job_id, cj.name, cj.source_display_number, cr.snapshot_job,
+               COALESCE(
+                 cj.last_calc_params->>'layout_mode',
+                 cpp.params->>'layout_mode',
+                 cj.params->>'layout_mode'
+               ) = 'vacuum_table' AS is_vacuum
+        FROM cut_job cj
+        JOIN cut_result cr
+          ON cr.cut_result_id = cj.current_cut_result_id
+         AND cr.cut_job_id = cj.cut_job_id
+        LEFT JOIN cut_result_archive_state archived
+          ON archived.cut_job_id = cr.cut_job_id
+         AND archived.result_no = cr.result_no
+        LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = cj.param_profile_id
+        WHERE cj.status = 'ready'
+          AND archived.cut_job_id IS NULL
+          -- Membership by the order recorded on the job items / result placements, not by the details' current
+          -- owner: a job whose details of this order were all deleted or moved to another order since must still be
+          -- reported for this order. Both columns are indexed; the snapshot filter below decides the final rows.
+          AND cj.cut_job_id IN (
+            SELECT cji.cut_job_id FROM cut_job_item cji WHERE cji.order_id = $1
+            UNION
+            SELECT p.cut_job_id FROM cut_result_placement p WHERE p.order_id = $1
+          )
+      )
+      SELECT j.cut_job_id, j.name, j.source_display_number, j.is_vacuum,
+             (item->>'orderDetailId')::bigint AS order_detail_id,
+             item #>> '{detail,detailNumber}' AS snap_number,
+             item #>> '{detail,width}' AS snap_width,
+             item #>> '{detail,height}' AS snap_height,
+             COALESCE(item #>> '{detail,quantity}', item ->> 'qty') AS snap_qty,
+             item #>> '{detail,sheetMaterialTypeId}' AS snap_sheet,
+             od.order_id AS current_order_id, od.delete_flag, od.width, od.height, od.quantity,
+             od.detail_number, od.sheet_material_type_id
+      FROM jobs j
+      CROSS JOIN LATERAL jsonb_array_elements(COALESCE(j.snapshot_job->'items', '[]'::jsonb)) AS item
+      LEFT JOIN order_details od ON od.detail_id = (item->>'orderDetailId')::bigint
+      WHERE (item->>'orderId')::bigint = $1
+        -- HDF items store the HDF detail id in orderDetailId; only ordinary order details are compared here.
+        AND COALESCE(item->>'sourceType', 'order_detail') = 'order_detail'
+      ORDER BY j.cut_job_id, order_detail_id
+      `,
+      [query.orderId],
+    );
+    const num = (value: string | number | null): number | null => {
+      if (value === null || value === '') return null;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    const differs = (a: number | null, b: number | null) => a !== null && b !== null && Math.abs(a - b) > 0.01;
+    const size = (height: number | null, width: number | null) => `${height ?? '—'}×${width ?? '—'}`;
+    const byJob = new Map<number, CutOrderIssuesResponseDto['jobs'][number]>();
+    for (const row of rows.rows) {
+      const cutJobId = toNum(row.cut_job_id);
+      const orderDetailId = toNum(row.order_detail_id);
+      const detailNumber = num(row.detail_number) ?? num(row.snap_number);
+      const issues: CutOrderIssueDto[] = [];
+      const gone = row.current_order_id === null || row.delete_flag === true || toNum(row.current_order_id) !== query.orderId;
+      if (gone) {
+        issues.push({ kind: 'deleted', orderDetailId, detailNumber, calculated: null, current: null });
+      } else {
+        const snapHeight = num(row.snap_height);
+        const snapWidth = num(row.snap_width);
+        const height = num(row.height);
+        const width = num(row.width);
+        if (differs(snapHeight, height) || differs(snapWidth, width)) {
+          issues.push({ kind: 'size_changed', orderDetailId, detailNumber, calculated: size(snapHeight, snapWidth), current: size(height, width) });
+        }
+        const snapQty = num(row.snap_qty);
+        const quantity = num(row.quantity);
+        if (differs(snapQty, quantity)) {
+          issues.push({ kind: 'quantity_changed', orderDetailId, detailNumber, calculated: String(snapQty), current: String(quantity) });
+        }
+        const snapSheet = num(row.snap_sheet);
+        const sheet = num(row.sheet_material_type_id);
+        if (snapSheet !== null && snapSheet !== sheet) {
+          issues.push({ kind: 'material_changed', orderDetailId, detailNumber, calculated: null, current: null });
+        }
+      }
+      if (issues.length === 0) continue;
+      const job = byJob.get(cutJobId) ?? {
+        cutJobId,
+        cutNumber: formatCutJobNumber(cutJobId, row.is_vacuum === true, row.source_display_number),
+        name: row.name,
+        issues: [],
+      };
+      job.issues.push(...issues);
+      byJob.set(cutJobId, job);
+    }
+    return { jobs: [...byJob.values()] };
   }
 
   async listDetailLastReady(query: DetailLastReadyQuery): Promise<CutDetailLastReadyResponseDto> {
