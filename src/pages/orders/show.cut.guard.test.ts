@@ -25,7 +25,7 @@ describe('OrderShow cut detail-picker guards', () => {
     expect(source).toContain('buildCutJobLinkMapsFromDetails(details)');
     expect(source).toContain('mergeCutJobLinkMaps(embeddedCutJobMaps, fetchedCutJobMaps)');
     expect(source).toContain('cutOrderJobs');
-    expect(source).toContain("import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent } from \"../cut/cutJobEvents\";");
+    expect(source).toContain("import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent, subscribeCutJobReady } from \"../cut/cutJobEvents\";");
     expect(source).toContain('cncTelegramApi.orderCuttingSequences');
     expect(source).toContain('cncOrderCuttingSequences');
     expect(source).toContain("title: 'Расчет ванны'");

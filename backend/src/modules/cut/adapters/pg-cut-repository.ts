@@ -3530,6 +3530,8 @@ export class PgCutRepository implements CutRepositoryPort {
       name: string;
       source_display_number: string | number | null;
       is_vacuum: boolean;
+      requires_recalc: boolean;
+      current_order_name: string | null;
       order_detail_id: string | number;
       snap_number: string | null;
       snap_width: string | null;
@@ -3547,6 +3549,7 @@ export class PgCutRepository implements CutRepositoryPort {
       `
       WITH jobs AS (
         SELECT cj.cut_job_id, cj.name, cj.source_display_number, cr.snapshot_job,
+               cj.last_calc_basis IS NULL AS requires_recalc,
                COALESCE(
                  cj.last_calc_params->>'layout_mode',
                  cpp.params->>'layout_mode',
@@ -3571,7 +3574,8 @@ export class PgCutRepository implements CutRepositoryPort {
             SELECT p.cut_job_id FROM cut_result_placement p WHERE p.order_id = $1
           )
       )
-      SELECT j.cut_job_id, j.name, j.source_display_number, j.is_vacuum,
+      SELECT j.cut_job_id, j.name, j.source_display_number, j.is_vacuum, j.requires_recalc,
+             current_order.order_name AS current_order_name,
              (item->>'orderDetailId')::bigint AS order_detail_id,
              item #>> '{detail,detailNumber}' AS snap_number,
              item #>> '{detail,width}' AS snap_width,
@@ -3583,6 +3587,7 @@ export class PgCutRepository implements CutRepositoryPort {
       FROM jobs j
       CROSS JOIN LATERAL jsonb_array_elements(COALESCE(j.snapshot_job->'items', '[]'::jsonb)) AS item
       LEFT JOIN order_details od ON od.detail_id = (item->>'orderDetailId')::bigint
+      LEFT JOIN orders current_order ON current_order.order_id = od.order_id
       WHERE (item->>'orderId')::bigint = $1
         -- HDF items store the HDF detail id in orderDetailId; only ordinary order details are compared here.
         AND COALESCE(item->>'sourceType', 'order_detail') = 'order_detail'
@@ -3601,11 +3606,17 @@ export class PgCutRepository implements CutRepositoryPort {
     for (const row of rows.rows) {
       const cutJobId = toNum(row.cut_job_id);
       const orderDetailId = toNum(row.order_detail_id);
-      const detailNumber = num(row.detail_number) ?? num(row.snap_number);
+      // A detail still in this order is named by its current number; a deleted or moved one by the number it had in
+      // this order when the cut was calculated (a transfer renumbers it in the target order).
+      const stillHere = row.current_order_id !== null && row.delete_flag !== true && toNum(row.current_order_id) === query.orderId;
+      const detailNumber = stillHere
+        ? num(row.detail_number) ?? num(row.snap_number)
+        : num(row.snap_number) ?? num(row.detail_number);
       const issues: CutOrderIssueDto[] = [];
-      const gone = row.current_order_id === null || row.delete_flag === true || toNum(row.current_order_id) !== query.orderId;
-      if (gone) {
+      if (row.current_order_id === null || row.delete_flag === true) {
         issues.push({ kind: 'deleted', orderDetailId, detailNumber, calculated: null, current: null });
+      } else if (toNum(row.current_order_id) !== query.orderId) {
+        issues.push({ kind: 'moved', orderDetailId, detailNumber, calculated: null, current: row.current_order_name });
       } else {
         const snapHeight = num(row.snap_height);
         const snapWidth = num(row.snap_width);
@@ -3625,11 +3636,15 @@ export class PgCutRepository implements CutRepositoryPort {
           issues.push({ kind: 'material_changed', orderDetailId, detailNumber, calculated: null, current: null });
         }
       }
-      if (issues.length === 0) continue;
+      // A job awaiting recalculation is reported even when this order's details in it are unchanged: its details'
+      // columns no longer point at it, and the order card has to say why.
+      if (issues.length === 0 && row.requires_recalc !== true) continue;
       const job = byJob.get(cutJobId) ?? {
         cutJobId,
         cutNumber: formatCutJobNumber(cutJobId, row.is_vacuum === true, row.source_display_number),
         name: row.name,
+        isVacuum: row.is_vacuum === true,
+        requiresRecalc: row.requires_recalc === true,
         issues: [],
       };
       job.issues.push(...issues);

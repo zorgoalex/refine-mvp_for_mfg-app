@@ -403,7 +403,7 @@ export interface CutDetailPlacementsResponseDto {
 }
 
 /** What changed in an order detail after a ready cut result was calculated from it. */
-export type CutOrderIssueKind = 'deleted' | 'size_changed' | 'quantity_changed' | 'material_changed';
+export type CutOrderIssueKind = 'deleted' | 'moved' | 'size_changed' | 'quantity_changed' | 'material_changed';
 
 export interface CutOrderIssueDto {
   kind: CutOrderIssueKind;
@@ -411,7 +411,7 @@ export interface CutOrderIssueDto {
   detailNumber: number | null;
   /** Value the cut was calculated with (size «H×W», quantity), null when not applicable. */
   calculated: string | null;
-  /** Current value in the order, null when not applicable (deleted detail). */
+  /** Current value in the order (for `moved` — the order the detail now belongs to), null when not applicable. */
   current: string | null;
 }
 
@@ -420,11 +420,18 @@ export interface CutOrderJobIssuesDto {
   cutJobId: number;
   cutNumber: string;
   name: string;
+  /** Vacuum-table («Ванна») job. */
+  isVacuum: boolean;
+  /**
+   * The job's calculation basis was cleared (e.g. a detail transfer between orders): its details' «Раскрой»/«Ванна»
+   * columns no longer point at it until it is recalculated.
+   */
+  requiresRecalc: boolean;
   issues: CutOrderIssueDto[];
 }
 
 export interface CutOrderIssuesResponseDto {
-  /** Only jobs with at least one issue; empty when every cut of the order is current. */
+  /** Jobs with at least one issue or awaiting recalculation; empty when every cut of the order is current. */
   jobs: CutOrderJobIssuesDto[];
 }
 
