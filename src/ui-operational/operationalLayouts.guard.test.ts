@@ -83,10 +83,10 @@ describe('LINE/AIR operational layout parity', () => {
     for (const label of ['Обзор', 'Состав', 'Материалы', 'Раскрой', 'Производство', 'Финансы', 'Логистика', 'Бирки', 'Активность']) {
       expect(show).toContain(`label: '${label}'`);
     }
-    expect(styles).toContain('.evolution-screen-frame:has(.order-show-page--operational) > div > .ant-page-header');
-    expect(styles).toContain('.evolution-screen-frame:has(.order-form-operational) > div > .ant-page-header');
+    expect(styles).toContain('.evolution-screen-frame:has(.order-show-page--operational:not([hidden] *)) > div > .ant-page-header');
+    expect(styles).toContain('.evolution-screen-frame:has(.order-form-operational:not([hidden] *)) > div > .ant-page-header');
     const pageHeaderRuleStart = styles.indexOf(
-      ':root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-show-page--operational) > div > .ant-page-header,',
+      ':root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-screen-frame:has(.order-show-page--operational:not([hidden] *)) > div > .ant-page-header,',
     );
     const pageHeaderRule = styles.slice(pageHeaderRuleStart, styles.indexOf('}', pageHeaderRuleStart));
     expect(pageHeaderRule).toContain('padding: 0');
