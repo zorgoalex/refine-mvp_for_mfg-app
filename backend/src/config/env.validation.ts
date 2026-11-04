@@ -207,6 +207,13 @@ export const envSchema = z
     BACKEND_ENABLE_ORDER_LIVE_SNAPSHOT: booleanFromEnv.default(false),
     BACKEND_ENABLE_ORDER_REALTIME_WRITES: booleanFromEnv.default(false),
     BACKEND_ENABLE_ORDER_REALTIME_STREAM: booleanFromEnv.default(false),
+    // Bell/balloon push: SSE «your notifications changed» (plan part B); off → the browser polls as before.
+    BACKEND_NOTIFICATION_STREAM_ENABLED: booleanFromEnv.default(false),
+    BACKEND_NOTIFICATION_STREAM_MAX_CONNECTIONS: z.coerce.number().int().min(1).max(10000).default(300),
+    BACKEND_NOTIFICATION_STREAM_MAX_CONNECTIONS_PER_USER: z.coerce.number().int().min(1).max(20).default(5),
+    BACKEND_NOTIFICATION_STREAM_HEARTBEAT_MS: z.coerce.number().int().min(5000).max(60000).default(25000),
+    // Free PostgreSQL connections that must remain after the LISTEN connection (outside the pool) is opened.
+    BACKEND_NOTIFICATION_STREAM_RESERVED_DB_CONNECTIONS: z.coerce.number().int().min(0).max(100).default(3),
     BACKEND_ORDER_REALTIME_HEARTBEAT_MS: z.coerce.number().int().min(5000).default(20000),
     BACKEND_ORDER_REALTIME_CATCHUP_MS: z.coerce.number().int().min(250).default(1000),
     BACKEND_ORDER_REALTIME_RETENTION_HOURS: z.coerce.number().int().min(1).max(168).default(24),

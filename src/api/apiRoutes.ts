@@ -411,6 +411,7 @@ export const apiRoutes = {
     readAll: backendApiPath('/notifications/read-all'),
     balloonsClaim: backendApiPath('/notifications/balloons/claim'),
     balloonsAck: backendApiPath('/notifications/balloons/ack'),
+    stream: backendApiPath('/notifications/stream'),
   },
   deadlinePolicies: {
     list: backendApiPath('/deadline-policies'),

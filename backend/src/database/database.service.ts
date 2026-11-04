@@ -1,6 +1,6 @@
 import { Inject, Injectable, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
+import { Client, Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
 import { ApiError } from '../common/errors/api-error';
 import type { BackendEnv } from '../config/env.validation';
 import type { DatabaseClient, DatabaseQueryOptions, TransactionClient } from './database.types';
@@ -267,6 +267,26 @@ export class DatabaseService implements OnModuleDestroy, DatabaseClient {
   async connectDedicated(label = 'Database dedicated connect'): Promise<PoolClient> {
     const pool = this.requirePool();
     return withTimeout(pool.connect(), this.queryTimeoutMs, label);
+  }
+
+  /**
+   * A connection OUTSIDE the working pool, for a long-lived LISTEN: it never takes a slot the API and workers need
+   * (DATABASE_POOL_MAX may be as low as 2). The caller ends it. Connects with the pool's URL/SSL settings.
+   */
+  async connectUnpooled(label = 'Database unpooled connect'): Promise<Client> {
+    this.requirePool();
+    const client = new Client({
+      connectionString: this.config.get('DATABASE_URL', { infer: true }),
+      ssl: this.config.get('DATABASE_SSL', { infer: true }) ? { rejectUnauthorized: false } : undefined,
+      connectionTimeoutMillis: this.queryTimeoutMs,
+    });
+    try {
+      await withTimeout(client.connect(), this.queryTimeoutMs, label);
+      return client;
+    } catch (error) {
+      await client.end().catch(() => undefined);
+      throw error;
+    }
   }
 
   /**

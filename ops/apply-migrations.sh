@@ -3198,6 +3198,10 @@ probe_file() {
     290_bazis_wins_saw_backfill*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event='orders.saw_status_backfill' AND entity_type='migration' AND entity_id='290');" \
       "SELECT pg_get_functiondef('public.trg_order_detail_saw_route()'::regprocedure) LIKE '%IN (''new'', ''drawn'')%';" ;;
+    # Notification stream: pg_notify('erp_user_notifications', user_id) on visible changes of notifications.
+    294_notification_user_signal*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='trg_notification_user_signal' AND t.tgrelid=to_regclass('public.notifications') AND t.tgfoid=to_regprocedure('public.notification_user_signal()') AND t.tgenabled='O' AND NOT t.tgisinternal);" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='trg_notification_user_signal_update' AND t.tgrelid=to_regclass('public.notifications') AND t.tgfoid=to_regprocedure('public.notification_user_signal()') AND t.tgenabled='O' AND NOT t.tgisinternal);" ;;
     # order.payment_status_changed for every change of orders.payment_status_id (trigger, transaction-local context).
     291_order_payment_status_event*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='trg_order_payment_status_event' AND t.tgrelid=to_regclass('public.orders') AND t.tgfoid=to_regprocedure('public.order_payment_status_event()') AND t.tgenabled='O' AND NOT t.tgisinternal);" \
@@ -3484,6 +3488,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     290_bazis_wins_saw_backfill*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    294_notification_user_signal*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     291_order_payment_status_event*)

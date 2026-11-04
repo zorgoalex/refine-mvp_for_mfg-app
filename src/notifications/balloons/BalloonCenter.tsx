@@ -10,8 +10,8 @@ import {
   type BalloonKind, type BalloonMode, type LocalBalloon, type StorageLike,
 } from './balloonCenterModel';
 import { NOTIFICATIONS_CHANGED_EVENT } from './notificationEvents';
+import { startNotificationSync } from './notificationSync';
 
-const POLL_MS = 60_000;
 /** CSS-класс балуна центра (оформление — styles/app.css). */
 export const BALLOON_CLASS_NAME = 'app-balloon';
 /** Критичный обязательный балун (оповещения 1С) — красная полоса слева, `.app-balloon--critical` в styles/app.css. */
@@ -213,15 +213,21 @@ export const BalloonCenterProvider: React.FC<{ children: React.ReactNode }> = ({
     const st = new CenterSession(userId, tabToken(userId, sessionStore(), randomId));
     stateRef.current = st;
     void pumpRef.current();
-    const timer = setInterval(() => { if (isVisible()) void pumpRef.current(); }, POLL_MS);
-    const onVisible = () => { if (isVisible()) void pumpRef.current(); };
-    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
+    // The server says when this user's notifications change (stream, plan part B): the bell list and the balloons
+    // re-sync then; without the stream — every minute, as before (notificationSync.ts).
+    const sync = startNotificationSync({
+      openStream: (signal) => notificationsApi.openStream(signal),
+      onSync: () => {
+        void pumpRef.current();
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT));
+      },
+      isVisible,
+    });
     return () => {
       st.alive = false;
       if (stateRef.current === st) stateRef.current = null;
-      clearInterval(timer);
+      sync.stop();
       api.destroy();
-      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
     };
   }, [api, userId, sessionGeneration]);
 

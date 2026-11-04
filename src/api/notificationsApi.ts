@@ -39,6 +39,16 @@ export const notificationsApi = {
   },
 
   /** Только перечисленные уведомления — те, что пользователь видит в списке. */
+  /** SSE «your notifications changed» (204 — the stream is disabled on the server). */
+  openStream(signal: AbortSignal): Promise<Response> {
+    return httpClient.raw(apiRoutes.notifications.stream, {
+      method: 'GET',
+      cache: 'no-store',
+      headers: new Headers({ Accept: 'text/event-stream' }),
+      signal,
+    });
+  },
+
   markAllRead(notificationIds: string[]): Promise<MarkAllNotificationsReadResponse> {
     return httpClient.patch<MarkAllNotificationsReadResponse>(apiRoutes.notifications.readAll, {
       notificationIds: notificationIds.map(validateNotificationId),
