@@ -709,6 +709,16 @@ describe('PgProductionActionRepository', () => {
       'order.payment_status_changed',
     );
     expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+    // One producer (migration 291): the action marks its own event before the UPDATE, so the trigger stays silent;
+    // its explicit outbox event keeps the command idempotency key and carries the previous status.
+    const marker = database.queries.findIndex((query) => query.text.includes("set_config('erp.payment_status_event', 'emitted', true)"));
+    const update = database.queries.findIndex((query) => normalizeSql(query.text).startsWith('UPDATE orders SET payment_status_id'));
+    expect(marker).toBeGreaterThan(-1);
+    expect(marker).toBeLessThan(update);
+    const outbox = database.queries.find((query) => /INSERT INTO outbox_events/i.test(query.text)
+      && JSON.stringify(query.params).includes('order.payment_status_changed'));
+    expect(JSON.stringify(outbox?.params)).toContain('payment-status-key-1');
+    expect(JSON.stringify(outbox?.params)).toContain('previousPaymentStatusId');
   });
 
   it('rejects manual payment status changes without finance visibility', async () => {

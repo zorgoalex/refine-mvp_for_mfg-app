@@ -1,4 +1,5 @@
 import { beginPaymentAuditCapture, recordCapturedPaymentChanges } from '../../payments/application/payment-change-audit';
+import { setPaymentStatusEventContext } from '../../../shared/payment-status/payment-status-event-context';
 import { humanName } from '../../../shared/human-name-schema';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
@@ -425,6 +426,8 @@ export class PgOrderSnapshot implements OrderSnapshotPort {
         // «Переделка» §5.5: restoring rounds takes the MDF cutover fence first (fail fast, 409).
         if (snapshotHasProductionRounds(snapshot)) await assertMdfSupportsRounds(tx);
         await setSessionUser(tx, command.currentUser.id);
+        // order.payment_status_changed (migration 291): same actor/request as this import's audit.
+        await setPaymentStatusEventContext(tx, { actorUserId: command.currentUser.id, source: 'orders-snapshot', correlationId: command.requestId ?? runId });
         await tx.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [
           snapshot.source.sourceInstanceId,
           snapshot.identity.order.sourceId,
