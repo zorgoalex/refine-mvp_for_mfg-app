@@ -1,6 +1,7 @@
 import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import { scopeSetsFromPolicy } from '../../../permissions/policies/scope-sets';
 import { describe, expect, it } from 'vitest';
+import { ORDER_MANAGER_CANDIDATE_SQL } from '../domain/order-manager-assignment';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
@@ -1387,6 +1388,6 @@ describe('order manager label', () => {
     expect(ORDER_MANAGER_LABEL_SQL).toContain("|| ' (' || u.username || ')'");
     expect(ORDER_MANAGER_LABEL_SQL).toContain('= u.username THEN u.username');
     expect(ORDER_MANAGER_OPTIONS_SQL).toContain(`${ORDER_MANAGER_LABEL_SQL} AS full_name`);
-    expect(ORDER_MANAGER_OPTIONS_SQL).toContain('WHERE u.is_active AND NOT u.is_service_account');
+    expect(ORDER_MANAGER_OPTIONS_SQL).toContain(`WHERE ${ORDER_MANAGER_CANDIDATE_SQL}`);
   });
 });

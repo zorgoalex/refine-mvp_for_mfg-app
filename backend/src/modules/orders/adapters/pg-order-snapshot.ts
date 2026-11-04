@@ -61,7 +61,7 @@ import type {
   SaveOrderDto,
 } from '../dto/save-order.dto';
 import { prepareOrderSave } from '../domain/order-save-preparer';
-import { invalidOrderManagerError, resolveOrderManagerAssignment } from '../domain/order-manager-assignment';
+import { invalidOrderManagerError, ORDER_MANAGER_CANDIDATE_SQL, resolveOrderManagerAssignment } from '../domain/order-manager-assignment';
 import { OrderNotFoundError } from '../errors/order.errors';
 import { insertAutoRoot } from './pg-order-transaction-manager';
 import { assertMdfSupportsRounds } from '../application/order-rework.service';
@@ -1509,7 +1509,7 @@ export async function assertImportedManagerAllowed(
   });
   if (!assignment.changed) return;
   const active = await tx.query<{ ok: boolean }>(
-    'SELECT EXISTS (SELECT 1 FROM users WHERE user_id = $1::bigint AND is_active AND NOT is_service_account) AS ok',
+    `SELECT EXISTS (SELECT 1 FROM users u WHERE u.user_id = $1::bigint AND ${ORDER_MANAGER_CANDIDATE_SQL}) AS ok`,
     [managerId],
   );
   if (active.rows[0]?.ok !== true) throw invalidOrderManagerError(String(managerId));

@@ -1,3 +1,4 @@
+import { ORDER_MANAGER_CANDIDATE_SQL } from '../domain/order-manager-assignment';
 import {
   beginPaymentAuditCapture,
   recordCapturedPaymentChanges,
@@ -927,7 +928,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
 
   async isActiveOrderManager(userId: string): Promise<boolean> {
     const result = await this.tx.query<{ ok: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM users WHERE user_id = $1::bigint AND is_active AND NOT is_service_account) AS ok`,
+      `SELECT EXISTS (SELECT 1 FROM users u WHERE u.user_id = $1::bigint AND ${ORDER_MANAGER_CANDIDATE_SQL}) AS ok`,
       [userId],
     );
     return result.rows[0]?.ok === true;
