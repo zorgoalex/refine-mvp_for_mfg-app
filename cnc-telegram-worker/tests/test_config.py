@@ -27,6 +27,21 @@ class WorkerConfigTest(unittest.TestCase):
         self.assertEqual(config.media_restore_poll_interval_seconds, 15)
         self.assertFalse(config.mdf_observations_enabled)
         self.assertEqual(config.mdf_observation_poll_interval_seconds, 60)
+        self.assertFalse(config.sawn_signal_poll_enabled)
+        self.assertEqual(config.sawn_signal_poll_interval_seconds, 120)
+        self.assertEqual(config.sawn_signal_batch_time_budget_seconds, 60)
+
+    def test_sawn_signal_env_overrides(self) -> None:
+        with patch.dict(os.environ, {
+            "CNC_SAWN_SIGNAL_POLL_ENABLED": "true",
+            "CNC_SAWN_SIGNAL_POLL_INTERVAL_SECONDS": "30",
+            "CNC_SAWN_SIGNAL_BATCH_TIME_BUDGET_SECONDS": "15",
+        }, clear=True):
+            config = WorkerConfig.from_env()
+
+        self.assertTrue(config.sawn_signal_poll_enabled)
+        self.assertEqual(config.sawn_signal_poll_interval_seconds, 30)
+        self.assertEqual(config.sawn_signal_batch_time_budget_seconds, 15)
 
     def test_glm_ocr_fallback_requires_explicit_enable(self) -> None:
         with patch.dict(os.environ, {

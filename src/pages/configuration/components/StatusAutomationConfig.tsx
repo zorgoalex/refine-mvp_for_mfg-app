@@ -7,6 +7,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError } from '../../../api/apiError';
 import { cncTelegramApi } from '../../../api/cncTelegramApi';
+import { cncSawnSignalsApi } from '../../../api/cncSawnSignalsApi';
 import { statusAutomationApi } from '../../../api/statusAutomationApi';
 import type {
   StatusAutomationActionType,
@@ -250,6 +251,22 @@ export function StatusAutomationConfig() {
   const [rulesImportReport, setRulesImportReport] =
     useState<StatusAutomationRulesImportReport | null>(null);
   const [autoCutStatusSaving, setAutoCutStatusSaving] = useState(false);
+  const canManageSawnSignals = can('cut.manage');
+  const [sawnApplyToPacket, setSawnApplyToPacket] = useState<boolean | null>(null);
+  const [sawnApplySaving, setSawnApplySaving] = useState(false);
+  const [sawnSettingsError, setSawnSettingsError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void cncSawnSignalsApi.settings()
+      .then((settings) => { if (!cancelled) { setSawnApplyToPacket(settings.applyToPacket); setSawnSettingsError(null); } })
+      .catch(() => {
+        if (!cancelled) {
+          setSawnApplyToPacket(null);
+          setSawnSettingsError('Не удалось прочитать настройку переноса по 👍 из чата.');
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
   const [autoCutStatusEnabled, setAutoCutStatusEnabled] = useState(false);
   const [confirmedAutoCutStatusEnabled, setConfirmedAutoCutStatusEnabled] =
     useState<boolean | null>(null);
@@ -849,6 +866,24 @@ export function StatusAutomationConfig() {
     }
   };
 
+  const handleSawnApplyToggle = async (enabled: boolean) => {
+    const previous = sawnApplyToPacket;
+    setSawnApplyToPacket(enabled);
+    setSawnApplySaving(true);
+    try {
+      const result = await cncSawnSignalsApi.setApplyToPacket(enabled);
+      setSawnApplyToPacket(result.applyToPacket);
+      message.success(result.applyToPacket
+        ? 'Перенос файла в «Распилено» по 👍 включён'
+        : 'Перенос файла в «Распилено» по 👍 выключен');
+    } catch (error) {
+      setSawnApplyToPacket(previous);
+      message.error(errorText(error, 'Не удалось сохранить настройку переноса по 👍'));
+    } finally {
+      setSawnApplySaving(false);
+    }
+  };
+
   const handleMdfBoardHiddenStatusesSave = async () => {
     setMdfBoardHiddenStatusesSaving(true);
     const nextProductionStatusIds = normalizeStatusIds(mdfBoardHiddenProductionStatusIds);
@@ -950,6 +985,28 @@ export function StatusAutomationConfig() {
               onChange={(checked) => void handleAutoCutStatusToggle(checked)}
             />
           </Space>
+          <Space
+            wrap
+            style={{ width: '100%', justifyContent: 'space-between' }}
+            align="center"
+          >
+            <div style={{ flex: 1, minWidth: 260 }}>
+              <Text strong>Переносить файл в «Распилено» по 👍 из чата</Text>
+              <br />
+              <Text type="secondary">
+                Сигнал из чата фиксируется в журнале всегда; переключатель управляет только автоматическим
+                переносом новых сигналов. Накопленные — кнопкой в журнале Telegram.
+              </Text>
+            </div>
+            <Switch
+              checked={sawnApplyToPacket === true}
+              loading={sawnApplySaving || (sawnApplyToPacket === null && sawnSettingsError === null)}
+              disabled={!canManageSawnSignals || sawnApplyToPacket === null}
+              aria-label="Переносить файл в «Распилено» по 👍 из чата"
+              onChange={(checked) => void handleSawnApplyToggle(checked)}
+            />
+          </Space>
+          {sawnSettingsError && <Alert type="error" showIcon message={sawnSettingsError} />}
           {!cutProductionStatusAvailable && !productionStatusesLoading && (
             <Alert
               type="warning"

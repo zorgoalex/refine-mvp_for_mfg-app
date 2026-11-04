@@ -7,6 +7,7 @@ import { cncTelegramApi } from '../../api/cncTelegramApi';
 import type { TelegramWorkerAuditExportQuery, TelegramWorkerAuditQuery, TelegramWorkerMessageLog, TelegramWorkerMessageStatus, TelegramWorkerMessageType, TelegramWorkerOperation, TelegramWorkerScan } from '../../api/types/cncTelegramWorkerAudit.types';
 import { ApiError } from '../../api/httpClient';
 import { TelegramWorkerTechnicalLogs } from './TelegramWorkerTechnicalLogs';
+import { TelegramSawnSignals } from './TelegramSawnSignals';
 import { can } from '../../utils/permissions';
 
 const { Text } = Typography;
@@ -247,6 +248,7 @@ export const TelegramWorkerAudit: React.FC = () => (
     defaultActiveKey="events"
     items={[
       { key: 'events', label: 'Зарегистрированные события', children: <TelegramWorkerStructuredAudit /> },
+      { key: 'sawn-signals', label: 'Сигналы «Распилено»', children: <TelegramSawnSignals /> },
       ...(can('audit.technical.view')
         ? [{ key: 'technical', label: 'Технические raw-логи', children: <TelegramWorkerTechnicalLogs /> }]
         : []),

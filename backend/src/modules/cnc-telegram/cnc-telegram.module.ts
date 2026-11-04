@@ -25,6 +25,9 @@ import { PgMdfBoardHistoryRepository } from './adapters/pg-mdf-board-history-rep
 import { PgCncTelegramMdfObservationRepository } from './adapters/pg-cnc-telegram-mdf-observation-repository';
 import { CncTelegramMdfObservationService } from './application/mdf-cnc-observations.service';
 import { CncTelegramObservationWorkerController } from './http/cnc-telegram-observation-worker.controller';
+import { CncChatSignalsController } from '../cnc-chat-signals/cnc-chat-signals.controller';
+import { CncChatSignalsService } from '../cnc-chat-signals/cnc-chat-signals.service';
+import { PgCncChatSignalsRepository } from '../cnc-chat-signals/pg-cnc-chat-signals-repository';
 
 @Module({
   imports: [DatabaseModule],
@@ -35,9 +38,19 @@ import { CncTelegramObservationWorkerController } from './http/cnc-telegram-obse
     CncTelegramWorkerSessionController,
     CncTelegramImportController,
     CncTelegramObservationWorkerController,
+    CncChatSignalsController,
   ],
   providers: [
     CncTelegramRuntimeConfigService,
+    {
+      provide: CncChatSignalsService,
+      useFactory: (
+        database: DatabaseService,
+        config: ConfigService<BackendEnv, true>,
+        session: CncTelegramWorkerSessionService,
+      ) => new CncChatSignalsService(new PgCncChatSignalsRepository(database), config, session),
+      inject: [DatabaseService, ConfigService, CncTelegramWorkerSessionService],
+    },
     {
       provide: MdfBoardHistoryService,
       useFactory: (database: DatabaseService) =>

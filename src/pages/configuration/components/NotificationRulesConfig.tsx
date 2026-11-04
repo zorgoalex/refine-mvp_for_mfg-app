@@ -60,6 +60,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   'order.rework_details_added': 'Переделка: добавлены детали',
   'order.rework_reason_clarified': 'Переделка: уточнена причина',
   'order.rework_closed': 'Переделка: круг закрыт',
+  'order.cnc_sawn_signal_received': 'Сигнал «Распилено» из чата CNC',
   DEADLINE_EXPIRED: 'Истечение срока',
   GROUP_DEADLINE_OVERDUE: 'Просрочка срока группы',
   'order.resource_procurement_changed': 'Закуп материала заказа',

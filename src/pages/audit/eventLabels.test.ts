@@ -32,4 +32,10 @@ describe('journal event labels', () => {
     expect(auditEventTitle('crm_sync.upsert', 'order')).toBe('Синхронизирована запись CRM');
     expect(auditEventTitle('crm_sync.upsert')).toBe('Синхронизирована запись CRM');
   });
+  it('labels every cnc.chat_signal audit event in Russian', () => {
+    const events = ['reaction_observed', 'reaction_cleared_observed', 'message_missing_observed', 'sawn_received',
+      'sawn_closed_observed', 'packet_applied', 'apply_skipped', 'apply_pending_previewed', 'apply_pending_executed',
+      'setting_changed', 'role_unknown', 'return_reset_applied', 'return_reset_cancelled'];
+    for (const event of events) expect(AUDIT_EVENT_TITLES[`cnc.chat_signal.${event}`]).toMatch(/[А-Яа-яЁё]/);
+  });
 });

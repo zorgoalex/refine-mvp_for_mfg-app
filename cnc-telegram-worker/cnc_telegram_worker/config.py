@@ -62,6 +62,9 @@ class WorkerConfig:
     mdf_observations_enabled: bool = False
     mdf_observation_poll_interval_seconds: int = 60
     manual_import_enabled: bool = False
+    sawn_signal_poll_enabled: bool = False
+    sawn_signal_poll_interval_seconds: int = 120
+    sawn_signal_batch_time_budget_seconds: int = 60
 
     @property
     def business_timezone(self) -> ZoneInfo:
@@ -127,6 +130,9 @@ class WorkerConfig:
             mdf_observations_enabled=bool_env("CNC_TELEGRAM_MDF_OBSERVATIONS_ENABLED", False),
             mdf_observation_poll_interval_seconds=positive_int_env("CNC_TELEGRAM_MDF_OBSERVATION_POLL_INTERVAL_SECONDS", 60),
             manual_import_enabled=bool_env("CNC_TELEGRAM_MANUAL_IMPORT_ENABLED", False),
+            sawn_signal_poll_enabled=bool_env("CNC_SAWN_SIGNAL_POLL_ENABLED", False),
+            sawn_signal_poll_interval_seconds=positive_int_env("CNC_SAWN_SIGNAL_POLL_INTERVAL_SECONDS", 120),
+            sawn_signal_batch_time_budget_seconds=positive_int_env("CNC_SAWN_SIGNAL_BATCH_TIME_BUDGET_SECONDS", 60),
         )
 
     @property

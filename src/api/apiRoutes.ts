@@ -332,6 +332,10 @@ export const apiRoutes = {
     importConfirm: (importRequestId: string) => backendApiPath(`/cnc-telegram/imports/${encodeURIComponent(importRequestId)}/confirm`),
     importRepeatPrepare: (importRequestId: string) => backendApiPath(`/cnc-telegram/imports/${encodeURIComponent(importRequestId)}/repeat/prepare`),
     importRequest: (importRequestId: string) => backendApiPath(`/cnc-telegram/imports/${encodeURIComponent(importRequestId)}`),
+    sawnSignals: backendApiPath('/cnc-telegram/sawn-signals'),
+    sawnSignalSettings: backendApiPath('/cnc-telegram/sawn-signals/settings'),
+    sawnSignalsApplyPreview: backendApiPath('/cnc-telegram/sawn-signals/apply-pending/preview'),
+    sawnSignalsApplyConfirm: backendApiPath('/cnc-telegram/sawn-signals/apply-pending/confirm'),
   },
   sheetMaterials: {
     list: backendApiPath('/sheet-material-types'),

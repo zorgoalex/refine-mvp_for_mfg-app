@@ -842,19 +842,13 @@ export class PgCncTelegramRepository
       // A newer revision of an already-completed packet can add matches, quantities, or
       // a verified whole-order comment. Reconcile every completed revision; updates are idempotent.
       if (packetIsCompleted(packet)) {
-        await applyCompletedPacketAutoCutStatus(tx, {
+        await applyPacketCompletionEffects(tx, {
           command: resolvedCommand,
           packet,
           requestId,
           packetAuditId: auditId,
-        });
-        await evaluateMdfBoardColumnAutomation(tx, {
-          eventType: 'mdf.board.completed',
-          source: { kind: 'packet', id: packet.packetId },
-          orderIds: packet.items.map((item) => item.orderId ?? item.matchOrderId),
-          actor: command.currentUser,
-          requestId,
-          sourceIdempotencyKey: `cnc-telegram-packet:${packet.packetId}:source-${packet.sourceVersion}:mdf-board-completed`,
+          mdfBoardCompletedIdempotencyKey:
+            `cnc-telegram-packet:${packet.packetId}:source-${packet.sourceVersion}:mdf-board-completed`,
         });
       }
       await evaluateMdfBoardBathColumnAutomationForPacket(tx, {
@@ -3538,7 +3532,7 @@ async function updatePacket(
       sheet_image_content_type = $14,
       sheet_image_size_bytes = $15::bigint,
       parse_status = $16,
-      ${mdfCompletionUpdateSql('$17', '$18', '$19')},
+      ${ingestCompletionUpdateSql('$17', '$18', '$19')},
       rework = $20,
       comments_json = $21::jsonb,
       tools_json = $22::jsonb,
@@ -3558,6 +3552,27 @@ async function updatePacket(
 }
 
 /** The same completion assignments are exercised against PostgreSQL by correction regression tests. */
+/**
+ * A packet completed by the chat «Распилено» signal (migration 292) stays completed when a later ingest revision
+ * carries `pending/false`, unless the packet was returned after that application (the return barrier then rules).
+ */
+const CHAT_SIGNAL_HOLDS_COMPLETION_SQL = `EXISTS (
+  SELECT 1 FROM cnc_chat_sawn_packet_signals chat_signal
+   WHERE chat_signal.packet_id = cnc_telegram_packets.packet_id AND chat_signal.apply_state = 'applied'
+     AND chat_signal.applied_at > COALESCE((
+       SELECT max(returned.created_at) FROM audit_log returned
+        WHERE returned.entity_type = 'mdf_board_card' AND returned.event = 'mdf_board.production_returned'
+          AND returned.entity_id = 'packet:' || cnc_telegram_packets.packet_id::text), '-infinity'::timestamptz))`;
+
+/** Completion columns written by an ingest revision: the chat-signal completion survives a `pending/false` revision. */
+export function ingestCompletionUpdateSql(status: string, thumbs: string, completedAt: string): string {
+  return mdfCompletionUpdateSql(
+    `CASE WHEN ${CHAT_SIGNAL_HOLDS_COMPLETION_SQL} THEN 'completed' ELSE ${status} END`,
+    `CASE WHEN ${CHAT_SIGNAL_HOLDS_COMPLETION_SQL} THEN true ELSE ${thumbs} END`,
+    `(CASE WHEN ${CHAT_SIGNAL_HOLDS_COMPLETION_SQL} THEN COALESCE(completed_at, ${completedAt}::timestamptz) ELSE ${completedAt}::timestamptz END)`,
+  );
+}
+
 export function mdfCompletionUpdateSql(status: string, thumbs: string, completedAt: string): string {
   return `completion_status = CASE WHEN mdf_completion_returned THEN 'pending' ELSE ${status} END,
     thumbs_up = CASE WHEN mdf_completion_returned THEN false ELSE ${thumbs} END,
@@ -6134,7 +6149,7 @@ async function enqueuePacketEvents(
 
 function packetOutboxPayload(
   packet: CncTelegramPacketDto,
-  command: IngestCncTelegramPacketCommand,
+  command: PacketCompletionCommand,
   requestId: string,
   auditId: string,
   eventKind: 'ingested' | 'completed' | 'needs_review',
@@ -6168,6 +6183,85 @@ function packetOutboxPayload(
 
 function packetIsCompleted(packet: CncTelegramPacketDto): boolean {
   return packet.completionStatus === 'completed' || packet.thumbsUp;
+}
+
+/** What the completion effects read from the command that completed a packet (ingest or a chat signal). */
+type PacketCompletionCommand = Pick<IngestCncTelegramPacketCommand, 'currentUser'> & {
+  dto: Pick<IngestCncTelegramPacketCommand['dto'], 'idempotencyKey'>;
+};
+
+/** Effects of a completed packet shared by ingest and the chat «Распилено» signal: detail «Распилен» (by the
+ * setting) and the «МДФ-доска распилено» automation. Callers keep their own audit and outbox. */
+async function applyPacketCompletionEffects(
+  tx: TransactionClient,
+  input: {
+    command: PacketCompletionCommand;
+    packet: CncTelegramPacketDto;
+    requestId: string;
+    packetAuditId: string;
+    mdfBoardCompletedIdempotencyKey: string;
+  },
+): Promise<void> {
+  await applyCompletedPacketAutoCutStatus(tx, {
+    command: input.command,
+    packet: input.packet,
+    requestId: input.requestId,
+    packetAuditId: input.packetAuditId,
+  });
+  await evaluateMdfBoardColumnAutomation(tx, {
+    eventType: 'mdf.board.completed',
+    source: { kind: 'packet', id: input.packet.packetId },
+    orderIds: input.packet.items.map((item) => item.orderId ?? item.matchOrderId),
+    actor: input.command.currentUser,
+    requestId: input.requestId,
+    sourceIdempotencyKey: input.mdfBoardCompletedIdempotencyKey,
+  });
+}
+
+export async function loadCncTelegramPacketForSignal(
+  tx: TransactionClient,
+  packetId: string,
+): Promise<CncTelegramPacketDto> {
+  return loadPacket(tx, packetId);
+}
+
+/**
+ * The chat «Распилено» signal completed this packet (its UPDATE already ran in the caller's transaction, under the
+ * caller's MDF boundary and locks): run the same effects as a completed ingest revision, the bath column automation
+ * and the `cnc.telegram_packet.completed` event. Keys are per packet signal, never colliding with ingest keys.
+ */
+export async function completeCncTelegramPacketFromSignal(
+  tx: TransactionClient,
+  input: {
+    packetId: string;
+    currentUser: CurrentUser;
+    requestId: string;
+    auditId: string;
+    idempotencyKey: string;
+  },
+): Promise<CncTelegramPacketDto> {
+  const packet = await loadPacket(tx, input.packetId);
+  const command: PacketCompletionCommand = { currentUser: input.currentUser, dto: { idempotencyKey: input.idempotencyKey } };
+  await applyPacketCompletionEffects(tx, {
+    command,
+    packet,
+    requestId: input.requestId,
+    packetAuditId: input.auditId,
+    mdfBoardCompletedIdempotencyKey: `${input.idempotencyKey}:mdf-board-completed`,
+  });
+  await evaluateMdfBoardBathColumnAutomationForPacket(tx, {
+    packet,
+    actor: input.currentUser,
+    requestId: input.requestId,
+  });
+  await enqueueOutbox(tx, {
+    eventType: 'cnc.telegram_packet.completed',
+    aggregateType: 'cnc_telegram_packet',
+    aggregateId: packet.packetId,
+    idempotencyKey: `${input.idempotencyKey}:packet-completed`,
+    payload: packetOutboxPayload(packet, command, input.requestId, input.auditId, 'completed'),
+  });
+  return packet;
 }
 
 async function evaluateMdfBoardBathColumnAutomationForPacket(
@@ -6308,7 +6402,7 @@ export async function loadMdfBathColumnAutomationState(
 async function applyCompletedPacketAutoCutStatus(
   tx: TransactionClient,
   input: {
-    command: IngestCncTelegramPacketCommand;
+    command: PacketCompletionCommand;
     packet: CncTelegramPacketDto;
     requestId: string;
     packetAuditId: string;

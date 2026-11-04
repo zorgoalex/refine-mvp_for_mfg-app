@@ -3223,6 +3223,21 @@ probe_file() {
       "$(q_col inbound_signal_occurrences visible_text)" \
       "$(q_con_on inbound_signal_occurrences inbound_signal_occurrences_message_signal_segment_key)" \
       "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.inbound_signal_occurrences'::regclass AND conname='inbound_signal_occurrences_message_id_signal_code_key');" ;;
+    # «Распилено» from the CNC chat: journal of 👍 under bot-sent files, packet transitions, return-barrier resets.
+    292_cnc_chat_sawn_signals*) probe_all \
+      "$(q_tbl cnc_chat_signal_messages)" \
+      "$(q_tbl cnc_chat_signal_claims)" \
+      "$(q_tbl cnc_chat_sawn_packet_signals)" \
+      "$(q_tbl cnc_chat_sawn_signals)" \
+      "$(q_tbl cnc_chat_signal_return_resets)" \
+      "$(q_tbl cnc_chat_signal_commands)" \
+      "$(q_idx uq_cnc_chat_sawn_packet_signals_open)" \
+      "$(q_idx uq_cnc_chat_sawn_signals_open_episode)" \
+      "$(q_idx uq_cnc_chat_signal_return_resets_active)" \
+      "$(q_con_on cnc_chat_sawn_packet_signals chk_cnc_chat_sawn_packet_signals_close)" \
+      "$(q_con_on cnc_chat_sawn_signals chk_cnc_chat_sawn_signals_anonymous)" \
+      "$(q_con_on cnc_chat_sawn_signals fk_cnc_chat_sawn_signals_message)" \
+      "SELECT EXISTS (SELECT 1 FROM app_settings WHERE setting_key='cnc_chat_signals.apply_to_packet');" ;;
     # Client merge journal written only by the card-aware merge/undo (rollback of 279 refused, not desynced).
     288_client_merge_cards_guard*) probe_all \
       "SELECT to_regprocedure('public.trg_client_merges_cards_guard()') IS NOT NULL;" \
@@ -3501,6 +3516,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     290_bazis_wins_saw_backfill*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    292_cnc_chat_sawn_signals*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     294_notification_user_signal*)

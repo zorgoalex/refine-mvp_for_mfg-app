@@ -39,6 +39,7 @@ from .manual_send_observation import (
     bind_manual_svg_sent_files,
     validated_transport_message_ids,
 )
+from .sawn_signals import poll_sawn_signals
 from .gcode import extract_order_names, parse_gcode_text
 from .ocr import OcrResult, run_ocr_command
 from .observation import ObservationReadError, fetch_observation_facts, validate_observation_claim
@@ -504,6 +505,19 @@ class CncTelegramWorker:
                         fatal_event=lease_lost_event,
                     ),
                     name="cnc-telegram-media-restore-poll",
+                ))
+            if getattr(self.config, "sawn_signal_poll_enabled", False):
+                queue_tasks.append(asyncio.create_task(
+                    poll_sawn_signals(
+                        self.erp,
+                        client,
+                        entity,
+                        stop_event,
+                        interval_seconds=self.config.sawn_signal_poll_interval_seconds,
+                        time_budget_seconds=self.config.sawn_signal_batch_time_budget_seconds,
+                        fatal_event=lease_lost_event,
+                    ),
+                    name="cnc-telegram-sawn-signal-poll",
                 ))
 
             stop_wait = asyncio.create_task(stop_event.wait(), name="cnc-telegram-serve-stop")

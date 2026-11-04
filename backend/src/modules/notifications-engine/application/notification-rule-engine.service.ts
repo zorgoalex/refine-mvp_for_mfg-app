@@ -133,6 +133,7 @@ const EVENT_TEXT: Record<string, string> = {
   'order.rework_details_added': 'в переделку добавлены детали',
   'order.rework_reason_clarified': 'уточнена причина переделки',
   'order.rework_closed': 'круг переделки закрыт',
+  'order.cnc_sawn_signal_received': 'из чата CNC пришёл сигнал «Распилено»',
 };
 
 function orderLabel(ctx: NotificationEventContext): string {

@@ -164,6 +164,18 @@ export const NOTIFICATION_EVENT_REGISTRY: Record<string, NotificationEventDefini
     allowedChannels: ['in_app', 'balloon'],
     featureFlag: 'procurementNotifications',
   },
+  // «Распилено» из чата CNC (👍 под файлом станка): fan-out по заказам файла только для свежих сигналов
+  // (`freshness='fresh'`, план cnc-chat-sawn-signals F7); поздние/базовые пишутся только в журнал.
+  'order.cnc_sawn_signal_received': {
+    eventType: 'order.cnc_sawn_signal_received',
+    aggregateType: 'order',
+    owner: 'engine',
+    contextFields: ['orderId', 'clientId'],
+    supportedResolvers: ORDER_RESOLVERS,
+    supportsOrderConditions: true,
+    supportsDeadlineConditions: false,
+    maxEventAgeHours: 6,
+  },
   'order.rework_started': reworkEvent('order.rework_started'),
   'order.rework_details_added': reworkEvent('order.rework_details_added'),
   'order.rework_reason_clarified': reworkEvent('order.rework_reason_clarified'),

@@ -311,6 +311,12 @@ class ErpClient:
             payload=with_item_lease({"error": error[:500]}, item_lease),
         )
 
+    async def claim_sawn_signals(self) -> dict[str, Any]:
+        return await self._authorized_post("/cnc-telegram/sawn-signals/worker/claim", payload={})
+
+    async def report_sawn_signals(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._authorized_post("/cnc-telegram/sawn-signals/worker/report", payload=payload)
+
     async def claim_import_scans(self) -> dict[str, Any]:
         return await self._authorized_post("/cnc-telegram/import-worker/scans/claim")
 
