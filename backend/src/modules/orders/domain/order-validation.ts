@@ -7,6 +7,7 @@ import type {
   OrderSaveMode,
 } from '../dto/save-order.dto';
 import { OrderValidationError, type OrderFieldError } from '../errors/order.errors';
+import { ORDER_DELIVERY_ADDRESS_MAX, ORDER_DELIVERY_METHODS, ORDER_DELIVERY_NOTES_MAX } from '../dto/save-order.dto';
 
 export interface ValidateSaveOrderOptions {
   mode: OrderSaveMode;
@@ -125,6 +126,18 @@ function validateHeader(
   requireNonNegative(header.discount, 'header.discount', errors);
   requireNonNegative(header.surcharge, 'header.surcharge', errors);
   requirePositiveIfPresent(header.hdfMinThresholdMm, 'header.hdfMinThresholdMm', errors);
+  if (header.deliveryMethod != null && !(ORDER_DELIVERY_METHODS as readonly string[]).includes(header.deliveryMethod)) {
+    errors.push({ field: 'header.deliveryMethod', message: `deliveryMethod must be one of ${ORDER_DELIVERY_METHODS.join(', ')}` });
+  }
+  if (header.deliveryAddress != null && header.deliveryAddress.length > ORDER_DELIVERY_ADDRESS_MAX) {
+    errors.push({ field: 'header.deliveryAddress', message: `deliveryAddress must be at most ${ORDER_DELIVERY_ADDRESS_MAX} characters` });
+  }
+  if (header.deliveryNotes != null && header.deliveryNotes.length > ORDER_DELIVERY_NOTES_MAX) {
+    errors.push({ field: 'header.deliveryNotes', message: `deliveryNotes must be at most ${ORDER_DELIVERY_NOTES_MAX} characters` });
+  }
+  if (header.startShift != null && (!Number.isInteger(header.startShift) || header.startShift < 1 || header.startShift > 3)) {
+    errors.push({ field: 'header.startShift', message: 'startShift must be 1, 2 or 3' });
+  }
 
   if (header.discount > 0 && header.surcharge > 0) {
     errors.push({

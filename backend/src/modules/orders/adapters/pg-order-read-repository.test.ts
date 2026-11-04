@@ -1356,6 +1356,7 @@ function mergeBaseDefaultGetByIdSql(): string {
     '        stage_letters.stage_codes AS stage_production_status_codes,',
     '        o.planned_completion_date, o.completion_date, o.issue_date, o.payment_date,',
     '        o.discount, o.surcharge, o.notes, o.manager_id,',
+    '        o.delivery_method, o.delivery_address, o.delivery_notes, o.start_shift,',
     '        o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,',
     '        o.total_amount, o.final_amount, o.paid_amount, o.parts_count, o.total_area,',
     '        o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,',

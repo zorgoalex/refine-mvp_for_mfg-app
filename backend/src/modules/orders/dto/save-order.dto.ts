@@ -24,6 +24,11 @@ export interface SaveOrderDto {
   idempotencyKey?: string;
 }
 
+export const ORDER_DELIVERY_METHODS = ['courier', 'pickup'] as const;
+export type OrderDeliveryMethod = (typeof ORDER_DELIVERY_METHODS)[number];
+export const ORDER_DELIVERY_ADDRESS_MAX = 500;
+export const ORDER_DELIVERY_NOTES_MAX = 1000;
+
 export interface SaveOrderHeaderDto {
   orderId?: number;
   projectId?: number | null;
@@ -57,6 +62,15 @@ export interface SaveOrderHeaderDto {
   edgeTypeId?: number | null;
   filmId?: number | null;
   hdfMinThresholdMm?: number | null;
+  /**
+   * Delivery and the production start shift (ERP → 1C phase 1, plan 2026-11-04). For these four fields an ABSENT key
+   * means «keep the stored value» (an older open form does not wipe them); an explicit null clears.
+   */
+  deliveryMethod?: OrderDeliveryMethod | null;
+  deliveryAddress?: string | null;
+  deliveryNotes?: string | null;
+  /** Shift 1..3 in which the production of the order starts (1C state «N смена В производстве»). */
+  startShift?: number | null;
 }
 
 export interface SaveOrderDetailDto {

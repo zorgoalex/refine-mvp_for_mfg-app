@@ -1,3 +1,4 @@
+import { orderDeliveryFieldsView } from './order-delivery-fields';
 import { ORDER_MANAGER_CANDIDATE_SQL } from '../domain/order-manager-assignment';
 import type { QueryResultRow } from 'pg';
 import { appendOrderReadVisibilitySql } from '../../../permissions/policies/order-read-scope-sql';
@@ -96,6 +97,10 @@ interface OrderHeaderRow extends QueryResultRow, ProductionSummaryRow {
   discount: string | number | null;
   surcharge: string | number | null;
   notes: string | null;
+  delivery_method?: string | null;
+  delivery_address?: string | null;
+  delivery_notes?: string | null;
+  start_shift?: number | string | null;
   manager_id: string | number | null;
   /** Detail read only: the manager as people see him (employee name via users.employee_id, else the user). */
   manager_name?: string | null;
@@ -796,6 +801,7 @@ export class PgOrderReadRepository
         stage_letters.stage_codes AS stage_production_status_codes,
         o.planned_completion_date, o.completion_date, o.issue_date, o.payment_date,
         o.discount, o.surcharge, o.notes, o.manager_id,
+        o.delivery_method, o.delivery_address, o.delivery_notes, o.start_shift,
         o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,
         o.total_amount, o.final_amount, o.paid_amount, o.parts_count, o.total_area,
         o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
@@ -1704,6 +1710,7 @@ function mapOrderDto(
       linkCadFile: row.link_cad_file,
       linkPdfFile: row.link_pdf_file,
       notes: row.notes,
+      ...orderDeliveryFieldsView(row),
       refKey1c: row.ref_key_1c,
       sheetMaterialTypeId: toNullableNumber(row.sheet_material_type_id),
       sheetEligible: row.sheet_eligible ?? false,

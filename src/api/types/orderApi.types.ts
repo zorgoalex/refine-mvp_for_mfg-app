@@ -627,6 +627,8 @@ export interface OrderNameSuggestionResponse {
   suggestedOrderName: string;
 }
 
+export type OrderDeliveryMethod = 'courier' | 'pickup';
+
 export interface SaveOrderHeaderDto {
   orderName: string;
   clientId: number;
@@ -667,6 +669,11 @@ export interface SaveOrderHeaderDto {
 
   notes?: string | null;
   refKey1c?: string | null;
+  /** Delivery and the production start shift (ERP → 1C phase 1). Absent key — the backend keeps the stored value. */
+  deliveryMethod?: OrderDeliveryMethod | null;
+  deliveryAddress?: string | null;
+  deliveryNotes?: string | null;
+  startShift?: number | null;
 }
 
 export interface SaveOrderDetailDto {
@@ -868,6 +875,10 @@ export interface OrderHeaderDto {
   deleteFlag?: boolean;
   deletedAt?: IsoDateTimeString | null;
   deletedByName?: string | null;
+  deliveryMethod?: OrderDeliveryMethod | null;
+  deliveryAddress?: string | null;
+  deliveryNotes?: string | null;
+  startShift?: number | null;
 }
 
 export interface OrderDetailDto {

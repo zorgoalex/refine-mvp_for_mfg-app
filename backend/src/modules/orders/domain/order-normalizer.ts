@@ -98,6 +98,11 @@ export function normalizeDateOnly(value: unknown): string | null {
   return String(value).trim();
 }
 
+/** `{ [key]: map(raw[key]) }` when the request carries the key at all, otherwise `{}` (the key stays absent). */
+function presentKey<K extends string, V>(raw: RawRecord, key: K, map: (value: unknown) => V): { [P in K]?: V } {
+  return Object.prototype.hasOwnProperty.call(raw, key) ? ({ [key]: map(raw[key]) } as { [P in K]?: V }) : {};
+}
+
 function normalizeHeader(header: SaveOrderHeaderDto): NormalizedSaveOrderHeaderDto {
   const raw = header as unknown as RawRecord;
 
@@ -128,6 +133,11 @@ function normalizeHeader(header: SaveOrderHeaderDto): NormalizedSaveOrderHeaderD
     linkCadFile: normalizeOptionalString(raw.linkCadFile),
     linkPdfFile: normalizeOptionalString(raw.linkPdfFile),
     notes: normalizeOptionalString(raw.notes),
+    // Absent key → absent property («keep stored»); see SaveOrderHeaderDto.deliveryMethod.
+    ...presentKey(raw, 'deliveryMethod', (value) => normalizeOptionalString(value) as never),
+    ...presentKey(raw, 'deliveryAddress', normalizeOptionalString),
+    ...presentKey(raw, 'deliveryNotes', normalizeOptionalString),
+    ...presentKey(raw, 'startShift', (value) => optionalInteger(value, 'header.startShift')),
     refKey1c: normalizeOptionalString(raw.refKey1c),
     // VARIANT B: header material_id is sunset. Preserve the raw value so that
     // validateSaveOrderDto can REJECT a non-null incoming materialId (422).

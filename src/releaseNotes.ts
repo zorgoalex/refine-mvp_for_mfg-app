@@ -29,6 +29,15 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-05", title: "Заказ: доставка и смена запуска",
+    services: ["ERP"], repositories: ["repo_erp"],
+    added: [
+      "Форма заказа, «Основная информация»: смена запуска (1/2/3), способ доставки (курьер или самовывоз), адрес и примечание к доставке.",
+      "Карточка заказа NewLine: блок «Доставка и смена».",
+      "Поля понадобятся при создании заказа покупателя в 1С: адрес, способ доставки и состояние «N смена В производстве».",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-04", title: "Уведомления приходят сразу, без обновления страницы",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

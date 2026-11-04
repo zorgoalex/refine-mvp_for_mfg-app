@@ -10,6 +10,20 @@ import type { OrderFormValues } from '../../types/orders';
 import type { OrderDto } from '../types/orderApi.types';
 
 describe('orderMapper', () => {
+  it('delivery and start shift: sent only when the form has the field (an older draft keeps the stored value)', () => {
+    const absent = mapOrderFormToSaveOrderDto(createFormValues());
+    for (const key of ['deliveryMethod', 'deliveryAddress', 'deliveryNotes', 'startShift']) {
+      expect(Object.prototype.hasOwnProperty.call(absent.header, key)).toBe(false);
+    }
+    const values = createFormValues();
+    values.header = { ...values.header, delivery_method: 'courier', delivery_address: '  ул. Абая 1 ', delivery_notes: '', start_shift: 2 };
+    expect(mapOrderFormToSaveOrderDto(values).header).toMatchObject({
+      deliveryMethod: 'courier', deliveryAddress: 'ул. Абая 1', deliveryNotes: null, startShift: 2,
+    });
+    values.header = { ...values.header, delivery_method: null, start_shift: null };
+    expect(mapOrderFormToSaveOrderDto(values).header).toMatchObject({ deliveryMethod: null, startShift: null });
+  });
+
   it('maps OrderFormValues to SaveOrderDto without frontend-only fields', () => {
     const values = createFormValues();
 

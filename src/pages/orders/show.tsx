@@ -41,6 +41,7 @@ import {
   OrderDatesCard,
   OrderLinksCard,
   OrderNotesCard,
+  OrderDeliveryCard,
   type OrderLinkItem,
 } from "./components/sections/OrderShowWorkbenchSide";
 import { collectOrderBasisProjects } from "./components/sections/orderBasisProjects";
@@ -4160,6 +4161,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 <OrderDatesCard record={record} />
                 <OrderLinksCard items={workbenchLinkItems} />
                 <OrderNotesCard notes={record.notes} />
+                <OrderDeliveryCard
+                  deliveryMethod={backendOrder?.header?.deliveryMethod}
+                  deliveryAddress={backendOrder?.header?.deliveryAddress}
+                  deliveryNotes={backendOrder?.header?.deliveryNotes}
+                  startShift={backendOrder?.header?.startShift}
+                />
               </aside>
             </>
           ) : null}

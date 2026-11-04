@@ -1,5 +1,6 @@
 // «NewLine» order card: right column cards. Display only — every value comes from
 // data the card already shows elsewhere (header, «Дополнительная информация», groups).
+import { orderDeliverySummary } from './orderDelivery';
 import React, { useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { originState } from '../../../../utils/backToOrigin';
@@ -180,3 +181,21 @@ export const OrderNotesCard: React.FC<{ notes?: string | null; extra?: React.Rea
     <div className={`wb-notes${notes ? '' : ' wb-notes--empty'}`}>{notes || 'Примечания нет'}</div>
   </WorkbenchSideCard>
 );
+
+/** Delivery and the production start shift of the order (ERP → 1C phase 1); nothing set → «Не указаны». */
+export const OrderDeliveryCard: React.FC<{
+  deliveryMethod?: string | null;
+  deliveryAddress?: string | null;
+  deliveryNotes?: string | null;
+  startShift?: number | null;
+}> = ({ deliveryMethod, deliveryAddress, deliveryNotes, startShift }) => {
+  const summary = orderDeliverySummary({ delivery_method: deliveryMethod, delivery_address: deliveryAddress, start_shift: startShift });
+  return (
+    <WorkbenchSideCard title="Доставка и смена">
+      <div className={`wb-notes${summary || deliveryNotes ? '' : ' wb-notes--empty'}`}>
+        {summary ?? 'Не указаны'}
+        {deliveryNotes ? <div>{deliveryNotes}</div> : null}
+      </div>
+    </WorkbenchSideCard>
+  );
+};

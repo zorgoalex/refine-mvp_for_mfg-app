@@ -1,3 +1,4 @@
+import { orderDeliveryInsert, orderDeliveryUpdateSet } from './order-delivery-fields';
 import { ORDER_MANAGER_CANDIDATE_SQL } from '../domain/order-manager-assignment';
 import {
   beginPaymentAuditCapture,
@@ -744,7 +745,9 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
              notes, material_id AS "materialId", milling_type_id AS "millingTypeId",
              edge_type_id AS "edgeTypeId", film_id AS "filmId", ref_key_1c AS "refKey1c",
              sheet_material_type_id AS "sheetMaterialTypeId", sheet_eligible AS "sheetEligible",
-             hdf_min_threshold_mm AS "hdfMinThresholdMm"
+             hdf_min_threshold_mm AS "hdfMinThresholdMm",
+             delivery_method AS "deliveryMethod", delivery_address AS "deliveryAddress",
+             delivery_notes AS "deliveryNotes", start_shift AS "startShift"
       FROM orders
       WHERE order_id = $1 AND order_kind = 'production_order'
       `,
@@ -863,6 +866,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     projectId: number;
     currentUser: CurrentUser;
   }): Promise<number> {
+    const delivery = orderDeliveryInsert(input.header, 34);
     const result = await this.tx.query<{ order_id: string | number }>(
       `
       INSERT INTO orders (
@@ -873,7 +877,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         discount, surcharge, total_amount, final_amount, paid_amount, parts_count, total_area,
         link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file,
         notes, material_id, milling_type_id, edge_type_id, film_id, ref_key_1c,
-        sheet_material_type_id, hdf_min_threshold_mm, project_id, version
+        sheet_material_type_id, hdf_min_threshold_mm, project_id${delivery.columns}, version
       )
       VALUES (
         $1, $2, $3, $4, $5,
@@ -882,7 +886,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         $10, $11, $12, $13,
         $14, $15, $16, $17, $18, $19, $20,
         $21, $22, $23, $24,
-        $25, $26, $27, $28, $29, $30, $31, $32, $33, 1
+        $25, $26, $27, $28, $29, $30, $31, $32, $33${delivery.placeholders}, 1
       )
       RETURNING order_id
       `,
@@ -921,6 +925,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         input.header.sheetMaterialTypeId ?? null,
         input.header.hdfMinThresholdMm ?? null,
         input.projectId,
+        ...delivery.values,
       ],
     );
 
@@ -943,6 +948,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
   }): Promise<void> {
     // production_status_id is derived from order_details after child persistence; do not write
     // the stale form snapshot here.
+    const delivery = orderDeliveryUpdateSet(input.header, 27);
     await this.tx.query(
       `
       UPDATE orders
@@ -970,7 +976,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
           film_id = $23,
           ref_key_1c = $24,
           sheet_material_type_id = $25,
-          hdf_min_threshold_mm = $26
+          hdf_min_threshold_mm = $26${delivery.sql}
       WHERE order_id = $1 AND delete_flag = false
       `,
       [
@@ -1002,6 +1008,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         input.header.refKey1c ?? null,
         input.header.sheetMaterialTypeId ?? null,
         input.header.hdfMinThresholdMm ?? null,
+        ...delivery.values,
       ],
     );
   }

@@ -88,6 +88,7 @@ import {
 import { OrderHeaderSummary } from './sections/OrderHeaderSummary';
 import { OrderBasicInfo } from './sections/OrderBasicInfo';
 import { OrderNotesSection } from './sections/OrderNotesSection';
+import { OrderDeliverySection } from './sections/OrderDeliverySection';
 import { OrderDatesSection } from './sections/OrderDatesSection';
 import { OrderFinanceSection } from './sections/OrderFinanceSection';
 import { OrderFinanceSummary } from './sections/OrderFinanceSummary';
@@ -1877,6 +1878,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
                 projectField={projectField}
               />
               <OrderNotesSection />
+              <OrderDeliverySection />
             </Space>
           </OrderLifecycleReadSurface>
         ),

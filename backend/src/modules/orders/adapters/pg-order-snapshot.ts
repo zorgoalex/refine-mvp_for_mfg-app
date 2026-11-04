@@ -1,3 +1,4 @@
+import { orderDeliveryFieldsView, orderDeliveryInsert, orderDeliveryUpdateSet, type OrderDeliveryFieldsView } from './order-delivery-fields';
 import { beginPaymentAuditCapture, recordCapturedPaymentChanges } from '../../payments/application/payment-change-audit';
 import { setPaymentStatusEventContext } from '../../../shared/payment-status/payment-status-event-context';
 import { humanName } from '../../../shared/human-name-schema';
@@ -1895,7 +1896,15 @@ function mapOrderHeaderSnapshot(row: AnyRow) {
     millingTypeId: toNullableNumber(row.milling_type_id),
     edgeTypeId: toNullableNumber(row.edge_type_id),
     filmId: toNullableNumber(row.film_id),
+    // Delivery / start shift (migration 295): exported only when set, so files of orders without them stay identical;
+    // an import without the keys leaves the columns NULL.
+    ...orderDeliverySnapshotFields(row),
   };
+}
+
+function orderDeliverySnapshotFields(row: AnyRow): Partial<OrderDeliveryFieldsView> {
+  const view = orderDeliveryFieldsView(row);
+  return Object.fromEntries(Object.entries(view).filter(([, value]) => value !== null)) as Partial<OrderDeliveryFieldsView>;
 }
 
 function mapDetailSnapshot(row: AnyRow): OrderSnapshotDetailDto {
@@ -2045,6 +2054,7 @@ async function insertOrderHeader(
   totals: OrderTotalsDto,
   projectId: number,
 ): Promise<number> {
+  const delivery = orderDeliveryInsert(header, 34);
   const result = await tx.query<IdRow>(
     `
     INSERT INTO orders (
@@ -2055,7 +2065,7 @@ async function insertOrderHeader(
       discount, surcharge, total_amount, final_amount, paid_amount, parts_count, total_area,
       link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file,
       notes, material_id, milling_type_id, edge_type_id, film_id, ref_key_1c,
-      sheet_material_type_id, hdf_min_threshold_mm, project_id, version
+      sheet_material_type_id, hdf_min_threshold_mm, project_id${delivery.columns}, version
     )
     VALUES (
       $1, $2, $3, $4, $5,
@@ -2064,11 +2074,11 @@ async function insertOrderHeader(
       $14, $15, $16, $17, $18, $19, $20,
       $21, $22, $23, $24,
       $25, $26, $27, $28, $29, $30,
-      $31, $32, $33, 1
+      $31, $32, $33${delivery.placeholders}, 1
     )
     RETURNING order_id AS id
     `,
-    orderHeaderParams(header, totals, projectId),
+    [...orderHeaderParams(header, totals, projectId), ...delivery.values],
   );
   return Number(result.rows[0].id);
 }
@@ -2081,6 +2091,7 @@ async function updateOrderHeader(
   header: NormalizedSaveOrderHeaderDto,
   totals: OrderTotalsDto,
 ): Promise<number> {
+  const delivery = orderDeliveryUpdateSet(header, 32);
   await tx.query(
     `
     UPDATE orders
@@ -2113,10 +2124,10 @@ async function updateOrderHeader(
         film_id = $28,
         ref_key_1c = $29,
         sheet_material_type_id = $30,
-        hdf_min_threshold_mm = $31
+        hdf_min_threshold_mm = $31${delivery.sql}
     WHERE order_id = $1 AND delete_flag = false
     `,
-    [orderId, ...orderHeaderUpdateParams(header, totals)],
+    [orderId, ...orderHeaderUpdateParams(header, totals), ...delivery.values],
   );
   return orderId;
 }
@@ -3588,6 +3599,7 @@ export async function writeAudit(
   metadata: Record<string, unknown>,
   relatedSheetMaterialTypeIds?: number[],
   relatedUserId?: number | null,
+  changes?: { before: Record<string, unknown> | null; after: Record<string, unknown>; diff: Record<string, unknown> },
 ): Promise<void> {
   const sheetIds = relatedSheetMaterialTypeIds ?? [];
   await auditService.record(tx, {
@@ -3603,8 +3615,33 @@ export async function writeAudit(
     relatedClientId: clientId ?? null,
     relatedUserId: relatedUserId ?? null,
     metadata,
+    ...(changes ?? {}),
     relatedEntities: sheetIds.map((entityId) => ({ entityType: 'sheet_material_type', entityId })),
   });
+}
+
+/**
+ * The delivery / start shift values an import wrote (migration 295), read back in the import transaction, as
+ * after/diff of its audit row. Only for a created order.
+ */
+async function snapshotImportDeliveryChanges(
+  tx: TransactionClient,
+  result: { status: ImportStatus; orderId: number },
+): Promise<{ before: null; after: Record<string, unknown>; diff: Record<string, unknown> } | undefined> {
+  // Only a created order: its values come from nothing. An «updated» import (no caller today) would need the
+  // stored values before the write.
+  if (result.status !== 'created' || !result.orderId) return undefined;
+  const row = (await tx.query<AnyRow>(
+    'SELECT delivery_method, delivery_address, delivery_notes, start_shift FROM orders WHERE order_id = $1',
+    [result.orderId],
+  )).rows[0];
+  if (!row) return undefined;
+  const after: Record<string, unknown> = { ...orderDeliveryFieldsView(row) };
+  const diff: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(after)) {
+    if (value !== null) diff[key] = { before: null, after: value };
+  }
+  return { before: null, after, diff };
 }
 
 /** Audit row of an import that wrote the order (created / updated), with the manager it wrote. */
@@ -3641,6 +3678,7 @@ export async function writeSnapshotImportResultAudit(
     },
     collectSnapshotSheetIds(remappedSnapshot),
     managerAudit.relatedUserId,
+    await snapshotImportDeliveryChanges(tx, result),
   );
 }
 

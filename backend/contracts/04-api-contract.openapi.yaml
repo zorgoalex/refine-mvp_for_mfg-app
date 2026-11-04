@@ -28913,6 +28913,19 @@ components:
         notes:
           type: string
           nullable: true
+        deliveryMethod:
+          type: string
+          enum: [courier, pickup]
+          nullable: true
+        deliveryAddress:
+          type: string
+          nullable: true
+        deliveryNotes:
+          type: string
+          nullable: true
+        startShift:
+          type: integer
+          nullable: true
         refKey1c:
           type: string
           nullable: true
@@ -29499,6 +29512,27 @@ components:
         notes:
           type: string
           nullable: true
+        deliveryMethod:
+          type: string
+          enum: [courier, pickup]
+          nullable: true
+          description: "Delivery way (1C СпособыДоставки). Absent key keeps the stored value; null clears."
+        deliveryAddress:
+          type: string
+          maxLength: 500
+          nullable: true
+          description: "Delivery address (1C АдресДоставки). Absent key keeps the stored value; null clears."
+        deliveryNotes:
+          type: string
+          maxLength: 1000
+          nullable: true
+          description: "Delivery notes. Absent key keeps the stored value; null clears."
+        startShift:
+          type: integer
+          minimum: 1
+          maximum: 3
+          nullable: true
+          description: "Production start shift 1..3 (1C state «N смена В производстве»). Absent key keeps the stored value; null clears."
         refKey1c:
           type: string
           nullable: true

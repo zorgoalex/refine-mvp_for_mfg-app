@@ -123,6 +123,11 @@ export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDt
 
       notes: normalizeOptionalString(header.notes),
       refKey1c: normalizeOptionalString(header.ref_key_1c),
+      // Sent only when the form has the field at all (an older draft without it keeps the stored value).
+      ...(header.delivery_method !== undefined ? { deliveryMethod: header.delivery_method === 'courier' || header.delivery_method === 'pickup' ? header.delivery_method : null } : {}),
+      ...(header.delivery_address !== undefined ? { deliveryAddress: normalizeOptionalString(header.delivery_address) } : {}),
+      ...(header.delivery_notes !== undefined ? { deliveryNotes: normalizeOptionalString(header.delivery_notes) } : {}),
+      ...(header.start_shift !== undefined ? { startShift: optionalNumber(header.start_shift) } : {}),
     },
     details,
     ...(values.catalogLines === undefined ? {} : { catalogLines: values.catalogLines.map(row => ({
@@ -252,6 +257,10 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
 
     notes: order.header.notes ?? null,
     ref_key_1c: order.header.refKey1c ?? null,
+    delivery_method: order.header.deliveryMethod ?? null,
+    delivery_address: order.header.deliveryAddress ?? null,
+    delivery_notes: order.header.deliveryNotes ?? null,
+    start_shift: order.header.startShift ?? null,
     created_at: order.header.createdAt ?? undefined,
     updated_at: order.header.updatedAt ?? undefined,
     created_by: optionalNumber(order.header.createdBy) ?? undefined,

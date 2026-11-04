@@ -80,6 +80,12 @@ export interface Order {
   // Notes
   notes?: string | null;
 
+  // Delivery and the production start shift (ERP → 1C phase 1)
+  delivery_method?: 'courier' | 'pickup' | null;
+  delivery_address?: string | null;
+  delivery_notes?: string | null;
+  start_shift?: number | null;
+
   // Dowelling orders (присадки) - many-to-many через order_doweling_links
   // Для обратной совместимости оставляем старые поля (будут заполняться из первой связи)
   doweling_order_id?: number | null;

@@ -5,7 +5,8 @@ import type { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { ImportOrderSnapshotCommand, OrderSnapshotDto } from '../dto/order-snapshot.dto';
-import { PgOrderSnapshot, snapshotImportManagerAudit, writeAudit, writeSnapshotImportResultAudit } from './pg-order-snapshot';
+import { PgOrderSnapshot, snapshotImportManagerAudit, writeAudit, writeSnapshotImportResultAudit, _testOnlyMapOrderHeaderSnapshot, _testOnlySnapshotHeaderToSaveOrderDto } from './pg-order-snapshot';
+import { prepareOrderSave } from '../domain/order-save-preparer';
 
 function fakeTx(captured: Array<{ text: string; params: readonly unknown[] }>): TransactionClient {
   return {
@@ -91,6 +92,55 @@ describe('order snapshot writeAudit', () => {
     expect(JSON.parse(String(insert.params[22]))).toMatchObject({
       requestId: 'req_i', importRunId: 'run-1', status: 'created', managerId: 12, managerAssignedByImport: true,
     });
+  });
+
+  it('a created import audits the delivery / start shift it wrote as after/diff (migration 295)', async () => {
+    const captured: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      raw: undefined as never,
+      async query<T extends QueryResultRow = QueryResultRow>(text: string, params: readonly unknown[] = []): Promise<QueryResult<T>> {
+        captured.push({ text, params: [...params] });
+        const row = /SELECT delivery_method/.test(text)
+          ? { delivery_method: 'courier', delivery_address: 'ул. Абая 1', delivery_notes: null, start_shift: 2 }
+          : /SELECT manager_id FROM orders/.test(text) ? { manager_id: null }
+            : /SELECT client_id FROM orders/.test(text) ? { client_id: '55' } : { audit_id: 'aud-d' };
+        return { rows: [row as unknown as T], rowCount: 1, command: 'SELECT', oid: 0, fields: [] };
+      },
+    } as TransactionClient;
+    const snapshot = { formatVersion: '1.0.0', exporterService: { version: '2.0.0' }, data: { order: {}, details: [] } } as unknown as OrderSnapshotDto;
+    const run = (status: 'created' | 'noop') => writeSnapshotImportResultAudit(tx, {
+      command: { currentUser: actor, requestId: 'req_d' } as ImportOrderSnapshotCommand,
+      snapshot, remappedSnapshot: snapshot, payloadHash: 'hash', runId: 'run-d', result: { status, orderId: 88 },
+    });
+    await run('created');
+    const insert = captured.find((query) => /INSERT INTO audit_log\b/i.test(query.text) && !/audit_log_related_entity/i.test(query.text))!;
+    expect(insert.params[19]).toBeNull(); // before_json
+    expect(JSON.parse(String(insert.params[20]))).toEqual({ deliveryMethod: 'courier', deliveryAddress: 'ул. Абая 1', deliveryNotes: null, startShift: 2 });
+    expect(JSON.parse(String(insert.params[21]))).toEqual({
+      deliveryMethod: { before: null, after: 'courier' },
+      deliveryAddress: { before: null, after: 'ул. Абая 1' },
+      startShift: { before: null, after: 2 },
+    });
+    captured.length = 0;
+    await run('noop');
+    expect(captured.some((query) => /SELECT delivery_method/.test(query.text))).toBe(false);
+  });
+
+  it('export carries the delivery / start shift only when set (older files stay identical)', () => {
+    const base = { order_id: 1, order_name: '1', client_id: 2, order_date: '2026-11-05', priority: 1, order_status_id: 1, payment_status_id: 1 };
+    const plain = _testOnlyMapOrderHeaderSnapshot(base as never) as Record<string, unknown>;
+    for (const key of ['deliveryMethod', 'deliveryAddress', 'deliveryNotes', 'startShift']) expect(key in plain).toBe(false);
+    const full = _testOnlyMapOrderHeaderSnapshot({ ...base, delivery_method: 'pickup', delivery_address: null, delivery_notes: 'звонить', start_shift: 3 } as never);
+    expect(full).toMatchObject({ deliveryMethod: 'pickup', deliveryNotes: 'звонить', startShift: 3 });
+    expect('deliveryAddress' in full).toBe(false);
+    // Round trip: the exported header goes through the same import preparation (normalize + validate) into the INSERT.
+    const toHeader = (order: unknown) => prepareOrderSave(
+      _testOnlySnapshotHeaderToSaveOrderDto({ data: { order, details: [], payments: [], workshops: [], requirements: [], dowelingLinks: [] } } as never, 2, undefined),
+      { mode: 'create' },
+    ).order.header as Record<string, unknown>;
+    expect(toHeader(full)).toMatchObject({ deliveryMethod: 'pickup', deliveryNotes: 'звонить', startShift: 3 });
+    const older = toHeader(plain);
+    for (const key of ['deliveryMethod', 'deliveryAddress', 'deliveryNotes', 'startShift']) expect(key in older).toBe(false);
   });
 
   it('a batch import runs every file through the single import (same manager contract and audit)', async () => {

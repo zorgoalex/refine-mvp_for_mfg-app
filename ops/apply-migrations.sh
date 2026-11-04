@@ -3195,6 +3195,16 @@ probe_file() {
       "$(q_con_on onec_write_mappings chk_onec_write_mappings_target)" \
       "SELECT EXISTS (SELECT 1 FROM permissions_catalog WHERE permission_name = 'onec.write.mappings' AND is_active);" \
       "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'admin' AND rp.permission_name = 'onec.write.mappings');" ;;
+    # 295: delivery of an order and its production start shift (four nullable orders columns + checks).
+    295_order_delivery_start_shift*) probe_all \
+      "$(q_col orders delivery_method)" \
+      "$(q_col orders delivery_address)" \
+      "$(q_col orders delivery_notes)" \
+      "$(q_col orders start_shift)" \
+      "$(q_con_on orders chk_orders_delivery_method)" \
+      "$(q_con_on orders chk_orders_delivery_address_len)" \
+      "$(q_con_on orders chk_orders_delivery_notes_len)" \
+      "$(q_con_on orders chk_orders_start_shift)" ;;
     290_bazis_wins_saw_backfill*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event='orders.saw_status_backfill' AND entity_type='migration' AND entity_id='290');" \
       "SELECT pg_get_functiondef('public.trg_order_detail_saw_route()'::regprocedure) LIKE '%IN (''new'', ''drawn'')%';" ;;
@@ -3485,6 +3495,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     293_onec_write_mappings*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    295_order_delivery_start_shift*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     290_bazis_wins_saw_backfill*)
