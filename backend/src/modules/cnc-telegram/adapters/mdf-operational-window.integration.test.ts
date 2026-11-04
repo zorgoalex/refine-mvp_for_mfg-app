@@ -40,6 +40,12 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     for (const table of tables) {
       await client.query(`CREATE TEMP TABLE ${table} AS TABLE public.${table} WITH NO DATA`);
     }
+    // The shared database's own engine mode must not pick the board path: these fixtures are legacy
+    // unless a test switches this session-local state to an engine mode.
+    await client.query(`CREATE TEMP TABLE mdf_engine_state(singleton boolean PRIMARY KEY, mode text NOT NULL);
+      INSERT INTO pg_temp.mdf_engine_state VALUES(true,'legacy')`);
+    // CREATE TABLE AS drops defaults; order_details.production_round is NOT NULL DEFAULT 1 («Переделка»).
+    await client.query('ALTER TABLE order_details ALTER COLUMN production_round SET DEFAULT 1');
     await client.query(`
       ALTER TABLE pg_temp.cut_result_placement ADD COLUMN IF NOT EXISTS order_hdf_detail_id bigint;
       ALTER TABLE pg_temp.audit_log ALTER COLUMN audit_id SET DEFAULT gen_random_uuid();
@@ -835,6 +841,36 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     await expectAllReadiness(true);
   });
 
+  // «Переделка» (plan §5.5, variant B): a production round > 1 detail is out of MDF automation.
+  it('a production round > 1 bath member neither blocks nor completes the bath automation', async () => {
+    await seed(1, [1, 3], '2026-09-06T12:00:00+05');
+    const state = () => loadMdfBathColumnAutomationState(client as unknown as TransactionClient, 1);
+    const laminated = () => loadMdfLaminatedBathAutomationRows(client as unknown as TransactionClient, [1, 3]);
+    expect((await state())?.column).toBe('baths');
+    expect(await laminated()).toEqual([]);
+
+    await client.query('UPDATE pg_temp.order_details SET production_round=2 WHERE detail_id=3');
+    expect(await state()).toEqual({ column: 'baths_laminated', orderIds: [1] });
+    expect(await laminated()).toEqual([expect.objectContaining({ cut_result_id: '1', order_id: '1' })]);
+    const events = await eventsFor({ kind: 'bath', id: 'cut-result:1' });
+    expect(events.flatMap(event => event.scope.details.map(detail => detail.detailId))).toEqual([1]);
+
+    await client.query('UPDATE pg_temp.order_details SET production_round=2 WHERE detail_id=1');
+    expect(await state()).toBeNull();
+    expect(await laminated()).toEqual([]);
+    expect(await eventsFor({ kind: 'bath', id: 'cut-result:1' })).toEqual([]);
+  });
+
+  it('a production round > 1 file position emits no board event and does not block the file', async () => {
+    await client.query(`INSERT INTO pg_temp.cnc_telegram_packet_items(packet_id,match_order_id,match_detail_id,quantity)
+      VALUES('00000000-0000-0000-0000-000000000001',1,3,1)`);
+    expect((await eventsFor()).flatMap(event => event.scope.details.map(detail => detail.detailId)).sort()).toEqual([1, 3]);
+    await client.query('UPDATE pg_temp.order_details SET production_round=2 WHERE detail_id=3');
+    expect((await eventsFor()).flatMap(event => event.scope.details.map(detail => detail.detailId))).toEqual([1]);
+    await client.query('UPDATE pg_temp.order_details SET production_round=2 WHERE detail_id=1');
+    expect(await eventsFor()).toEqual([]);
+  });
+
   it('discovers and completes a BASIS-only bath', async () => {
     await seed(1, [1, 1], '2026-09-06T12:00:00+05');
     await client.query('TRUNCATE pg_temp.cnc_telegram_packets, pg_temp.cnc_telegram_packet_items');
@@ -927,6 +963,34 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     await expectAllReadiness(ready);
     await client.query('UPDATE pg_temp.orders SET production_status_id=NULL,order_status_id=NULL WHERE order_id=1');
     await expectAllReadiness(false);
+  });
+
+  // «Переделка» (plan §5.5): neither BASIS aggregate (packed, cardRules terminal) counts an excluded member.
+  it('an excluded BASIS member neither blocks the cardRules terminal nor completes the set alone', async () => {
+    await seed(1, [1], '2026-09-06T12:00:00+05');
+    await client.query(`TRUNCATE pg_temp.cnc_telegram_packets, pg_temp.cnc_telegram_packet_items;
+      UPDATE pg_temp.order_details SET production_status_id=2 WHERE detail_id IN (1,2);
+      UPDATE pg_temp.orders SET order_status_id=6 WHERE order_id=1`);
+    await addBasis(1, 'parsed');
+    await client.query(`INSERT INTO pg_temp.bazis_cut_set_details(bazis_cut_set_id,source_order_id,source_order_detail_id,quantity,material_name)
+      VALUES(1,2,2,1,'МДФ 18мм');
+      INSERT INTO pg_temp.app_settings(setting_key,value_json,is_active)
+      VALUES('status_automation.mdf_board_hidden_production_statuses','{"cardRules":[{"cardKind":"bazisCutSet","orderStatusIds":[6]}]}',true)`);
+    const state = () => loadMdfBathColumnAutomationState(client as unknown as TransactionClient, 1);
+    const basis = { kind: 'bazisCutSet' as const, id: '1' };
+    expect((await state())?.column).toBe('baths'); // order 2 member is neither packed nor hidden
+    expect((await eventsFor(basis)).map(event => event.eventType)).not.toContain('mdf.board.completed');
+
+    await client.query('UPDATE pg_temp.order_details SET production_round=2 WHERE detail_id=2');
+    expect((await state())?.column).not.toBe('baths');
+    const events = await eventsFor(basis);
+    expect(events.filter(event => event.eventType === 'mdf.board.completed')
+      .flatMap(event => event.scope.details.map(detail => detail.detailId))).toEqual([1]);
+    expect(events.flatMap(event => event.scope.details.map(detail => detail.detailId))).not.toContain(2);
+
+    await client.query('UPDATE pg_temp.order_details SET production_round=2 WHERE detail_id=1');
+    expect(await state()).toBeNull();
+    expect(await eventsFor(basis)).toEqual([]);
   });
 
   it('requires the whole file to be issued for the pending-file terminal shortcut', async () => {
@@ -1031,5 +1095,62 @@ describe.skipIf(!enabled)('MDF month actual PostgreSQL queries (temporary fixtur
     expect((await client.query('SELECT 1 FROM pg_temp.cut_result WHERE cut_result_id=5')).rows).toEqual([]);
     await expect(client.query('UPDATE pg_temp.cut_result_board_projection SET is_vacuum=false WHERE cut_result_id=1')).rejects.toThrow('append-only');
     await expect(client.query('DELETE FROM pg_temp.cut_result_board_projection WHERE cut_result_id=1')).rejects.toThrow('append-only');
+  });
+
+  it('hybrid: an excluded-material file yields no MDF events even with a manual move (skip under active loses nothing)', async () => {
+    await client.query(`UPDATE pg_temp.cnc_telegram_packets SET mdf_board_card_kind='machine_file',material_name='ХДФ 3 мм'
+      WHERE packet_id='00000000-0000-0000-0000-000000000001'`);
+    await client.query(`INSERT INTO pg_temp.mdf_board_manual_moves(card_kind,card_id,target_column)
+      VALUES('packet','00000000-0000-0000-0000-000000000001','completed')`);
+    expect(await loadMdfBoardEvents(client as unknown as TransactionClient,
+      { kind: 'packet', id: '00000000-0000-0000-0000-000000000001' })).toEqual([]);
+    await client.query(`UPDATE pg_temp.cnc_telegram_packets SET material_name='МДФ 10мм'
+      WHERE packet_id='00000000-0000-0000-0000-000000000001'`);
+    expect((await loadMdfBoardEvents(client as unknown as TransactionClient,
+      { kind: 'packet', id: '00000000-0000-0000-0000-000000000001' })).length).toBeGreaterThan(0);
+  });
+
+  it('hybrid: engine active ⇒ one RR read-only snapshot with each MDF card digest; legacy ⇒ no digest', async () => {
+    await seed(10, [1], '2026-09-06T12:00:00+05');
+    await client.query(`UPDATE pg_temp.cnc_telegram_packets SET mdf_board_card_kind='machine_file',updated_at=now(),
+      source_version=1; UPDATE pg_temp.cnc_telegram_packet_items SET packet_item_id=COALESCE(packet_item_id,gen_random_uuid())`);
+    const legacy = (await boundedLoad()).response;
+    expect(legacy.columns.flatMap(c => c.packets).every(p => !('mdfPresentationDigest' in p))).toBe(true);
+    await client.query("UPDATE pg_temp.mdf_engine_state SET mode='active'");
+    try {
+      const calls: string[] = [];
+      const run = (sql: string, params?: unknown[]) => { calls.push(sql); return client.query(sql, params ?? []); };
+      // Temp tables are session-local, so this harness serves the shared snapshot from one session;
+      // database.service.readSnapshot's multi-session import is covered by its own PostgreSQL test.
+      const repo = new PgCncTelegramRepository({ query: run, readSnapshot: async (handler: (client: unknown) => unknown,
+        options: { parallelism?: number }) => {
+        expect(options.parallelism).toBeGreaterThan(1);
+        await run('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+        try {
+          const result = await handler({ query: run });
+          await run('COMMIT');
+          return result;
+        } catch (error) { await run('ROLLBACK'); throw error; }
+      } } as never);
+      const response = await repo.listToday({ currentUser: { id: '158', role: 'admin', permissions: [] } as never,
+        operationalWindow: 'two_months', workdayFrom: '2026-09-06', workdayTo: '2026-09-06' });
+      const packet = response.columns.flatMap(c => c.packets)[0];
+      const bath = response.columns.flatMap(c => c.baths)[0];
+      const expected = (await client.query(`SELECT mdf_source_presentation_digest('packet',$1) p,
+        mdf_source_presentation_digest('bath',$2) b`, [packet.packetId, bath.bathCardId])).rows[0];
+      expect(packet.mdfPresentationDigest).toBe(expected.p);
+      expect(bath.mdfPresentationDigest).toBe(expected.b);
+      expect(packet.mdfPresentationDigest).toMatch(/^[a-f0-9]{64}$/);
+      // Every loader statement and the digest read run after the snapshot is fixed, inside one transaction.
+      const begin = calls.indexOf('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY'), commit = calls.indexOf('COMMIT');
+      expect(begin).toBeGreaterThanOrEqual(0);
+      const digestCall = calls.findIndex(sql => sql.includes('mdf_source_presentation_digest(s.kind,s.id)'));
+      expect(digestCall).toBeGreaterThan(begin);
+      expect(digestCall).toBeLessThan(commit);
+      expect(calls.slice(begin + 1, commit).length).toBeGreaterThan(2);
+      expect(calls.slice(commit + 1).some(sql => /cnc_telegram_packets|cut_result/.test(sql))).toBe(false);
+    } finally {
+      await client.query("UPDATE pg_temp.mdf_engine_state SET mode='legacy'");
+    }
   });
 });

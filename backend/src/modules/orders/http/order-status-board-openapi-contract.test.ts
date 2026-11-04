@@ -77,6 +77,122 @@ describe('order status board OpenAPI contract', () => {
     expect(publication).toContain("pattern: '^[a-f0-9]{64}$'");
   });
 
+  it('documents active evidence correction as a separate token-bound preview/confirm protocol', () => {
+    const preview = sectionBetween(
+      contract,
+      '  /api/v1/orders/status-board/mdf-corrections/{cardKind}/{cardId}/preview:',
+      '  /api/v1/orders/status-board/mdf-corrections/{cardKind}/{cardId}/confirm:',
+    );
+    const confirm = sectionBetween(
+      contract,
+      '  /api/v1/orders/status-board/mdf-corrections/{cardKind}/{cardId}/confirm:',
+      '  /api/v1/orders/status-board/mdf-manual-moves:',
+    );
+    expect(preview).toContain('operationId: previewMdfActiveProductionReturn');
+    expect(preview).toContain('MdfActiveProductionReturnPreviewRequest');
+    expect(preview).toContain("'409':");
+    expect(confirm).toContain('operationId: confirmMdfActiveProductionReturn');
+    expect(confirm).toContain('MdfActiveProductionReturnConfirmRequest');
+    expect(confirm).toContain('Тот же actor/key');
+    expect(confirm).toContain('MdfActiveProductionReturnConfirmResponse');
+
+    const schemas = sectionBetween(contract, '    MdfActiveProductionReturnPreviewRequest:', '    MdfCorrectionSource:');
+    expect(schemas).toContain('additionalProperties: false');
+    expect(schemas).toContain('required: [sourceToken, targetColumn, expectedDigest, idempotencyKey]');
+    expect(schemas).toContain("pattern: '^[A-Za-z0-9._:-]{1,128}$'");
+    expect(schemas).toContain('deferredPriorAutomation:');
+    expect(schemas).toContain('cncFreshnessBaseline:');
+    expect(schemas).toContain('manualPlacementColumnBefore');
+    expect(schemas).toContain('manualPlacementColumnAfter');
+    expect(schemas).toContain('clearsManualPlacementOverride');
+    // §5.5: authoritative resulting columns, card quantity and order status consequences are part of the preview.
+    expect(schemas).toContain('afterColumn:');
+    expect(schemas).toContain('afterIssues:');
+    expect(schemas).toContain('cardQuantity:');
+    expect(schemas).toContain('statusKept:');
+    expect(schemas).toContain('sourceAfter:');
+    expect(schemas).toContain('afterStatusId:');
+    expect(contract).toContain('  /api/v1/orders/status-board/mdf-engine:');
+    expect(contract).toContain('operationId: getMdfEngineMode');
+    expect(schemas).not.toContain('replayed:');
+    expect(contract).toContain('  /api/v1/orders/status-board/mdf-return/{cardKind}/{cardId}/preview:');
+  });
+
+  it('documents the displayFrom window param on the published MDF board route', () => {
+    const route = sectionBetween(
+      contract,
+      '  /api/v1/orders/status-board/mdf:',
+      '  /api/v1/orders/status-board/mdf-return/{cardKind}/{cardId}/preview:',
+    );
+    expect(route).toContain('operationId: getPublishedMdfBoard');
+    expect(route).toContain('- { name: displayFrom, in: query');
+    expect(route).toContain('dateTo минус 6 дней');
+  });
+
+  it('documents the bath duplicates read of explicit baths (≤ 100 ids, read flag)', () => {
+    const route = sectionBetween(
+      contract,
+      '  /api/v1/orders/status-board/mdf-bath-duplicates:',
+      '  /api/v1/orders/status-board/mdf-bath-duplicates/resolve:',
+    );
+    expect(route).toContain('operationId: listMdfBathDuplicates');
+    expect(route).toContain('x-permission: orders.view');
+    expect(route).toContain('До 100 значений cut-result:<id>');
+    expect(route).toContain('BACKEND_MDF_BATH_DUPLICATES_READ');
+    expect(route).toContain('reworkDetailCount');
+  });
+
+  it('documents the bath duplicate resolve command (keep_both / rework_mark, digest, idempotency, gate)', () => {
+    const route = sectionBetween(
+      contract,
+      '  /api/v1/orders/status-board/mdf-bath-duplicates/resolve:',
+      '  /api/v1/orders/status-board/mdf-drift:',
+    );
+    expect(route).toContain('operationId: resolveMdfBathDuplicate');
+    expect(route).toContain('x-permission: cut.manage');
+    expect(route).toContain('required: [bathCardId, otherBathCardId, action, expectedDigest]');
+    expect(route).toContain('enum: [keep_both, rework_mark]');
+    expect(route).toContain("pattern: '^[A-Za-z0-9._:-]{8,200}$'");
+    expect(route).toContain('MDF_BATH_DUPLICATE_STALE');
+    expect(route).toContain('BACKEND_MDF_BATH_DUPLICATES_WRITE');
+    for (const status of ["'403':", "'409':", "'422':", "'503':"]) expect(route).toContain(status);
+  });
+
+  it('documents the demand-drift conflicts list/confirm routes (§5.8 reconciler)', () => {
+    const listRoute = sectionBetween(
+      contract,
+      '  /api/v1/orders/status-board/mdf-drift:',
+      '  /api/v1/orders/status-board/mdf-drift/{conflictId}/confirm:',
+    );
+    expect(listRoute).toContain('operationId: listMdfDemandDriftConflicts');
+    expect(listRoute).toContain('x-permission: orders.view');
+    expect(listRoute).toContain("$ref: '#/components/schemas/MdfDemandDriftConflict'");
+    expect(listRoute).toContain("'403':");
+
+    const confirmRoute = sectionBetween(
+      contract,
+      '  /api/v1/orders/status-board/mdf-drift/{conflictId}/confirm:',
+      '  /api/v1/orders/{orderId}/resource-procurement/{resourceKey}:',
+    );
+    expect(confirmRoute).toContain('operationId: confirmMdfDemandDrift');
+    expect(confirmRoute).toContain('x-permission: orders.update');
+    expect(confirmRoute).toContain("format: uuid");
+    expect(confirmRoute).toContain("pattern: '^[a-f0-9]{64}$'");
+    expect(confirmRoute).toContain('resolved:');
+    expect(confirmRoute).toContain("'404':");
+    expect(confirmRoute).toContain("'409':");
+
+    const schema = sectionBetween(
+      contract,
+      '    MdfDemandDriftConflict:',
+      '    OrderStatusBoardResponse:',
+    );
+    expect(schema).toContain('conflictId');
+    expect(schema).toContain('CONFIRMATION_REQUIRED, HARD_CONFLICT, BLOCKED_BY_CLOSURE, MDF_RECONCILE_SCOPE_LIMIT');
+    expect(schema).toContain('orderIds');
+    expect(schema).toContain('detectedAt');
+  });
+
   it('keeps pagination, capabilities and nullable financials explicit', () => {
     const response = sectionBetween(
       contract,

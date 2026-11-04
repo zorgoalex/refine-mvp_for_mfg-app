@@ -97,7 +97,7 @@ export async function executePinnedMdfAutomation(tx: TransactionClient, input: P
 async function executePinnedMdfBatch(tx: TransactionClient, input: PinnedMdfAutomationInput,
   executionMode: 'accepted_job' | 'live_command') {
   if (pinnedRules.has(tx)) throw new Error('MDF_PINNED_EXECUTION_REENTRANT');
-  const batch = snapshotPinnedMdfBatch(input, executionMode === 'live_command');
+  const batch = snapshotPinnedMdfBatch(input, executionMode === 'live_command', executionMode === 'accepted_job');
   if (!isStatusAutomationEnabled()) return { status: 'disabled' as const, selectedRuleCount: 0, skippedPins: [] };
   const previousVisited = executedRules.get(tx);
   // Install before the first await: concurrent/reentrant use of this same tx
@@ -110,7 +110,8 @@ async function executePinnedMdfBatch(tx: TransactionClient, input: PinnedMdfAuto
     const byId = new Map(definitions.map(rule => [rule.id, rule]));
     const selected: StatusAutomationRule[] = [];
     const skippedPins: Array<{ ruleId: number; version: number; reason: string }> = [];
-    const orderIds = [...new Set(batch.events.map(event => event.orderId))].sort((a, b) => a - b);
+    const orderIds = [...new Set([...batch.events.map(event => event.orderId),
+      ...(batch.productionCompositionOrderIds ?? [])])].sort((a, b) => a - b);
     for (const pin of batch.pins) {
       const rule = byId.get(pin.ruleId);
       const reason = !rule ? 'pinned_rule_missing' : !rule.isEnabled ? 'pinned_rule_disabled'
@@ -130,6 +131,11 @@ async function executePinnedMdfBatch(tx: TransactionClient, input: PinnedMdfAuto
     selected.sort((a, b) => a.priority - b.priority || a.id - b.id);
     pinnedRules.set(tx, selected);
     await executeResolvedMdfEvents(tx, batch, batch.events, selected);
+    for (const orderId of batch.productionCompositionOrderIds ?? []) {
+      await evaluateProductionCompositionAutomation(tx, { orderId, actor: batch.actor,
+        requestId: batch.requestId,
+        sourceIdempotencyKey: `${batch.sourceIdempotencyKey}:cnc-physical-priority:order-${orderId}` });
+    }
     return { status: 'evaluated' as const, selectedRuleCount: selected.length, skippedPins };
   } finally {
     pinnedRules.delete(tx);
@@ -191,6 +197,22 @@ export async function evaluateStatusAutomation(
   await evaluateEventRules(tx, event);
   if (event.eventType === 'order.created' || event.eventType === 'order.updated') {
     await evaluateProductionCompositionAutomation(tx, event);
+  }
+}
+
+/** Runs a rolled-back what-if (SAVEPOINT) without leaking its rule-visit guards
+ * into the same transaction's real command, which must evaluate rules afresh. */
+export async function withIsolatedStatusAutomationVisits<T>(
+  tx: TransactionClient,
+  run: () => Promise<T>,
+): Promise<T> {
+  const previous = executedRules.get(tx);
+  executedRules.set(tx, new Set(previous ?? []));
+  try {
+    return await run();
+  } finally {
+    if (previous) executedRules.set(tx, previous);
+    else executedRules.delete(tx);
   }
 }
 
@@ -465,6 +487,9 @@ export async function dispatchMdfBoardEvent(tx: TransactionClient, input: MdfBoa
   if (pinnedRules.has(tx)) throw new Error('MDF_PINNED_LEGACY_DISPATCH_FORBIDDEN');
   if (input.source) markMdfShadowSource(tx, input);
   if (!isStatusAutomationEnabled() || !input.source) return;
+  // The board-event read compiles under PostgreSQL JIT for 10+ s on a busy host (its cost estimate is inflated):
+  // off for this transaction, as in the MDF board commands.
+  await tx.query('SET LOCAL jit=off');
   const usePins = process.env.BACKEND_MDF_PINNED_DISPATCH === 'true';
   let pins = liveMdfPins.get(tx);
   // Do not query a new set on later source dispatches in this transaction.

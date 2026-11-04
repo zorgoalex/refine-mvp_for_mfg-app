@@ -18,7 +18,11 @@ import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { mdfCutReadinessCtes } from '../../../shared/cnc-material/cut-readiness-sql';
+import { loadBoardBathDuplicates, mdfBathDuplicatesReadEnabled } from '../../orders/adapters/mdf-bath-duplicate-facts';
 import { productionBoardReadScopeSql } from '../../orders/adapters/pg-order-status-board-repository';
+import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
+import { assertMdfManualSvgMatchScope, assertMdfManualSvgReplayScope, captureNewMdfManualSvgSource, lockMdfManualSvgOwners,
+  registerNewMdfManualSvgSource, assertMdfTelegramSvg, hasMdfTelegramDuplicate } from '../../mdf-board/adapters/mdf-manual-svg-source';
 import {
   CUT_RENDER_STYLES_SETTING_KEY,
   CUT_RENDER_STYLE_TELEGRAM_PHOTO,
@@ -63,6 +67,8 @@ import type {
 import type {
   CncAutoCutStatusConfigureResponseDto,
   CncTelegramBathCardDto,
+  CncTelegramBathDuplicateDto,
+  CncTelegramBathReworkMarkDto,
   CncTelegramBathItemDto,
   CncTelegramBathSheetDto,
   CncTelegramBazisCutSetCardDto,
@@ -492,7 +498,18 @@ export class PgCncTelegramRepository
     const workdayTo = command.workdayTo ?? workday;
     const requestedFrom = command.workdayFrom ?? workday;
     if (command.operationalWindow === 'two_months') {
-      return loadBoundedToday(this.database, command.currentUser, workdayTo, requestedFrom, command.focusBathCardId);
+      if (!await mdfEngineOwnsBoard(this.database)) {
+        return loadBoundedToday(this.database, command.currentUser, workdayTo, requestedFrom, command.focusBathCardId,
+          { engineOwnsBoard: false });
+      }
+      // Hybrid board: each MDF card's presentation and its digest come from ONE snapshot, so the board can bind it to
+      // the engine's accepted revision (equal digest ⇒ the shown composition is the one the command token acts on).
+      // One exported snapshot shared by several sessions: the same-snapshot binding holds while the board's
+      // independent reads run in parallel instead of queueing on one connection.
+      return this.database.readSnapshot(async (snapshot) => {
+        return loadBoundedToday(snapshot, command.currentUser, workdayTo, requestedFrom, command.focusBathCardId,
+          { presentationDigests: true, engineOwnsBoard: true });
+      }, { parallelism: MDF_BOARD_SNAPSHOT_PARALLELISM });
     }
     const monthStart = mdfOperationalMonthStart(workdayTo);
     const workdayFrom = command.operationalWindow === 'month' && requestedFrom < monthStart
@@ -869,12 +886,18 @@ export class PgCncTelegramRepository
   }
 
   async manualSvgUpload(command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto> {
-    return this.database.transaction(async (tx) => this.manualSvgUploadInTransaction(tx, command));
+    return this.database.transaction(async (tx) => this.manualSvgUploadInTransaction(tx, command),
+      { mdf:{ writer:'cnc.manual_svg_upload',capability:'queued' } });
   }
 
   /** Used by explicit Telegram import so packet/job/result/card and its audit/outbox
    * share the item/session transaction. It is intentionally not part of the public port. */
   async manualSvgUploadInTransaction(tx: TransactionClient, command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto> {
+      const boundary=await requireMdfCommandBoundary(tx,{ writer:'cnc.manual_svg_upload',capability:'queued' });
+      await lockMdfManualSvgOwners(tx,command.currentUser,command.dto.selectedOrderIds);
+      if (boundary.queued && command.dto.duplicatePolicy?.kind==='intentional_copy') {
+        assertMdfTelegramSvg(tx,command.dto.duplicatePolicy.approvedByImportItemId,command.currentUser.id);
+      }
       await setSessionUser(tx, command.currentUser.id);
       if (command.dto.duplicatePolicy?.kind === 'intentional_copy') {
         const approval = await tx.query<{ import_item_id: string; requested_by: string; duplicate_acknowledged: boolean; has_duplicate_matches: boolean; status: string }>(`
@@ -900,7 +923,11 @@ export class PgCncTelegramRepository
         dto,
         payloadHash,
       });
-      if (replayResponse) return replayResponse;
+      if (replayResponse) {
+        assertMdfManualSvgMatchScope(tx,replayResponse.packet.items);
+        await assertMdfManualSvgReplayScope(tx,replayResponse.packet.packetId);
+        return replayResponse;
+      }
 
       const replay = await tx.query<PacketReplayRow>(
         `
@@ -912,6 +939,12 @@ export class PgCncTelegramRepository
         [dto.externalPacketKey],
       );
       const existing = replay.rows[0] ?? null;
+
+      // New command for an old source is NOT fresh membership. Restoration and
+      // source-file promotion need their own correction protocol before cutover.
+      if (boundary.queued && (existing || (!hasMdfTelegramDuplicate(tx) && await findExistingSvgCutJobForSourceFile(tx,dto,null)))) {
+        throw new ApiError(409,'MDF_SVG_EXISTING_SOURCE_REQUIRES_REVIEW','Для существующего SVG-файла требуется проверка производственной истории');
+      }
 
       if (existing && dto.source.version < Number(existing.source_version)) {
         const packet = await loadPacket(tx, existing.packet_id);
@@ -1015,7 +1048,7 @@ export class PgCncTelegramRepository
         return response;
       }
 
-      if (!existing) {
+      if (!existing && !(boundary.queued && hasMdfTelegramDuplicate(tx))) {
         const reusedSourceFile = await reuseExistingManualSvgSourceFile(tx, {
           command,
           dto,
@@ -1029,6 +1062,7 @@ export class PgCncTelegramRepository
 
       const prepared = await prepareManualSvgUploadDto(tx, dto, command.dto);
       const { resolvedDto, matchSourceDto } = prepared;
+      assertMdfManualSvgMatchScope(tx,matchSourceDto.items);
       const resolvedCommand: IngestCncTelegramPacketCommand = {
         currentUser: command.currentUser,
         dto: resolvedDto,
@@ -1036,6 +1070,7 @@ export class PgCncTelegramRepository
       };
 
       const packetId = await insertPacket(tx, resolvedCommand, payloadHash);
+      registerNewMdfManualSvgSource(tx,packetId);
       await replaceItems(tx, packetId, resolvedDto);
       await ensureCuttingSequenceNo(tx, packetId, resolvedDto, Number(command.currentUser.id));
       await syncSvgCutImport(tx, packetId, resolvedDto, matchSourceDto, command.currentUser.id, {
@@ -1061,11 +1096,14 @@ export class PgCncTelegramRepository
       if (command.dto.createMdfMachineFileCard) {
         assertManualSvgMachineFileCardReady(packet);
       }
+      const mdfJobId=boundary.queued && command.dto.createMdfMachineFileCard
+        ? await captureNewMdfManualSvgSource(tx,{ packetId,user:command.currentUser,requestId }) : undefined;
       const auditId = await writeManualSvgCreatedAudit(tx, {
         command,
         packet,
         requestId,
         externalPacketKey: dto.externalPacketKey,
+        mdfJobId,
       });
       if (command.dto.createMdfMachineFileCard) {
         mdfCardAuditId = await writeManualSvgMdfCardAudit(tx, {
@@ -1083,6 +1121,7 @@ export class PgCncTelegramRepository
         requestId,
         auditId,
         externalPacketKey: dto.externalPacketKey,
+        mdfJobId,
       });
       if (mdfCardCreatedNow) {
         await enqueueManualSvgMdfCardEvent(tx, {
@@ -1099,12 +1138,12 @@ export class PgCncTelegramRepository
         requestId,
         externalPacketKey: dto.externalPacketKey,
       });
-      await evaluateMdfBoardBathColumnAutomationForPacket(tx, {
+      if (!boundary.queued) await evaluateMdfBoardBathColumnAutomationForPacket(tx, {
         packet,
         actor: command.currentUser,
         requestId,
       });
-      if (command.dto.createMdfMachineFileCard && packetColumnKey(packet) === 'parsed') {
+      if (!boundary.queued && command.dto.createMdfMachineFileCard && packetColumnKey(packet) === 'parsed') {
         await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
           source: { kind: 'packet', id: packet.packetId },
           orderIds: packet.items.map((item) => item.orderId),
@@ -1321,7 +1360,9 @@ export class PgCncTelegramRepository
       };
       await completeIdempotency(tx, command.idempotencyKey, response);
       return response;
-    });
+    // In the active MDF engine the CNC authority job owns automatic cut statuses: the legacy backfill
+    // (enable ⇒ apply to completed packets) is legacy-only (503 there); disabling stays available.
+    }, command.enabled ? { mdf: { writer: 'cnc.auto_cut_status.backfill', capability: 'legacy-only' } } : {});
   }
 
   async recordIngestDenied(command: RecordCncTelegramDeniedAuditCommand): Promise<void> {
@@ -2778,6 +2819,7 @@ async function writeManualSvgCreatedAudit(
     packet: CncTelegramPacketDto;
     requestId: string;
     externalPacketKey: string;
+    mdfJobId?: string;
   },
 ): Promise<string> {
   return auditService.record(tx, {
@@ -2797,7 +2839,7 @@ async function writeManualSvgCreatedAudit(
       itemQuantityTotal: input.packet.itemQuantityTotal,
       svgCutImportStatus: input.packet.svgCutImportStatus ?? 'none',
     },
-    metadata: manualSvgEventMetadata(input, 'manual_svg_upload'),
+    metadata: { ...manualSvgEventMetadata(input, 'manual_svg_upload'),...(input.mdfJobId ? { mdfJobId:input.mdfJobId,mdfEvidence:'membership_only' } : {}) },
     relatedEntities: manualSvgRelatedEntities(input.packet),
   });
 }
@@ -2842,6 +2884,7 @@ async function enqueueManualSvgCreatedEvent(
     requestId: string;
     auditId: string;
     externalPacketKey: string;
+    mdfJobId?: string;
   },
 ): Promise<void> {
   await enqueueOutbox(tx, {
@@ -2849,7 +2892,7 @@ async function enqueueManualSvgCreatedEvent(
     aggregateType: 'cnc_telegram_packet',
     aggregateId: input.packet.packetId,
     idempotencyKey: `cnc-manual-svg:${input.packet.packetId}:source-${input.packet.sourceVersion}:created`,
-    payload: manualSvgOutboxPayload(input, MANUAL_SVG_EVENT),
+    payload: { ...manualSvgOutboxPayload(input, MANUAL_SVG_EVENT),...(input.mdfJobId ? { mdfJobId:input.mdfJobId,mdfEvidence:'membership_only' } : {}) },
   });
 }
 
@@ -7379,6 +7422,7 @@ async function enqueueOutbox(
 /** Bounded calculation history is separate from display cards and their order scope. */
 async function loadBoundedToday(
   database: DatabaseClient, currentUser: CurrentUser, dateTo: string, requestedFrom: string, focusBathCardId?: string,
+  options: { presentationDigests?: boolean; engineOwnsBoard?: boolean } = {},
 ): Promise<CncTelegramTodayResponseDto> {
   const dateFrom = mdfOperationalTwoMonthStart(dateTo);
   const displayFrom = requestedFrom < dateFrom ? dateFrom : requestedFrom;
@@ -7401,6 +7445,17 @@ async function loadBoundedToday(
     loadPeriodBazisCutSetCards(database, displayFrom, dateTo),
   ]);
   const columns = buildTodayColumns(mapPacketRows(packets.rows), baths.cards, basis);
+  // The shown cards are final here (the history below never changes them): their digests are read
+  // alongside the history instead of after it.
+  const digestsPromise = options.presentationDigests ? loadMdfPresentationDigests(database, columns) : null;
+  digestsPromise?.catch(() => undefined); // a failing history read must not leave this rejection unhandled
+  // «Разобрать дубль» (flag): bounded to the active baths of the shown baths' orders, read alongside the history.
+  const duplicatesPromise = mdfBathDuplicatesReadEnabled() ? loadBoardBathDuplicates(database, currentUser, {
+    shown: columns.flatMap(column => column.baths.map(card => ({ bathCardId: card.bathCardId, column: column.key,
+      orderIds: card.items.map(item => item.orderId) }))),
+    engineOwnsBoard: options.engineOwnsBoard === true,
+  }) : null;
+  duplicatesPromise?.catch(() => undefined);
   const cutQuantities = (await cutQuantitiesPromise).rows;
   const orderIds = sourceOrderIds(columns);
   let historicalReadinessSources: CncHistoricalReadinessSourceDto[] = [];
@@ -7472,8 +7527,57 @@ async function loadBoundedToday(
           { orderId: null, detailId: null, detailNumber: null, quantity: 0 }] : bath.items);
     }
   }
-  return { workday: dateTo, generatedAt: new Date().toISOString(), columns,
+  const today: CncTelegramTodayResponseDto = { workday: dateTo, generatedAt: new Date().toISOString(), columns,
     operationalWindow: { dateFrom, dateTo }, historicalBathReadiness: [], historicalReadinessSources };
+  const withDigests = digestsPromise ? withMdfPresentationDigests(today, await digestsPromise) : today;
+  return duplicatesPromise ? withBathDuplicates(withDigests, await duplicatesPromise) : withDigests;
+}
+
+/** Every shown bath gets both lists (empty when none) while the duplicates read is on. */
+export function withBathDuplicates(today: CncTelegramTodayResponseDto, duplicates: ReadonlyMap<string, {
+  duplicates: CncTelegramBathDuplicateDto[]; reworkMarks: CncTelegramBathReworkMarkDto[]; reworkDetailCount: number;
+}>): CncTelegramTodayResponseDto {
+  return { ...today, columns: today.columns.map(column => ({ ...column,
+    baths: column.baths.map(card => ({ ...card,
+      duplicates: duplicates.get(card.bathCardId)?.duplicates ?? [],
+      reworkMarks: duplicates.get(card.bathCardId)?.reworkMarks ?? [],
+      reworkDetailCount: duplicates.get(card.bathCardId)?.reworkDetailCount ?? 0 })),
+  })) };
+}
+
+/** Sessions sharing the hybrid board's read snapshot (spare pool capacity permitting). */
+const MDF_BOARD_SNAPSHOT_PARALLELISM = 4;
+
+/** Engine `active`/`read_only` owns the MDF board (schema-tolerant: no engine state ⇒ legacy). */
+async function mdfEngineOwnsBoard(database: DatabaseClient): Promise<boolean> {
+  const row = (await database.query<{ owns: boolean }>(`SELECT to_regclass('mdf_engine_state') IS NOT NULL
+    AND EXISTS (SELECT 1 FROM mdf_engine_state WHERE singleton AND mode IN ('active','read_only')) owns`)).rows[0];
+  return row?.owns === true;
+}
+
+/** Same snapshot as the cards: digest of the raw composition-sensitive presentation (migration 192). */
+async function loadMdfPresentationDigests(database: DatabaseClient,
+  columns: CncTelegramTodayColumnDto[]): Promise<Map<string, string | null>> {
+  const keys = columns.flatMap(column => [
+    ...column.packets.map(card => ['packet', card.packetId]),
+    ...column.baths.map(card => ['bath', card.bathCardId]),
+    ...column.bazisCutSets.map(card => ['bazisCutSet', String(card.bazisCutSetId)]),
+  ]);
+  if (!keys.length) return new Map();
+  return new Map((await database.query<{ kind: string; id: string; digest: string | null }>(`SELECT s.kind,s.id,
+    mdf_source_presentation_digest(s.kind,s.id) digest FROM unnest($1::text[],$2::text[]) s(kind,id)`,
+  [keys.map(k => k[0]), keys.map(k => k[1])])).rows.map(row => [`${row.kind}:${row.id}`, row.digest]));
+}
+
+function withMdfPresentationDigests(today: CncTelegramTodayResponseDto,
+  digests: ReadonlyMap<string, string | null>): CncTelegramTodayResponseDto {
+  const digest = (kind: string, id: string) => digests.get(`${kind}:${id}`) ?? null;
+  return { ...today, columns: today.columns.map(column => ({ ...column,
+    packets: column.packets.map(card => ({ ...card, mdfPresentationDigest: digest('packet', card.packetId) })),
+    baths: column.baths.map(card => ({ ...card, mdfPresentationDigest: digest('bath', card.bathCardId) })),
+    bazisCutSets: column.bazisCutSets.map(card => ({ ...card,
+      mdfPresentationDigest: digest('bazisCutSet', String(card.bazisCutSetId)) })),
+  })) };
 }
 
 function sourceOrderIds(columns: CncTelegramTodayColumnDto[]): number[] {
@@ -8196,6 +8300,53 @@ function compareBathItems(left: CncTelegramBathItemDto, right: CncTelegramBathIt
 
 function compareBathSheets(left: CncTelegramBathSheetDto, right: CncTelegramBathSheetDto): number {
   return left.sheetNumber - right.sheetNumber || left.cutGroupId - right.cutGroupId;
+}
+
+/** A machine file's column exactly as the board shows it: the server column, then its manual move unless the server
+ * column is terminal (same rule as the board's `resolveCncManualTarget`). Null when the packet does not exist. */
+export async function loadCncPacketBoardColumn(database: DatabaseClient,
+  packetId: string): Promise<'parsed' | 'completed' | 'completed_laminated' | null> {
+  const rows = await database.query<PacketJoinedRow>(packetSelectSql('p.packet_id = $1::uuid'), [packetId]);
+  const packet = mapPacketRows(rows.rows)[0];
+  if (!packet) return null;
+  const server = packetColumnKey(packet);
+  if (server === 'completed_laminated') return server;
+  const manual = packetManualTargetColumns.get(packet);
+  return manual === 'parsed' || manual === 'completed' || manual === 'completed_laminated' ? manual : server;
+}
+
+/** The column the legacy board shows a BASIS set in (the hybrid board keeps it for a non-MDF set): finished
+ * («completed_laminated») when every item is packed or later — its detail packed, or its owner order issued or later,
+ * exactly as `loadPeriodBazisCutSetCards` + `allItemsPackedOrLater` — otherwise its manual placement, else the machine. */
+export async function loadCncBazisCutSetBoardColumn(database: DatabaseClient,
+  setId: string): Promise<'parsed' | 'completed' | 'completed_laminated' | null> {
+  const row = (await database.query<{ items: string; packed: string; manual: string | null }>(`
+    WITH packed_status AS (
+      SELECT COALESCE(MIN(ps.sort_order) FILTER (WHERE lower(trim(COALESCE(ps.production_status_code, ''))) = 'packed'),
+        MIN(ps.sort_order) FILTER (WHERE lower(trim(ps.production_status_name)) = 'упакован')) AS sort_order
+      FROM production_statuses ps
+    ), issued_status AS (
+      SELECT MIN(os.sort_order) FILTER (WHERE lower(trim(os.order_status_name)) = 'выдан') AS sort_order FROM order_statuses os
+    )
+    SELECT count(detail.bazis_cut_set_detail_id)::text items,
+      count(*) FILTER (WHERE (detail_status.sort_order IS NOT NULL AND packed_status.sort_order IS NOT NULL
+          AND detail_status.sort_order >= packed_status.sort_order)
+        OR (source_order_status.sort_order IS NOT NULL AND issued_status.sort_order IS NOT NULL
+          AND source_order_status.sort_order >= issued_status.sort_order))::text packed,
+      (SELECT m.target_column FROM mdf_board_manual_moves m
+        WHERE m.card_kind = 'bazisCutSet' AND m.card_id = cut_set.bazis_cut_set_id::text) manual
+    FROM bazis_cut_sets cut_set
+    LEFT JOIN bazis_cut_set_details detail ON detail.bazis_cut_set_id = cut_set.bazis_cut_set_id
+    LEFT JOIN order_details source_detail ON source_detail.detail_id = detail.source_order_detail_id
+    LEFT JOIN orders source_order ON source_order.order_id = COALESCE(detail.source_order_id, source_detail.order_id)
+    LEFT JOIN order_statuses source_order_status ON source_order_status.order_status_id = source_order.order_status_id
+    LEFT JOIN production_statuses detail_status ON detail_status.production_status_id = source_detail.production_status_id
+    CROSS JOIN packed_status CROSS JOIN issued_status
+    WHERE cut_set.bazis_cut_set_id::text = $1
+    GROUP BY cut_set.bazis_cut_set_id`, [setId])).rows[0];
+  if (!row) return null;
+  if (Number(row.items) > 0 && row.packed === row.items) return 'completed_laminated';
+  return row.manual === 'parsed' || row.manual === 'completed' || row.manual === 'completed_laminated' ? row.manual : 'parsed';
 }
 
 function packetColumnKey(

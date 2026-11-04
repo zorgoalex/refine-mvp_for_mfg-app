@@ -37,6 +37,8 @@ describe('MDF/CNC automation keeps production-round > 1 details out (§5.5)', ()
     const writers = files.filter((file) => stageWrites(readFileSync(file, 'utf8')).length > 0);
     expect(writers.map((file) => relative(root, file)).sort()).toEqual([
       'src/modules/cnc-telegram/adapters/pg-cnc-telegram-repository.ts',
+      'src/modules/mdf-board/adapters/mdf-correction-command.ts',
+      'src/modules/mdf-board/application/mdf-cnc-authority-job.ts',
       'src/modules/orders/adapters/pg-mdf-production-return.ts',
     ]);
   });

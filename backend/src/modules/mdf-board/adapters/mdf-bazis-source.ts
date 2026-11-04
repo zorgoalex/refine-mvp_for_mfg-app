@@ -64,7 +64,7 @@ export async function captureNewMdfBazisSource(tx: TransactionClient, input: {
     FROM status_automation_rules WHERE is_enabled ORDER BY id`)).rows;
   const revisionKey = `bazis-created:${setId}`;
   const saved = await recordMdfReceipt(tx,{ sourceKind: 'bazisCutSet',sourceId: String(setId),revisionKey,
-    origin: 'derived',actorUserId: Number(user.id),requestId: input.requestId,causeKey: revisionKey,
+    origin: 'derived',presentation: 'compute',actorUserId: Number(user.id),requestId: input.requestId,causeKey: revisionKey,
     expectedFence: null,accept: true,rules,
     lines: members.map(m => ({ ...m,stageCode: 'membership',evidenceKind: 'derived' as const,rework: false })),
     executionContext: { sourceCreatedAt: header.createdAt,displayName: header.name,priorColumn: 'parsed',

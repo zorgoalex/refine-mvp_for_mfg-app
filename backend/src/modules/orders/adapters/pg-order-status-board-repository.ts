@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { mapProductionSummary, type ProductionSummaryRow } from '../../../shared/production-status/production-summary';
+import { mdfDemandMaterialSql } from '../../../shared/cnc-material';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
@@ -276,11 +277,14 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
             'detailId', od.detail_id,
             'detailNumber', od.detail_number,
             'quantity', GREATEST(od.quantity, 0),
-            'bazisCutQuantity', ${command.query.includeBazisAllocation === false ? '0' : 'COALESCE(bazis_cut.quantity, 0)'}
+            'bazisCutQuantity', ${command.query.includeBazisAllocation === false ? '0' : 'COALESCE(bazis_cut.quantity, 0)'},
+            'mdfEligible', ${mdfDemandMaterialSql('mt', 'm')}
           )
           ORDER BY od.detail_number ASC NULLS LAST, od.detail_id ASC
         ) AS details_json
         FROM order_details od
+        LEFT JOIN sheet_material_types mt ON mt.sheet_material_type_id = od.sheet_material_type_id
+        LEFT JOIN materials m ON m.material_id = od.material_id
         ${command.query.includeBazisAllocation === false ? '' : `LEFT JOIN LATERAL (
           SELECT SUM(GREATEST(detail.quantity, 0))::integer AS quantity
           FROM bazis_cut_set_details detail
@@ -744,6 +748,7 @@ function mapBoardCardDetails(value: unknown): OrderStatusBoardCardDetailDto[] {
       bazisCutQuantity: Number.isFinite(bazisCutQuantity)
         ? Math.max(0, Math.trunc(bazisCutQuantity))
         : 0,
+      mdfEligible: record.mdfEligible === true,
     }];
   });
 }

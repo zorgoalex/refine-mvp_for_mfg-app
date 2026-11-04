@@ -2,13 +2,23 @@ import { planMdfEvidenceAllocations, type MdfEvidenceAllocation, type MdfSupplyL
 import type { MdfBathDemand } from './mdf-allocation';
 import { mdfPositionKey, mdfQuantity, mdfSum, type MdfPositionQuantity } from './mdf-quantities';
 import { isMdfEvidenceContract } from './mdf-evidence-contract';
+import { matchesMdfValidatedPhysicalLineage, type MdfValidatedPhysicalLineage } from './mdf-physical-lineage';
+import { matchesMdfValidatedBazisAssignmentState, type MdfValidatedBazisAssignmentState } from '../application/mdf-bazis-assignment-state';
 
 export interface MdfAllocationSource {
   kind: 'packet' | 'bazisCutSet' | 'bath' | 'order' | 'orderDetail';
   id: string; accepted: string | null; received: string; createdAt?: string;
+  /** Issued only by the server-side sealed-lineage snapshot loader. */
+  lineage?: MdfValidatedPhysicalLineage;
+  /** Issued only for a sealed, validated BASIS assignment-state marker. */
+  assignmentState?: MdfValidatedBazisAssignmentState;
+  /** A present lineage failure is never treated as an unlineaged v1 source. */
+  lineageIssue?: string;
   /** Frozen known ownership when exact membership is unresolved. */
   uncertainOrderIds?: readonly number[];
-  lines: (MdfPositionQuantity & { evidenceLineId: string; revision: string;
+  /** §5.4e positions detached in THIS source: lines stay for validation, never supply/membership. */
+  detachedPositionKeys?: ReadonlySet<string>;
+  lines: (MdfPositionQuantity & { evidenceLineId: string; lineKey?: string; revision: string;
     stage: string; evidence: string; rework: boolean })[];
 }
 export interface MdfAllocationQuarantine {
@@ -28,6 +38,29 @@ function quantities(lines: readonly MdfPositionQuantity[]) {
   }
   return result;
 }
+const positionReworkKey = (row: MdfPositionQuantity & { rework: boolean }) => JSON.stringify([mdfPositionKey(row),row.rework]);
+
+function positionReworkQuantities(lines: readonly (MdfPositionQuantity & { rework: boolean })[]) {
+  const result = new Map<string,number>();
+  for (const line of lines) {
+    const key = positionReworkKey(line);
+    result.set(key,mdfSum(result.get(key) ?? 0,line.quantity));
+  }
+  return result;
+}
+function hasValidCurrentLineage(source: MdfAllocationSource, acceptedLines: MdfAllocationSource['lines']): boolean {
+  if (source.lineage === undefined) return false;
+  if (!source.lineage) return false;
+  if (source.lineageIssue !== undefined || !source.accepted || source.accepted !== source.received
+    || (source.kind !== 'packet' && source.kind !== 'bazisCutSet' && source.kind !== 'bath')) return false;
+  try {
+    if (acceptedLines.some(line => line.revision === source.accepted && line.evidence === 'physical' && !line.lineKey)) return false;
+    return matchesMdfValidatedPhysicalLineage({ sourceKind: source.kind,sourceId: source.id,
+      revisionKey: source.accepted,lines: acceptedLines.map(line => ({ ...line, lineKey: line.lineKey ?? '' })),lineage: source.lineage });
+  } catch {
+    return false;
+  }
+}
 
 /** Local uncertainty, NOT proof of a complete historical baseline. Caller must
  * discover all relevant sources, including hidden consumers, before using this
@@ -37,6 +70,8 @@ export function planMdfQuarantinedAllocations(input: {
 }) {
   const quarantine: MdfAllocationQuarantine[] = [], blocked = new Set<string>(), blockedOrders = new Set<number>();
   const supply: MdfSupplyLine[] = [], baths: MdfBathDemand[] = [], laminated = new Set<string>();
+  // Credited (declared) cut of the same admitted sources: never supply of the ledger, only bath readiness (C2).
+  const declared: MdfSupplyLine[] = [];
   const liveAllocations = input.allocations.filter(a => a.state !== 'released');
   const ownAllocations = (id: string) => liveAllocations.filter(a => a.bathId === id);
   const reject = (s: MdfAllocationSource, code: string, rows: readonly MdfPositionQuantity[] = [], widen = false) => {
@@ -58,26 +93,53 @@ export function planMdfQuarantinedAllocations(input: {
       if (!mdfQuantity(l.quantity) || !l.evidenceLineId || seenLines.has(l.evidenceLineId)) throw new Error('MDF_ALLOCATION_INVALID_LINE');
       seenLines.add(l.evidenceLineId);
     }
-    if (s.kind === 'order' || s.kind === 'orderDetail') continue;
-    const own = s.lines.filter(l => l.revision === s.accepted);
+    if (s.kind === 'order' || s.kind === 'orderDetail') {
+      if (s.lineageIssue !== undefined || s.lineage !== undefined) {
+        reject(s,s.lineageIssue || 'LINEAGE_INVALID',s.lines);
+      }
+      continue;
+    }
+    const ownAll = s.lines.filter(l => l.revision === s.accepted);
+    const detachedKeys = s.detachedPositionKeys;
+    const own = detachedKeys?.size ? ownAll.filter(l => !detachedKeys.has(mdfPositionKey(l))) : ownAll;
     const members = quantities(own.filter(l => l.stage === 'membership' && l.evidence === 'derived'));
-    const scope = [...s.lines, ...ownAllocations(s.id)];
+    const hasLineage = hasValidCurrentLineage(s,s.lines);
+    const hasAssignmentState = s.kind==='bazisCutSet' && s.accepted===s.received
+      && matchesMdfValidatedBazisAssignmentState({sourceKind:s.kind,sourceId:s.id,revisionKey:s.accepted??'',
+        lines:ownAll.map(line=>({...line,lineKey:line.lineKey??'',stageCode:line.stage,evidenceKind:line.evidence})),
+        state:s.assignmentState});
+    const scope = [...(detachedKeys?.size ? s.lines.filter(l => !detachedKeys.has(mdfPositionKey(l))) : s.lines),
+      ...ownAllocations(s.id)];
     const missingMembership = [...new Set([s.accepted, s.received].filter(r => r !== null))]
       .some(r => !s.lines.some(l => l.revision === r && l.stage === 'membership' && l.evidence === 'derived'));
     let reason: string | undefined;
-    if (!s.accepted || s.accepted !== s.received) reason = 'ACCEPTANCE_PENDING';
-    else if (!members.size) reason = 'MEMBERSHIP_MISSING';
-    else if (own.some(l => !isMdfEvidenceContract(s.kind,l.stage,l.evidence))) reason = 'INVALID_EVIDENCE';
-    else if (['cut','laminated'].some(stage => [...quantities(own.filter(l => l.stage === stage && l.evidence === 'physical'))]
-      .some(([key,row]) => row.quantity > (members.get(key)?.quantity ?? 0)))) reason = 'MEMBERSHIP_MISMATCH';
-    else if (s.kind === 'bath' && (!s.createdAt || !Number.isFinite(Date.parse(s.createdAt)))) reason = 'BATH_METADATA_MISSING';
-    else if (s.kind === 'bath' && own.some(l => l.rework)) reason = 'REWORK_BATH_UNSUPPORTED';
+    if (s.lineageIssue !== undefined || (s.lineage !== undefined && !hasLineage)) reason = s.lineageIssue || 'LINEAGE_INVALID';
+    else if (!s.accepted || s.accepted !== s.received) reason = 'ACCEPTANCE_PENDING';
+    else if (!members.size && !(hasAssignmentState&&s.assignmentState?.intentionalEmpty)) reason = 'MEMBERSHIP_MISSING';
+    else if (ownAll.some(l => !isMdfEvidenceContract(s.kind,l.stage,l.evidence))) reason = 'INVALID_EVIDENCE';
+    else {
+      const lineageMayCarry = hasLineage && (s.kind === 'packet' || s.kind === 'bazisCutSet');
+      // Preserve the v1 stage/position aggregate cap exactly. V2 packet/BASIS
+      // physical rows are independently authenticated by the sealed lineage.
+      const memberByPartition = positionReworkQuantities(own.filter(l => l.stage === 'membership' && l.evidence === 'derived'));
+      const declarationByPartition = positionReworkQuantities(own.filter(l => (l.stage === 'cut' || l.stage === 'laminated')
+        && l.evidence === 'declaration'));
+      const hasUnsupportedOverhang = !lineageMayCarry && ['cut','laminated'].some(stage =>
+        [...quantities(own.filter(l => l.stage === stage && l.evidence === 'physical'))]
+          .some(([key,row]) => row.quantity > (members.get(key)?.quantity ?? 0)))
+        || (hasLineage && [...declarationByPartition].some(([key,quantity]) =>
+          quantity > (memberByPartition.get(key) ?? 0)));
+      if (hasUnsupportedOverhang) reason = 'MEMBERSHIP_MISMATCH';
+    }
+    if (!reason && s.kind === 'bath' && (!s.createdAt || !Number.isFinite(Date.parse(s.createdAt)))) reason = 'BATH_METADATA_MISSING';
+    if (!reason && s.kind === 'bath' && own.some(l => l.rework)) reason = 'REWORK_BATH_UNSUPPORTED';
     if (reason) {
       reject(s, reason, s.kind === 'bath' ? scope : [], s.kind === 'bath' && missingMembership);
       continue;
     }
     if (s.kind !== 'bath') {
       supply.push(...own.filter(l => l.stage === 'cut' && l.evidence === 'physical' && !l.rework));
+      declared.push(...own.filter(l => l.stage === 'cut' && l.evidence === 'declaration' && !l.rework));
       continue;
     }
     const items = [...members.values()].sort((a,b) => compare(mdfPositionKey(a),mdfPositionKey(b)));
@@ -135,13 +197,70 @@ export function planMdfQuarantinedAllocations(input: {
     for (const b of eligible) if (laminated.has(b.id) && !plan.readyBathIds.includes(b.id)) {
       if (!failures.has(b.id)) failures.set(b.id,'LAMINATION_SUPPLY_MISSING');
     }
-    if (!failures.size) return { ...plan, quarantine: quarantine.sort((a,b) => compare(JSON.stringify(a),JSON.stringify(b))),
-      blockedPositionKeys: [...blocked].sort(compare),
-      consumableBathIds: plan.readyBathIds.filter(id => laminated.has(id)) };
+    if (!failures.size) {
+      // After convergence only: lamination checks and consumption above used the physical plan alone.
+      const credited = planMdfDeclaredReadiness({ baths: eligible, physicalReadyBathIds: plan.readyBathIds,
+        supply: supply.filter(l => !isBlocked(l)), declared: declared.filter(l => !isBlocked(l)),
+        allocations: liveAllocations.filter(a => !isBlocked(a)), reservations: plan.reservations });
+      return { ...plan, readyBathIds: [...plan.readyBathIds, ...credited.readyBathIds],
+        physicalReadyBathIds: plan.readyBathIds, declaredReadyBathIds: credited.readyBathIds,
+        declaredCoverage: credited.coverage,
+        quarantine: quarantine.sort((a,b) => compare(JSON.stringify(a),JSON.stringify(b))),
+        blockedPositionKeys: [...blocked].sort(compare),
+        consumableBathIds: plan.readyBathIds.filter(id => laminated.has(id)) };
+    }
     for (const [id,code] of failures) {
       const s = sourceOf(id);
       reject(s,code,[...s.lines,...ownAllocations(id)]);
     }
   }
   throw new Error('MDF_ALLOCATION_QUARANTINE_DID_NOT_CONVERGE');
+}
+
+/** Bath readiness from credited cut (plan «MDF bath readiness from credited cut», r2): a bath not ready on physical supply
+ * may be closed by the credited cut of its positions that no other bath holds. Per position the credited cut is the
+ * same coverage as the publication's (physical sum vs. the largest declaration, never added); what the physical ledger
+ * (live reserved/consumed debits and this plan's reservations) already holds is subtracted. Oldest bath first, all or
+ * nothing per bath, so one credited piece closes at most one bath. Pure: no ledger rows, no consumption. */
+export function planMdfDeclaredReadiness(input: {
+  baths: readonly MdfBathDemand[]; physicalReadyBathIds: readonly string[];
+  supply: readonly MdfPositionQuantity[]; declared: readonly MdfPositionQuantity[];
+  allocations: readonly (MdfPositionQuantity & { bathId: string; state: string })[];
+  reservations: readonly (MdfPositionQuantity & { bathId: string })[];
+}): { readyBathIds: string[]; coverage: { bathId: string; bathRevision: string; orderId: number; detailId: number; quantity: number }[] } {
+  const free = new Map<string, number>();
+  const physical = new Map<string, number>(), declaration = new Map<string, number>();
+  for (const l of input.supply) physical.set(mdfPositionKey(l), mdfSum(physical.get(mdfPositionKey(l)) ?? 0, l.quantity));
+  for (const l of input.declared) declaration.set(mdfPositionKey(l), Math.max(declaration.get(mdfPositionKey(l)) ?? 0, l.quantity));
+  for (const key of new Set([...physical.keys(), ...declaration.keys()])) {
+    free.set(key, Math.max(physical.get(key) ?? 0, declaration.get(key) ?? 0));
+  }
+  const held = new Map<string, Map<string, number>>();
+  const debit = (row: MdfPositionQuantity & { bathId: string }) => {
+    const key = mdfPositionKey(row);
+    free.set(key, (free.get(key) ?? 0) - row.quantity);
+    const own = held.get(row.bathId) ?? new Map<string, number>();
+    own.set(key, mdfSum(own.get(key) ?? 0, row.quantity));
+    held.set(row.bathId, own);
+  };
+  for (const a of input.allocations) if (a.state === 'reserved' || a.state === 'consumed') debit(a);
+  for (const r of input.reservations) debit(r);
+  const physicalReady = new Set(input.physicalReadyBathIds);
+  const result: ReturnType<typeof planMdfDeclaredReadiness> = { readyBathIds: [], coverage: [] };
+  const sorted = [...input.baths].filter(b => !physicalReady.has(b.id))
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || compare(a.id, b.id));
+  for (const bath of sorted) {
+    const own = held.get(bath.id) ?? new Map<string, number>();
+    const needs = quantities(bath.items);
+    const missing = [...needs].map(([key, item]) => ({ key, item, quantity: Math.max(0, item.quantity - (own.get(key) ?? 0)) }))
+      .filter(n => n.quantity > 0);
+    if (!missing.length || missing.some(n => n.quantity > (free.get(n.key) ?? 0))) continue;
+    for (const n of missing) {
+      free.set(n.key, (free.get(n.key) ?? 0) - n.quantity);
+      result.coverage.push({ bathId: bath.id, bathRevision: bath.revision, orderId: n.item.orderId, detailId: n.item.detailId,
+        quantity: n.quantity });
+    }
+    result.readyBathIds.push(bath.id);
+  }
+  return result;
 }

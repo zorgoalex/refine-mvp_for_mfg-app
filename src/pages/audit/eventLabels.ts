@@ -248,6 +248,7 @@ export const AUDIT_EVENT_TITLES: Record<string, string> = {
   'mdf_board.manual_move.created': 'Создан ручной перенос карточки МДФ',
   'mdf_board.manual_move.updated': 'Изменён ручной перенос карточки МДФ',
   'mdf_board.manual_move.deleted': 'Удалён ручной перенос карточки МДФ',
+  'mdf_board.bath_duplicate_resolved': 'Разобран дубль ванн МДФ',
   'orders.calendar_move': 'Перенесён заказ в календаре',
   'orders.export': 'Экспортирован заказ',
   'orders.export.requested': 'Запрошен экспорт заказа',

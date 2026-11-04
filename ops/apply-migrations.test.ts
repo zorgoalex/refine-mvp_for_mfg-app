@@ -81,6 +81,295 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).toMatch(/--run-041-reset/);
     expect(scriptText).toMatch(/--skip-041/);
   });
+  it('probes sealed correction policy integrity and verifies migration178 before ledgering it', () => {
+    const start = probeFn.indexOf('178_mdf_correction_receipts*)');
+    const end = probeFn.indexOf('*) return 2', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of ['mdf_revision_context', 'mdf_recalculation_jobs', 'effect_policy',
+      'is_nullable=\'NO\'', 'forward', 'mdf_revision_context_effect_policy_check',
+      'mdf_recalculation_jobs_effect_policy_check', 'mdf_job_effect_policy_binding',
+      'mdf_guard_job_effect_policy_binding()', 'tgenabled=\'O\'', 'tgtype=23', 'NOT convalidated',
+      "q_fun_hash 'public.mdf_guard_job_effect_policy_binding()' 45e1620014c367515f61c170f2bcf0f5",
+      "md5(pg_get_constraintdef(oid))='762134ad47d34c70223ce0ce81067951'",
+      "q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8"]) {
+      expect(arm).toContain(marker);
+    }
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/178_mdf_correction_receipts\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
+  it('probes immutable active-return state and verifies migration179 before ledgering it', () => {
+    const start = probeFn.indexOf('179_mdf_active_return*)');
+    const end = probeFn.indexOf('*) return 2', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'mdf_correction_command_results', 'mdf_correction_job_effect_suppressions', 'mdf_cnc_return_fences',
+      '472e096aaefa864ed4b6e46f3626351d', '12852bdfb98b41e1bc7b8525cfb57ca4',
+      '8904331b527955cd6afb69762cb245f8', '277b3a158b9ae318826ac38d3dc335c2',
+      'cebc56e18c6d83644a0a0db1784b530e', '9027e841e29fbf97366380dfc9283c10',
+      '9e3d189a5bb7f2694778eb04c97b9fb4', '8d0c64ba064394cb48bd7ac95d7d811f',
+      'fa6c7fddbb7d49d529ce84a8d4b4b37b',
+      "q_fun_hash 'public.mdf_guard_cnc_return_fence()' d026131d8311f356670a7d23d54d73aa",
+      "q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8",
+      'mdf_correction_command_result_immutable', 'mdf_correction_job_effect_suppression_immutable',
+      'mdf_cnc_return_fence_guard', 'tgtype=27', 'tgtype=31', "t.tgenabled='O'",
+      "c.confrelid=to_regclass('public.mdf_recalculation_jobs')", 'NOT convalidated',
+      'NOT indisvalid OR NOT indisready',
+    ]) expect(arm).toContain(marker);
+    expect(arm).toContain('mdf_correction_job_effect_suppressio_correction_source_id_check');
+    expect(arm).toContain('mdf_correction_job_effect_suppress_correction_source_kind_check');
+    expect(arm).not.toMatch(/mdf_correction_job_effect_suppressions\s+.*q_con_hash_on/);
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/179_mdf_active_return\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
+  it('probes bounded CNC observation state and verifies migration180 before ledgering it', () => {
+    const start = probeFn.indexOf('180_mdf_cnc_observations*)');
+    const end = probeFn.indexOf('*) return 2', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'mdf_cnc_observation_targets', 'mdf_cnc_observation_receipts', 'mdf_cnc_observation_job_authorities',
+      'cnc_telegram_packets', 'cnc_telegram_import_candidates', 'cnc_telegram_import_items',
+      'mdf_cnc_return_fences', 'last_observation_version', 'claim_token_hash',
+      '58c9e312f16b38ba45c5534146e41ace', '14d491731eb52f0a2c23e87fdb8129df',
+      '7821d51124214275c01987dacf631670', 'b9f99f4745220b221cbf5884e57ff0ed',
+      'a11437465812fd395e0de3193864263d', 'aafc76b66f97eccf6e9769810c00a936',
+      '6a9edc964e9da23dd9ca659d7a27297c', '8e5c2533815f1dd0184e7851c9e60b94',
+      '7cdb1d017c3efa3cb34ea09c72bf89d0',
+      'q_colset_fun_hash_pair', '518942b013d23e6160eb47e06237a0d2', 'd241972faa5d662ff436a873690ff619',
+      "q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8",
+      'mdf_guard_cnc_observation_target', 'mdf_reject_evidence_change()',
+      'mdf_cnc_observation_target_guard', 'mdf_cnc_observation_receipt_immutable',
+      'mdf_cnc_observation_job_authority_immutable', 't.tgtype=kind', ',31)', ',27)', "t.tgenabled='O'",
+      'NOT convalidated', 'NOT indisvalid OR NOT indisready',
+    ]) expect(arm).toContain(marker);
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/180_mdf_cnc_observations\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
+  it('keeps migration180 compatible with only the exact migration181 target successor', () => {
+    const start = probeFn.indexOf('180_mdf_cnc_observations*)');
+    const end = probeFn.indexOf('181_cnc_manual_send_observation*)', start);
+    const arm = probeFn.slice(start, end);
+    expect(arm).toContain('48bbfe7c44d81a3641ca98da18e89227');
+    expect(arm).toContain('d241972faa5d662ff436a873690ff619');
+    expect(arm).toContain('518942b013d23e6160eb47e06237a0d2');
+    expect(arm).toContain('mdf_cnc_observation_targets');
+  });
+
+  it('probes immutable manual-send observation snapshots and verifies migration181 before ledgering it', () => {
+    const start = probeFn.indexOf('181_cnc_manual_send_observation*)');
+    const end = probeFn.indexOf('*) return 2', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'cnc_manual_svg_observation_claim_snapshots', 'cnc_manual_svg_observation_send_bindings',
+      'cnc_manual_svg_observation_registration_work', 'mdf_cnc_observation_targets',
+      'files_snapshot', 'source_fence', 'sent_files', 'completion_digest', 'next_attempt_at',
+      'eca628417e7d71f4f05e9bd1d1e3729c', '0ea7fefef06e9a2981bb9e939b2181ce',
+      'f473e0973769cfbcb60aa715664b5d30', '48bbfe7c44d81a3641ca98da18e89227',
+      'cb172fa1f14d23161886f580e7b8be3e', '3b2f3cf98c8132022bd8cfe45f620967',
+      '7f7dba43c6b43af86ce34657040e7770', '02fad0863784f5bf8c13310d873be105',
+      'c246869b70663118d9fce67e3a34acf6', '73f6d4083eec681244cc51c8a5b6e39d',
+      '3f83026700f84394068c1c6b624b0cd5', 'ac9e56036817b6c6baeb29ac2112d261',
+      'mdf_guard_cnc_manual_svg_observation_append_only()', 'mdf_guard_cnc_manual_svg_observation_work()',
+      'mdf_guard_cnc_observation_target()', 'cnc_manual_svg_observation_claim_immutable',
+      'cnc_manual_svg_observation_binding_immutable', 'cnc_manual_svg_observation_work_guard',
+      'b2f7ad914fece1fa6e50a291108a884f', '6fb75265fe9bab58adda8bb558593ff7',
+      'd241972faa5d662ff436a873690ff619',
+      'uq_mdf_cnc_observation_manual_send', 'chk_mdf_cnc_observation_target_registration_kind',
+      't.tgenabled=\'O\'', 'NOT convalidated', 'NOT indisvalid OR NOT indisready',
+      'mdf_recalculation_jobs', 'confrelid',
+    ]) expect(arm).toContain(marker);
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/181_cnc_manual_send_observation\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
+  it('probes physical-lineage contracts and verifies migration182 before ledgering it', () => {
+    const start = probeFn.indexOf('182_mdf_physical_lineage*)');
+    const end = probeFn.indexOf('*) return 2', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'mdf_physical_lineage_contracts', 'mdf_physical_lineage_transitions',
+      'mdf_revision_context', 'mdf_revision_demand', 'mdf_revision_seals', 'mdf_source_heads', 'mdf_evidence_lines',
+      '5138882885769bc7fa70ca08c9f31850', 'a1c435fd8e1718dfa27fc51b6e97a5b1',
+      'd86e35e02578b17a844033efe13a00ce', '75284260f5fbdf3850fce32f3c4ec0dd',
+      'e8ffa2aa2aeba0b52cc70a1c10c47509', '9953302b7dd61a70a78069d48d67bff5',
+      "q_fun_hash 'public.mdf_guard_physical_lineage_insert()' 5f33a57477dcf2397fa18783d9b7ecae",
+      "q_fun_hash 'public.mdf_guard_physical_lineage_immutable()' 39d2c9d9500956c4bca2546c68d8cc15",
+      // 191 redefines the seal guard in place (detached-position exemption): either body is a valid 182 end-state.
+      "q_fun_hash_either 'public.mdf_validate_physical_lineage_seal()' 3067d8c18cdc8b1603397ce68a56824b f303a542a2e940954763bfa8a5d44bbe",
+      // 201 redefines the lineage head guard (genesis/retirement without physical lines): either body is valid.
+      "q_fun_hash_either 'public.mdf_guard_physical_lineage_source_head()' d2ab89206c2d81b774c16779d302d789 4895f75ef2c486bccd3715f8ab8e6dab",
+      "q_fun_hash 'public.mdf_guard_source_fence()' 5865eedf3ea4c2cf2b715b6ac210d49a",
+      "q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8",
+      "q_fun_hash 'public.mdf_guard_accepted_revision()' 945aada9b298e291ecda1442e6391f6d",
+      "q_fun_hash 'public.mdf_guard_job_effect_policy_binding()' 45e1620014c367515f61c170f2bcf0f5",
+      'mdf_physical_lineage_contract_insert_guard', 'mdf_physical_lineage_contract_immutable',
+      'mdf_physical_lineage_transition_insert_guard', 'mdf_physical_lineage_transition_immutable',
+      'mdf_physical_lineage_seal_guard', 'mdf_physical_lineage_source_head_guard',
+      'mdf_source_fence_guard', 'mdf_context_immutable', 'mdf_demand_immutable',
+      'mdf_job_effect_policy_binding', 'mdf_accepted_revision_guard',
+      't.tgfoid=to_regprocedure(\'public.mdf_guard_source_fence()\')', 't.tgtype=27',
+      't.tgfoid=to_regprocedure(\'public.mdf_reject_evidence_change()\')',
+      't.tgfoid=to_regprocedure(\'public.mdf_guard_job_effect_policy_binding()\')', 't.tgtype=23',
+      't.tgfoid=to_regprocedure(\'public.mdf_guard_accepted_revision()\')', 't.tgtype=19',
+      "t.tgenabled='O'", 'NOT convalidated', 'NOT indisvalid OR NOT indisready',
+    ]) expect(arm).toContain(marker);
+    expect(arm).toContain('(SELECT count(*)=2 FROM pg_constraint WHERE conrelid=to_regclass(\'public.mdf_physical_lineage_contracts\') AND contype=\'f\')');
+    expect(arm).toContain('(SELECT count(*)=4 FROM pg_constraint WHERE conrelid=to_regclass(\'public.mdf_physical_lineage_transitions\') AND contype=\'f\')');
+    expect(arm).toContain("remote_ns.nspname='public'");
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/182_mdf_physical_lineage\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
+  it('probes the presentation binding and conditionally-redefined board-history functions before ledgering migration192', () => {
+    const start = probeFn.indexOf('192_mdf_board_presentation_history*)');
+    const end = probeFn.indexOf('186_bitrix24_product_import*)', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'mdf_revision_presentation', 'mdf_revision_presentation_pkey',
+      'mdf_revision_presentation_presentation_digest_check',
+      'mdf_revision_presentation_source_kind_source_id_revision_k_fkey',
+      'mdf_revision_presentation_immutable', "public.mdf_reject_revision_presentation_change()",
+      't.tgtype=27', "t.tgenabled='O'", 'NOT t.tgisinternal',
+      "to_regprocedure('public.mdf_source_presentation_digest(text,text)') IS NOT NULL",
+      // 192 conditionally redefines the two 141 board-history functions in place; the guard
+      // below only requires the post-192 body once mdf_board_history_events (141) exists —
+      // without it (191-only schema, no 141), the migration still applies and the check is skipped.
+      "to_regclass('public.mdf_board_history_events') IS NULL OR",
+      "to_regprocedure('public.record_mdf_board_history_from_audit()')",
+      "'cb273b6a454a8c02ffce436caa6f8863'",
+      "to_regprocedure('public.record_mdf_board_history_from_audit_relation()')",
+      "'3a0cefb994d1231bb6fda6677fa2077e'",
+    ]) expect(arm).toContain(marker);
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/192_mdf_board_presentation_history\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
+  it('probes the baseline population run manifest, durable freeze guard and cutover fence before ledgering migration193', () => {
+    const start = probeFn.indexOf('195_mdf_baseline_population*)');
+    const end = probeFn.indexOf('186_bitrix24_product_import*)', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'mdf_baseline_runs', 'mdf_baseline_run_items', 'mdf_baseline_run_preexisting', 'mdf_freeze_guard',
+      "SELECT count(*)=1 FROM mdf_freeze_guard",
+      "to_regprocedure('public.mdf_baseline_owned()') IS NOT NULL",
+      'mdf_freeze_guard_row', 'mdf_freeze_guard_truncate', 'mdf_guard_freeze_guard',
+      'mdf_baseline_run_guard', 'mdf_guard_baseline_run',
+      'mdf_baseline_item_guard', 'mdf_baseline_preexisting_guard', 'mdf_guard_baseline_append_only',
+      'q_col mdf_revision_context baseline_run_id', 'q_col mdf_revision_context closure',
+      'q_con_on mdf_revision_context mdf_context_baseline_check',
+      'mdf_legacy_acceptance_guard', 'mdf_guard_legacy_acceptance',
+      "to_regclass('public.orders') IS NULL OR EXISTS",
+      "to_regclass('public.order_details') IS NULL OR EXISTS",
+      "to_regclass('public.cnc_telegram_packets') IS NULL OR EXISTS",
+      "to_regclass('public.mdf_evidence_revisions') IS NULL OR EXISTS",
+      "to_regclass('public.mdf_bazis_composition_intents') IS NULL OR EXISTS",
+      "t.tgname='mdf_cutover_fence'", "t.tgfoid=to_regprocedure('public.mdf_cutover_fence()')", 't.tgtype=62',
+      "to_regprocedure('public.mdf_reset_delete_baseline_rows(uuid)') IS NOT NULL",
+      "to_regprocedure('public.mdf_reset_unactivated_baseline(uuid)') IS NOT NULL",
+      "NOT has_function_privilege('public','mdf_reset_delete_baseline_rows(uuid)','EXECUTE')",
+      "NOT has_function_privilege('public','mdf_reset_unactivated_baseline(uuid)','EXECUTE')",
+    ]) expect(arm).toContain(marker);
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/195_mdf_baseline_population\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
+  it('probes the recovery freeze, demand-drift conflicts table and catalog classification guard before ledgering migration199', () => {
+    const start = probeFn.indexOf('199_mdf_cutover_controls*)');
+    const end = probeFn.indexOf('186_bitrix24_product_import*)', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'q_col mdf_freeze_guard recovery_frozen_at', 'q_col mdf_freeze_guard recovery_reason',
+      'q_col mdf_engine_state mode_changed_at', "t.tgname='mdf_mode_changed_at_stamp'",
+      "to_regprocedure('public.mdf_recovery_owned()') IS NOT NULL",
+      'mdf_demand_drift_conflicts', 'mdf_demand_drift_conflicts_pkey',
+      'source_kind%source_id%predecessor_revision_key%live_demand_digest',
+      'CONFIRMATION_REQUIRED',
+      "confrelid=to_regclass('public.users')",
+      'idx_mdf_demand_drift_conflicts_open',
+      "q_stmt_trg mdf_cutover_fence mdf_demand_drift_conflicts mdf_cutover_fence 62",
+      "q_stmt_trg mdf_cutover_fence cut_result_archive_state mdf_cutover_fence 62",
+      "to_regprocedure('public.mdf_material_is_mdf(text)') IS NOT NULL",
+      'mdf_material_is_mdf', "to_regprocedure('public.mdf_guard_catalog_classification()') IS NOT NULL",
+      "to_regclass('public.sheet_material_types') IS NULL OR EXISTS",
+      "to_regclass('public.materials') IS NULL OR EXISTS",
+      "t.tgname='mdf_catalog_classification_guard'",
+      "t.tgfoid=to_regprocedure('public.mdf_guard_catalog_classification()')", 't.tgtype=19',
+    ]) expect(arm).toContain(marker);
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/199_mdf_cutover_controls\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
+  it('probes the relaxed lineage head guard before ledgering migration201', () => {
+    const start = probeFn.indexOf('201_mdf_lineage_genesis_guard*)');
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, probeFn.indexOf(';;', start));
+    expect(arm).toContain("q_fun_hash 'public.mdf_guard_physical_lineage_source_head()' 4895f75ef2c486bccd3715f8ab8e6dab");
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/201_mdf_lineage_genesis_guard\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
+  it('probes the frozen bath coverage column before ledgering migration273', () => {
+    const start = probeFn.indexOf('273_mdf_published_bath_coverage*)');
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, probeFn.indexOf(';;', start));
+    expect(arm).toContain('q_col mdf_published_source_members covered_quantity');
+    expect(arm).toContain('q_con_on mdf_published_source_members mdf_published_member_covered_quantity_check');
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/273_mdf_published_bath_coverage\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
+  it('probes declared bath coverage and the republish job marker before ledgering migration277', () => {
+    const start = probeFn.indexOf('277_mdf_bath_declared_coverage*)');
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, probeFn.indexOf(';;', start));
+    expect(arm).toContain('q_col mdf_published_source_members declared_covered_quantity');
+    expect(arm).toContain('q_con_on mdf_published_source_members mdf_published_member_declared_coverage_check');
+    expect(arm).toContain("to_regclass('public.mdf_republish_jobs') IS NOT NULL");
+    expect(arm).toContain("t.tgname='mdf_republish_job_immutable'");
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/277_mdf_bath_declared_coverage\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
+  it('probes sealed BASIS assignment and command intent effects before ledgering migration185', () => {
+    const start = probeFn.indexOf('185_mdf_bazis_composition*)');
+    const end = probeFn.indexOf('*) return 2', start);
+    expect(start).toBeGreaterThan(-1);
+    const arm = probeFn.slice(start, end);
+    for (const marker of [
+      'mdf_evidence_revisions', 'mdf_revision_context', 'mdf_revision_demand', 'mdf_revision_seals',
+      'mdf_evidence_lines', 'mdf_source_heads', 'mdf_physical_lineage_contracts',
+      'mdf_physical_lineage_transitions', 'mdf_recalculation_jobs', 'mdf_bath_allocations',
+      'bazis_cut_sets', 'bazis_cut_set_details', 'mdf_bazis_assignment_states',
+      'mdf_bazis_composition_intents', 'idx_mdf_bazis_assignment_state_id',
+      'idx_mdf_bazis_composition_intent_job',
+      'mdf_guard_bazis_assignment_state_insert()', 'mdf_guard_bazis_composition_intent_insert()',
+      'mdf_guard_bazis_assignment_state_seal()', 'mdf_validate_bazis_composition_intent_job()',
+      'mdf_reject_bazis_composition_marker_change()', 'mdf_bazis_assignment_state_insert_guard',
+      'mdf_bazis_assignment_state_immutable', 'mdf_bazis_composition_intent_insert_guard',
+      'mdf_bazis_composition_intent_immutable', 'mdf_bazis_composition_intent_job_guard',
+      'mdf_bazis_assignment_state_seal_guard', 't.tgenabled=\'O\'',
+      'NOT convalidated', 'NOT indisvalid OR NOT indisready', 'remote_ns.nspname=\'public\'',
+      '7c8e35fd85174def4370da92813f0bda', '25d043103a689c70d3732e862a2a69e2',
+      '28027224d245e073777c3a83adadcb15', '25c766d22da2e71829e9945daf195c01',
+      '2ea244aca9759044c36943e27c621536', '2ea3abb5d89f4f8b489c53825b3e398a',
+      '2d6c181ca20df43da653d44409a9073a', 'aaa36c569106fe12b38a8d71ebb4f45f',
+      '8fe6e4df8cbeff3c28b44959da4e412b', '006a828cf13a2b5f9f116bab7813c115',
+      '93cbd0bde882a11eeecbb86623beb05a',
+    ]) expect(arm).toContain(marker);
+    const verification = scriptText.slice(scriptText.indexOf('verify_applied_effect() {'), scriptText.indexOf('probe_076_endstate()'));
+    expect(verification).toMatch(/185_mdf_bazis_composition\*\)\s+probe_file "\$f" \|\| die/);
+  });
+
   it('verifies typed HDF projection functions and structure before recording177',()=>{
     const arm=probeFn.slice(probeFn.indexOf('177_cut_result_typed_hdf*)'),probeFn.indexOf('176_whatsapp_reply_templates*)'));
     for(const marker of ['order_hdf_detail_id','NOT attnotnull','convalidated','indisvalid AND indisready',
@@ -179,7 +468,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).not.toMatch(/q_fun_hash\(\).*md5\(prosrc\)/);
     expect(probeFn).toContain("q_fun_hash 'cnc_telegram_worker_reason_code_valid(text)'");
     expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(
-      requiredFunctions.length + 2 + 9 + 1 + 1 + 3 + 1 + 1, // 164-169,174/175 guards,177 typed snapshot/projector; 098 emit_one moved to q_fun_hash_either while 274 fingerprints it exactly (net 0); 275 stage-event boundary (+1); 276 round closure (+1)
+      requiredFunctions.length + 2 + 9 + 1 + 1 + 7 + 4 + 8 + 5 - 1 + 1 + 1, // prior probes plus 182 lineage and 185 assignment markers; 182 seal guard moved to q_fun_hash_either (191); 098 emit_one moved to q_fun_hash_either while 274 fingerprints it exactly (net 0); 275 stage-event boundary (+1); 276 round closure (+1)
     );
   });
 

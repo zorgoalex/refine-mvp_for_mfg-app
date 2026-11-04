@@ -1,14 +1,18 @@
 # MDF engine foundation
 
-Status: **optional shadow intake**, not the active board calculation.
-Applying migration `165_mdf_engine_foundation.sql` does not enable automation,
-modify existing production statuses, or change current board APIs.
+Status: **active receipt/correction foundation with bounded CNC observation and
+a distinct CNC-priority executor, still opt-in**. Applying migrations 165–180
+does not enable automation, modify existing production statuses, or turn on the
+CNC worker lane.
 
 ## Boundaries
 
-`backend/src/modules/mdf-board` contains pure per-position quantity arithmetic,
-a deterministic bath allocation planner and a transactional job runner primitive.
-No scheduler, HTTP command or replacement board reader is registered yet.
+`backend/src/modules/mdf-board` contains per-position quantity arithmetic,
+deterministic bath allocation, active transactional command/correction adapters,
+and the accepted-job runner. CNC observation HTTP endpoints are separately
+available for bounded worker claims. CNC physical authority has a distinct
+accepted-job path; it is not substituted with ordinary rule17. Neither migration
+application nor endpoint registration enables the engine or starts the worker.
 Do not enable the engine by manually changing its mode.
 
 `BACKEND_MDF_SHADOW_INTAKE=true` connects the existing MDF event dispatch to a
@@ -32,11 +36,102 @@ existing owning-command audit remains unchanged. No extra notification is sent
 for a diagnostic observation. Disable the flag to stop intake without deleting
 history. Applied migrations165–167 are additive.
 
-Still required before active cutover: producers that bypass dispatch, frozen
-whole-order declarations, demand preflight, correction adapters, common resolver,
-allocation executor/worker, baseline and full-board shadow comparison. Legacy CNC
-processing is still inside its owning transaction: this increment does not yet
-make intake survive failure of that legacy processing.
+## Bounded CNC observation lane
+
+Migration `180_mdf_cnc_observations.sql` adds immutable observation targets,
+receipts, and CNC-authority markers. Successful explicit Telegram import is the
+only registration path; older and manual-send sources are not backfilled. The
+worker flag `CNC_TELEGRAM_MDF_OBSERVATIONS_ENABLED` defaults to `false`, so the
+new endpoints do not cause polling unless the worker is deliberately enabled.
+Apply migrations 165–180 before deploying this backend version; this preserves
+the accepted-job authority lookup even while the worker lane is disabled. Keep
+the flags below off until separately approved. The API also
+requires `BACKEND_ENABLE_CNC_TELEGRAM=true`; when that flag is off its routes
+return 503. In `legacy` or `shadow`, claim returns `{claim:null}` and
+complete/fail return 503 `MDF_CNC_OBSERVATION_MODE_DISABLED`. In `read_only`,
+the observer may acquire and persist CNC observation facts, but the accepted-job
+runner remains inactive and no production-status automation runs. An active or
+read-only claim with no eligible source also returns `{claim:null}`.
+
+Packet membership is invariant: every current packet writer (manual/explicit
+import creation, CNC cut receipts, corrections/returns) carries the accepted
+membership unchanged, so the registered membership digest of an observation
+target is never re-baselined. A mismatch can therefore only mean drift or
+tampering and fails closed: `claim` quarantines the target (`membership_changed`,
+needs_reconciliation), `complete`/`fail` answer `MDF_CNC_OBSERVATION_STALE`, and
+an accepted CNC-authority job ends `needs_attention` with
+`MDF_CNC_AUTHORITY_MEMBERSHIP_BINDING_INVALID` without status writes. After an
+explicit return, an old thumbs-up cannot restore the reverted fact: the return
+fence requires a fresh not-completed observation before a new completion is
+credited. CNC never changes a completed order's header status and never lowers
+a detail status.
+
+The server issues each claim with the accepted MDF head, correction epoch,
+unchanged raw packet `source_version`, independent observation version, and the
+exact bounded Telegram message IDs/roles/hashes. The worker refetches only that
+group and submits its presence/thumbs-up observations; it cannot choose a
+packet, source version, or completion state. Failure to fetch or validate any
+group member uses the failure endpoint, never a partial pending report. No
+history scan, local cache reuse, file parsing, or generic ingest is part of this
+lane. Preserving raw `source_version` keeps existing packet label-map and
+evidence projections valid.
+
+After a correction, an old in-flight claim becomes stale. The return fence needs
+a fresh no-like observation followed by a separate later fresh like before the
+return marker can clear. A fresh accepted completion creates an immutable CNC
+physical receipt and a separately marked job. Its dedicated executor verifies
+that authority against the exact completed observation, accepted packet revision,
+head/epoch and freshness fence before applying any scalar effect. A missing or
+corrupt observation authority never falls through to the ordinary packet rule.
+
+The CNC executor selects only normal details in that packet's sealed membership
+and requires the packet's own complete physical cut receipt. A selected detail
+advances only when verified accepted packet/BASIS evidence covers its full live
+quantity; quantities never move between details, and rework-only membership does
+not advance a normal detail. At observation-receipt intake, exact unchanged normal
+physical cut pins can be released and replaced against the new packet revision
+in the same transaction, preserving quantities, bath revisions and reserved/
+consumed states. The full bounded owner/source component is locked before
+acceptance; affected bath context and debits must remain valid. There is one
+accepted-head increment, no declaration-to-physical debit conversion and no
+automatic linked-roll cancellation. Incompatible pins or unresolved context
+remain in reconciliation without changing the accepted head/allocation state.
+Write failures roll back the entire transaction. A valid accepted revision uses the common allocation
+executor and current accepted graph; unrelated active allocations are not a
+blanket blocker. Direct CNC detail marking remains controlled by
+`status_automation.cnc_mark_cut_details`; with it enabled, the executor advances
+eligible detail statuses only and does not replay the packet's ordinary rule17
+event. With it disabled, direct CNC marking is skipped while the normal pinned
+packet event retains the legacy rule path. Eligible bath events and downstream
+composition use the job's stored rule pins only. Completed business-order headers
+are excluded from ordinary CNC-job automation and are never reopened; detail
+effects do not directly change business order status. Informational production
+summary recalculation follows its existing enablement behavior.
+
+The executor is prepared in this increment but not activated. The existing
+worker service remains behind its existing gates. Generic `/cnc-telegram/ingest`
+continues to fail closed with 503 (`CNC_TELEGRAM_BACKGROUND_INGEST_DISABLED` or
+`CNC_TELEGRAM_BACKGROUND_INGEST_APPROVAL_REQUIRED`); it is not enabled by the
+observation API.
+
+Future manual-SVG sends additionally preserve claim-time file/source identity and
+explicit sent-message bindings. A separate registrar checks those facts before
+creating an observation target; sending alone is never physical cut evidence.
+See [manual-send registration and settlement](cnc-telegram-bounded-observations.md#future-manual-sends).
+
+This bounded CNC continuity path does not deliver complete allocation-pin reconciliation across
+all active producers, historical source backfill, UI workflow, or
+full engine cutover. Keep engine mode and worker/API feature flags unchanged
+unless a separately approved rollout covers those remaining gates.
+
+Still required before a broader cutover: validation of the whole live source
+chain, complete allocation-pin reconciliation across active producers,
+historical source handling if brought into scope, and the
+UI workflow. The bounded observation API and CNC-priority executor do not by
+themselves complete those separate rollout steps. Keep
+`BACKEND_MDF_JOB_WORKER=false`, `BACKEND_MDF_PUBLISHED_READS=false`, and
+`CNC_TELEGRAM_MDF_OBSERVATIONS_ENABLED=false`; engine mode remains `legacy` until
+a separately reviewed rollout explicitly changes each gate.
 
 Physical production, whole-position declarations, derived card states and
 visibility are separate. Rework is included in raw statistics, excluded from
@@ -50,7 +145,355 @@ fully satisfiable baths and never partially reserves an unsatisfiable new bath.
 It cannot persist its own output: the command executor must lock and revalidate
 the complete affected set. Manual bath readiness is not synthetic physical supply.
 
-## Storage
+## BASIS name changes
+
+The active `bazis.rename` command changes metadata, not production evidence.
+For a tracked source it requires verified unchanged membership/demand, a settled
+current source job and a matching clean published card. It copies the exact
+evidence into a new metadata revision with no pinned status rules. A pending
+production job cannot be replaced by a rename and silently lose its effects.
+The normal queued accounting pass preserves reserved/consumed bath quantities
+and may allocate already verified eligible stock; a name change never proves
+additional cut or lamination. Set update, receipt, audit, outbox and replay result
+commit together. Replays recheck owner access.
+
+Resolved non-MDF/HDF-only or empty sets without an MDF source need no MDF receipt.
+Historical MDF without accepted evidence and unresolved sources require separate
+reconciliation; renaming cannot establish a baseline. Other BASIS composition
+mutations remain outside this connected path. Legacy/shadow behavior and all
+activation flags stay unchanged.
+
+## BASIS assignment changes and performed work
+
+Assignment quantity, order demand and performed quantity are separate. Editing
+a BASIS assignment from 10 to 8 must retain the confirmed cut of 10 and its bath
+reservations/consumption. Increasing an assignment to 12 does not prove the extra
+two were cut. Removing an assigned position does not erase its physical history.
+Only an explicit production return may retract an erroneous physical fact and
+its attributable dependent lamination.
+
+`planMdfBazisComposition` is a pure transition helper, not a connected command.
+It replaces current membership, copies accepted cut facts unchanged and plans
+one-for-one allocation reference replacements. It does not change order demand,
+cancel bath work, write detail statuses or authenticate historical evidence.
+Its input must come from an authoritative, complete, locked accepted snapshot.
+Immediate predecessor references are not proof of verified historical origin.
+
+Some lineage consumption is now connected for immutable, accepted source
+revisions: execution and correction snapshots validate the sealed v2 manifest
+against the exact physical rows, and allocation quarantine/correction planning
+can preserve authenticated packet/BASIS physical facts beyond current
+membership. Only exact source/revision/evidence identities count; v1 evidence
+keeps its original membership cap, pending revisions receive no lineage credit,
+and baths remain strict (no physical overhang). Current membership must still
+be nonempty. Current-member events continue to be derived from current
+membership, not from retained proof at a removed position.
+
+Assignment edits are connected through the BASIS composition command
+(`POST /api/v1/bazis-cut-sets/{setId}/composition/preview|confirm`, active engine
+only). `GET /api/v1/bazis-cut-sets/{setId}` reports `mdfComposition`
+(availability, concurrency token, eligible row ids) only in the active or
+read-only engine, so the legacy editor is unchanged in legacy/shadow mode. In
+the active engine the legacy detail edit/delete/add endpoints answer 409
+(`MDF_COMPOSITION_REQUIRED`, `MDF_SET_REFILL_NOT_CONNECTED`) and a set with
+production history cannot be deleted (`MDF_SET_HAS_PRODUCTION_HISTORY`).
+
+An intentionally-empty assignment is supported only with its authentic sealed
+marker: the card keeps retained physical proof, can be moved and renamed
+carry-only (no rules, one `mdf_board.card_placed` event for a move), may advance
+with its bath reservations, and stays valid after an explicit return removes the
+retained proof. Unmarked emptiness is still rejected.
+
+Refill (new rows) is limited to ordinary MDF details of the set's current owner
+orders and is gated by `BACKEND_MDF_BAZIS_REFILL` (default off; requests with
+`newDetailId` answer 409 `MDF_BAZIS_REFILL_DISABLED`). Rows are built
+server-side; migration 187 records every raw row INSERT in a trigger-only
+creation log and each added row's provenance for its intent, and the worker
+accepts a membership row without a predecessor only when that provenance, the
+same-transaction creation record and the unchanged raw content all match.
+
+Refill rollout and rollback: deploy the compatible backend and migration 187
+with the flag off, then enable the flag. Before any backend downgrade below this
+version, turn the flag off and make sure no refill job is unresolved — pending,
+retry and `needs_attention` all block the downgrade:
+
+```sql
+SELECT j.job_id, j.status, i.source_id
+FROM mdf_bazis_composition_intents i
+JOIN mdf_recalculation_jobs j ON j.job_id = i.job_id
+WHERE EXISTS (SELECT 1 FROM mdf_bazis_composition_new_rows n WHERE n.intent_id = i.intent_id)
+  AND j.status NOT IN ('done', 'superseded');
+```
+
+Resolve every returned job on the compatible backend first (retry to done, or
+an explicit correction/return), then verify the source's accepted head equals
+its received head and its publication has no issues. Existing v1 physical
+evidence is never promoted, and the engine mode and runtime flags are unchanged
+by these commands.
+
+## Order edits and accounted production
+
+Order update/import, HDF recalculation, delete, restore and detail transfer enter the MDF command
+boundary with capability `order-demand` (writers `orders.update`, `orders.recalculate_hdf`,
+`orders.delete`, `orders.restore`, `orders.transfer_details`). In `legacy`/`shadow` nothing else
+happens. In `active`, the command's own orders are compared before and after its writes: when their
+MDF demand did not change, nothing else happens (no discovery, lock or card state can block it). Otherwise
+every source whose received revision has frozen demand or evidence on the touched orders, and whose own
+positions or statuses this command changed, is classified:
+
+- pending acceptance or a pending job → 409 `MDF_ORDER_SOURCE_PENDING`;
+- failed job, missing publication, an own issue other than `MDF_DEMAND_CHANGED` /
+  `MEMBER_OUTSIDE_LIVE_MDF_DEMAND`, or any published issue besides those and their quarantine
+  consequences (`LINEAGE_INVALID`, `ACCEPTANCE_PENDING`) → 409 `MDF_ORDER_SOURCE_ATTENTION`;
+- a position with membership/evidence (MDF-present) disappears or loses quantity → 409
+  `MDF_ORDER_PHYSICAL_CONFLICT` (cut/lamination/reservations) or `MDF_ORDER_ASSIGNMENT_CONFLICT`;
+  no remaining demand → `MDF_ORDER_DEMAND_EMPTY`;
+- only demand-only positions changed, or MDF-present positions grew → a cascade receipt carries the
+  predecessor lines verbatim with the new frozen demand. It is received but never accepted by the
+  command; migration 188 `mdf_order_cascade_intents` authenticates it and only the MDF worker accepts it
+  (`mdf_board.order_cascade_accepted`), replacing bath allocations one-for-one. Added quantity inherits
+  no completion; rules are never pinned;
+- a completed demand quarantine healed by this change (same demand as frozen again) → a refresh
+  receipt (identical lines and demand) republishes the card.
+
+The new board has no order cards: in `active` a manual move or clear of an `order` card answers 409
+`MDF_ORDER_CARD_NOT_SUPPORTED` (packets, BASIS sets and baths are moved as before).
+
+Detail status changes alone never touch MDF sources here: card placement follows the members' live
+production ranks (read-time placement, see the published board reader).
+
+Every 409 rolls back the whole order command and lists the affected cards filtered by the actor's
+`orders.view` permission and scope (hidden owners give no ids, names or quantities). Owners of affected sources that
+sort below the command's own orders are locked with `NOWAIT`; contention answers retryable 409
+`MDF_ORDER_LOCK_CONTENTION`. In `read_only`, edits without MDF impact pass and any receipt-requiring
+change answers `MDF_ENGINE_READ_ONLY`. Creating an order never touches MDF sources.
+
+### Confirmed corrections (reduction, detachment)
+
+With `BACKEND_MDF_ORDER_CORRECTIONS=true` (default `false`: the 409s above stay unchanged) a
+`MDF_ORDER_PHYSICAL_CONFLICT` / `MDF_ORDER_ASSIGNMENT_CONFLICT` for MDF-present positions becomes a preview:
+the 409 carries `details.mdfConfirmation.digest` and per position `before`, `after`, `cut`, `laminated`,
+`reserved` and `outcome` (`surplus` for a reduction, `detached` for a deleted or transferred position),
+redacted exactly like other MDF conflicts. PENDING/ATTENTION stay hard 409s. The client confirms by resending
+the identical request with header `X-MDF-Confirmation: <digest>` (update, delete, detail transfer); a
+different digest answers 409 `MDF_ORDER_CONFIRMATION_STALE` with a fresh preview. The digest binds the
+actor and the MDF consequences (affected source heads, their lines and active allocations, positions and
+outcomes); generated ids of new details or a new transfer target never enter it. A challenge rolls back
+the whole command, including delete/transfer idempotency reservations, so the confirmation reuses the same
+Idempotency-Key and a lost-success retry replays the stored response. Restore only adds demand and never
+needs a confirmation.
+
+A confirmed command writes, in the same transaction:
+
+- `mdf_position_detachments` rows (migration 191): a TERMINAL, immutable detachment of the position in
+  each source holding it (supplier packets/BASIS sets and consuming baths). Every line of that source at
+  that position — in any revision, including new production roots — is history only: it counts as surplus,
+  never as membership, supply, bath demand or credit (shared resolver `mdf-position-detachments.ts`, used by
+  receipt validation, the lineage seal guard, execution snapshot, allocation planner/quarantine and
+  projection). A restored or re-created detail never revives it; new work must come from another source;
+- per affected source either a confirmed cascade receipt (intent `confirmed=true`, `preview_digest`; the
+  worker then allows reductions and positions that left demand only when detached) or, when every line of
+  the source is detached, a refresh receipt: such a source is terminal like a retired bath (its card
+  leaves the board, history stays) and a fully detached CNC packet's observation target becomes
+  `needs_reconciliation`;
+- audit `mdf.order_correction.requested` (normalized orders/details, outcomes, digest) and outbox
+  `mdf_board.order_correction` (deduplicated by command key). The worker records
+  `mdf_board.order_correction_accepted`.
+
+The worker releases `reserved` allocations at a detached position (audit `mdf_board.bath_supply_released`,
+reason `position_detached`); a `consumed` debit whose supplier line and bath membership are both detached
+stays as authenticated history and is excluded from the planner. Detail transfer with history following the
+detail is a separate later stage: today a confirmed transfer detaches the old position and adds plain demand
+in the target order.
+
+Rollback boundary: code without these semantics may run the `active` engine only while
+`SELECT count(*) FROM mdf_order_cascade_intents WHERE confirmed` and `SELECT count(*) FROM mdf_position_detachments`
+are both 0. After the first confirmed correction receipt of any kind (a reduction creates no detachment, but an
+older worker would reject its reducing cascade), switch the engine to `read_only` before downgrading; committed,
+unprocessed confirmed jobs then wait and are processed after re-upgrading.
+
+## Read-time card placement
+
+A published card stores its rank-independent placement inputs (`mdf_published_sources.placement_inputs`,
+migration 189: kind, verified, intentional-empty, manual placement, full cut/rolled, bath readiness,
+balance blocking, prior column) bound to the row's `published_revision` and `schemaVersion: 1`. The board
+reader computes the column with `mdfPlacement` from these inputs and the members' **live** production ranks
+(one set-based read; no writes, no automation). Detail status changes by any writer therefore move cards
+immediately without a receipt or job. Manual moves and production returns decide on the same effective
+column, locking the member detail rows and the production status catalogue `FOR SHARE` to commit; a return
+preview binds the effective column and member ranks, so a status change before confirm makes it stale.
+
+Inputs are usable only when `mdf_placement_inputs_valid(inputs, published_revision)` holds (the same rule
+in SQL and in the TypeScript parser). Otherwise the stored column is shown with issue
+`MDF_PLACEMENT_INPUTS_MISSING` and the card is not movable. Activation gate: `SELECT count(*) FROM
+mdf_published_sources WHERE NOT mdf_placement_inputs_valid(placement_inputs, published_revision)` must be 0
+before switching to `active`; an older worker that republishes without inputs invalidates them by bumping
+the revision. The legacy CNC auto-cut backfill is `legacy-only` (503 in `active`); the CNC authority job owns
+automatic cut statuses there.
+
+## Bath lifecycle
+
+A cut job has at most one **active bath**: the captured source of its current, non-archived result of a
+non-archived job. Commands that change which result that is — recalculation, making another result current,
+saving a manual layout, archiving the job — authorize (`cut.manage` + `orders.view` with scope over every owner
+of the old and new bath) and lock those owners before the cut-job lock, then, after their writes, record one
+transition (migration 190 `mdf_bath_transitions`): the old bath B receives an empty terminal revision and the new
+result N a membership-only revision; only B's transition job accepts both, releases B's `reserved` allocations
+(history kept) and lets allocation plan N. A retired bath leaves the board (its published card is removed) and
+cannot be made current again (409 `MDF_BATH_RESULT_RETIRED`, recalculate instead).
+
+- A bath with lamination evidence or consumed allocations is never retired: 409 `MDF_BATH_HAS_PRODUCTION`
+  (a recalculation is refused before any write). Lamination that appears during the external calculation rejects
+  the persist with the same 409: nothing of the new calculation is kept, the old result stays current, and a replay
+  of the command answers `CUT_RESULT_COMMAND_FAILED` with the stored code.
+- While a transition of the job is unprocessed (including a retirement without successor), further lifecycle
+  changes and fresh calculations answer 409 `MDF_BATH_TRANSITION_PENDING` before any write.
+- Making a result current requires `If-Match` (job version) and `Idempotency-Key` when it changes the active
+  bath (428 `MDF_BATH_FENCE_REQUIRED`, 409 `CUT_JOB_STALE_VERSION`); job archive and manual layout use their
+  existing version/command fences. Archiving or unarchiving a result never changes the active bath (the current
+  result cannot be archived).
+- Audit `mdf.bath_transition.requested` (command) and `mdf_board.bath_retired` (worker); domain outbox
+  `mdf_board.bath_transition` once per command; no user notification. The transition job pins the enabled rules,
+  so baths that become ready through released supply fire their normal board events once.
+- Activation gate: no cut job may have more than one non-retired bath head. Rolling back to code without
+  migration 190 after the first transition requires `read_only`.
+
+## Production returns in the active engine
+
+In `active`, a backward move of a machine file, BASIS set or bath card uses the accepted-evidence correction
+(`POST /orders/status-board/mdf-corrections/:cardKind/:cardId/preview|confirm`, token of the published card). The
+board asks `GET /orders/status-board/mdf-engine` first: the legacy return dialog is used only in `legacy`/`shadow`;
+in `active` a card that is not ready (pending job, no token, partial access, publication off) shows the reason
+instead of falling back; `read_only` allows no confirmation.
+
+A return of source S to stage T revokes S's own proof strictly above T and the lamination that depended on it:
+- supplier below cut: its allocations are released without replacement;
+- supplier at/above cut but below laminated: the cut stays, the affected consumed allocations become `reserved`;
+- bath below laminated: suppliers' cut stays, the bath's lamination is cancelled, its consumed allocations become
+  `reserved`.
+Proof of other sources and bath positions supplied by them are never touched; a detail moves back only if no
+remaining proof covers its current stage. Positions detached in S (§5.4e) are history only: they are carried or
+dropped like other lines but get no status effect and no credit; every owner of S, including one present only as
+detached history, stays locked and must pass view/update scope. BASIS composition still refuses closures with
+detachments (`MDF_CORRECTION_DETACHED_UNSUPPORTED`).
+
+The board never sets the order status. Orders in «Готов к выдаче»/«Выдан» may be returned; enabled
+`order.production_status_changed` rules (e.g. `anyProductionStatusIn` → «В производстве») decide. The preview runs the
+detail writes and those rules in a rolled-back savepoint and shows `orders[{before, after}]`; confirm dispatches the
+rules for real and fails `MDF_CORRECTION_STALE` (whole transaction rolled back) if any order ends differently from the
+preview. Closed orders stay refused (`MDF_ORDER_CLOSED`). The preview also returns, bound into its digest,
+`sourceAfter`/`affectedBaths[].afterColumn` (the §5.4d placement function on the post-return inputs; `afterIssues`
+such as `READINESS_AFTER_RECALCULATION` when a bath's readiness is known only after the job) and per detail
+`cardQuantity` and `statusKept`. No reason is required.
+
+## Board on the coherent publication
+
+With the engine `active` or `read_only`, the MDF view of the board renders from one published snapshot
+(`GET /orders/status-board/mdf`): the set of cards, their columns, issues («Требует проверки»), queue state, command
+tokens, members and counters come only from that revision. In `legacy`/`shadow` the board is unchanged. If the engine is
+`active`/`read_only` but the reader is disabled or fails, the view shows «Производственный учёт недоступен» — never the
+legacy rendering.
+
+### Hybrid screen (default)
+
+By default (`features.mdfHybridBoard`; rollback for everyone: `RUNTIME_CONFIG_MDF_HYBRID_BOARD=false` in the frontend
+runtime config, per page: `?mdfView=engine`) the
+board keeps the legacy screen and takes from the snapshot everything the engine owns: which MDF cards exist (MDF
+machine files, BASIS sets, baths), their column, issues, queue state and command tokens, bath pieces and order readiness.
+`GET /cnc-telegram/today` supplies only the presentation of those cards plus machine files of other materials:
+- in `active`/`read_only` it runs in one `REPEATABLE READ READ ONLY` transaction and adds `mdfPresentationDigest`
+  (`mdf_source_presentation_digest`) to each card; the snapshot adds `presentation[].acceptedDigest`. The legacy
+  presentation is shown only when both digests are equal and the card is not stale — otherwise a minimal engine card
+  without moves until the next read;
+- bath pieces are the allocated machine-file/BASIS coverage frozen with the bath's publication
+  (`mdf_published_source_members.covered_quantity`, migration 273; `progress[].allocated`), never live allocations;
+- order readiness keeps the legacy formula with the engine's MDF facts (`positions`: cut = `creditedCut +
+  creditedRolled`, rolled = `creditedRolled`). The order board marks each detail `mdfEligible` with the engine's demand
+  rule (`mdfDemandMaterialSql`); when an order's MDF details differ from its positions the readiness is «Учёт обновляется»
+  and the order is not placed as ready automatically;
+- engine cards move by their command token; backward moves go through the correction dialog. Hidden-card rules by order
+  status still move cards visually; such a card cannot be dragged.
+
+Machine files of other materials (HDF, chipboard, …) stay outside the engine. Under the queued boundary a `packet`
+manual move routes, after resolving an earlier replay of the same `Idempotency-Key`: a non-MDF packet without engine
+ownership (no head, or a diagnostic head without demand) uses its own command — forward only, `expectedColumn` (the column
+the operator saw) in the body, owner authorization of every live order (a file without one needs the unscoped
+production-task grant), locks in the engine order, audit with the owners and an idempotent `mdf_board.card_placed` outbox
+event that also stores the replay. Backward moves and clears answer `409 MDF_NON_MDF_RETURN_UNSUPPORTED`; a non-MDF file
+whose head carries demand needs reconciliation. If such a file later becomes MDF it is an unregistered source until the
+reconciliation command.
+
+The snapshot also carries, from the same read-only transaction:
+- `presentation` — card presentation. Composition-sensitive content (items with sizes, previews, program/file names) is
+  shown only while the accepted revision's presentation binding (`mdf_revision_presentation`, migration 192) equals
+  `mdf_source_presentation_digest(kind, id)` of the current raw source; otherwise `stale` (minimal card). Only receipts
+  that establish membership from raw data compute a binding (manual SVG/CNC intake, BASIS source/composition, bath from a
+  cut result, bath successor); every other receipt inherits the predecessor's binding, so a stale one is never refreshed.
+  Comments, rework, thumbs-up, completion, doweling links and the BASIS name are live annotations outside the binding.
+  Items are limited to visible orders; file names, previews and live annotations need every owner visible;
+- `progress` — per-card member/cut/laminated from the card's own accepted lines (detached positions excluded);
+  whole-position totals stay in `positions`;
+- `orders` — names of visible orders; `unregistered` — authorized sources of the window not yet in the engine
+  («Ожидает учёта», read-only).
+`searchOrderIds` selects the (old, completed) cards of requested visible orders; `orderIds` keeps adding only position
+totals of the board's order cards. Reading never writes and runs no automation.
+
+### Bath duplicates («Разобрать дубль»)
+
+After a re-cut one detail can sit in ACTIVE baths of several cut jobs (one active bath per job: its latest non-archived
+vacuum result, current first, not hidden). With `BACKEND_MDF_BATH_DUPLICATES_READ=true` the two-month
+`GET /cnc-telegram/today` read adds to every shown bath `duplicates[]` — pairs with other active baths sharing
+`(order, detail)` by effective MDF placements: shared details with quantities here/there, `coveredBy`, an archive hint
+(`archivable`, `blockedReason`: `scope`, `engine`, `not_covered`, `production`, `composition`, `linked_cards`) and the
+server pair `digest` (sides by `cut_result_id`, each with result/revision numbers, `cut_job.version` and the active job
+composition, plus the shared quantities; equal from either side) — and `reworkMarks[]`. Under the engine
+(`active`/`read_only`) the hint is never given (`engine`); other orders out of the user's view scope redact the other
+bath (`otherJobLabel = null`, shared details of visible orders only). `reworkDetailCount` is the number of distinct
+marked details of the bath. The hybrid board copies the lists onto the engine bath card of the same `cut-result:<id>`;
+engine baths without a legacy card (search, focus, old cards) are read by
+`GET /orders/status-board/mdf-bath-duplicates?bathCardIds=…` (≤ 100 ids, same flag, `orders.view`, only baths whose
+orders are all visible).
+
+`POST /orders/status-board/mdf-bath-duplicates/resolve` (`BACKEND_MDF_BATH_DUPLICATES_WRITE`, off ⇒ 503; literal
+`cut.manage` + `orders.view` and the view scope of every order of both baths) records `keep_both` or `rework_mark`
+(a mark only, no rework round) in `mdf_bath_duplicate_resolutions` (migration 287) with the audit event
+`mdf_board.bath_duplicate_resolved` and an outbox event in one transaction. It never changes cut data and takes only
+the per-bath advisory lock `hashtext('mdf-bath:' || cut_result_id)` (both baths ascending). A decision applies while the
+pair digest is the same: a re-cut, archive or item change shows the duplicate again. Archiving stays in «Раскрой»: the
+dialog only links to the job. Frontend: `RUNTIME_CONFIG_MDF_BATH_DUPLICATES` (off by default).
+
+Board history (migration 141 triggers, redefined by 192) also resolves engine events: entity `<kind>:<id>` of type
+`mdf_source`/`mdf_board_card`, bath ids of `mdf_bath`, and admits `mdf.order_correction.requested`.
+
+## Storage and bounded lineage consumers
+
+### Physical origin contract
+
+The internal lineage receipt path separates fresh production from carrying an
+existing physical fact into a new assignment revision. A carry preserves the
+same detail, stage, rework class, quantity and canonical origin. Partial and full
+removal require an explicit correction manifest; a missing line is not a return.
+New production is bounded per position/rework class by the current assignment
+minus retained work. Retaining 10 against assignment 8 must not prevent fresh
+production for a different position, or create a second copy of the same fact.
+
+The contract and transitions are immutable and sealed with the receipt. Parent
+links refer only to the immediate accepted predecessor. Once a source receives
+a lineage revision, legacy writers cannot overwrite it; pending acceptance must
+settle before the next revision. Old physical history without verified origins
+is not automatically promoted. Legacy receipt digest/replay remains compatible.
+
+The bounded snapshot, allocation-quarantine, active correction, ordinary manual
+production, BASIS rename, same-membership compatible-advance, and bounded CNC
+observation paths consume this contract for accepted v2 revisions. A fresh CNC
+receipt carries exact accepted v2 physical identities and roots only the
+remaining quantity under the existing membership cap; zero-delta receipts still
+record CNC authority without duplicating proof. V1 receipts remain unchanged.
+CNC physical overhang, changed-membership assignment edits, historical
+backfill, and other unreviewed physical producers remain fenced; no activation
+follows from this integration.
+
+### Existing receipt and allocation boundaries
 
 - Revisions and lines are append-only; a seal permanently closes membership.
   Source heads and jobs can refer only to sealed revisions.

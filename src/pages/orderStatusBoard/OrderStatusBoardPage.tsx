@@ -12,6 +12,34 @@ import {
 } from './stableBoardData';
 import { useSessionGenerationReset } from './useSessionGenerationReset';
 import { mdfDeepLinkLookup } from './mdfDeepLink';
+import { toMdfReturnBoardWindow } from '../../api/mdfProductionReturnApi';
+import { mdfCorrectionApi, type MdfEngineModeDto } from '../../api/mdfCorrectionApi';
+import { mdfPublishedApi } from '../../api/mdfPublishedApi';
+import type { MdfPublishedSnapshot, MdfSessionSnapshot, MdfSourceColumn, MdfSourceKind } from '../../api/types/mdfPublishedApi.types';
+import { isMdfEngineModeEndpointMissing, selectMdfReturnDialog } from './mdfReturnSelection';
+import {
+  MdfCorrectionReturnDialog,
+  type MdfCorrectionReturnDialogSelection,
+  type MdfCorrectionReturnIntent,
+} from './MdfCorrectionReturnDialog';
+import { MdfBoardUnavailable } from './MdfBoardUnavailable';
+import { MdfBathDuplicateBadges, MdfBathDuplicatesContext, MdfBathDuplicatesDialog } from './MdfBathDuplicatesDialog';
+import { applyBathDuplicates, createEngineBathDuplicatesRefresher } from './mdfBathDuplicates';
+import type { MdfBathDuplicatesOfBath } from '../../api/types/orderStatusBoardApi.types';
+
+import { MdfPublishedBoardView } from './MdfPublishedBoardView';
+import { prepareMdfPublishedCommand } from './mdfPublishedCommand';
+import type { MdfPublishedBoardCard } from './mdfPublishedBoard';
+import { resolveMdfBoardRenderMode } from './mdfBoardMode';
+import {
+  buildMdfHybridBoard,
+  buildMdfHybridOrderReadiness,
+  mdfHybridManualMoves,
+  mdfHybridMissingPositionOrderIds,
+  type MdfHybridBoard,
+  type MdfHybridCardMeta,
+} from './mdfHybridBoard';
+import { useMdfPublishedBoard } from './useMdfPublishedBoard';
 import React, {
   lazy,
   memo,
@@ -596,6 +624,8 @@ function useWorkspaceTabsHeight(): number {
   return height;
 }
 
+const NO_ENGINE_BATH_DUPLICATES: ReadonlyMap<string, MdfBathDuplicatesOfBath> = new Map();
+
 export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   active = true,
   defaultCncOrderSearchPeriod = DEFAULT_CNC_ORDER_SEARCH_PERIOD,
@@ -607,6 +637,12 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const finePointer = !touchBoardDragEnabled;
   const { canViewFinancials } = useOrderFinancialVisibility();
   const canViewCncCutMaps = can('cut.view');
+  // §5.6 finding 9: literal permission check for moving MDF published-board cards, separate from
+  // engine/card readiness.
+  const canMoveMdfPublishedCards = can('production.tasks.update');
+  // «Разобрать дубль»: same authority as the cut (literal cut.manage + orders.view); the backend adds the order scope.
+  const canResolveBathDuplicates = can('cut.manage') && can('orders.view');
+  const [bathDuplicatesBathId, setBathDuplicatesBathId] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const workspaceTabsHeight = useWorkspaceTabsHeight();
@@ -650,6 +686,29 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     return parsed;
   }, [defaultCncOrderSearchPeriod, defaultSort, fixedView, searchParams]);
   const isCncToday = viewState.view === 'cnc_today';
+  // §5.6: which the MDF board (`cnc_today`) renders from. `null`/`legacy` fall through to the
+  // unchanged legacy rendering below; `published` and `unavailable` take over entirely.
+  const mdfFocusKind: MdfSourceKind | null =
+    viewState.cncCardKind === 'packet' || viewState.cncCardKind === 'bazisCutSet' || viewState.cncCardKind === 'bath'
+      ? viewState.cncCardKind
+      : null;
+  const mdfFocusId = mdfFocusKind ? viewState.cncCardId ?? null : null;
+  // Hybrid board: orders with MDF demand that own no engine card — their positions are requested by id.
+  const [mdfHybridExtraOrderIds, setMdfHybridExtraOrderIds] = useState<number[]>([]);
+  const mdfPublishedBoard = useMdfPublishedBoard({
+    enabled: active && isCncToday,
+    workday: viewState.cncWorkday ?? todayCncWorkday,
+    period: viewState.cncOrderSearchPeriod,
+    focusKind: mdfFocusKind,
+    focusId: mdfFocusId,
+    orderIds: mdfHybridExtraOrderIds,
+  });
+  // §5.6 finding 5: what the board actually renders — legacy is reached ONLY on an explicit
+  // `legacy` mode result; `mode === null` (still resolving) always renders a loading state.
+  const mdfBoardRenderMode = useMemo(
+    () => resolveMdfBoardRenderMode({ mode: mdfPublishedBoard.mode, hasSession: mdfPublishedBoard.session !== null }),
+    [mdfPublishedBoard.mode, mdfPublishedBoard.session],
+  );
   const {
     orderStatuses: cncOrderStatuses,
     isLoading: cncOrderStatusesLoading,
@@ -658,6 +717,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     viewState.cncCardKind && viewState.cncCardId && viewState.cncWorkday,
   );
   const [cncPlacementMode] = useState<CncBoardPlacementMode>('current');
+  // Engine active/read_only: the legacy screen on the engine's data (rollback: runtime flag or `?mdfView=engine`).
+  const mdfHybridActive = mdfBoardRenderMode === 'published'
+    && featureFlags.mdfHybridBoard
+    && searchParams.get('mdfView') !== 'engine'
+    && cncPlacementMode !== 'original';
   const [cncHistoryOpen, setCncHistoryOpen] = useState(false);
   const [cncHistoryCollapsed, setCncHistoryCollapsed] = useState(false);
   const [cncHistoryOrderId, setCncHistoryOrderId] = useState<number | null>(null);
@@ -796,6 +860,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncOrderBoardRequestKeyRef = useRef<string | null>(null);
   const cncManualMoveRequestSeqRef = useRef<Record<string, number>>({});
   const [mdfReturnIntent, setMdfReturnIntent] = useState<MdfReturnIntent | null>(null);
+  const [mdfCorrectionReturn, setMdfCorrectionReturn] = useState<{
+    intent: MdfCorrectionReturnIntent;
+    selection: MdfCorrectionReturnDialogSelection;
+  } | null>(null);
+  const mdfReturnResolveSeqRef = useRef(0);
   const [cncDetailedEnabled, setCncDetailedEnabled] = useState(false);
   const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =
     useState(false);
@@ -1192,7 +1261,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   // background read is still running); a shown board reads its dataset again under the new session.
   const datasetKeyRef = useRef(datasetKey);
   datasetKeyRef.current = datasetKey;
-  useSessionGenerationReset({ active, revisionRef: datasetRevisionRef, onReset: (shown) => resetMdfBoardForNewSession({
+  useSessionGenerationReset({ active, revisionRef: datasetRevisionRef, onReset: (shown) => {
+    // Open return dialogs and the history panel show orders, details and baths of the old scope: they close, and a
+    // return selection still resolving is superseded (its late answer would reopen it).
+    mdfReturnResolveSeqRef.current += 1;
+    setMdfCorrectionReturn(null);
+    setMdfReturnIntent(null);
+    // the history panel shows the old scope's order history and search results too
+    setCncHistoryOpen(false);
+    setCncHistoryOrderId(null);
+    setCncHistoryOrderNumber(null);
+    resetMdfBoardForNewSession({
     // a hidden board mounted with a prefetched snapshot must load under the new session when it is shown
     dropInitialSnapshot: () => {
       preserveInitialMdfSnapshotRef.current = false;
@@ -1207,7 +1286,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     clearOrderBoard: () => { cncOrderBoardRequestKeyRef.current = null; setCncOrderBoard(null); },
     setShownKey: (key) => { shownDatasetKeyRef.current = key; },
     reload: () => { void fetchInitial(); },
-  }, { shown, datasetKey: datasetKeyRef.current, sessionGeneration: authSession.getSessionGeneration() }) });
+  }, { shown, datasetKey: datasetKeyRef.current, sessionGeneration: authSession.getSessionGeneration() });
+  } });
 
   useEffect(() => {
     if (!active) return;
@@ -1629,19 +1709,97 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncOrderFilters = viewState.cncOrderFilters;
   const cncOriginalView = cncPlacementMode === 'original';
   const cncOrderFilterKey = cncOrderFilters.join('\u0000');
+  // Hybrid board: a searched order also brings its old/completed engine cards (snapshot `searchOrderIds`), like the
+  // engine's own view; clearing the selection clears them.
+  const requestMdfSearchOrderNames = mdfPublishedBoard.requestSearchOrderNames;
+  useEffect(() => {
+    if (!mdfHybridActive) return;
+    requestMdfSearchOrderNames(cncOrderFilters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mdfHybridActive, cncOrderFilterKey, requestMdfSearchOrderNames]);
   const cncDisplayPeriod = viewState.cncOrderSearchPeriod ?? defaultCncOrderSearchPeriod;
   const cncPlannedTodayDate = dayjs().format('YYYY-MM-DD');
+  const mdfHybridSnapshot = mdfHybridActive ? mdfPublishedBoard.session?.snapshot ?? null : null;
+  const mdfHybridBoard = useMemo<MdfHybridBoard | null>(
+    () => mdfHybridSnapshot && cncToday
+      ? buildMdfHybridBoard({ legacyColumns: cncToday.columns, snapshot: mdfHybridSnapshot,
+          searchOrderIds: mdfPublishedBoard.searchOrderIds })
+      : null,
+    [cncToday, mdfHybridSnapshot, mdfPublishedBoard.searchOrderIds],
+  );
+  const mdfHybridBoardRef = useRef<MdfHybridBoard | null>(null);
+  mdfHybridBoardRef.current = mdfHybridBoard;
+  // «Разобрать дубль»: engine baths without a legacy card (search, focus, old cards) get their pair facts by id, on
+  // every board cycle — the poll, a refresh (new legacy read or snapshot), a decision — since another user's decision
+  // changes neither the ids nor the engine publication. One refresher for the page: the context is the engine-only id
+  // set (empty when none / feature off / board hidden); signals only ask for a read — a read in flight is awaited and
+  // followed by one coalesced re-read, an answer is dropped only when the id set changed.
+  const [engineBathDuplicateList, setEngineBathDuplicateList] = useState<MdfBathDuplicatesOfBath[]>([]);
+  const [bathDuplicatesRevision, setBathDuplicatesRevision] = useState(0);
+  const engineOnlyBathKey = featureFlags.mdfBathDuplicates && mdfHybridBoard
+    ? [...mdfHybridBoard.engineOnlyBathIds].sort().join(',') : '';
+  const engineBathDuplicatesCycle = `${mdfHybridSnapshot?.revision ?? ''}|${mdfHybridSnapshot?.generatedAt ?? ''}`
+    + `|${cncToday?.generatedAt ?? ''}|${bathDuplicatesRevision}`;
+  const engineBathDuplicatesRefresherRef = useRef<ReturnType<typeof createEngineBathDuplicatesRefresher> | null>(null);
+  if (!engineBathDuplicatesRefresherRef.current) {
+    engineBathDuplicatesRefresherRef.current = createEngineBathDuplicatesRefresher(
+      (ids) => orderStatusBoardApi.listMdfBathDuplicates(ids, { cache: 'no-store' }),
+      (facts) => setEngineBathDuplicateList((current) => reuseIfSameData(current, facts)),
+    );
+  }
+  const engineBathDuplicatesContext = active ? engineOnlyBathKey : '';
+  useEffect(() => {
+    void engineBathDuplicatesRefresherRef.current!.setContext(engineBathDuplicatesContext);
+  }, [engineBathDuplicatesContext]);
+  useEffect(() => () => { void engineBathDuplicatesRefresherRef.current!.setContext(''); }, []);
+  useEffect(() => {
+    void engineBathDuplicatesRefresherRef.current!.request();
+  }, [engineBathDuplicatesCycle]);
+  useEffect(() => {
+    if (!engineBathDuplicatesContext) return undefined;
+    const timer = window.setInterval(() => {
+      void engineBathDuplicatesRefresherRef.current!.request();
+    }, CNC_ORDER_STATUS_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [engineBathDuplicatesContext]);
+  const engineBathDuplicates = useMemo<ReadonlyMap<string, MdfBathDuplicatesOfBath>>(
+    () => engineBathDuplicateList.length
+      ? new Map(engineBathDuplicateList.map((bath) => [bath.bathCardId, bath])) : NO_ENGINE_BATH_DUPLICATES,
+    [engineBathDuplicateList],
+  );
+  // Placement projection: in the hybrid board only non-MDF machine files keep client-side manual moves.
+  const cncBoardManualMoves = useMemo(
+    () => mdfHybridBoard ? mdfHybridManualMoves(cncManualMoves, mdfHybridBoard.meta) : cncManualMoves,
+    [cncManualMoves, mdfHybridBoard],
+  );
   // A refresh keeps the objects of unchanged cards (and the inputs every card shares), so only changed cards
   // re-render instead of the whole board.
   const stableCncPeriodColumnsRef = useRef<CncTelegramTodayColumn[] | null>(null);
   const cncPeriodColumns = useMemo(() => {
     const columns = cncOriginalView
       ? buildCncOriginalSourceColumns(cncOriginalBoard)
-      : cncToday?.columns ?? [];
+      : (mdfHybridBoard ? applyBathDuplicates(mdfHybridBoard.columns, engineBathDuplicates) : null)
+        ?? cncToday?.columns ?? [];
     const stable = reuseUnchangedCncColumns(stableCncPeriodColumnsRef.current, columns);
     stableCncPeriodColumnsRef.current = stable;
     return stable;
-  }, [cncOriginalBoard, cncOriginalView, cncToday?.columns]);
+  }, [cncOriginalBoard, cncOriginalView, cncToday?.columns, engineBathDuplicates, mdfHybridBoard]);
+  // «Разобрать дубль» (RUNTIME_CONFIG_MDF_BATH_DUPLICATES): the dialog follows the bath by id, so a refresh shows
+  // the fresh pair facts (or closes when the bath left the board).
+  const cncBoardBaths = useMemo(() => cncPeriodColumns.flatMap((column) => column.baths), [cncPeriodColumns]);
+  const bathDuplicatesBath = bathDuplicatesBathId
+    ? cncBoardBaths.find((bath) => bath.bathCardId === bathDuplicatesBathId) ?? null
+    : null;
+  const bathDuplicatesContext = useMemo(() => ({
+    enabled: featureFlags.mdfBathDuplicates && !cncOriginalView,
+    open: (bath: CncTelegramBathCard) => setBathDuplicatesBathId(bath.bathCardId),
+  }), [cncOriginalView]);
+  const closeBathDuplicates = useCallback(() => setBathDuplicatesBathId(null), []);
+  const refreshAfterBathDuplicate = useCallback(() => {
+    setBathDuplicatesRevision((revision) => revision + 1);
+    if (mdfHybridActive) mdfPublishedBoard.refresh();
+    void fetchInitial({ mutationRefetch: true, preserveLoading: true });
+  }, [fetchInitial, mdfHybridActive, mdfPublishedBoard]);
   const cncOrderFilterOptions = useMemo(
     () =>
       buildCncOrderFilterOptions(cncPeriodColumns).map((orderName) => ({
@@ -1671,6 +1829,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     () => buildCncOrderStatusCards(cncOrderBoardColumns, cncOrderIds),
     [cncOrderBoardColumns, cncOrderIds],
   );
+  useEffect(() => {
+    const next = mdfHybridSnapshot ? mdfHybridMissingPositionOrderIds(cncOrderStatusCards, mdfHybridSnapshot) : [];
+    setMdfHybridExtraOrderIds((current) => current.join(',') === next.join(',') ? current : next);
+  }, [cncOrderStatusCards, mdfHybridSnapshot]);
   const cncHistoricalReadinessSources = useMemo(
     () => cncOriginalView || cncToday?.historicalReadinessSources === undefined ? undefined
       : applyMdfHiddenRulesToReadinessSources(cncToday.historicalReadinessSources, cncOrderStatusCards, mdfBoardHiddenStatusesSetting),
@@ -1700,7 +1862,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             'packet',
             packet.packetId,
             sourceColumn,
-            cncManualMoves,
+            cncBoardManualMoves,
           ) as CncTelegramTodayColumn['key'],
         ),
     [
@@ -1708,7 +1870,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       cncHiddenOrderStatusIds,
       cncHiddenProductionStatusIds,
       cncPeriodColumns,
-      cncManualMoves,
+      cncBoardManualMoves,
       mdfBoardHiddenStatusesSetting,
       cncOriginalView,
     ],
@@ -1773,11 +1935,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncTerminalSearchVisibility = useMemo(
     () => cncOriginalView
       ? { columns: cncPlannedDateColumns, revealedColumnKeys: [] }
-      : buildCncTerminalSearchVisibility(cncPlannedDateColumns, cncManualMoves, {
+      : buildCncTerminalSearchVisibility(cncPlannedDateColumns, cncBoardManualMoves, {
           searchActive: cncSearchActive,
           terminalColumnsVisible: cncTerminalColumnsVisible,
         }),
-    [cncPlannedDateColumns, cncManualMoves, cncOriginalView, cncSearchActive, cncTerminalColumnsVisible],
+    [cncPlannedDateColumns, cncBoardManualMoves, cncOriginalView, cncSearchActive, cncTerminalColumnsVisible],
   );
   const cncShownDataColumns = cncTerminalSearchVisibility.columns;
   const mdfDeepLinkState = viewState.cncCardKind && viewState.cncCardId ? mdfDeepLinkLookup({
@@ -2228,6 +2390,171 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     (...args: Parameters<typeof moveCncCard>) => moveCncCardRef.current?.(...args),
     [],
   ) as typeof moveCncCard;
+  // §5.5b: legacy dialog only in legacy/shadow; active engine picks the new
+  // mdf-corrections dialog (or a blocked/read_only/unavailable explanation),
+  // never the legacy one. Engine mode + (when active) the published session
+  // are re-resolved on every backward move; a superseded resolution is dropped.
+  // Engine mode (+ the published card when needed) → dialog selection. Also used by the new dialog to re-resolve a
+  // fresh card token after a stale confirm.
+  const computeMdfReturnSelection = useCallback(async (kind: 'packet' | 'bazisCutSet' | 'bath', cardId: string) => {
+    let engineMode: MdfEngineModeDto | null = null;
+    let engineModeEndpointMissing = false;
+    try {
+      engineMode = await mdfCorrectionApi.getEngineMode();
+    } catch (error) {
+      engineModeEndpointMissing = isMdfEngineModeEndpointMissing(error);
+    }
+    let publishedSession: MdfSessionSnapshot | null = null;
+    let publishedSessionFailed = false;
+    if (engineMode?.mode === 'active' || engineModeEndpointMissing) {
+      if (engineMode && !engineMode.publishedReads) {
+        publishedSessionFailed = true;
+      } else {
+        try {
+          publishedSession = await mdfPublishedApi.get({ focus: { kind, id: cardId } });
+        } catch {
+          publishedSessionFailed = true;
+        }
+      }
+    }
+    return selectMdfReturnDialog({ engineMode, engineModeEndpointMissing, publishedSession, publishedSessionFailed,
+      card: { kind, id: cardId } });
+  }, []);
+
+  const resolveMdfReturnDialog = useCallback((
+    kind: 'packet' | 'bazisCutSet' | 'bath',
+    cardId: string,
+    targetColumn: MdfReturnIntent['targetColumn'],
+    targetTitle: string,
+  ) => {
+    const seq = ++mdfReturnResolveSeqRef.current;
+    const state = viewStateRef.current;
+    const boardWindow = toMdfReturnBoardWindow(buildCncOrderSearchDateRange(
+      state.cncWorkday ?? dayjs().format('YYYY-MM-DD'), state.cncOrderSearchPeriod,
+    ));
+    void (async () => {
+      const selection = await computeMdfReturnSelection(kind, cardId);
+      if (seq !== mdfReturnResolveSeqRef.current) return;
+      if (selection.kind === 'legacy') {
+        setMdfReturnIntent({ source: { kind, id: cardId }, targetColumn, targetTitle, boardWindow });
+        return;
+      }
+      setMdfCorrectionReturn({ intent: { source: { kind, id: cardId }, targetColumn, targetTitle }, selection });
+    })();
+  }, [computeMdfReturnSelection]);
+
+  // §5.6b/8: manual move on a published card. A backward move reuses the §5.5 return dialog
+  // selection (already engine-aware); a forward move uses the published-command token directly and
+  // refreshes the board's own snapshot afterwards — the legacy `moveCncCard` path is never used here.
+  const handleMdfPublishedMove = useCallback((
+    card: MdfPublishedBoardCard,
+    targetColumn: MdfSourceColumn,
+    targetTitle: string,
+  ) => {
+    if (isMdfBackwardMove(card.kind, card.column ?? undefined, targetColumn)) {
+      resolveMdfReturnDialog(card.kind, card.id, targetColumn as MdfReturnIntent['targetColumn'], targetTitle);
+      return;
+    }
+    const session = mdfPublishedBoard.session;
+    if (!session) {
+      message.error('Доска ещё не загружена. Обновите страницу.');
+      return;
+    }
+    try {
+      const prepared = prepareMdfPublishedCommand(session, { kind: card.kind, id: card.id }, targetColumn);
+      prepared.execute()
+        .then(() => mdfPublishedBoard.refresh())
+        .catch((error: unknown) => {
+          message.error(errorMessage(error, 'Не удалось переместить карточку.'));
+          mdfPublishedBoard.refresh();
+        });
+    } catch (error) {
+      message.error(errorMessage(error, 'Карточка ещё не готова к перемещению — обновите доску.'));
+    }
+  }, [mdfPublishedBoard, resolveMdfReturnDialog]);
+
+  // Hybrid board: engine cards move by the engine's command (returns through the correction dialog); a non-MDF
+  // machine file moves forward by its own command, guarded by the column the operator saw.
+  const moveMdfHybridCard = useCallback((
+    hybridBoard: MdfHybridBoard,
+    kind: Exclude<CncManualCardKind, 'order'>,
+    cardId: string,
+    targetColumn: CncTelegramTodayDisplayColumnKey,
+    targetTitle: string,
+    trigger: HTMLElement | null,
+    sourceColumn?: CncTelegramTodayDisplayColumnKey,
+  ) => {
+    const meta = hybridBoard.meta.get(cncManualMoveStorageKey(kind, cardId));
+    const shown = sourceColumn ?? meta?.column;
+    if (!meta || !meta.movable || (meta.source !== 'nonMdf' && shown !== meta.column)) {
+      message.warning(meta?.blockedReason ?? 'Эту карточку сейчас нельзя переместить — обновите доску.');
+      return;
+    }
+    const refreshBoth = () => {
+      mdfPublishedBoard.refresh();
+      void fetchInitial({ mutationRefetch: true, preserveLoading: true });
+    };
+    if (meta.source === 'engine') {
+      if (isMdfBackwardMove(kind, meta.column, targetColumn)) {
+        resolveMdfReturnDialog(kind, cardId, targetColumn as MdfReturnIntent['targetColumn'], targetTitle);
+        return;
+      }
+      const session = mdfPublishedBoard.session;
+      if (!session) {
+        message.error('Доска ещё не загружена. Обновите страницу.');
+        return;
+      }
+      try {
+        prepareMdfPublishedCommand(session, { kind, id: cardId }, targetColumn as MdfSourceColumn).execute()
+          .then(() => {
+            message.info(`Перемещение в «${targetTitle}» принято. Доска обновится после пересчёта.`);
+            refreshBoth();
+          })
+          .catch((error: unknown) => {
+            message.error(errorMessage(error, 'Не удалось переместить карточку.'));
+            refreshBoth();
+          });
+      } catch (error) {
+        message.error(errorMessage(error, 'Карточка ещё не готова к перемещению — обновите доску.'));
+      }
+      return;
+    }
+    const expected = shown === 'parsed' || shown === 'completed' ? shown : null;
+    if (kind === 'bath' || !expected || (targetColumn !== 'completed' && targetColumn !== 'completed_laminated')
+      || isMdfBackwardMove(kind, expected, targetColumn)) {
+      message.warning('Возврат карточки не из МДФ при новом учёте недоступен — обратитесь к администратору.');
+      return;
+    }
+    const key = cncManualMoveStorageKey(kind, cardId);
+    const previousTarget = cncManualMovesRef.current[key];
+    const optimisticMoves = { ...cncManualMovesRef.current, [key]: targetColumn };
+    cncManualMovesRef.current = optimisticMoves;
+    setCncManualMoves(optimisticMoves);
+    window.requestAnimationFrame(() => trigger?.focus());
+    void orderStatusBoardApi.upsertNonMdfMove(kind, cardId, targetColumn, expected,
+      `mdf-non-mdf:${crypto.randomUUID()}`)
+      .then((response) => {
+        setCncManualMoves((current) => {
+          const next = { ...current, [key]: response.move.targetColumn };
+          cncManualMovesRef.current = next;
+          return next;
+        });
+        message.success(`Карточка перемещена в «${targetTitle}».`);
+        refreshBoth();
+      })
+      .catch((error: unknown) => {
+        setCncManualMoves((current) => {
+          const next = { ...current };
+          if (previousTarget) next[key] = previousTarget;
+          else delete next[key];
+          cncManualMovesRef.current = next;
+          return next;
+        });
+        message.error(errorMessage(error, 'Не удалось переместить файл станка.'));
+        refreshBoth();
+      });
+  }, [fetchInitial, mdfPublishedBoard, resolveMdfReturnDialog]);
+
   const moveCncCard = useCallback((
     kind: CncManualCardKind,
     cardId: string,
@@ -2236,10 +2563,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     trigger: HTMLElement | null,
     sourceColumn?: CncTelegramTodayDisplayColumnKey,
   ) => {
+    const hybridBoard = mdfHybridBoardRef.current;
+    if (kind !== 'order' && hybridBoard) {
+      moveMdfHybridCard(hybridBoard, kind, cardId, targetColumn, targetTitle, trigger, sourceColumn);
+      return;
+    }
     if (kind !== 'order' && isMdfBackwardMove(kind, sourceColumn, targetColumn)) {
-      const state=viewStateRef.current;
-      const boardWindow=buildCncOrderSearchDateRange(state.cncWorkday ?? dayjs().format('YYYY-MM-DD'),state.cncOrderSearchPeriod);
-      setMdfReturnIntent({ source: { kind, id: cardId }, targetColumn:targetColumn as MdfReturnIntent['targetColumn'], targetTitle, boardWindow });
+      resolveMdfReturnDialog(kind, cardId, targetColumn as MdfReturnIntent['targetColumn'], targetTitle);
       return;
     }
     if (kind === 'order') {
@@ -2399,7 +2729,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     cncOrderStatuses,
     fetchCncManualMoves,
     fetchInitial,
+    moveMdfHybridCard,
     replacePending,
+    resolveMdfReturnDialog,
   ]);
   moveCncCardRef.current = moveCncCard;
 
@@ -3093,7 +3425,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             <Select
               size="small"
               allowClear
-              mode="multiple"
+              // Hybrid board: a typed number outside the loaded period is searched in the engine's history.
+              mode={mdfHybridActive ? 'tags' : 'multiple'}
               showSearch
               className="status-board-toolbar__cnc-order-search"
               maxTagCount="responsive"
@@ -3276,7 +3609,40 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               <Spin size="large" tip="Загрузка доски…" />
             </div>
           ) : isCncToday ? (
-            !cncHasRenderableColumns ? (
+            mdfBoardRenderMode === 'loading' ? (
+              <div className="status-board-loading">
+                <Spin size="large" tip="Загрузка доски…" />
+              </div>
+            ) : mdfBoardRenderMode === 'unavailable' ? (
+              <MdfBoardUnavailable onRetry={mdfPublishedBoard.refresh} loading={mdfPublishedBoard.loading} />
+            ) : mdfBoardRenderMode === 'published' && mdfPublishedBoard.session
+              // Hybrid board without its legacy presentation (read failed): the engine's own view, not old data.
+              && (!mdfHybridActive || (!cncToday && loadError !== null)) ? (
+              <MdfPublishedBoardView
+                session={mdfPublishedBoard.session}
+                workday={viewState.cncWorkday ?? todayCncWorkday}
+                period={viewState.cncOrderSearchPeriod}
+                orderFilters={cncOrderFilters}
+                searchText={viewState.search}
+                searchOrderIds={mdfPublishedBoard.searchOrderIds}
+                focusKind={mdfFocusKind}
+                focusId={mdfFocusId}
+                searchResolving={mdfPublishedBoard.searchResolving}
+                canMove={canMoveMdfPublishedCards}
+                onRequestSearchOrderNames={mdfPublishedBoard.requestSearchOrderNames}
+                onMove={handleMdfPublishedMove}
+                onFocusCard={focusMdfHistoryCard}
+              />
+            ) : !cncHasRenderableColumns ? (
+              <>
+              {mdfHybridSnapshot?.unregisteredTruncated && (
+                <Alert
+                  type="info"
+                  showIcon
+                  className="status-board-mdf-truncated"
+                  message="Не учтённых новым учётом файлов больше, чем показано: показаны файлы выбранной карточки, искомых заказов и самые новые. Уточните период или найдите заказ."
+                />
+              )}
               <Empty
                 description={
                   allCncColumnsHidden
@@ -3288,14 +3654,26 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                     : 'CNC-работ на сегодня нет'
                 }
               />
+              </>
             ) : (
+              <>
+              {mdfHybridSnapshot?.unregisteredTruncated && (
+                <Alert
+                  type="info"
+                  showIcon
+                  className="status-board-mdf-truncated"
+                  message="Не учтённых новым учётом файлов больше, чем показано: показаны файлы выбранной карточки, искомых заказов и самые новые. Уточните период или найдите заказ."
+                />
+              )}
+              <MdfBathDuplicatesContext.Provider value={bathDuplicatesContext}>
               <CncTelegramTodayColumns
                 columns={cncRenderColumns}
                 readinessColumns={cncActiveColumns}
                 historicalBathReadiness={cncHistoricalBathReadiness}
                 historicalReadinessSources={cncHistoricalReadinessSources}
                 orderCards={cncOrderCards}
-                manualMoves={cncManualMoves}
+                manualMoves={cncBoardManualMoves}
+                mdfHybrid={mdfHybridBoard && mdfHybridSnapshot ? { board: mdfHybridBoard, snapshot: mdfHybridSnapshot } : null}
                 mutedOrderIds={cncMutedOrderIds}
                 orderStatusColumns={cncOrderBoardColumns}
                 orderCardsLoading={cncOrderBoardLoading}
@@ -3332,6 +3710,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 onMove={stableMoveCncCard}
                 showFinancials={canViewFinancials}
               />
+              </MdfBathDuplicatesContext.Provider>
+              {bathDuplicatesBath && (
+                <MdfBathDuplicatesDialog
+                  bath={bathDuplicatesBath}
+                  boardBaths={cncBoardBaths}
+                  canResolve={canResolveBathDuplicates}
+                  onClose={closeBathDuplicates}
+                  onResolved={refreshAfterBathDuplicate}
+                />
+              )}
+              </>
             )
           ) : columns.length === 0 ? (
             <Empty
@@ -3428,6 +3817,21 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             message.success('Возврат выполнен. Производственные данные и положение карточек обновлены.');
             await fetchInitial({ mutationRefetch: true, preserveLoading: true });
           }} />}
+        {mdfCorrectionReturn && <MdfCorrectionReturnDialog
+          intent={mdfCorrectionReturn.intent}
+          selection={mdfCorrectionReturn.selection}
+          onCancel={() => setMdfCorrectionReturn(null)}
+          reselect={() => computeMdfReturnSelection(mdfCorrectionReturn.intent.source.kind, mdfCorrectionReturn.intent.source.id)}
+          columnTitle={(key) => isCncManualColumnKey(key) ? cncColumnTitleByKey(key) : key}
+          onRefreshBoard={() => {
+            setMdfCorrectionReturn(null);
+            void fetchInitial({ mutationRefetch: true, preserveLoading: true });
+          }}
+          onReturned={async () => {
+            setMdfCorrectionReturn(null);
+            message.success('Возврат выполнен. Производственные данные и положение карточек обновлены.');
+            await fetchInitial({ mutationRefetch: true, preserveLoading: true });
+          }} />}
       </main>
     </DndProvider>
   );
@@ -3511,7 +3915,12 @@ interface CncTelegramTodayColumnsProps {
     sourceColumn?: CncTelegramTodayDisplayColumnKey,
   ) => void;
   showFinancials: boolean;
+  /** Engine active/read_only: the board's MDF facts come from the engine (`mdfHybridBoard.ts`). */
+  mdfHybrid?: { board: MdfHybridBoard; snapshot: MdfPublishedSnapshot } | null;
 }
+
+/** Hybrid MDF board: per-card engine state for the move gate and the card badge (null outside the hybrid board). */
+const MdfHybridMoveContext = React.createContext<ReadonlyMap<string, MdfHybridCardMeta> | null>(null);
 
 export type CncTelegramTodayDisplayColumnKey =
   | CncTelegramTodayColumn['key']
@@ -3547,6 +3956,9 @@ export interface CncOrderReadiness {
   positionQuantities?: ReadonlyMap<string, CncPositionQuantities>;
   // Capped per-position credit is separate from fact totals, which may exceed demand.
   creditedQuantities?: CncPositionQuantities;
+  /** Hybrid MDF board: the order composition and the engine's positions disagree (two reads) — no progress, never
+   * auto-placed as ready, until the next read. */
+  unknown?: boolean;
 }
 
 interface CncPositionQuantities {
@@ -3897,6 +4309,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   onOpenBazisCut,
   onMove,
   showFinancials,
+  mdfHybrid = null,
 }) => {
   const isOperational = useOperationalUi();
   const [standardCardOverrides, setStandardCardOverrides] =
@@ -3988,10 +4401,16 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     }));
   }, []);
   const orderReadinessByOrderId = useMemo(
-    () => buildCncOrderReadiness(
-      applyCncManualMovesToColumns(readinessColumns, manualMoves), manualMoves, historicalBathReadiness, historicalReadinessSources,
-    ),
-    [manualMoves, readinessColumns, historicalBathReadiness, historicalReadinessSources],
+    () => {
+      const legacy = buildCncOrderReadiness(
+        applyCncManualMovesToColumns(readinessColumns, manualMoves), manualMoves, historicalBathReadiness, historicalReadinessSources,
+      );
+      // Hybrid: the same formula with the engine's MDF facts; unknown when the two reads disagree.
+      return mdfHybrid
+        ? buildMdfHybridOrderReadiness({ legacy, orderCards, snapshot: mdfHybrid.snapshot })
+        : legacy;
+    },
+    [manualMoves, readinessColumns, historicalBathReadiness, historicalReadinessSources, mdfHybrid, orderCards],
   );
   const orderMissingDetailsByOrderId = useMemo(
     () => buildCncOrderMissingDetails(orderCards, readinessColumns, historicalReadinessSources),
@@ -4191,7 +4610,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   };
 
   return (
-    <>
+    <MdfHybridMoveContext.Provider value={mdfHybrid?.board.meta ?? null}>
       <div
         className={[
           'status-board-columns status-board-columns--cnc',
@@ -4817,7 +5236,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
         />,
         document.body,
       )}
-    </>
+    </MdfHybridMoveContext.Provider>
   );
 };
 
@@ -5137,11 +5556,18 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
   const touchDragPointRef = useRef<{ x: number; y: number } | null>(null);
   const touchDragFrameRef = useRef<number | null>(null);
   const [touchReady, setTouchReady] = useState(false);
+  const hybridMeta = React.useContext(MdfHybridMoveContext);
+  const hybrid = hybridMeta && kind !== 'order'
+    ? hybridCardMoveGate(hybridMeta.get(cncManualMoveStorageKey(kind, cardId)), sourceColumn)
+    : null;
   const destinations = useMemo(
-    () => cncManualMoveDestinations(kind, sourceColumn),
-    [kind, sourceColumn],
+    () => cncManualMoveDestinations(kind, sourceColumn)
+      // A non-MDF file under the engine moves forward only.
+      .filter((destination) => !hybrid?.forwardOnly
+        || !isMdfBackwardMove(kind, sourceColumn, destination.key)),
+    [hybrid?.forwardOnly, kind, sourceColumn],
   );
-  const moveAvailable = movesEnabled && destinations.length > 0;
+  const moveAvailable = movesEnabled && (!hybrid || hybrid.allowed) && destinations.length > 0;
   const [{ isDragging }, dragRef] = useDrag<
     CncBoardDragItem,
     void,
@@ -5294,7 +5720,7 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
       overlayClassName="cnc-card-context-menu"
     >
       <Tooltip
-        title={currentLocation ? `Текущее положение: ${currentLocation}` : undefined}
+        title={currentLocation ? `Текущее положение: ${currentLocation}` : hybrid?.reason ?? undefined}
         trigger={['hover', 'focus']}
       >
       <div
@@ -5320,12 +5746,33 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
         onTouchEndCapture={clearDragSuppression}
         onTouchCancelCapture={clearDragSuppression}
       >
+        {hybrid?.badge && (
+          <span className={`cnc-mdf-engine-badge cnc-mdf-engine-badge--${hybrid.badge.tone}`}>{hybrid.badge.label}</span>
+        )}
         {children()}
       </div>
       </Tooltip>
     </Dropdown>
   );
 };
+
+/** Hybrid MDF board move gate of one card: the engine's command availability, the column the card is shown in (a
+ * hidden-card rule may show it elsewhere), and the badge that explains a non-movable or not-yet-final card. */
+function hybridCardMoveGate(meta: MdfHybridCardMeta | undefined, shownColumn: CncTelegramTodayDisplayColumnKey): {
+  allowed: boolean; forwardOnly: boolean; reason: string | null;
+  badge: { tone: 'pending' | 'warning' | 'muted'; label: string } | null;
+} {
+  if (!meta) return { allowed: false, forwardOnly: false, reason: 'Карточка не найдена в учёте — обновите доску', badge: null };
+  // A non-MDF file is shown at its projected manual column; hidden-card rules move only engine cards.
+  const overlaid = meta.source !== 'nonMdf' && meta.column !== shownColumn;
+  const reason = overlaid ? 'Скрыта правилом статуса заказа — перенос недоступен' : meta.blockedReason;
+  const badge = meta.source === 'unregistered' ? { tone: 'muted' as const, label: 'Не учтён' }
+    : meta.pending ? { tone: 'pending' as const, label: 'Пересчёт…' }
+      : meta.minimal ? { tone: 'warning' as const, label: 'Состав обновляется' }
+        : meta.source === 'engine' && (meta.issues.length > 0 || meta.commandToken === null)
+          ? { tone: 'warning' as const, label: 'Требует проверки' } : null;
+  return { allowed: meta.movable && !overlaid, forwardOnly: meta.source === 'nonMdf', reason, badge };
+}
 
 interface CncDetailedMachineMapsProps {
   sources: CncDetailedMachineSource[];
@@ -7074,12 +7521,15 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
       onClick={interactive ? onSelect : undefined}
     >
       {minimal ? (
+          <>
           <span
             className="cnc-compact-card__number"
             aria-label={`Номер карты раскроя ${bathCutNumber}`}
           >
             {bathCutNumber}
           </span>
+          <MdfBathDuplicateBadges bath={bath} />
+          </>
       ) : (
         <>
       <div className="status-board-card__top">
@@ -7116,6 +7566,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
               />
             </Tooltip>
           )}
+          <MdfBathDuplicateBadges bath={bath} />
           <Tag
             className="cnc-bath-card__cut-result-badge"
             aria-label={`Номер карты раскроя ${bathCutNumber}`}
@@ -7201,10 +7652,14 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
                 <span className="cnc-packet-card__qty">
                   {item.quantity}
                   {!item.ready && (
-                    <Tooltip title={`Готово ${item.completedQuantity} из ${item.quantity}`}>
+                    <Tooltip title={item.coverageUnknown
+                      ? 'Нет данных учёта о распиленных деталях'
+                      : `Готово ${item.completedQuantity} из ${item.quantity}`}>
                       <span
                         className="cnc-packet-card__qty-warning"
-                        aria-label={`Готово ${item.completedQuantity} из ${item.quantity}`}
+                        aria-label={item.coverageUnknown
+                          ? 'Нет данных учёта о распиленных деталях'
+                          : `Готово ${item.completedQuantity} из ${item.quantity}`}
                       >
                         !
                       </span>
@@ -8360,7 +8815,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
       }
     },
   }), [card, destinations, onMove]);
-  const readinessProgress = cncReadiness
+  const readinessProgress = cncReadiness && !cncReadiness.unknown
     ? cncOrderReadinessProgress(cncReadiness)
     : null;
 
@@ -8558,7 +9013,14 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         </div>
       )}
 
-      {cncOrderCard && cncReadiness && !cncNumberOnly && (
+      {cncOrderCard && cncReadiness?.unknown && !cncNumberOnly && (
+        <div className="cnc-order-card__readiness cnc-order-card__readiness--unknown"
+          title="Состав заказа и производственный учёт МДФ ещё не совпали — данные обновятся при следующем чтении">
+          <span>Учёт обновляется</span>
+        </div>
+      )}
+
+      {cncOrderCard && cncReadiness && !cncReadiness.unknown && !cncNumberOnly && (
         <div className="cnc-order-card__readiness">
           <span>Распилено {cncReadiness.cutDetails}</span>
           <span>Закатано {cncReadiness.rolledDetails}</span>
@@ -9406,7 +9868,7 @@ export function splitCncOrderCardsByManualColumn(
     );
     const statusColumn = resolveCncOrderStatusColumn(card);
     const readinessColumn: CncTelegramTodayDisplayColumnKey =
-      readiness.totalDetails > 0 && readiness.remainingDetails === 0
+      !readiness.unknown && readiness.totalDetails > 0 && readiness.remainingDetails === 0
         ? 'orders_ready'
         : 'orders';
     const autoColumn = statusColumn ?? readinessColumn;
@@ -9596,6 +10058,10 @@ function normalizeCncOrderReadiness(
   if (!source.positionQuantities) {
     cutDetails = nonNegativeInteger(source.cutDetails);
     rolledDetails = nonNegativeInteger(source.rolledDetails);
+  }
+  if (source.unknown) {
+    return { totalDetails, cutDetails: 0, rolledDetails: 0, remainingDetails: totalDetails,
+      creditedQuantities: { cut: 0, rolled: 0 }, unknown: true };
   }
   return {
     totalDetails,

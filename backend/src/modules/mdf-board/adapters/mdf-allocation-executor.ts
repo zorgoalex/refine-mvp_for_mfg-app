@@ -1,24 +1,36 @@
 import type { DatabaseClient } from '../../../database/database.types';
+import type { MdfDeclaredCoverage } from './mdf-publication';
 import { auditService } from '../../../common/audit/audit.service';
 import { MdfNeedsAttention, type MdfJob, type MdfSourceKind } from '../application/mdf-job-runner';
 import type { MdfEvidenceAllocation, MdfEvidenceReservation } from '../domain/mdf-evidence-allocation';
 import { planMdfQuarantinedAllocations } from '../domain/mdf-allocation-quarantine';
-import type { MdfPositionQuantity } from '../domain/mdf-quantities';
+import { mdfPositionKey, type MdfPositionQuantity } from '../domain/mdf-quantities';
+import { mdfLineageRevisionKey } from '../domain/mdf-physical-lineage';
 import { loadMdfExecutionSnapshot, mdfSourceKey } from './mdf-execution-snapshot';
 import { advanceCompatibleMdfRevision } from './mdf-compatible-advance';
+import { advanceMdfBathTransition, loadMdfBathTransitionForJob } from './mdf-bath-transition';
+import { isMdfLineDetached, loadMdfDetachedPositions } from './mdf-position-detachments';
+import { loadMdfClosedOrders } from './mdf-closed-orders';
+import { loadMdfBazisCompositionJobIntent, mdfBazisCompositionOwnerScope,
+  lockMdfBazisCompositionDetails } from './mdf-bazis-composition-job';
+import { advanceMdfBazisCompositionRevision,
+  type MdfBazisCompositionAcceptance } from './mdf-bazis-composition-advance';
+import { loadMdfBazisCompositionRawSnapshot,
+  type MdfBazisRawSnapshot } from './mdf-bazis-composition-snapshot';
 
 type Source = { kind: MdfSourceKind; id: string };
-type Head = Source & { received: string; accepted: string | null; epoch: string };
+type Head = Source & { received: string; accepted: string | null; epoch: string; version: string };
 type Line = MdfPositionQuantity & { evidenceLineId: string; lineKey: string; kind: MdfSourceKind; id: string;
   revision: string; stage: string; evidence: string; rework: boolean };
 const MAX_ORDERS = 100, MAX_SOURCES = 250, MAX_ROWS = 5000;
 const key = (s: Source) => JSON.stringify([s.kind, s.id]);
 function attention(code: string): never { throw new MdfNeedsAttention(`MDF_ALLOCATION_${code}`); }
 const result = (status: 'disabled' | 'superseded' | 'allocated') => ({ status, reservedCount: 0, consumedCount: 0,
-  readyBathIds: [] as string[], blockers: [] as ReturnType<typeof planMdfQuarantinedAllocations>['blockers'],
+  readyBathIds: [] as string[], declaredCoverage: [] as MdfDeclaredCoverage[], blockers: [] as ReturnType<typeof planMdfQuarantinedAllocations>['blockers'],
   quarantine: [] as ReturnType<typeof planMdfQuarantinedAllocations>['quarantine'], blockedPositionKeys: [] as string[],
-  orderIds: [] as number[], sourceHeads: [] as Head[], sourceLines: [] as Line[],
-  executionSnapshot: null as Awaited<ReturnType<typeof loadMdfExecutionSnapshot>> | null });
+  orderIds: [] as number[], closedOrderIds: [] as number[], sourceHeads: [] as Head[], sourceLines: [] as Line[],
+  executionSnapshot: null as Awaited<ReturnType<typeof loadMdfExecutionSnapshot>> | null,
+  compositionAcceptance: null as MdfBazisCompositionAcceptance | null });
 
 // Pending membership and historic allocations are graph edges too: neither may
 // silently disappear from scope when a source changes, is hidden or is removed.
@@ -34,8 +46,17 @@ const edges = (withContext: boolean) => `edges AS (
     AND (d.revision_key=h.accepted_revision_key OR d.revision_key=h.received_revision_key)` : ''}
 )`;
 
-async function discover(tx: DatabaseClient, source: Source,allowEmptyScope = false) {
-  const sources = new Map<string, Source>([[key(source), source]]), orders = new Set<number>();
+/** §5.7b: discovery never expands THROUGH a closed order (`loadMdfClosedOrders`); a closed order's own `order:X`
+ * closure head is added by key so its declarations are validated and shown, without growing the component. */
+async function discover(tx: DatabaseClient, source: Source,allowEmptyScope = false,seeds: readonly Source[] = []) {
+  const sources = new Map<string, Source>([[key(source), source],...seeds.map(s => [key(s), s] as const)]), orders = new Set<number>();
+  // §5.7b: an order-level source always owns its order — even with no evidence/demand edges (terminal empty demand) —
+  // so the order is locked and its current sources are discovered before its aggregates are replaced.
+  if (source.kind === 'order' || source.kind === 'orderDetail') {
+    const id = Number(source.kind === 'order' ? source.id : source.id.split(':')[0]);
+    if (Number.isSafeInteger(id) && id > 0) orders.add(id);
+  }
+  let closed = new Set<number>();
   for (let round = 0; round <= MAX_ORDERS; round++) {
     const previous = `${sources.size}:${orders.size}`, values = [...sources.values()];
     const owners = (await tx.query<{ id: string }>(`WITH ${edges(allowEmptyScope)}
@@ -47,13 +68,17 @@ async function discover(tx: DatabaseClient, source: Source,allowEmptyScope = fal
       orders.add(id);
     }
     if (orders.size > MAX_ORDERS) attention('SCOPE_LIMIT');
+    closed = await loadMdfClosedOrders(tx, [...orders]);
+    const open = [...orders].filter(id => !closed.has(id));
     const linked = (await tx.query<Source>(`WITH ${edges(allowEmptyScope)}
-      SELECT DISTINCT kind,id FROM edges WHERE order_id=ANY($1::bigint[]) LIMIT $2`, [[...orders], MAX_SOURCES + 1])).rows;
+      SELECT DISTINCT kind,id FROM edges WHERE order_id=ANY($1::bigint[]) LIMIT $2`, [open, MAX_SOURCES + 1])).rows;
     for (const s of linked) sources.set(key(s), s);
+    for (const id of closed) sources.set(key({ kind: 'order', id: String(id) }), { kind: 'order', id: String(id) });
     if (sources.size > MAX_SOURCES) attention('SCOPE_LIMIT');
     if (previous === `${sources.size}:${orders.size}`) {
       if (!orders.size && !allowEmptyScope) attention('EMPTY_SCOPE');
-      return { orders: [...orders].sort((a,b) => a-b), sources: [...sources.values()].sort((a,b) => key(a) < key(b) ? -1 : 1) };
+      return { orders: [...orders].sort((a,b) => a-b), closedOrders: [...closed].sort((a,b) => a-b),
+        sources: [...sources.values()].sort((a,b) => key(a) < key(b) ? -1 : 1) };
     }
   }
   return attention('SCOPE_LIMIT');
@@ -77,19 +102,45 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
   const job = (await tx.query<MdfJob & { status: string }>(`SELECT * FROM mdf_recalculation_jobs WHERE job_id=$1 FOR UPDATE`, [jobId])).rows[0];
   if (!job || job.status !== 'pending') attention('JOB_NOT_PENDING');
   const source = { kind: job.source_kind, id: job.source_id };
-  const scope = await discover(tx, source,options.requireExecutionContext);
+  const intent = await loadMdfBazisCompositionJobIntent(tx, job);
+  // §5.4b: a bath transition job also owns its successor's acceptance; seed it into the scope.
+  const transition = await loadMdfBathTransitionForJob(tx, job);
+  const seeds = transition?.successorSourceId ? [{ kind: 'bath' as const, id: transition.successorSourceId }] : [];
+  if (intent && !options.requireExecutionContext) attention('COMPOSITION_REQUIRES_CONTEXT');
+  // Negative-only early gate: a stale received head or epoch supersedes before
+  // any owner/raw work; the locked recheck below stays authoritative.
+  if (intent) {
+    const early = (await tx.query<{ received: string | null; epoch: string | null }>(
+      `SELECT received_revision_key received,correction_epoch::text epoch
+       FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2`,
+    [job.source_kind, job.source_id])).rows[0];
+    if (!early) attention('HEAD_MISSING');
+    if (early.received !== job.revision_key || early.epoch !== job.correction_epoch) return result('superseded');
+  }
+  const scope = await discover(tx, source,options.requireExecutionContext,seeds);
+  const lockedOwnerIds = intent ? mdfBazisCompositionOwnerScope(scope.orders, intent) : scope.orders;
+  let compositionAcceptance: MdfBazisCompositionAcceptance | null = null;
   const owners = (await tx.query<{ order_id: string }>(`SELECT order_id FROM orders WHERE order_id=ANY($1::bigint[])
-    ORDER BY order_id FOR UPDATE`, [scope.orders])).rows;
-  if (owners.length !== scope.orders.length) attention('OWNER_MISSING');
+    ORDER BY order_id FOR UPDATE`, [lockedOwnerIds])).rows;
+  if (owners.length !== lockedOwnerIds.length) attention('OWNER_MISSING');
+  if (intent) {
+    const live = (await tx.query<{ id: string }>(`SELECT order_id::text id FROM orders
+      WHERE order_id=ANY($1::bigint[]) AND NOT delete_flag AND order_kind='production_order'
+      ORDER BY order_id LIMIT $2`, [lockedOwnerIds, lockedOwnerIds.length])).rows;
+    if (live.length !== lockedOwnerIds.length) attention('OWNER_STALE');
+    await lockMdfBazisCompositionDetails(tx, intent, lockedOwnerIds);
+  }
   for (const s of scope.sources) {
     await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`mdf-source:${key(s)}`]);
   }
   const heads = (await tx.query<Head>(`SELECT h.source_kind kind,h.source_id id,h.received_revision_key received,
-    h.accepted_revision_key accepted,h.correction_epoch::text epoch FROM mdf_source_heads h
+    h.accepted_revision_key accepted,h.correction_epoch::text epoch,h.version::text version FROM mdf_source_heads h
     JOIN unnest($1::text[],$2::text[]) s(kind,id) ON h.source_kind=s.kind AND h.source_id=s.id
     ORDER BY h.source_kind,h.source_id FOR UPDATE OF h`, [scope.sources.map(s => s.kind), scope.sources.map(s => s.id)])).rows;
   // A waiter must not use a component discovered before somebody changed it.
-  if (JSON.stringify(await discover(tx, source,options.requireExecutionContext)) !== JSON.stringify(scope)) throw new Error('MDF_ALLOCATION_SCOPE_CHANGED');
+  const again = await discover(tx, source,options.requireExecutionContext,seeds);
+  if (JSON.stringify(again) !== JSON.stringify(scope)) throw new Error('MDF_ALLOCATION_SCOPE_CHANGED');
+  if (intent) mdfBazisCompositionOwnerScope(again.orders, intent);
   const trigger = heads.find(h => key(h) === key(source));
   if (!trigger || (!trigger.accepted && !options.requireExecutionContext)) attention('ACCEPTANCE_PENDING');
   // Strict jobs may publish an unaccepted RECEIVED revision's quarantine. They
@@ -107,20 +158,102 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
   [heads.map(h => h.kind), heads.map(h => h.id), heads.map(h => h.accepted), heads.map(h => h.received), MAX_ROWS + 1])).rows;
   if (lines.length > MAX_ROWS) attention('ROW_LIMIT');
   for (const l of lines) if (![l.orderId,l.detailId,l.quantity].every(n => Number.isSafeInteger(n) && n > 0)) attention('INVALID_EVIDENCE');
-  const executionSnapshot = options.requireExecutionContext ? await loadMdfExecutionSnapshot(tx,heads,scope.orders) : null;
+  let executionSnapshot = options.requireExecutionContext ? await loadMdfExecutionSnapshot(tx,heads,scope.orders,
+    {allowPendingJobId:jobId}) : null;
+  let raw: MdfBazisRawSnapshot | null = null;
+  if (intent) {
+    try {
+      raw = await loadMdfBazisCompositionRawSnapshot(tx, { setId: intent.setId, lockRowsAfterOwnerLocks: true });
+    } catch (error) {
+      if (error instanceof Error && ['MDF_BAZIS_SET_NOT_FOUND','MDF_BAZIS_SNAPSHOT_INVALID',
+        'MDF_BAZIS_SNAPSHOT_ROW_LIMIT'].includes(error.message)) throw new MdfNeedsAttention('MDF_COMPOSITION_RAW_STALE');
+      throw error;
+    }
+  }
   let allocations = (await tx.query<MdfEvidenceAllocation>(`SELECT a.allocation_id "allocationId",a.evidence_line_id "evidenceLineId",
     a.bath_id "bathId",a.bath_revision "bathRevision",a.order_id::float8 "orderId",a.detail_id::float8 "detailId",
     a.quantity::float8 quantity,a.state FROM mdf_bath_allocations a
     WHERE a.order_id=ANY($1::bigint[]) AND a.state<>'released' ORDER BY a.allocation_id LIMIT $2 FOR UPDATE`,
   [scope.orders, MAX_ROWS + 1])).rows;
   if (allocations.length > MAX_ROWS) attention('ROW_LIMIT');
-  if (executionSnapshot) {
+  // §5.4e: a reservation at a position detached in its supplier's or its bath's source is released
+  // (history kept); a consumed debit stays as authenticated history. Detached lines are neither
+  // supply nor bath demand below, so a released reservation is never recreated.
+  const detached = await loadMdfDetachedPositions(tx, heads);
+  const evidenceSource = new Map(lines.map(l => [l.evidenceLineId, l]));
+  const detachedDebit = (a: MdfEvidenceAllocation) => {
+    const supplier = evidenceSource.get(a.evidenceLineId);
+    const supplierDetached = supplier ? isMdfLineDetached(detached, supplier) : false;
+    const bathDetached = isMdfLineDetached(detached, { kind: 'bath', id: a.bathId, orderId: a.orderId, detailId: a.detailId });
+    return { supplierDetached, bathDetached };
+  };
+  const releasedDetached = allocations.filter(a => {
+    if (a.state !== 'reserved') return false;
+    const d = detachedDebit(a);
+    return d.supplierDetached || d.bathDetached;
+  });
+  if (releasedDetached.length) {
+    await tx.query(`UPDATE mdf_bath_allocations SET state='released',updated_at=now() WHERE allocation_id=ANY($1::uuid[])
+      AND state='reserved'`, [releasedDetached.map(a => a.allocationId)]);
+    await auditChanges(tx, job, 'released', releasedDetached);
+    const releasedIds = new Set(releasedDetached.map(a => a.allocationId));
+    allocations = allocations.filter(a => !releasedIds.has(a.allocationId));
+  }
+  if (intent) {
+    if (!executionSnapshot || !raw) throw new Error('MDF_COMPOSITION_CONTEXT_MISSING');
+    const advanced = await advanceMdfBazisCompositionRevision(tx, { job, intent, head: trigger, heads,
+      orderIds: lockedOwnerIds, lines, allocations, snapshot: executionSnapshot, raw });
+    allocations = [...advanced.allocations];
+    trigger.version = advanced.newHeadVersion;
+    compositionAcceptance = advanced.compositionAcceptance;
+    executionSnapshot = await loadMdfExecutionSnapshot(tx, heads, scope.orders, { allowPendingJobId: jobId });
+  } else if (transition) {
+    if (!executionSnapshot) throw new Error('MDF_BATH_TRANSITION_CONTEXT_MISSING');
+    allocations = await advanceMdfBathTransition(tx,{ job,transition,heads,lines,allocations });
+    executionSnapshot = await loadMdfExecutionSnapshot(tx,heads,scope.orders,{ allowPendingJobId: jobId });
+  } else if (executionSnapshot) {
     // Promote only THIS job's authorized forward revision; another source's
     // pending proof must wait for its own pinned job and original actor.
-    const advanced=await advanceCompatibleMdfRevision(tx,{ job,head: trigger,
-      contextValid: executionSnapshot.issues.get(mdfSourceKey(trigger))?.length===0,
-      lines: lines.filter(l => key(l)===key(trigger)),allocations });
-    if (advanced) allocations=advanced;
+    const previousLineageKey=trigger.accepted ? mdfLineageRevisionKey(trigger,trigger.accepted) : null;
+    const nextLineageKey=mdfLineageRevisionKey(trigger,trigger.received);
+    const previousLineage=previousLineageKey ? executionSnapshot.lineage.get(previousLineageKey) : undefined;
+    const nextLineage=executionSnapshot.lineage.get(nextLineageKey);
+    const previousLineageIssues=previousLineageKey ? executionSnapshot.lineageIssues.get(previousLineageKey) ?? [] : [];
+    const nextLineageIssues=executionSnapshot.lineageIssues.get(nextLineageKey) ?? [];
+    const previousPhysical=trigger.accepted
+      ? lines.filter(line => key(line)===key(trigger) && line.revision===trigger.accepted && line.evidence==='physical') : [];
+    // Once the source has any v2 contract, the snapshot loader marks an
+    // otherwise-valid old v1 predecessor MDF_LINEAGE_REQUIRED source-wide.
+    // Permit only this narrow first-v2 transition when that predecessor has no
+    // physical facts; malformed v2 descriptors are never ignored.
+    const firstV2WithoutPhysicalPredecessor=Boolean(trigger.accepted && !previousLineage && previousPhysical.length===0
+      && nextLineage?.operation==='production' && nextLineage.lines.some(line=>line.action==='root')
+      && previousLineageIssues.length===1 && previousLineageIssues[0]==='MDF_LINEAGE_REQUIRED');
+    const lineageInvalid=nextLineageIssues.length>0 || (previousLineageIssues.length>0 && !firstV2WithoutPhysicalPredecessor);
+    const contextIssues=executionSnapshot.issues.get(mdfSourceKey(trigger));
+    const lineageRequiredButMissing=Boolean(previousLineage && !nextLineage);
+    // Empty carry only for an issued intentional-empty assignment state on BOTH revisions.
+    const previousState=trigger.kind==='bazisCutSet' && trigger.accepted
+      ? executionSnapshot.assignmentStates.get(mdfLineageRevisionKey(trigger,trigger.accepted)) : undefined;
+    const nextState=trigger.kind==='bazisCutSet'
+      ? executionSnapshot.assignmentStates.get(mdfLineageRevisionKey(trigger,trigger.received)) : undefined;
+    const intentionalEmpty=previousState?.intentionalEmpty===true && nextState?.intentionalEmpty===true
+      && !executionSnapshot.assignmentStateIssues.get(mdfSourceKey(trigger))?.length && Boolean(previousLineage && nextLineage);
+    const advanced=await advanceCompatibleMdfRevision(tx,{ job,head: trigger,intentionalEmpty,
+      contextValid: contextIssues?.length===0 && !lineageInvalid && !lineageRequiredButMissing,
+      lines: lines.filter(l => key(l)===key(trigger)),allocations,
+      ...(nextLineage ? { lineage: previousLineage ? { previous: previousLineage,next: nextLineage } : { next: nextLineage } } : {}) });
+    if (!advanced && (await tx.query(`SELECT 1 FROM mdf_order_cascade_intents WHERE job_id=$1`,[job.job_id])).rows.length) {
+      // An order-demand cascade is accepted by this job or not at all; never publish it as pending.
+      throw new MdfNeedsAttention('MDF_ORDER_CASCADE_INVALID');
+    }
+    if (advanced) {
+      allocations=advanced;
+      // Compatible advancement changes the accepted head inside this
+      // transaction. Re-authorize the exact newly accepted revision rather
+      // than carrying a descriptor/context loaded before that transition.
+      executionSnapshot=await loadMdfExecutionSnapshot(tx,heads,scope.orders,{allowPendingJobId:jobId});
+    }
   }
   const bathHeads = heads.filter(h => h.kind === 'bath');
   const dates = (await tx.query<{ id: string; createdAt: string }>(`SELECT 'cut-result:'||cut_result_id::text id,created_at::text "createdAt"
@@ -128,14 +261,47 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
   const bySource = new Map<string, Line[]>();
   for (const line of lines) { const own = bySource.get(key(line)) ?? []; own.push(line); bySource.set(key(line), own); }
   let plan: ReturnType<typeof planMdfQuarantinedAllocations>;
-  try { plan = planMdfQuarantinedAllocations({ sources: heads.map(h => ({ ...h,
+  // A retired bath (terminal empty revision) takes no part in allocation.
+  const liveHeads = heads.filter(h => !executionSnapshot?.retired.has(mdfSourceKey(h)));
+  // §5.7b: positions of a closed order are covered by its closure and never planned (not supply, not bath demand).
+  // They are passed as positions detached for PLANNING (the planner's own mechanism): the full sealed lines stay for
+  // lineage/contract validation, only supply and bath membership ignore them. Projection is unaffected.
+  const closedOrders = new Set(scope.closedOrders);
+  const plannedLines = (h: Head) => (bySource.get(key(h)) ?? [])
+    .filter(l => h.kind === 'order' || h.kind === 'orderDetail' || !closedOrders.has(l.orderId));
+  // A card whose every position belongs to a closed order takes no part in planning at all (passing it with an empty
+  // membership would quarantine it as MEMBERSHIP_MISSING); it still publishes, placed from ranks/manual.
+  const planningDetached = (h: Head): ReadonlySet<string> | undefined => {
+    const own = detached.get(key(h));
+    if (h.kind === 'order' || h.kind === 'orderDetail' || !closedOrders.size) return own;
+    const closedKeys = (bySource.get(key(h)) ?? []).filter(l => closedOrders.has(l.orderId)).map(l => mdfPositionKey(l));
+    return closedKeys.length ? new Set([...(own ?? []), ...closedKeys]) : own;
+  };
+  const fullyClosed = (h: Head) => h.kind !== 'order' && h.kind !== 'orderDetail' && closedOrders.size > 0
+    && (bySource.get(key(h)) ?? []).length > 0 && plannedLines(h).length === 0;
+  try { plan = planMdfQuarantinedAllocations({ sources: liveHeads.filter(h => !fullyClosed(h)).map(h => ({ ...h,
     // Invalid context quarantines THIS source. It never blesses legacy shadow
     // quantities, nor freezes independent same-order sources wholesale.
     accepted: executionSnapshot?.issues.get(mdfSourceKey(h))?.length ? null : h.accepted,
+    lineage: executionSnapshot && h.accepted && h.accepted===h.received
+      ? executionSnapshot.lineage.get(mdfLineageRevisionKey(h,h.accepted)) : undefined,
+    lineageIssue: executionSnapshot && h.accepted && h.accepted===h.received
+      ? executionSnapshot.lineageIssues.get(mdfLineageRevisionKey(h,h.accepted))?.[0]
+        ?? executionSnapshot.issues.get(mdfSourceKey(h))?.find(issue=>issue.startsWith('MDF_LINEAGE_'))
+      : undefined,
+    assignmentState: executionSnapshot && h.accepted && h.accepted===h.received
+      ? executionSnapshot.assignmentStates.get(mdfLineageRevisionKey(h,h.accepted)) : undefined,
     uncertainOrderIds: executionSnapshot ? [...new Set(executionSnapshot.frozenDemand.get(mdfSourceKey(h))?.map(d => d.orderId))] : undefined,
+    detachedPositionKeys: planningDetached(h),
     lines: bySource.get(key(h)) ?? [], createdAt: executionSnapshot
       ? executionSnapshot.metadata.get(mdfSourceKey(h))?.sourceCreatedAt : dates.find(d => d.id === h.id)?.createdAt })),
-  allocations, orderIds: scope.orders }); }
+  // A consumed debit whose supplier line AND bath membership are both detached is history only.
+  allocations: allocations.filter(a => {
+    if (closedOrders.has(a.orderId)) return false;
+    if (a.state !== 'consumed') return true;
+    const d = detachedDebit(a);
+    return !(d.supplierDetached && d.bathDetached);
+  }), orderIds: scope.orders.filter(id => !closedOrders.has(id)) }); }
   catch { return attention('INVALID_BALANCE'); }
   let inserted: (MdfEvidenceReservation & { allocationId: string })[] = [];
   if (plan.reservations.length) {
@@ -153,13 +319,15 @@ export async function executeMdfAllocation(tx: DatabaseClient, jobId: string,
     WHERE allocation_id=ANY($1::uuid[]) AND state='reserved'`, [toConsume.map(a => a.allocationId)]);
   await auditChanges(tx, job, 'reserved', inserted);
   await auditChanges(tx, job, 'consumed', toConsume);
-  return { ...result('allocated'), readyBathIds: plan.readyBathIds, blockers: plan.blockers,
+  return { ...result('allocated'), readyBathIds: plan.readyBathIds, declaredCoverage: plan.declaredCoverage,
+    blockers: plan.blockers,
     quarantine: plan.quarantine, blockedPositionKeys: plan.blockedPositionKeys,
     reservedCount: inserted.length, consumedCount: toConsume.length,
-    orderIds: scope.orders, sourceHeads: heads, sourceLines: lines, executionSnapshot };
+    orderIds: scope.orders, closedOrderIds: scope.closedOrders, sourceHeads: heads, sourceLines: lines, executionSnapshot,
+    compositionAcceptance };
 }
 
-async function auditChanges(tx: DatabaseClient, job: MdfJob, state: 'reserved' | 'consumed',
+async function auditChanges(tx: DatabaseClient, job: MdfJob, state: 'reserved' | 'consumed' | 'released',
   lines: readonly (MdfEvidenceReservation & { allocationId: string })[]) {
   const grouped = new Map<string, typeof lines[number][]>();
   for (const l of lines) { const own = grouped.get(l.bathId) ?? []; own.push(l); grouped.set(l.bathId, own); }
@@ -171,7 +339,8 @@ async function auditChanges(tx: DatabaseClient, job: MdfJob, state: 'reserved' |
       relatedOrderId: orderIds.length === 1 ? orderIds[0] : null, statusField: 'allocation_state', statusCode: state,
       before: { allocationState: state === 'reserved' ? 'unallocated' : 'reserved' },
       after: { allocationState: state, allocations: changes },
-      metadata: { jobId: job.job_id, causeKey: job.event_key, notificationEventDecision: 'owning_job_transition_outbox' } });
+      metadata: { jobId: job.job_id, causeKey: job.event_key, notificationEventDecision: 'owning_job_transition_outbox',
+        ...(state === 'released' ? { reason: 'position_detached' } : {}) } });
     if (!auditId) throw new Error('MDF_ALLOCATION_AUDIT_FAILED');
     await tx.query(`INSERT INTO audit_log_related_entity(audit_id,entity_type,entity_id)
       SELECT $1::uuid,'order',unnest($2::bigint[]) UNION ALL SELECT $1::uuid,'order_detail',unnest($3::bigint[])

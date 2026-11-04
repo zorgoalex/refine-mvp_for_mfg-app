@@ -125,6 +125,10 @@ export interface CutResultStateCommand {
   cutJobId: number;
   resultNo: number;
   requestId?: string;
+  /** If-Match: job version the operator saw (§5.4b fence). */
+  expectedJobVersion?: number;
+  /** Idempotency-Key for replay of a retirement-producing command. */
+  idempotencyKey?: string;
 }
 
 export interface ListCutJobsQuery {

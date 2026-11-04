@@ -16,6 +16,18 @@ describe('published MDF read endpoint', () => {
     expect(parseMdfPublishedQuery({ orderIds: '12,5,12',dateTo: '2026-09-21',focusKind: 'bath',focusId: 'cut-result:14' }))
       .toEqual({ dateTo: '2026-09-21',orderIds: [5,12],focus: { kind: 'bath',id: 'cut-result:14' } });
   });
+  it('normalizes and bounds the display-cut floor (§5.8), independent of dateTo', () => {
+    expect(parseMdfPublishedQuery({ dateTo: '2026-09-21',displayFrom: '2026-09-15' }))
+      .toEqual({ dateTo: '2026-09-21',displayFrom: '2026-09-15' });
+    expect(parseMdfPublishedQuery({ displayFrom: '2026-01-01' })).toEqual({ displayFrom: '2026-01-01' });
+  });
+  it('normalizes searchOrderIds (§5.6) separately from orderIds and bounds it', () => {
+    expect(parseMdfPublishedQuery({ searchOrderIds: '9,3,9', orderIds: '4' }))
+      .toEqual({ orderIds: [4], searchOrderIds: [3, 9] });
+    expect(() => parseMdfPublishedQuery({ searchOrderIds: '0' })).toThrow();
+    expect(() => parseMdfPublishedQuery({ searchOrderIds: 'x' })).toThrow();
+    expect(() => parseMdfPublishedQuery({ searchOrderIds: Array.from({ length: 101 }, (_, i) => i + 1).join(',') })).toThrow();
+  });
   it('normalizes exact job IDs and includes terminal results in the ETag', () => {
     const id='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
     expect(parseMdfPublishedQuery({ jobIds: `${id.toUpperCase()},${id}` })).toEqual({ jobIds: [id] });
@@ -25,6 +37,7 @@ describe('published MDF read endpoint', () => {
   });
   it.each([
     { dateFrom: '2020-01-01' },{ dateTo: '2026-02-30' },{ dateTo: ['2026-09-21'] },{ dateTo: '0000-01-01' },
+    { displayFrom: '2026-02-30' },{ displayFrom: ['2026-09-21'] },{ displayFrom: '0000-01-01' },{ displayFrom: 'not-a-date' },
     { focusKind: 'packet' },{ focusKind: 'order',focusId: '1' },{ focusKind: 'bath',focusId: 'cut-result:9007199254740992' },
     { orderIds: '0' },{ orderIds: '9007199254740992' },{ orderIds: ['1'] },{ orderIds: '1 OR true' },
     { orderIds: Array.from({ length: 101 },(_,i) => i+1).join(',') },

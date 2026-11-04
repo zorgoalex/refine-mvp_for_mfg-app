@@ -36,7 +36,7 @@ export class MdfPublishedBoardController {
 
 export function parseMdfPublishedQuery(raw: Record<string,unknown>): MdfPublishedQuery {
   const invalid = (): never => { throw new ApiError(422,'MDF_QUERY_INVALID','Неверный период или идентификатор карточки'); };
-  if (Object.keys(raw).some(k => !['dateTo','focusKind','focusId','orderIds','jobIds'].includes(k))) invalid();
+  if (Object.keys(raw).some(k => !['dateTo','displayFrom','focusKind','focusId','orderIds','jobIds','searchOrderIds'].includes(k))) invalid();
   const query: MdfPublishedQuery = {};
   if (raw.jobIds!==undefined) {
     if (typeof raw.jobIds!=='string') invalid();
@@ -50,12 +50,22 @@ export function parseMdfPublishedQuery(raw: Record<string,unknown>): MdfPublishe
     if (ids.length>100 || ids.some(id => !Number.isSafeInteger(id))) invalid();
     query.orderIds=[...new Set(ids)].sort((a,b) => a-b);
   }
-  if (raw.dateTo!==undefined) {
-    if (typeof raw.dateTo!=='string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw.dateTo)) invalid();
-    const value = String(raw.dateTo), parsed = new Date(`${value}T00:00:00.000Z`);
-    if (value.startsWith('0000-') || !Number.isFinite(parsed.valueOf()) || parsed.toISOString().slice(0,10)!==value) invalid();
-    query.dateTo=value;
+  // §5.6 search beyond the window: also selects the (old/completed) cards of these orders; authorized server-side.
+  if (raw.searchOrderIds!==undefined) {
+    if (typeof raw.searchOrderIds!=='string' || !/^[1-9]\d*(,[1-9]\d*)*$/.test(raw.searchOrderIds)) invalid();
+    const ids=String(raw.searchOrderIds).split(',').map(Number);
+    if (ids.length>100 || ids.some(id => !Number.isSafeInteger(id))) invalid();
+    query.searchOrderIds=[...new Set(ids)].sort((a,b) => a-b);
   }
+  const isoDay = (input: unknown): string => {
+    if (typeof input!=='string' || !/^\d{4}-\d{2}-\d{2}$/.test(input)) invalid();
+    const value = String(input), parsed = new Date(`${value}T00:00:00.000Z`);
+    if (value.startsWith('0000-') || !Number.isFinite(parsed.valueOf()) || parsed.toISOString().slice(0,10)!==value) invalid();
+    return value;
+  };
+  if (raw.dateTo!==undefined) query.dateTo=isoDay(raw.dateTo);
+  // §5.8 display cut (bounded to the two-month window by the reader).
+  if (raw.displayFrom!==undefined) query.displayFrom=isoDay(raw.displayFrom);
   if (raw.focusKind!==undefined || raw.focusId!==undefined) {
     const kind=raw.focusKind,id=raw.focusId;
     if (typeof id!=='string' || !['packet','bazisCutSet','bath'].includes(String(kind))) invalid();

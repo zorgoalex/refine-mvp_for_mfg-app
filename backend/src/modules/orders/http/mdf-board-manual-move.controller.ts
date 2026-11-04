@@ -34,6 +34,8 @@ const moveBodySchema = z.object({
     'orders_ready',
     'orders_issued',
   ]),
+  /** Engine active, non-MDF machine file only: the column the operator saw (stale ⇒ 409). */
+  expectedColumn: z.enum(['parsed', 'completed', 'completed_laminated']).optional(),
 }).strict();
 
 @ApiTags('Orders')
@@ -93,6 +95,7 @@ export class MdfBoardManualMoveController {
     const cardKind = parseMdfManualCardKind(rawKind);
     const cardId = parseMdfManualCardId(rawCardId);
     const targetColumn = parseMdfManualMoveBody(body);
+    const expectedColumn = parseMdfManualMoveExpectedColumn(body);
     assertMdfManualMoveAllowed(cardKind, targetColumn);
     return this.moves.upsert({
       currentUser,
@@ -101,6 +104,7 @@ export class MdfBoardManualMoveController {
       targetColumn,
       ...(sourceToken === undefined ? {} : { sourceToken }),
       ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+      ...(expectedColumn === undefined ? {} : { expectedColumn }),
       requestId: request.requestId,
     });
   }
@@ -182,6 +186,11 @@ export function parseMdfManualMoveBody(body: unknown): MdfBoardManualTargetColum
     });
   }
   return parsed.data.targetColumn;
+}
+
+export function parseMdfManualMoveExpectedColumn(body: unknown): 'parsed' | 'completed' | 'completed_laminated' | undefined {
+  const parsed = moveBodySchema.safeParse(body);
+  return parsed.success ? parsed.data.expectedColumn : undefined;
 }
 
 export function assertMdfManualMoveAllowed(

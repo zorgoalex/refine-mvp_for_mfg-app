@@ -54,7 +54,7 @@ import { isApiError } from "../../api/apiError";
 import { shouldShowOrderLoading } from "./utils/orderShowLoading";
 import { getDowelingOrderShowPath } from "./utils/dowelingOrderPaths";
 import { resolveOrderExportClientName, toOrderExportClient } from "./utils/orderExportClient";
-import { ordersApi } from "../../api/ordersApi";
+import { ordersApi, createOrderDeleteIdempotencyKey } from "../../api/ordersApi";
 import { OrderDeadlinePanel } from "./deadlines/OrderDeadlinePanel";
 import { GroupLinksEditor } from "./components/groups/GroupLinksEditor";
 import { AddToCutModal } from "./components/AddToCutModal";
@@ -117,6 +117,7 @@ import type { DetailCardLookups } from './mobile/detailCardModel';
 import { makeOrderDeleteHandler } from './orderDeleteAction';
 import { canDeleteOrderForUser } from './orderDeleteVisibility';
 import { makeRestoreHandler } from './orderRestoreAction';
+import { showMdfOrderConflictModal } from '../../utils/mdfOrderConflictModal';
 import { DeletedOrderCard } from './DeletedOrderCard';
 import { buildDeletedOrderCardModel } from './deletedOrderCard';
 import type { OrderDto } from "../../api/types/orderApi.types";
@@ -1818,6 +1819,18 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>(() => (
     readPositiveIntegerArray(restoredShowCheckpoint?.cutSelectedDetailIds)
   ));
+  /** order_details.quantity per selected detail, for the AddToBazisCutModal refill path
+   * (adding into an existing set on the new MDF engine) — that command needs each added
+   * detail's ACTUAL quantity and must never default a missing one to 1. */
+  const cutSelectedDetailQuantities = useMemo(() => {
+    const map: Record<number, number> = {};
+    for (const detail of details as any[]) {
+      if (typeof detail.detail_id === 'number' && Number.isInteger(detail.quantity)) {
+        map[detail.detail_id] = detail.quantity;
+      }
+    }
+    return map;
+  }, [details]);
   const [cutModalOpen, setCutModalOpen] = useState(
     () => restoredShowCheckpoint?.cutModalOpen === true,
   );
@@ -2673,6 +2686,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       return;
     }
 
+    // One Idempotency-Key for the whole attempt: the confirmation resend (if
+    // any) must reuse it so the backend sees it as the same delete request.
+    const deleteIdempotencyKey = createOrderDeleteIdempotencyKey();
+
     Modal.confirm({
       title: `Удалить заказ №${record.order_name}?`,
       content: 'Заказ попадёт в корзину, его можно будет восстановить.',
@@ -2684,12 +2701,17 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           const token = showAsyncReadGuard.capture();
           return token ? () => showAsyncReadGuard.isSameResource(token) : null;
         },
-        deleteFn: () => runPageOwnedWorkspaceOperation(
+        deleteFn: (confirmationDigest) => runPageOwnedWorkspaceOperation(
           tabKey,
           'order-delete',
-          () => ordersApi.delete(Number(record.order_id), {
-            version: Number(record.version ?? backendOrder?.version ?? 0),
-          }),
+          () => ordersApi.delete(
+            Number(record.order_id),
+            {
+              version: Number(record.version ?? backendOrder?.version ?? 0),
+              idempotencyKey: deleteIdempotencyKey,
+            },
+            confirmationDigest ? { confirmationDigest } : undefined,
+          ),
         ),
         onSuccess: () => {
           message.success('Заказ перемещён в корзину');
@@ -2703,6 +2725,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             onOk: () => window.location.reload(),
           }),
         onError: (m) => message.error(m),
+        onMdfConflict: (error, confirm) => {
+          showMdfOrderConflictModal(error, { onConfirm: confirm });
+        },
       }),
     });
   }, [
@@ -3098,6 +3123,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         },
         onStale: () => {
           void queryResult.refetch();
+        },
+        onMdfConflict: (error) => {
+          showMdfOrderConflictModal(error);
         },
       })
     : null;
@@ -4688,6 +4716,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 open={bazisCutModalOpen}
                 orderId={record.order_id}
                 detailIds={cutSelectedDetailIds}
+                detailQuantities={cutSelectedDetailQuantities}
                 onClose={() => setBazisCutModalOpen(false)}
                 onDone={() => {
                   setBazisCutModalOpen(false);

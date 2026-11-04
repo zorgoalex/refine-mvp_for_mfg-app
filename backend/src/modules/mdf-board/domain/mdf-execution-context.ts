@@ -11,6 +11,8 @@ export interface MdfExecutionContext {
   priorColumn: string | null;
   /** Explicit placement only. Omitted on v1 receipts; null clears an override. */
   manualPlacementColumn?: string | null;
+  /** Internal durable job effect policy. Omitted on old/ordinary receipts. */
+  effectPolicy?: 'forward' | 'publish_only';
   compositionComplete: boolean;
   demand: readonly MdfPositionQuantity[];
 }
@@ -20,7 +22,10 @@ export function mdfDemandDigest(rows: readonly MdfPositionQuantity[]): string {
     .map(d => [d.orderId,d.detailId,d.quantity]))).digest('hex');
 }
 
-export function snapshotMdfExecutionContext(input: MdfExecutionContext): MdfExecutionContext {
+/** `allowEmptyComplete`: only an order-level source may freeze an EMPTY complete demand (§5.7b terminal: the order has
+ * no MDF demand any more — deleted order, last MDF detail removed); card sources never may. */
+export function snapshotMdfExecutionContext(input: MdfExecutionContext,
+  options: { allowEmptyComplete?: boolean } = {}): MdfExecutionContext {
   const invalid = (): never => { throw new Error('MDF_EXECUTION_CONTEXT_INVALID'); };
   if (!input || typeof input.sourceCreatedAt !== 'string' || !Number.isFinite(Date.parse(input.sourceCreatedAt))
     || typeof input.displayName !== 'string' || !input.displayName.trim() || input.displayName.length > 2000
@@ -30,7 +35,9 @@ export function snapshotMdfExecutionContext(input: MdfExecutionContext): MdfExec
     || (input.manualPlacementColumn !== undefined && input.manualPlacementColumn !== null
       && !['parsed', 'completed', 'completed_laminated', 'baths', 'baths_ready', 'baths_laminated', 'completed_baths']
         .includes(input.manualPlacementColumn))
-    || !Array.isArray(input.demand) || (!input.demand.length && input.compositionComplete) || input.demand.length > 5000) invalid();
+    || (input.effectPolicy !== undefined && input.effectPolicy !== 'forward' && input.effectPolicy !== 'publish_only')
+    || !Array.isArray(input.demand) || (!input.demand.length && input.compositionComplete && !options.allowEmptyComplete)
+    || input.demand.length > 5000) invalid();
   const ids = new Set<number>(), orders = new Set<number>();
   const demand = input.demand.map(row => {
     try { mdfPositionKey(row); mdfQuantity(row.quantity); } catch { return invalid(); }
@@ -42,5 +49,6 @@ export function snapshotMdfExecutionContext(input: MdfExecutionContext): MdfExec
   return { sourceCreatedAt: new Date(input.sourceCreatedAt).toISOString(), displayName: input.displayName,
     priorColumn: input.priorColumn, compositionComplete: input.compositionComplete, demand,
     // Preserve old receipt digests: do not attach a field absent from v1 input.
-    ...(input.manualPlacementColumn === undefined ? {} : { manualPlacementColumn: input.manualPlacementColumn }) };
+    ...(input.manualPlacementColumn === undefined ? {} : { manualPlacementColumn: input.manualPlacementColumn }),
+    ...(input.effectPolicy === undefined ? {} : { effectPolicy: input.effectPolicy }) };
 }

@@ -41,7 +41,22 @@ describe('featureFlags', () => {
       useBackendWhatsApp: false,
       useBackendOnec: false,
       inventory: false,
+      mdfHybridBoard: true,
+      mdfBathDuplicates: false,
     });
+  });
+
+  it('keeps the hybrid MDF board on by default; env and runtime config can switch it off', () => {
+    expect(getFeatureFlags({}).mdfHybridBoard).toBe(true);
+    expect(getFeatureFlags({ VITE_MDF_HYBRID_BOARD: 'false' }).mdfHybridBoard).toBe(false);
+    expect(getFeatureFlags({}, { mdfHybridBoard: 'false' }).mdfHybridBoard).toBe(false);
+    expect(getFeatureFlags({ VITE_MDF_HYBRID_BOARD: 'false' }, { mdfHybridBoard: true }).mdfHybridBoard).toBe(true);
+  });
+
+  it('keeps «Разобрать дубль» off by default; runtime config switches it on', () => {
+    expect(getFeatureFlags({}).mdfBathDuplicates).toBe(false);
+    expect(getFeatureFlags({}, { mdfBathDuplicates: 'true' }).mdfBathDuplicates).toBe(true);
+    expect(getFeatureFlags({ VITE_MDF_BATH_DUPLICATES: 'true' }, { mdfBathDuplicates: false }).mdfBathDuplicates).toBe(false);
   });
 
   it('reads the clientScreen flag from env and runtime config, default off', () => {

@@ -1,4 +1,5 @@
 import type { TransactionClient } from '../../../database/database.types';
+import { mdfAttachedLines } from '../adapters/mdf-position-detachments';
 import { loadEvaluationUserWith } from '../../../permissions/user-authorization-snapshot';
 import { executePinnedMdfAutomation } from '../../status-automation/application/status-automation-runtime';
 import { executeMdfAllocation } from '../adapters/mdf-allocation-executor';
@@ -6,17 +7,41 @@ import { loadMdfExecutionDetails, mdfSourceKey } from '../adapters/mdf-execution
 import { publishMdfState } from '../adapters/mdf-publication';
 import { projectMdfAcceptedState, type MdfAcceptedSource, type MdfAcceptedLine } from '../domain/mdf-accepted-projection';
 import type { MdfQuantityEvidence } from '../domain/mdf-quantities';
+import { mdfPositionKey } from '../domain/mdf-quantities';
+import { mdfLineageRevisionKey } from '../domain/mdf-physical-lineage';
 import { MdfNeedsAttention, type MdfJob, type MdfPinnedRule } from './mdf-job-runner';
+import { applyMdfCncAuthorityEffects, loadMdfCncAuthority, lockAndReadMdfCncAutoCut } from './mdf-cnc-authority-job';
 
 /** Complete transactional effect handler, invoked by MdfJobRunner after its
  * claim/savepoint. The registered scheduler remains off until producers, reader
  * and cutover coverage are complete. No raw-source/legacy readiness fallback. */
 export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   rules: readonly MdfPinnedRule[]): Promise<'done'|'superseded'> {
+  // An internal re-publication (immutable marker, migration 277) keeps the sealed effect policy of its revision but only
+  // projects and publishes: no rule effects and no CNC authority effects, so it needs no CNC authority marker either.
+  const republish = await loadMdfRepublishMarker(tx, job);
+  // Classify and validate provenance before allocation. Observation revisions
+  // with a missing marker fail closed; origin=cnc alone is not authority.
+  const cncAuthority = republish ? null : await loadMdfCncAuthority(tx, job);
+  // Match the legacy AutoCut-setting lock order: setting/catalogue first,
+  // before allocation discovers and locks owners and source heads.
+  const cncAutoCutEnabled = cncAuthority ? await lockAndReadMdfCncAutoCut(tx) : false;
   const allocation = await executeMdfAllocation(tx,job.job_id,{ requireExecutionContext: true });
   if (allocation.status==='superseded') return 'superseded';
   const snapshot = allocation.executionSnapshot;
   if (allocation.status!=='allocated' || !snapshot) throw new MdfNeedsAttention('MDF_JOB_CONTEXT_UNAVAILABLE');
+  // Assignment-only acceptance keeps accounting/publication, never production effects.
+  const composition = allocation.compositionAcceptance;
+  if (composition && (composition.jobId !== job.job_id || cncAuthority !== null || rules.length !== 0)) {
+    throw new MdfNeedsAttention('MDF_COMPOSITION_JOB_CONFLICT');
+  }
+  const effectPolicy = job.effect_policy ?? 'forward';
+  const contextPolicy = snapshot.metadata.get(mdfSourceKey({ kind: job.source_kind,id: job.source_id }))?.effectPolicy;
+  if ((effectPolicy !== 'forward' && effectPolicy !== 'publish_only')
+    || (contextPolicy !== undefined && contextPolicy !== effectPolicy)
+    || (effectPolicy === 'publish_only' && contextPolicy !== 'publish_only')) {
+    throw new MdfNeedsAttention('MDF_JOB_POLICY_MISMATCH');
+  }
   const previous = (await tx.query<{ kind: string; id: string; column: string|null }>(`SELECT p.source_kind kind,p.source_id id,p.column_key "column"
     FROM mdf_published_sources p JOIN unnest($1::text[],$2::text[]) h(kind,id)
       ON p.source_kind=h.kind AND p.source_id=h.id`,
@@ -26,10 +51,14 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   const declarations: MdfQuantityEvidence[] = [];
   const positionWarnings: { orderId: number; detailId: number; issues: readonly string[] }[]=[];
   for (const h of allocation.sourceHeads) {
+    // §5.4b: a retired bath leaves the board (its history stays in audit/evidence).
+    if (snapshot.retired.has(mdfSourceKey(h))) continue;
     const issues = [...new Set([...(snapshot.issues.get(mdfSourceKey(h)) ?? ['MDF_CONTEXT_REQUIRED']),
       ...allocation.quarantine.filter(q => q.sourceKind===h.kind && q.sourceId===h.id).map(q => q.code)])].sort();
-    const own = allocation.sourceLines.filter(l => l.kind===h.kind && l.id===h.id
-      && l.revision===h.received);
+    // §5.4e: lines at a position detached in this source are history only (surplus), never members/credit.
+    const attached = mdfAttachedLines(snapshot.detached,allocation.sourceLines.filter(l => l.kind===h.kind && l.id===h.id));
+    const own = (h.kind==='order' || h.kind==='orderDetail' ? attached : allocation.sourceLines)
+      .filter(l => l.kind===h.kind && l.id===h.id && l.revision===h.received);
     const lines = own.map((l): MdfAcceptedLine => {
       const evidence = l.evidence;
       if (evidence!=='physical' && evidence!=='declaration' && evidence!=='derived') throw new MdfNeedsAttention('MDF_INVALID_EVIDENCE');
@@ -37,7 +66,7 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
     });
     if (h.kind==='order' || h.kind==='orderDetail') {
       if (h.accepted!==h.received) issues.push('ACCEPTANCE_PENDING');
-      if (issues.length) for (const l of allocation.sourceLines.filter(l => l.kind===h.kind && l.id===h.id)) {
+      if (issues.length) for (const l of attached) {
         positionWarnings.push({ orderId: l.orderId,detailId: l.detailId,issues });
       }
       if (!issues.length && h.accepted===h.received) for (const l of lines) {
@@ -50,6 +79,11 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
     sources.push({ ...h, kind: h.kind, verified: issues.length===0,
       manualPlacementColumn: snapshot.metadata.get(mdfSourceKey(h))?.manualPlacementColumn ?? null,
       priorColumn: previousColumns.get(mdfSourceKey(h)) ?? snapshot.metadata.get(mdfSourceKey(h))?.priorColumn ?? null, issues,
+      assignmentState:h.kind==='bazisCutSet'&&h.accepted===h.received
+        ? snapshot.assignmentStates.get(mdfLineageRevisionKey(h,h.received)) : undefined,
+      lineage:h.kind==='bazisCutSet'&&h.accepted===h.received
+        ? snapshot.lineage.get(mdfLineageRevisionKey(h,h.received)) : undefined,
+      detachedPositionKeys: snapshot.detached.get(mdfSourceKey(h)),
       lines });
   }
   const trigger = { kind: job.source_kind,id: job.source_id };
@@ -61,21 +95,85 @@ export async function executeMdfAcceptedJob(tx: TransactionClient, job: MdfJob,
   const input = { trigger, sources, declarations, positionWarnings, details: snapshot.details, thresholds,
     readyBathIds: allocation.readyBathIds, blockedPositionKeys: allocation.blockedPositionKeys };
   const resolved = projectMdfAcceptedState(input);
+  // A correction records per-job/per-order fences without locking or changing
+  // old job rows (the worker lock order is job -> owners). Read them only after
+  // executeMdfAllocation has acquired the complete sorted owner closure. The
+  // job still publishes/accounting-projects all accepted facts; only pinned
+  // forward effects for corrected orders are suppressed.
+  const fenced = (await tx.query<{ affected_order_id: string }>(`SELECT affected_order_id::text
+    FROM mdf_correction_job_effect_suppressions WHERE job_id=$1 ORDER BY affected_order_id`,[job.job_id])).rows;
+  const suppressedOrderIds = new Set(fenced.map(row => {
+    const id = Number(row.affected_order_id);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new MdfNeedsAttention('MDF_JOB_EFFECT_FENCE_INVALID');
+    return id;
+  }));
+  // §5.7b: a closed order (historical status closure) never receives rule effects; its status stays as it is.
+  const closedOrderIds = new Set(allocation.closedOrderIds);
+  const openOrderIds = allocation.orderIds.filter(id => !closedOrderIds.has(id));
+  let ruleEvents = composition || republish ? [] : resolved.events.filter(event => !suppressedOrderIds.has(event.orderId)
+    && !closedOrderIds.has(event.orderId));
+  let changedCompositionOrderIds: number[] = [];
+  if (!composition && cncAuthority) {
+    const verifiedSourceKeys = new Set(resolved.cards.filter(card => card.verified)
+      .map(card => mdfSourceKey({ kind: card.kind, id: card.id })));
+    const cncEffects = await applyMdfCncAuthorityEffects(tx, { job, authority: cncAuthority,
+      heads: allocation.sourceHeads, sources, details: snapshot.details, orderIds: openOrderIds, verifiedSourceKeys,
+      suppressedOrderIds, enabled: cncAutoCutEnabled });
+    const completed = new Set(cncEffects.completedOrderIds);
+    // Completed business headers are protected from every ordinary event for
+    // this CNC job. When direct AutoCut is enabled, the packet's completion is
+    // represented by the dedicated effect rather than a duplicate rule-17 pass.
+    ruleEvents = ruleEvents.filter(event => !completed.has(event.orderId)
+      && !(cncAutoCutEnabled && event.eventType === 'mdf.board.completed'
+        && event.scope.source.kind === 'packet' && event.scope.source.id === cncAuthority.packetId));
+    changedCompositionOrderIds = cncEffects.changedOrderIds
+      .filter(orderId => !completed.has(orderId) && !suppressedOrderIds.has(orderId));
+  }
   // Accepted business facts outlive actor accounts. A missing actor never gets
   // fabricated admin authority; retain accounting, omit rule effects, expose why.
-  const user = job.actor_user_id ? (await tx.query<{ user_id: string; username: string; role_id: number }>(
+  const user = !composition && !republish && job.actor_user_id ? (await tx.query<{ user_id: string; username: string; role_id: number }>(
     'SELECT user_id,username,role_id FROM users WHERE user_id=$1 AND is_active',[job.actor_user_id])).rows[0] : null;
   // Effective authorization of the living actor (same snapshot as the token), read in this transaction.
   const actor = user ? await loadEvaluationUserWith(tx, user.user_id) : null;
-  if (actor) await executePinnedMdfAutomation(tx,{ actor, requestId: job.request_id, sourceIdempotencyKey: job.event_key,
-    pins: rules.map(r => ({ ruleId: Number(r.rule_id), version: Number(r.rule_version) })), events: resolved.events });
+  if (!composition && actor && effectPolicy === 'forward' && (ruleEvents.length || changedCompositionOrderIds.length)) {
+    await executePinnedMdfAutomation(tx,{ actor, requestId: job.request_id, sourceIdempotencyKey: job.event_key,
+      pins: rules.map(r => ({ ruleId: Number(r.rule_id), version: Number(r.rule_version) })), events: ruleEvents,
+      ...(changedCompositionOrderIds.length ? { productionCompositionOrderIds: changedCompositionOrderIds } : {}) });
+  }
   // Actions can change ranks; republish placement from the SAME locked evidence
   // and post-action detail snapshot. They cannot create new physical quantities.
   const final = projectMdfAcceptedState({ ...input, details: await loadMdfExecutionDetails(tx,allocation.orderIds) });
-  if (!actor && rules.length) {
-    for (const card of final.cards) card.issues.push('MDF_ACTOR_UNAVAILABLE');
-    for (const issues of final.positionIssues.values()) issues.push('MDF_ACTOR_UNAVAILABLE');
+  if (!composition && !actor && rules.length && effectPolicy === 'forward' && (ruleEvents.length || changedCompositionOrderIds.length)) {
+    const eligibleOrders = new Set(ruleEvents.map(event => event.orderId));
+    for (const orderId of changedCompositionOrderIds) eligibleOrders.add(orderId);
+    for (const card of final.cards) if (card.orderIds.some(id => eligibleOrders.has(id))) card.issues.push('MDF_ACTOR_UNAVAILABLE');
+    const eligiblePositions = new Set(snapshot.details.filter(d => eligibleOrders.has(d.orderId)).map(mdfPositionKey));
+    // The warning is appended after projection (and therefore after the
+    // card-to-position issue fanout); attach it only to eligible positions.
+    for (const position of eligiblePositions) {
+      if (!final.positionIssues.has(position)) continue;
+      final.positionIssues.set(position,[...new Set([...final.positionIssues.get(position)!,
+        'MDF_ACTOR_UNAVAILABLE'])].sort());
+    }
   }
-  await publishMdfState(tx,{ job, orderIds: allocation.orderIds, sources, metadata: snapshot.metadata, state: final });
+  // Order aggregates: open orders of the scope; a closed order only in its own closure job (never from a partial
+  // source snapshot).
+  // An order-level job always owns its order's aggregates (closure, carried coverage, or terminal empty demand ⇒ removal).
+  const closureTrigger = job.source_kind === 'order' && !openOrderIds.includes(Number(job.source_id)) ? [Number(job.source_id)] : [];
+  await publishMdfState(tx,{ job, orderIds: allocation.orderIds, positionOrderIds: [...openOrderIds, ...closureTrigger],
+    sources, metadata: snapshot.metadata, state: final,
+    retired: allocation.sourceHeads.filter(h => snapshot.retired.has(mdfSourceKey(h))),
+    declaredCoverage: allocation.declaredCoverage,
+    ...(republish ? { republish } : {}) });
   return 'done';
+}
+
+export interface MdfRepublishMarker { runId: string; commandKey: string; actorUserId: string; requestId: string }
+
+/** The immutable re-publication marker of this job (migration 277), or null for an ordinary job. */
+export async function loadMdfRepublishMarker(tx: TransactionClient, job: MdfJob): Promise<MdfRepublishMarker | null> {
+  if (!(await tx.query<{ ok: boolean }>(`SELECT to_regclass('mdf_republish_jobs') IS NOT NULL ok`)).rows[0]?.ok) return null;
+  return (await tx.query<MdfRepublishMarker>(`SELECT run_id "runId",command_key "commandKey",
+    actor_user_id::text "actorUserId",request_id "requestId" FROM mdf_republish_jobs WHERE job_id=$1::uuid`,
+  [job.job_id])).rows[0] ?? null;
 }

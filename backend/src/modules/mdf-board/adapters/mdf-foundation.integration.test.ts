@@ -26,11 +26,17 @@ describe.skipIf(!enabled)('MDF foundation real PostgreSQL', () => {
     } };
   }
   const migration = readFileSync(new URL('../../../../db/migrations/165_mdf_engine_foundation.sql', import.meta.url), 'utf8');
+  const executionMigration = readFileSync(new URL('../../../../db/migrations/174_mdf_execution_context.sql', import.meta.url), 'utf8');
+  const placementMigration = readFileSync(new URL('../../../../db/migrations/175_mdf_command_placement.sql', import.meta.url), 'utf8');
+  const correctionMigration = readFileSync(new URL('../../../../db/migrations/178_mdf_correction_receipts.sql', import.meta.url), 'utf8');
   const digest = 'a'.repeat(64);
   beforeAll(async () => {
     await client.connect();
     await client.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
     await client.query(migration);
+    await client.query(executionMigration);
+    await client.query(placementMigration);
+    await client.query(correctionMigration);
     await client.query(`INSERT INTO mdf_evidence_revisions
       (source_kind,source_id,revision_key,payload_digest,origin,request_id,cause_key)
       VALUES('packet','E2E-file','1',$1,'cnc','E2E-request','E2E-cause')`, [digest]);

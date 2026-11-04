@@ -5,6 +5,7 @@ import { PgBazisCutRepository } from './adapters/pg-bazis-cut-repository';
 import { BazisCutService } from './application/bazis-cut.service';
 import { BazisCutRuntimeConfigService } from './http/bazis-cut-runtime-config.service';
 import { BazisCutSetsController } from './http/bazis-cut-sets.controller';
+import { PgMdfBazisCompositionCommand } from '../mdf-board/adapters/mdf-bazis-composition-command';
 import { ExportTemplatesModule } from '../export-templates/export-templates.module';
 import { ExportTemplatesService } from '../export-templates/application/export-templates.service';
 
@@ -13,6 +14,11 @@ import { ExportTemplatesService } from '../export-templates/application/export-t
   controllers: [BazisCutSetsController],
   providers: [
     BazisCutRuntimeConfigService,
+    {
+      provide: PgMdfBazisCompositionCommand,
+      useFactory: (database: DatabaseService) => new PgMdfBazisCompositionCommand(database),
+      inject: [DatabaseService],
+    },
     {
       provide: BazisCutService,
       useFactory: (database: DatabaseService, exportTemplates: ExportTemplatesService) =>

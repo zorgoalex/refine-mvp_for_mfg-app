@@ -22,11 +22,13 @@ import { PgOrderExporter } from './adapters/pg-order-exporter';
 import { PgOrderReadRepository } from './adapters/pg-order-read-repository';
 import { PgOrderResourceDemandRepository } from './adapters/pg-order-resource-demand-repository';
 import { PgOrderStatusBoardRepository } from './adapters/pg-order-status-board-repository';
+import { PgMdfBathDuplicateRepository } from './adapters/pg-mdf-bath-duplicate-repository';
 import { PgMdfBoardManualMoveRepository } from './adapters/pg-mdf-board-manual-move-repository';
 import { PgOrderSnapshot } from './adapters/pg-order-snapshot';
 import { PgOrderGroupLinkRepository, UnavailableOrderGroupLinkRepository } from './adapters/pg-order-group-link-repository';
 import { PgOrderTransactionManager } from './adapters/pg-order-transaction-manager';
 import { assertBazisPanelOrderLinkSchema } from './adapters/pg-bazis-panel-order-link-reconciler';
+import { UnavailableMdfBathDuplicateRepository } from './adapters/unavailable-mdf-bath-duplicate-repository';
 import { UnavailableMdfBoardManualMoveRepository } from './adapters/unavailable-mdf-board-manual-move-repository';
 import { UnavailableOrderExporter } from './adapters/unavailable-order-exporter';
 import { UnavailableOrderReadRepository } from './adapters/unavailable-order-read-repository';
@@ -42,14 +44,18 @@ import { OrderRefreshService } from './application/order-refresh.service';
 import { OrderHdfSettingsService } from './application/order-hdf-settings.service';
 import { OrderResourceDemandService } from './application/order-resource-demand.service';
 import { OrderStatusBoardService } from './application/order-status-board.service';
+import { MdfBathDuplicateService } from './application/mdf-bath-duplicate.service';
 import { MdfBoardManualMoveService } from './application/mdf-board-manual-move.service';
+import { MdfActiveProductionReturnService } from './application/mdf-active-production-return.service';
 import { RateLimitService } from '../../rate-limit/rate-limit.service';
 import { UnavailableOrderTransactionManager } from './adapters/unavailable-order-transaction-manager';
 import { SharedOrderExportRateLimiter } from './application/order-export-rate-limiter';
 import { OrderExportController } from './http/order-export.controller';
 import { OrderGroupLinksController } from './http/order-group-links.controller';
+import { MdfBathDuplicateController } from './http/mdf-bath-duplicate.controller';
 import { MdfBoardManualMoveController } from './http/mdf-board-manual-move.controller';
 import { MdfProductionReturnController } from './http/mdf-production-return.controller';
+import { MdfActiveProductionReturnController, MdfEngineModeController } from './http/mdf-active-production-return.controller';
 import { OrderResourceDemandController } from './http/order-resource-demand.controller';
 import { OrderResourceProcurementController } from './http/order-resource-procurement.controller';
 import { OnecDocumentsController } from './http/onec-documents.controller';
@@ -101,6 +107,9 @@ export function shouldEnableOrderDeadlineSync(input: {
   controllers: [
     // Register static `/orders/*` routes before the generic `/orders/:orderId`.
     MdfBoardManualMoveController,
+    MdfBathDuplicateController,
+    MdfActiveProductionReturnController,
+    MdfEngineModeController,
     MdfProductionReturnController,
     OrderStatusBoardController,
     OrderExportController,
@@ -367,6 +376,21 @@ export function shouldEnableOrderDeadlineSync(input: {
             ? new PgMdfBoardManualMoveRepository(database)
             : new UnavailableMdfBoardManualMoveRepository(),
         }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: MdfBathDuplicateService,
+      useFactory: (database: DatabaseService) =>
+        new MdfBathDuplicateService({
+          duplicates: database.isConfigured
+            ? new PgMdfBathDuplicateRepository(database)
+            : new UnavailableMdfBathDuplicateRepository(),
+        }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: MdfActiveProductionReturnService,
+      useFactory: (database: DatabaseService) => new MdfActiveProductionReturnService(database),
       inject: [DatabaseService],
     },
     {

@@ -97,10 +97,33 @@ export interface BazisCutSetDetailDto extends BazisCutDetailFields {
   updatedAt: string;
 }
 
+/** Readiness for the production-safe composition command (new MDF engine). Absent on the
+ * legacy engine; present (possibly unavailable) once a set is under the new engine. */
+export type MdfCompositionUnavailableReason =
+  | 'MDF_ENGINE_NOT_ACTIVE'
+  | 'MDF_ENGINE_READ_ONLY'
+  | 'MDF_SOURCE_NOT_REGISTERED'
+  | 'MDF_PUBLICATION_PENDING'
+  | 'MDF_SOURCE_ISSUES'
+  | 'MDF_PARTIAL_ACCESS';
+
+export interface BazisCutMdfComposition {
+  available: boolean;
+  /** Concurrency token for the composition command, NOT an authorization token. */
+  sourceToken: string | null;
+  reason: MdfCompositionUnavailableReason | null;
+  /** Server-resolved rows eligible for the composition command (ordinary MDF rows); HDF
+   * rows, non-MDF materials and cut-disabled rows are excluded and preserved raw by the
+   * server. GET-only: absent (or stale) on a mutation response that omits mdfComposition
+   * entirely. rowId = String(bazisCutSetDetailId). */
+  eligibleRowIds: string[];
+}
+
 export interface BazisCutSetCardDto extends BazisCutSetListItemDto {
   createdBy: number | null;
   updatedBy: number | null;
   details: BazisCutSetDetailDto[];
+  mdfComposition?: BazisCutMdfComposition;
 }
 
 export interface BazisCutMutationResultDto {
@@ -236,6 +259,99 @@ export interface BazisCutCommandOptions {
   idempotencyKey: string;
 }
 
+/** Complete desired eligible-row list for a composition change; an omitted row is deleted,
+ * an empty array empties the set. Each entry is EITHER an existing eligible row (rowId =
+ * bazisCutSetDetailId as a decimal string) OR a REFILL row: a NEW row the backend builds
+ * server-side from an order detail (newDetailId) belonging to one of the set's current
+ * owner orders. The two shapes are mutually exclusive (never both keys on one entry). */
+export type BazisCutCompositionDesiredRow =
+  | { rowId: string; quantity: number }
+  | { newDetailId: number; quantity: number };
+
+export interface BazisCutCompositionPreviewRequest {
+  /** Canonical positive decimal bazis_cut_sets.version observed by the caller. */
+  expectedVersion: string;
+  sourceToken: string;
+  desiredRows: BazisCutCompositionDesiredRow[];
+}
+
+export interface BazisCutCompositionConfirmRequest extends BazisCutCompositionPreviewRequest {
+  expectedDigest: string;
+}
+
+export interface BazisCutCompositionAssignmentChange {
+  rowId: string;
+  orderId: string;
+  detailId: string;
+  before: number;
+  after: number;
+  /** Present only for a REFILL row (a new row built from this order detail); rowId for such
+   * a row is a synthetic `new:<detailId>` key, not a bazisCutSetDetailId. */
+  newDetailId?: string;
+}
+
+export interface BazisCutCompositionRetainedPhysical {
+  orderId: number;
+  detailId: number;
+  quantity: number;
+  stage: 'cut' | 'laminated';
+  rework: boolean;
+}
+
+export interface BazisCutCompositionPreservedAllocation {
+  allocationId: string;
+  bathId: string;
+  bathRevision: string;
+  orderId: number;
+  detailId: number;
+  quantity: number;
+  state: 'reserved' | 'consumed';
+}
+
+export interface BazisCutCompositionBlocker {
+  code: string;
+  sourceId?: string;
+  allocationId?: string;
+  position?: string;
+}
+
+export type BazisCutCompositionPreviewResponse =
+  | {
+      status: 'ready' | 'unchanged';
+      beforeVersion: string;
+      previewDigest: string;
+      assignmentChanges: BazisCutCompositionAssignmentChange[];
+      retainedPhysical: BazisCutCompositionRetainedPhysical[];
+      preservedAllocations: BazisCutCompositionPreservedAllocation[];
+      blockers: [];
+    }
+  | {
+      status: 'blocked';
+      beforeVersion: string;
+      previewDigest: null;
+      assignmentChanges: [];
+      retainedPhysical: [];
+      preservedAllocations: [];
+      blockers: BazisCutCompositionBlocker[];
+    };
+
+export type BazisCutCompositionConfirmResponse =
+  | {
+      status: 'queued';
+      jobId: string;
+      intentId: string;
+      assignmentStateId: string;
+      auditId: string;
+      outboxId: string;
+      version: string;
+      replay: boolean;
+    }
+  | {
+      status: 'unchanged';
+      beforeVersion: string;
+      replay: boolean;
+    };
+
 export interface BazisCutExportFile {
   blob: Blob;
   fileName: string | null;
@@ -254,7 +370,12 @@ export const bazisCutSetRoutes = {
   detail: (setId: number, detailId: number) =>
     `${bazisCutSetRoutes.details(setId)}/${validateId(detailId, 'detailId')}`,
   exportXls: (setId: number) => `${bazisCutSetRoutes.byId(setId)}/export.xls`,
+  compositionPreview: (setId: number) => `${bazisCutSetRoutes.byId(setId)}/composition/preview`,
+  compositionConfirm: (setId: number) => `${bazisCutSetRoutes.byId(setId)}/composition/confirm`,
 } as const;
+
+/** The confirm Idempotency-Key must also satisfy the backend's stricter command-key charset. */
+const COMPOSITION_IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 
 /** Backend-owned client for all eight Bazis-cut set routes. */
 export const bazisCutApi = {
@@ -377,6 +498,37 @@ export const bazisCutApi = {
     });
   },
 
+  previewComposition(
+    setId: number,
+    request: BazisCutCompositionPreviewRequest,
+  ): Promise<BazisCutCompositionPreviewResponse> {
+    validateCompositionPreviewRequest(request);
+    return httpClient.post<BazisCutCompositionPreviewResponse>(
+      bazisCutSetRoutes.compositionPreview(setId),
+      request,
+    );
+  },
+
+  confirmComposition(
+    setId: number,
+    request: BazisCutCompositionConfirmRequest,
+    idempotencyKey: string,
+  ): Promise<BazisCutCompositionConfirmResponse> {
+    validateCompositionPreviewRequest(request);
+    if (typeof request.expectedDigest !== 'string' || !/^[a-f0-9]{64}$/.test(request.expectedDigest)) {
+      throw new Error('Invalid expectedDigest');
+    }
+    if (typeof idempotencyKey !== 'string' || idempotencyKey.length < 8 || idempotencyKey.length > 200
+      || !COMPOSITION_IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+      throw new Error('Invalid idempotencyKey');
+    }
+    return httpClient.post<BazisCutCompositionConfirmResponse>(
+      bazisCutSetRoutes.compositionConfirm(setId),
+      request,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
+  },
+
   async exportXls(setId: number, templateId?: number): Promise<BazisCutExportFile> {
     const url = templateId ? `${bazisCutSetRoutes.exportXls(setId)}?templateId=${validateId(templateId, 'templateId')}` : bazisCutSetRoutes.exportXls(setId);
     const { blob, fileName } = await httpClient.download(url, {
@@ -446,6 +598,28 @@ function parseDateOnly(value: string): number | null {
   const timestamp = Date.parse(`${value}T00:00:00.000Z`);
   return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value
     ? timestamp : null;
+}
+
+function validateCompositionPreviewRequest(request: BazisCutCompositionPreviewRequest): void {
+  if (!request || typeof request.expectedVersion !== 'string' || !/^[1-9][0-9]{0,18}$/.test(request.expectedVersion)) {
+    throw new Error('Invalid expectedVersion');
+  }
+  if (typeof request.sourceToken !== 'string' || !/^[a-f0-9]{64}$/.test(request.sourceToken)) {
+    throw new Error('Invalid sourceToken');
+  }
+  if (!Array.isArray(request.desiredRows) || request.desiredRows.length > 5000
+    || request.desiredRows.some((row) => !isValidDesiredRow(row))) {
+    throw new Error('Invalid desiredRows');
+  }
+}
+
+function isValidDesiredRow(row: BazisCutCompositionDesiredRow): boolean {
+  if (!row || !Number.isInteger(row.quantity) || row.quantity < 1 || row.quantity > 1_000_000) return false;
+  const hasRowId = 'rowId' in row;
+  const hasNewDetailId = 'newDetailId' in row;
+  if (hasRowId === hasNewDetailId) return false; // exactly one of the two shapes, never both/neither
+  if (hasRowId) return typeof row.rowId === 'string' && /^[1-9][0-9]{0,18}$/.test(row.rowId);
+  return Number.isInteger(row.newDetailId) && row.newDetailId > 0;
 }
 
 function validatePageValue(value: number, field: string): number {

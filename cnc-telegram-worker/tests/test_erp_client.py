@@ -364,6 +364,50 @@ class ErpClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(payload["truncated"])
         self.assertIn("sourceFiles", candidate)
 
+    async def test_mdf_observation_calls_use_session_bound_claim_complete_and_fail_routes(self) -> None:
+        claim_payload = {"claim": {"claimId": "f7f6d9ab-1791-41b7-99ae-31a3bfe38880"}}
+        fake_http = FakeAsyncClient([
+            response(200, claim_payload),
+            response(200, {"status": "recorded"}),
+            response(200, {"failed": True}),
+        ])
+        client = ErpClient("http://backend/api/v1", BackendAuth(bearer_token="test-token"))
+        client.set_worker_identity("00000000-0000-4000-8000-000000000001")
+        client.set_session_lease(WorkerSessionLease("l" * 64, 9))
+        client.session_chat_id = "-100123"
+        report = {
+            "claimId": "f7f6d9ab-1791-41b7-99ae-31a3bfe38880",
+            "claimToken": "c" * 64,
+            "claimGeneration": 1,
+            "messages": [{
+                "messageId": 42,
+                "chatId": "-100123",
+                "role": "svg",
+                "sha256": "a" * 64,
+                "present": True,
+                "thumbsUp": False,
+            }],
+        }
+
+        with patch("cnc_telegram_worker.erp_client.httpx.AsyncClient", return_value=fake_http):
+            self.assertEqual(await client.claim_mdf_cnc_observation(), claim_payload)
+            await client.complete_mdf_cnc_observation(report["claimId"], report)
+            await client.fail_mdf_cnc_observation(report["claimId"], "c" * 64, 1, "FETCH_FAILED")
+
+        self.assertEqual([request[0][0] for request in fake_http.requests], [
+            "http://backend/api/v1/cnc-telegram/observation-worker/claim",
+            "http://backend/api/v1/cnc-telegram/observation-worker/claims/f7f6d9ab-1791-41b7-99ae-31a3bfe38880/complete",
+            "http://backend/api/v1/cnc-telegram/observation-worker/claims/f7f6d9ab-1791-41b7-99ae-31a3bfe38880/fail",
+        ])
+        self.assertEqual(fake_http.requests[1][1]["json"], report)
+        self.assertEqual(fake_http.requests[2][1]["json"], {
+            "claimToken": "c" * 64,
+            "claimGeneration": 1,
+            "reason": "FETCH_FAILED",
+        })
+        for _args, kwargs in fake_http.requests:
+            self.assertEqual(kwargs["headers"]["X-CNC-Telegram-Session-Generation"], "9")
+
 
 if __name__ == "__main__":
     unittest.main()

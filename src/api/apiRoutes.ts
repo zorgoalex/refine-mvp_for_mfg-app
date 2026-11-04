@@ -73,6 +73,11 @@ export const apiRoutes = {
     statusBoardMdfPublished: backendApiPath('/orders/status-board/mdf'),
     statusBoardMdfManualMove: (cardKind: string, cardId: string) =>
       backendApiPath(`/orders/status-board/mdf-manual-moves/${encodeURIComponent(cardKind)}/${encodeURIComponent(cardId)}`),
+    statusBoardMdfEngineMode: backendApiPath('/orders/status-board/mdf-engine'),
+    statusBoardMdfBathDuplicates: backendApiPath('/orders/status-board/mdf-bath-duplicates'),
+    statusBoardMdfBathDuplicatesResolve: backendApiPath('/orders/status-board/mdf-bath-duplicates/resolve'),
+    statusBoardMdfCorrection: (cardKind: string, cardId: string) =>
+      backendApiPath(`/orders/status-board/mdf-corrections/${encodeURIComponent(cardKind)}/${encodeURIComponent(cardId)}`),
     byId: (orderId: number) => backendApiPath(`/orders/${orderId}`),
     recalculateHdf: (orderId: number) => backendApiPath(`/orders/${orderId}/recalculate-hdf`),
     refresh: (orderId: number) => backendApiPath(`/orders/${orderId}/refresh`),

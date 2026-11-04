@@ -531,6 +531,8 @@ export class OrderTransactionService {
       }
 
       this.requireUpdateScope(command, lockedOrder);
+      const mdf = await unitOfWork.openMdfOrderCommand?.('orders.update');
+      await mdf?.captureBefore([command.orderId]);
 
       const clientVersion = this.extractClientVersion(command.dto.version, lockedOrder.version);
 
@@ -778,9 +780,13 @@ export class OrderTransactionService {
           detailIdsByClientKey,
         });
       }
+      // Last write step: MDF consequence of the final detail state (incl. in-tx automation).
+      await mdf?.finish({ user: command.currentUser, requestId: automationRequestId,
+        commandKey: `orders.update:${command.orderId}:v${version}`, orderIds: [command.orderId],
+        confirmation: command.mdfConfirmation ?? null });
 
       return this.readAndAssertVersion(unitOfWork, command.orderId, version, command);
-    });
+    }, { mdfWriter: 'orders.update' });
 
     await this.ports.deadlineSync?.syncOrderDeadlinesAfterSave({
       orderId: command.orderId,
@@ -802,6 +808,8 @@ export class OrderTransactionService {
         throw new OrderNotFoundError(command.orderId);
       }
       this.requireUpdateScope(command, lockedOrder);
+      const mdf = await unitOfWork.openMdfOrderCommand?.('orders.recalculate_hdf');
+      await mdf?.captureBefore([command.orderId]);
 
       await unitOfWork.reconcileHdfDetails({
         orderId: command.orderId,
@@ -809,12 +817,14 @@ export class OrderTransactionService {
         requestId: command.requestId,
       });
       await unitOfWork.recalcOrderProductionStatus(command.orderId);
+      await mdf?.finish({ user: command.currentUser, requestId: command.requestId ?? 'orders-recalculate-hdf',
+        commandKey: `orders.recalculate_hdf:${command.orderId}:v${lockedOrder.version}`, orderIds: [command.orderId] });
 
       return this.filterOrderForReadPermissions(
         await unitOfWork.readOrder(command.orderId),
         command,
       );
-    });
+    }, { mdfWriter: 'orders.recalculate_hdf' });
 
     await this.ports.deadlineSync?.syncOrderDeadlinesAfterSave({
       orderId: command.orderId,
@@ -847,6 +857,8 @@ export class OrderTransactionService {
       if (command.version !== lockedOrder.version) {
         throw new OrderVersionConflictError(lockedOrder.version, command.version);
       }
+      const mdf = await unitOfWork.openMdfOrderCommand?.('orders.delete');
+      await mdf?.captureBefore([command.orderId]);
 
       const nextVersion = await unitOfWork.softDeleteOrder({
         orderId: command.orderId,
@@ -869,6 +881,9 @@ export class OrderTransactionService {
         idempotencyKey: command.idempotencyKey,
       });
 
+      await mdf?.finish({ user: command.currentUser, requestId,
+        commandKey: `orders.delete:${command.orderId}:v${nextVersion}`, orderIds: [command.orderId],
+        confirmation: command.mdfConfirmation ?? null });
       const response: DeleteOrderResponseDto = {
         success: true,
         orderId: command.orderId,
@@ -878,7 +893,7 @@ export class OrderTransactionService {
       await unitOfWork.completeOrderDeleteIdempotency(command.idempotencyKey, response);
 
       return response;
-    });
+    }, { mdfWriter: 'orders.delete' });
   }
 
   async restore(command: RestoreOrderCommand): Promise<RestoreOrderResponseDto> {
@@ -939,6 +954,8 @@ export class OrderTransactionService {
         }
 
         await unitOfWork.assertOrderNameAvailable({ orderName: effectiveTargetName });
+        const mdf = await unitOfWork.openMdfOrderCommand?.('orders.restore');
+        await mdf?.captureBefore([command.orderId]);
 
         const nextVersion = await unitOfWork.restoreOrder({
           orderId: command.orderId,
@@ -971,11 +988,13 @@ export class OrderTransactionService {
           actor: command.currentUser, requestId,
           sourceIdempotencyKey: `${command.idempotencyKey}:production-composition`,
         });
+        await mdf?.finish({ user: command.currentUser, requestId,
+          commandKey: `orders.restore:${command.orderId}:v${nextVersion}`, orderIds: [command.orderId] });
         const order = await unitOfWork.readOrder(command.orderId);
         const response: RestoreOrderResponseDto = { order, auditId, requestId };
         await unitOfWork.completeOrderRestoreIdempotency(command.idempotencyKey, response);
         return response;
-      });
+      }, { mdfWriter: 'orders.restore' });
     } catch (error) {
       if (this.shouldMarkRestoreIdempotencyFailed(error)) {
         // Burn is awaited before rethrow so the client's next sequential retry

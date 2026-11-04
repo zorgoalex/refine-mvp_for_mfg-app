@@ -4,15 +4,25 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { policyScopeSetsForUser } from '../../../permissions/policies/scope';
 import type { MdfJobDatabase } from '../application/mdf-job-runner';
 import { mdfSourceCommandToken } from '../domain/mdf-manual-proof';
+import { loadMdfEffectivePlacement } from './mdf-effective-placement';
+import { mdfSourceKey } from './mdf-execution-snapshot';
+import { loadMdfPublishedPresentation, loadMdfUnregisteredSources } from './mdf-published-presentation';
 
 export interface MdfPublishedQuery {
   dateTo?: string;
+  /** §5.8 default display cut (legacy parity): cards are shown only when their legacy display date is on/after this day
+   * (packet workday, BASIS set creation, bath result creation); default = dateTo − 6 days (period «1w»). Bounded to the
+   * two-month window. Focus and search bypass it; owners/positions/progress stay on the two-month window. */
+  displayFrom?: string;
   focus?: { kind: 'packet'|'bazisCutSet'|'bath'; id: string };
   /** Current order cards selected by the caller. Visibility only; quantities
    * still come from the complete accepted ledger, never the visible files. */
   orderIds?: readonly number[];
   /** Exact command jobs, independent of card period and current source head. */
   jobIds?: readonly string[];
+  /** §5.6 search: ALSO select the cards (old/completed included) of these orders, each authorized first. Distinct from
+   * `orderIds`, which only adds position totals of the board's order cards. */
+  searchOrderIds?: readonly number[];
 }
 export interface PublishedCard {
   kind: 'packet'|'bazisCutSet'|'bath'; id: string; displayName: string; column: string|null;
@@ -30,54 +40,125 @@ export interface PublishedMember { kind: string; id: string; orderId: number; de
  * Scope is resolved from current server policy, never client-supplied owner ids.
  * The two-month window limits cards only; position totals are already accounted
  * against all accepted history. No legacy/source JSON readiness fallback. */
-export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: CurrentUser, query: MdfPublishedQuery = {}) {
-  return database.transaction(async tx => {
-    await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const state = (await tx.query<{ mode: string; revision: string; generatedAt: string; dateFrom: string; dateTo: string }>(`SELECT
+export async function readMdfPublishedSnapshot(database: MdfJobDatabase | MdfSnapshotDatabase, user: CurrentUser,
+  query: MdfPublishedQuery = {}) {
+  return readOneSnapshot(database, async tx => {
+    const state = (await tx.query<{ mode: string; revision: string; generatedAt: string; dateFrom: string; dateTo: string;
+      displayFrom: string }>(`SELECT
       mode,published_revision::text revision,transaction_timestamp()::text "generatedAt",
       (COALESCE($1::date,current_date)-interval '2 months')::date::text "dateFrom",
-      COALESCE($1::date,current_date)::text "dateTo" FROM mdf_engine_state WHERE singleton`,[query.dateTo ?? null])).rows[0];
+      COALESCE($1::date,current_date)::text "dateTo",
+      LEAST(COALESCE($1::date,current_date),GREATEST((COALESCE($1::date,current_date)-interval '2 months')::date,
+        COALESCE($2::date,COALESCE($1::date,current_date)-6)))::text "displayFrom"
+      FROM mdf_engine_state WHERE singleton`,[query.dateTo ?? null,query.displayFrom ?? null])).rows[0];
     if (!state) throw new ApiError(503,'MDF_STATE_UNAVAILABLE','Состояние МДФ-доски недоступно');
     if (state.mode!=='active' && state.mode!=='read_only') return { schemaVersion: 1 as const, ...state,
-      cards: [],positions: [],members: [],pendingJobs: [],trackedJobs: [],issues: ['MDF_PUBLICATION_NOT_ACTIVE'] };
-    // Scope set of the token (access groups stage 0A): own ∪ assigned = OR of both; one value = same SQL as before.
+      cards: [],positions: [],members: [],pendingJobs: [],trackedJobs: [],presentation: [],progress: [],orders: [],
+      unregistered: [],unregisteredTruncated: false,issues: ['MDF_PUBLICATION_NOT_ACTIVE'] };
     const scope = policyScopeSetsForUser(user).orders.view;
-    const parts = scope.includes('all') ? ['TRUE'] : [
-      ...(scope.includes('own') ? ['(o.created_by=$1::bigint OR o.manager_id=$1::bigint)'] : []),
-      ...(scope.includes('assigned') ? [`EXISTS(SELECT 1 FROM order_workshops w JOIN users u
-        ON u.employee_id=w.responsible_employee_id WHERE w.order_id=o.order_id AND NOT w.delete_flag
-        AND u.is_active AND u.user_id=$1::bigint)`] : []),
-    ];
-    const allowed = parts.length === 0 ? 'FALSE' : parts.length === 1 ? parts[0] : `(${parts.join(' OR ')})`;
-    const owners = `SELECT o.order_id FROM orders o WHERE $1::bigint IS NOT NULL
-      AND NOT o.delete_flag AND o.order_kind='production_order' AND ${allowed}`;
-    const cardRows = (await tx.query<PublishedCard & { headVersion: string; headEpoch: string; headReceived: string; headAccepted: string|null }>(`WITH allowed AS (${owners})
-      SELECT p.source_kind kind,p.source_id id,p.display_name "displayName",p.column_key "column",
-        p.source_created_at::text "sourceCreatedAt",p.accepted_revision_key "acceptedRevision",
-        p.received_revision_key "receivedRevision",p.issues,h.version::text "headVersion",h.correction_epoch::text "headEpoch",
-        h.received_revision_key "headReceived",h.accepted_revision_key "headAccepted"
+    const owners = mdfAllowedOrdersSql(user);
+    // Card owners = current published members ∪ demand/evidence owners of the exact
+    // published accepted AND received revisions (retained physical proof survives a
+    // composition edit). Never today's head, never caller-provided owners or markers.
+    const cardOwners = mdfPublishedCardOwnersSql;
+    // Reads that need only the window start now and run beside the card chain (one shared snapshot).
+    const unregisteredRead = settled(loadMdfUnregisteredSources(tx,owners,user.id,
+      state,{ orderIds: query.searchOrderIds ?? [], focus: query.focus ?? null }));
+    const pendingRead = settled(loadPending(tx,owners,user.id,state,query,scope.includes('all')));
+    const trackedRead = settled(loadTracked(tx,owners,user.id,query.jobIds ?? [],scope.includes('all')));
+    // Visibility (at least one allowed owner) is decided BEFORE the page limit, so newer
+    // denied cards can never push an older authorized/focused card out of the page.
+    const cardRows = (await tx.query<PublishedCard & { headVersion: string; headEpoch: string; headReceived: string;
+      headAccepted: string|null; ownerIds: number[]; allOwnersAllowed: boolean }>(`WITH allowed AS (${owners}), page AS (
+      SELECT p.source_kind,p.source_id,p.display_name,p.column_key,p.source_created_at,p.accepted_revision_key,
+        p.received_revision_key,p.issues,h.version,h.correction_epoch,h.received_revision_key head_received,
+        h.accepted_revision_key head_accepted
       FROM mdf_published_sources p
       JOIN mdf_source_heads h ON h.source_kind=p.source_kind AND h.source_id=p.source_id
-      WHERE ((p.source_created_at >= $2::date AND p.source_created_at < $3::date+interval '1 day')
-        OR (p.source_kind=$4 AND p.source_id=$5))
-        AND NOT EXISTS(SELECT 1 FROM mdf_published_source_members m WHERE m.source_kind=p.source_kind AND m.source_id=p.source_id
-          AND NOT EXISTS(SELECT 1 FROM allowed a WHERE a.order_id=m.order_id))
-        AND ($6::boolean OR EXISTS(SELECT 1 FROM mdf_published_source_members m
-          WHERE m.source_kind=p.source_kind AND m.source_id=p.source_id))
-      ORDER BY p.source_created_at DESC,p.source_kind,p.source_id LIMIT 1001`,
-    [user.id,state.dateFrom,state.dateTo,query.focus?.kind ?? null,query.focus?.id ?? null,scope.includes('all')])).rows;
+      -- §5.8 legacy display parity: the legacy display date of each kind within [displayFrom, dateTo] (bath: no upper
+      -- bound, like the legacy board), operator-hidden packets excluded; the two-month candidate window still applies.
+      WHERE ((p.source_created_at >= $2::date AND p.source_created_at < $3::date+interval '1 day' AND CASE p.source_kind
+          WHEN 'packet' THEN EXISTS(SELECT 1 FROM cnc_telegram_packets r WHERE r.packet_id::text=p.source_id
+            AND r.workday BETWEEN $8::date AND $3::date AND r.mdf_board_hidden_at IS NULL)
+          WHEN 'bazisCutSet' THEN EXISTS(SELECT 1 FROM bazis_cut_sets r WHERE r.bazis_cut_set_id::text=p.source_id
+            AND r.created_at >= $8::date AND r.created_at < $3::date+interval '1 day')
+          WHEN 'bath' THEN EXISTS(SELECT 1 FROM cut_result r WHERE 'cut-result:'||r.cut_result_id::text=p.source_id
+            AND r.created_at >= $8::date)
+          ELSE false END)
+        OR (p.source_kind=$4 AND p.source_id=$5)
+        -- §5.6: cards of requested orders (old/completed ones included), each requested order authorized first.
+        OR (cardinality($7::bigint[])>0 AND EXISTS(SELECT 1 FROM (${cardOwners('p')}) co(order_id)
+          WHERE co.order_id=ANY($7::bigint[]) AND co.order_id IN (SELECT order_id FROM allowed))))
+        -- §5.8: uncorrelated IN over the allowed set (hashed subplan) instead of a correlated scan per owner.
+        AND ($6::boolean OR EXISTS(SELECT 1 FROM (${cardOwners('p')}) co(order_id)
+          WHERE co.order_id IN (SELECT order_id FROM allowed)))
+      ORDER BY p.source_created_at DESC,p.source_kind,p.source_id LIMIT 1001)
+      SELECT page.source_kind kind,page.source_id id,page.display_name "displayName",page.column_key "column",
+        page.source_created_at::text "sourceCreatedAt",page.accepted_revision_key "acceptedRevision",
+        page.received_revision_key "receivedRevision",page.issues,page.version::text "headVersion",
+        page.correction_epoch::text "headEpoch",page.head_received "headReceived",page.head_accepted "headAccepted",
+        o.owner_ids "ownerIds",o.all_allowed "allOwnersAllowed"
+      FROM page CROSS JOIN LATERAL (
+        SELECT COALESCE(array_agg(x.order_id::float8 ORDER BY x.order_id),'{}') owner_ids,
+          COALESCE(bool_and(x.order_id IN (SELECT order_id FROM allowed)),$6::boolean) all_allowed
+        FROM (${cardOwners('page')}) x(order_id)) o
+      ORDER BY page.source_created_at DESC,page.source_kind,page.source_id`,
+    [user.id,state.dateFrom,state.dateTo,query.focus?.kind ?? null,query.focus?.id ?? null,scope.includes('all'),
+      [...(query.searchOrderIds ?? [])],state.displayFrom])).rows;
     checkLimit(cardRows,1000);
-    const cards: PublishedCard[] = cardRows.map(({ headVersion,headEpoch,headReceived,headAccepted,...card }) => ({ ...card,
-      commandToken: headReceived === card.receivedRevision && headAccepted === headReceived && card.issues.length === 0
-        ? mdfSourceCommandToken(card,{ received: headReceived,version: headVersion,epoch: headEpoch }) : null }));
-    const members = (await tx.query<PublishedMember>(`SELECT m.source_kind kind,m.source_id id,m.order_id::float8 "orderId",
+    const cardOwnerIds = cardRows.flatMap(c => c.ownerIds);
+    // §5.4d: placement follows the members' live ranks (one set-based read, no writes/automation).
+    // Unusable inputs keep the stored column and make the card non-movable.
+    const cardKeys = [cardRows.map(c => c.kind),cardRows.map(c => c.id)];
+    const [placements,rawOwnersVisible,members] = await Promise.all([loadMdfEffectivePlacement(tx, cardRows),
+      tx.query<{ kind: string; id: string; ok: boolean }>(`WITH allowed AS (${owners}),
+      s AS (SELECT * FROM unnest($2::text[],$3::text[]) s(kind,id)),
+      raw AS (
+        SELECT s.kind,s.id,i.match_order_id order_id FROM s JOIN cnc_telegram_packet_items i
+          ON s.kind='packet' AND i.packet_id::text=s.id WHERE i.match_order_id IS NOT NULL
+        UNION SELECT s.kind,s.id,d.source_order_id FROM s JOIN bazis_cut_set_details d
+          ON s.kind='bazisCutSet' AND d.bazis_cut_set_id::text=s.id WHERE d.source_order_id IS NOT NULL
+        UNION SELECT s.kind,s.id,cp.order_id FROM s JOIN cut_result_placement cp
+          ON s.kind='bath' AND ('cut-result:'||cp.cut_result_id::text)=s.id WHERE cp.order_id IS NOT NULL)
+      SELECT s.kind,s.id,($4::boolean OR NOT EXISTS(SELECT 1 FROM raw r WHERE r.kind=s.kind AND r.id=s.id
+        AND r.order_id NOT IN (SELECT order_id FROM allowed))) ok FROM s`,
+      [user.id,...cardKeys,scope.includes('all')]).then(result => new Map(result.rows.map(r => [`${r.kind}:${r.id}`,r.ok]))),
+      tx.query<PublishedMember>(`WITH allowed AS (${owners})
+      SELECT m.source_kind kind,m.source_id id,m.order_id::float8 "orderId",
       m.detail_id::float8 "detailId",m.quantity::float8 quantity FROM mdf_published_source_members m
-      JOIN unnest($1::text[],$2::text[]) s(kind,id) ON m.source_kind=s.kind AND m.source_id=s.id
-      ORDER BY m.source_kind,m.source_id,m.order_id,m.detail_id LIMIT 10001`,[cards.map(c => c.kind),cards.map(c => c.id)])).rows;
+      JOIN unnest($2::text[],$3::text[]) s(kind,id) ON m.source_kind=s.kind AND m.source_id=s.id
+      JOIN allowed a ON a.order_id=m.order_id
+      ORDER BY m.source_kind,m.source_id,m.order_id,m.detail_id LIMIT 10001`,
+      [user.id,...cardKeys]).then(result => result.rows)]);
     checkLimit(members,10000);
-    const pendingJobs = await loadPending(tx,owners,user.id,state,query,scope.includes('all'));
-    const trackedJobs = await loadTracked(tx,owners,user.id,query.jobIds ?? [],scope.includes('all'));
-    const selectedOwners = [...new Set([...members.map(m => m.orderId),...(query.orderIds ?? []),
+    for (const card of cardRows) {
+      const placement = placements.get(mdfSourceKey(card));
+      if (!placement) continue;
+      card.column = placement.column;
+      // Live placement issues (missing inputs, missing stage thresholds, …) block the command token.
+      if (placement.issues.length) card.issues = [...new Set([...card.issues, ...placement.issues])];
+    }
+    // A partial viewer sees the card but only its allowed orders' data, and never a
+    // command token: a command would act on positions of orders it cannot see.
+    // §5.6: source-wide presentation (name, program/BASIS name, previews, comments) needs EVERY owner of the raw source
+    // content visible — incl. non-MDF rows/items that never become members — in addition to the frozen owners.
+    const fullyVisible = (c: { kind: string; id: string; allOwnersAllowed: boolean }) =>
+      c.allOwnersAllowed && rawOwnersVisible.get(`${c.kind}:${c.id}`) === true;
+    // A partial viewer never sees the source name (program/BASIS names can identify hidden co-owners).
+    const neutralName = (kind: string, id: string) => `${kind==='packet' ? 'Файл станка' : kind==='bath' ? 'Ванна' : 'Набор БАЗИС'} ${id}`;
+    const cards: PublishedCard[] = cardRows.map(({ headVersion,headEpoch,headReceived,headAccepted,ownerIds: _ownerIds,
+      allOwnersAllowed,...card }) => ({ ...card,
+      displayName: fullyVisible({ ...card,allOwnersAllowed }) ? card.displayName : neutralName(card.kind,card.id),
+      issues: allOwnersAllowed ? card.issues : [...card.issues,'MDF_PARTIAL_ACCESS'],
+      commandToken: allOwnersAllowed && headReceived === card.receivedRevision && headAccepted === headReceived
+        && card.issues.length === 0
+        ? mdfSourceCommandToken(card,{ received: headReceived,version: headVersion,epoch: headEpoch }) : null }));
+    const presentationRead = settled(loadMdfPublishedPresentation(tx,owners,user.id,
+      cardRows.map(c => ({ kind: c.kind,id: c.id,acceptedRevision: c.acceptedRevision,allOwnersAllowed: fullyVisible(c) })),
+      [...cardOwnerIds,...members.map(m => m.orderId),...(query.orderIds ?? []),...(query.searchOrderIds ?? [])]));
+    const pendingJobs = await pendingRead;
+    const selectedOwners = [...new Set([...members.map(m => m.orderId),...cardOwnerIds,...(query.orderIds ?? []),
+      ...(query.searchOrderIds ?? []),
       ...pendingJobs.flatMap(j => j.orderIds)])];
     const positions = (await tx.query<PublishedPosition>(`WITH allowed AS (${owners})
       SELECT p.order_id::float8 "orderId",p.detail_id::float8 "detailId",p.required_quantity::float8 required,
@@ -87,9 +168,43 @@ export async function readMdfPublishedSnapshot(database: MdfJobDatabase, user: C
       WHERE p.order_id=ANY($2::bigint[]) ORDER BY p.order_id,p.detail_id LIMIT 10001`,
     [user.id,selectedOwners])).rows;
     checkLimit(positions,10000);
+    const { presentation, progress, orders } = await presentationRead;
+    checkLimit(progress,20000);
+    // Informational lists: over their bounds they say so (`unregisteredTruncated`) — never make the board unavailable.
+    const { unregistered, truncated: unregisteredTruncated } = await unregisteredRead;
+    const trackedJobs = await trackedRead;
     return { schemaVersion: 1 as const, ...state, cards,positions,members,pendingJobs,trackedJobs,
+      presentation,progress,orders,unregistered,unregisteredTruncated,
       issues: state.mode==='read_only' ? ['MDF_READ_ONLY'] : [] };
   });
+}
+
+/** Orders the user may view under the current server scope ($1 = user id). */
+export function mdfAllowedOrdersSql(user: CurrentUser): string {
+  // Scope set of the token (access groups stage 0A): own ∪ assigned = OR of both; one value = same SQL as before.
+  const scope = policyScopeSetsForUser(user).orders.view;
+  const parts = scope.includes('all') ? ['TRUE'] : [
+    ...(scope.includes('own') ? ['(o.created_by=$1::bigint OR o.manager_id=$1::bigint)'] : []),
+    ...(scope.includes('assigned') ? [`EXISTS(SELECT 1 FROM order_workshops w JOIN users u
+      ON u.employee_id=w.responsible_employee_id WHERE w.order_id=o.order_id AND NOT w.delete_flag
+      AND u.is_active AND u.user_id=$1::bigint)`] : []),
+  ];
+  const allowed = parts.length === 0 ? 'FALSE' : parts.length === 1 ? parts[0] : `(${parts.join(' OR ')})`;
+  return `SELECT o.order_id FROM orders o WHERE $1::bigint IS NOT NULL
+    AND NOT o.delete_flag AND o.order_kind='production_order' AND ${allowed}`;
+}
+
+/** Card owners = current published members ∪ demand/evidence owners of the exact published
+ * accepted AND received revisions of the `mdf_published_sources` row aliased as `alias`. */
+export function mdfPublishedCardOwnersSql(alias: string): string {
+  return `SELECT m.order_id FROM mdf_published_source_members m
+        WHERE m.source_kind=${alias}.source_kind AND m.source_id=${alias}.source_id
+      UNION SELECT d.order_id FROM mdf_revision_demand d
+        WHERE d.source_kind=${alias}.source_kind AND d.source_id=${alias}.source_id
+          AND d.revision_key IN (${alias}.accepted_revision_key,${alias}.received_revision_key)
+      UNION SELECT e.order_id FROM mdf_evidence_lines e
+        WHERE e.source_kind=${alias}.source_kind AND e.source_id=${alias}.source_id
+          AND e.revision_key IN (${alias}.accepted_revision_key,${alias}.received_revision_key)`;
 }
 
 async function loadTracked(tx: DatabaseClient,owners: string,userId: string,jobIds: readonly string[],allowUnlinked: boolean) {
@@ -105,6 +220,9 @@ async function loadTracked(tx: DatabaseClient,owners: string,userId: string,jobI
       UNION
       SELECT j.job_id,e.order_id FROM requested j JOIN mdf_evidence_lines e
         ON e.source_kind=j.source_kind AND e.source_id=j.source_id AND e.revision_key=j.revision_key
+      UNION
+      -- §5.4b: a retirement revision is empty; its transition row carries the immutable owners.
+      SELECT j.job_id,unnest(t.owner_ids) FROM requested j JOIN mdf_bath_transitions t ON t.job_id=j.job_id
     ) SELECT j.job_id "jobId",j.source_kind kind,j.source_id id,j.status,j.error_code code,j.attempts,
       ARRAY(SELECT f.order_id::float8 FROM frozen_owners f WHERE f.job_id=j.job_id ORDER BY f.order_id) "orderIds"
     FROM requested j
@@ -129,13 +247,17 @@ async function loadPending(tx: DatabaseClient,owners: string,userId: string,
         OR EXISTS(SELECT 1 FROM mdf_evidence_lines e WHERE e.source_kind=j.source_kind AND e.source_id=j.source_id
           AND e.revision_key=j.revision_key AND e.order_id=ANY($6::bigint[]))
         OR EXISTS(SELECT 1 FROM mdf_revision_demand d WHERE d.source_kind=j.source_kind AND d.source_id=j.source_id
-          AND d.revision_key=j.revision_key AND d.order_id=ANY($6::bigint[])))
+          AND d.revision_key=j.revision_key AND d.order_id=ANY($6::bigint[]))
+        OR EXISTS(SELECT 1 FROM mdf_bath_transitions t WHERE t.job_id=j.job_id AND t.owner_ids && $6::bigint[]))
     ), frozen_owners AS (
       SELECT j.job_id,d.order_id FROM current_jobs j JOIN mdf_revision_demand d
         ON d.source_kind=j.source_kind AND d.source_id=j.source_id AND d.revision_key=j.revision_key
       UNION
       SELECT j.job_id,e.order_id FROM current_jobs j JOIN mdf_evidence_lines e
         ON e.source_kind=j.source_kind AND e.source_id=j.source_id AND e.revision_key=j.revision_key
+      UNION
+      -- §5.4b: a retirement revision is empty; its transition row carries the immutable owners.
+      SELECT j.job_id,unnest(t.owner_ids) FROM current_jobs j JOIN mdf_bath_transitions t ON t.job_id=j.job_id
     ) SELECT
     j.job_id "jobId",j.source_kind kind,j.source_id id,j.status,j.error_code code,j.attempts,
     ARRAY(SELECT f.order_id::float8 FROM frozen_owners f WHERE f.job_id=j.job_id ORDER BY f.order_id) "orderIds"
@@ -147,6 +269,27 @@ async function loadPending(tx: DatabaseClient,owners: string,userId: string,
   [userId,state.dateFrom,state.dateTo,query.focus?.kind ?? null,query.focus?.id ?? null,query.orderIds ?? [],allowUnlinked])).rows;
   checkLimit(rows,1000); return rows;
 }
+/** A read started ahead of its first await: its failure still fails the snapshot, never an unhandled rejection. */
+function settled<T>(read: Promise<T>): Promise<T> {
+  read.catch(() => undefined);
+  return read;
+}
+
+/** The DatabaseService surface: one exported snapshot shared by parallel sessions. */
+export interface MdfSnapshotDatabase {
+  readSnapshot<T>(handler: (client: DatabaseClient) => Promise<T>, options?: { parallelism?: number }): Promise<T>;
+}
+const MDF_SNAPSHOT_PARALLELISM = 4;
+
+function readOneSnapshot<T>(database: MdfJobDatabase | MdfSnapshotDatabase,
+  handler: (client: DatabaseClient) => Promise<T>): Promise<T> {
+  if ('readSnapshot' in database) return database.readSnapshot(handler, { parallelism: MDF_SNAPSHOT_PARALLELISM });
+  return database.transaction(async tx => {
+    await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    return handler(tx);
+  });
+}
+
 function checkLimit(rows: readonly unknown[],limit: number): void {
   if (rows.length>limit) throw new ApiError(422,'MDF_PUBLICATION_SCOPE_LIMIT','Слишком большой состав доски. Уточните период.');
 }

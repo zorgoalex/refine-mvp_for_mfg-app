@@ -72,6 +72,8 @@ describe('runtime-config handler', () => {
       features: {
         filmCatalogImport: false,
         inventory: false,
+        mdfHybridBoard: true,
+        mdfBathDuplicates: false,
         backendAuth: false,
         backendPermissions: false,
         backendOrdersRead: false,
@@ -151,6 +153,8 @@ describe('runtime-config handler', () => {
       features: {
         filmCatalogImport: true,
         inventory: true,
+        mdfHybridBoard: true,
+        mdfBathDuplicates: false,
         backendAuth: true,
         backendDeadlines: true,
         bazisCut: true,

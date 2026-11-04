@@ -42,6 +42,11 @@ export interface FrontendFeatureFlags {
   useBackendOnec: boolean;
   /** Film warehouse section and order stock badges. */
   inventory: boolean;
+  /** MDF engine active/read_only: the legacy board screen on the engine's data (default). false ⇒ the engine's own
+   * published view — the rollback switch of the hybrid board. */
+  mdfHybridBoard: boolean;
+  /** «Разобрать дубль» on MDF board bath cards (RUNTIME_CONFIG_MDF_BATH_DUPLICATES). */
+  mdfBathDuplicates: boolean;
 }
 
 type EnvSource = Record<string, string | boolean | undefined>;
@@ -79,6 +84,8 @@ export type RuntimeFeatureFlagSource = Partial<{
   backendWhatsApp: string | boolean;
   backendOnec: string | boolean;
   inventory: string | boolean;
+  mdfHybridBoard: string | boolean;
+  mdfBathDuplicates: string | boolean;
 }>;
 
 export function getFeatureFlags(
@@ -118,6 +125,8 @@ export function getFeatureFlags(
     useBackendWhatsApp: readBooleanFlag(env.VITE_USE_BACKEND_WHATSAPP, false),
     useBackendOnec: readBooleanFlag(env.VITE_USE_BACKEND_ONEC, false),
     inventory: false,
+    mdfHybridBoard: readBooleanFlag(env.VITE_MDF_HYBRID_BOARD, true),
+    mdfBathDuplicates: readBooleanFlag(env.VITE_MDF_BATH_DUPLICATES, false),
   };
 
   return mergeRuntimeFeatureFlags(envFlags, runtimeFeatures);
@@ -190,6 +199,8 @@ export function mergeRuntimeFeatureFlags(
       readOptionalBooleanFlag(runtimeFeatures.backendWhatsApp) ?? fallback.useBackendWhatsApp,
     useBackendOnec: readOptionalBooleanFlag(runtimeFeatures.backendOnec) ?? fallback.useBackendOnec,
     inventory: readOptionalBooleanFlag(runtimeFeatures.inventory) ?? fallback.inventory,
+    mdfHybridBoard: readOptionalBooleanFlag(runtimeFeatures.mdfHybridBoard) ?? fallback.mdfHybridBoard,
+    mdfBathDuplicates: readOptionalBooleanFlag(runtimeFeatures.mdfBathDuplicates) ?? fallback.mdfBathDuplicates,
   });
 }
 
