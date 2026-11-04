@@ -26,6 +26,8 @@ export interface NotificationRuleConditions {
 export interface NotificationRuleRecipients {
   resolvers?: RecipientResolverKind[];
   roleCodes?: string[];
+  /** Access groups: their active members, only while access groups are enabled. */
+  groupCodes?: string[];
   userIds?: number[];
 }
 
@@ -55,6 +57,8 @@ export interface NotificationEventTypeDto {
   supportedResolvers: RecipientResolverKind[];
   supportsOrderConditions: boolean;
   supportsDeadlineConditions: boolean;
+  /** False — the event is delivered by another path and ignores access groups in recipients. */
+  supportsAccessGroups?: boolean;
 }
 
 export interface CreateNotificationRuleRequest {

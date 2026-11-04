@@ -145,6 +145,8 @@ function fakeHasura(options: { bumpAfterExport?: boolean; loseReplaceAnswer?: nu
     snapshot: null as string[] | null, loseFinAnswer: options.loseFinAnswer ?? 0, failReplace: options.failReplace ?? 0,
     revert: null as null | { run: { runId: string; operator: string }; allowReopen: boolean; reopened: string[] },
     loseRevertStartAnswer: options.loseRevertStartAnswer ?? 0,
+    // permissions_state.access_groups_enabled: the guard of a revert aborts its whole transaction (Postgres error).
+    groups: false, groupsRefusals: 0,
     loseReplaceAnswer: options.loseReplaceAnswer ?? 0, failFlagWrite: options.failFlagWrite ?? 0,
     failExportAfterLoss: options.failExportAfterLoss ?? 0, failAudit: options.failAudit ?? 0, lostAnswer: false,
   };
@@ -174,6 +176,15 @@ function fakeHasura(options: { bumpAfterExport?: boolean; loseReplaceAnswer?: nu
       }
       if (payload.type === 'run_sql') {
         const sql: string = payload.args.sql;
+        if (sql.includes('ACCESS_GROUPS_ENABLED')) {
+          expect(sql.indexOf('FOR UPDATE')).toBeLessThan(sql.indexOf('ACCESS_GROUPS_ENABLED'));
+          expect(sql.indexOf('ACCESS_GROUPS_ENABLED')).toBeLessThan(sql.indexOf('UPDATE public.permissions_state SET'));
+          if (state.groups) {
+            state.groupsRefusals += 1;
+            return reply(400, { error: 'query execution failed', code: 'postgres-error', internal: { error: {
+              message: 'ACCESS_GROUPS_ENABLED: access groups are on; turn them off before reverting step', status_code: 'P0001' } } });
+          }
+        }
         if (sql.includes("to_jsonb(ps) ->> 'hasura_financials_state'")) return reply(200, { result: [['v'], [state.fin]] });
         if (sql.includes('information_schema.columns')) {
           return reply(200, { result: [['row'], ...Object.entries(state.columns).map(([name, cols]) => [`${name}|${[...cols].sort().join(',')}`])] });
@@ -364,6 +375,32 @@ describe('access-predicates apply / revert', () => {
     expect(state.flag).toBe(false);
     expect(readdirSync(files.dir).some((name) => name.endsWith('.reverted'))).toBe(true);
     expect(readdirSync(files.dir)).not.toContain('B-current');
+  });
+
+  it('revert B is refused while access groups are on (nothing written), and goes through once they are off', async () => {
+    const files = prepare();
+    const { server, state } = fakeHasura();
+    const port = await listen(server);
+    await apply(port, 'A', files);
+    const afterA = JSON.stringify(state.metadata);
+    await apply(port, 'B', files);
+    const afterB = JSON.stringify(state.metadata);
+    const writes = state.flagWrites.length;
+    state.groups = true;
+    const refused = await revert(port, files);
+    expect(refused.code).not.toBe(0);
+    expect(refused.output).toContain('access groups are on');
+    expect(state.groupsRefusals).toBe(1);
+    expect(state.flag).toBe(true);
+    expect(state.flagWrites.length).toBe(writes);
+    expect(JSON.stringify(state.metadata)).toBe(afterB);
+    expect(readdirSync(files.dir)).toContain('B-current');
+
+    state.groups = false;
+    const reverted = await revert(port, files);
+    expect(reverted.code, reverted.output).toBe(0);
+    expect(JSON.stringify(state.metadata)).toBe(afterA);
+    expect(state.flag).toBe(false);
   });
 
   it('refuses to revert over metadata changed after B', async () => {
@@ -679,6 +716,26 @@ describe('access-predicates apply / revert', () => {
     expect(result.code, result.output).toBe(0);
     expect(state.fin).toBe('open');
     expect(state.audits.some((sql) => sql.includes('"reopened": ["7"]'))).toBe(true);
+  });
+
+  it('revert F2 is refused while access groups are on (state stays closed), and goes through once they are off', async () => {
+    const files = prepareFin();
+    const { server, state } = finServer();
+    const port = await listen(server);
+    await applyAll(port, files);
+    const closed = JSON.stringify(state.metadata);
+    state.groups = true;
+    const refused = await revertStep(port, files, 'F2', ['--allow-reopen']);
+    expect(refused.code).not.toBe(0);
+    expect(refused.output).toContain('access groups are on');
+    expect(state.fin).toBe('closed');
+    expect(state.revert).toBeNull();
+    expect(JSON.stringify(state.metadata)).toBe(closed);
+
+    state.groups = false;
+    const reverted = await revertStep(port, files, 'F2');
+    expect(reverted.code, reverted.output).toBe(0);
+    expect(state.fin).toBe('open');
   });
 
   it('revert F1 waits for the revert of F2, then restores the metadata after B', async () => {

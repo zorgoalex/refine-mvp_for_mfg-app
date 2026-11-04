@@ -14,6 +14,7 @@ import {
 } from 'antd';
 import { ReloadOutlined, SaveOutlined, UndoOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Segmented } from '../../../ui/Segmented';
 import { Table } from '../../../ui/tooltipDelay';
 import { ApiError } from '../../../api/apiError';
 import { permissionsMatrixApi } from '../../../api/permissionsMatrixApi';
@@ -24,6 +25,8 @@ import type {
   RolePolicyScopeValue,
 } from '../../../api/types/permissionsMatrixApi.types';
 import { can } from '../../../utils/permissions';
+import { accessGroupsErrorText } from '../accessGroupsModel';
+import { AccessGroupsTab } from './AccessGroupsTab';
 
 const { Text } = Typography;
 
@@ -47,7 +50,27 @@ export function canViewRolesMatrixTab(): boolean {
   return can('permissions.manage') || can('system.superadmin');
 }
 
+type PermissionsView = 'roles' | 'groups';
+
+/** «Права ролей»: the roles matrix and, next to it, «Группы доступа» (access groups plan v6 §6). */
 export function RolesPermissionsMatrixTab() {
+  const [view, setView] = useState<PermissionsView>('roles');
+  if (!canViewRolesMatrixTab()) {
+    return <Empty description="Недостаточно прав" />;
+  }
+  return (
+    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Segmented
+        value={view}
+        onChange={(value) => setView(value as PermissionsView)}
+        options={[{ label: 'Роли', value: 'roles' }, { label: 'Группы доступа', value: 'groups' }]}
+      />
+      {view === 'roles' ? <RolesMatrixView /> : <AccessGroupsTab />}
+    </Space>
+  );
+}
+
+function RolesMatrixView() {
   const [matrix, setMatrix] = useState<RolesMatrixDto | null>(null);
   const [rolePermissions, setRolePermissions] = useState<Record<string, Record<string, boolean>>>({});
   const [roleScopes, setRoleScopes] = useState<Record<string, Record<string, RolePolicyScopeValue>>>({});
@@ -219,7 +242,7 @@ export function RolesPermissionsMatrixTab() {
       setRoleScopes(cloneScopeMatrix(next.roleScopes));
       message.success('Права ролей сохранены');
     } catch (error) {
-      if (error instanceof ApiError && error.status === 409) {
+      if (error instanceof ApiError && error.code === 'PERMISSIONS_VERSION_CONFLICT') {
         Modal.warning({
           title: 'Матрица устарела',
           content: 'Права уже изменены в другой сессии. Обновите данные и повторите сохранение.',
@@ -228,7 +251,7 @@ export function RolesPermissionsMatrixTab() {
       } else if (error instanceof ApiError && error.code === 'DANGEROUS_PERMISSION_CONFIRMATION_REQUIRED') {
         confirmSaveDangerous();
       } else {
-        message.error(error instanceof Error ? error.message : 'Не удалось сохранить права');
+        message.error(accessGroupsErrorText(error, 'Не удалось сохранить права'));
       }
     } finally {
       setSaving(false);
@@ -262,14 +285,10 @@ export function RolesPermissionsMatrixTab() {
       setRoleScopes(cloneScopeMatrix(next.roleScopes));
       message.success('Роль сброшена к значениям по умолчанию');
     } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Не удалось сбросить роль');
+      message.error(accessGroupsErrorText(error, 'Не удалось сбросить роль'));
     } finally {
       setSaving(false);
     }
-  }
-
-  if (!canViewRolesMatrixTab()) {
-    return <Empty description="Недостаточно прав" />;
   }
 
   return (

@@ -103,6 +103,21 @@ export class PgRecipientSourceAdapter implements RecipientSourcePort {
     return res.rows.map((r) => Number(r.user_id)).filter(Number.isFinite);
   }
 
+  async resolveAccessGroupMembers(client: DatabaseClient, groupCodes: string[]): Promise<number[]> {
+    if (groupCodes.length === 0) return [];
+    // The switch read in the same statement: off — nobody (the rule then reaches only its other recipients).
+    const result = await client.query<{ user_id: string }>(
+      `SELECT DISTINCT uag.user_id
+         FROM public.user_access_groups uag
+         JOIN public.access_groups ag ON ag.group_id = uag.group_id AND ag.is_active
+         JOIN public.users u ON u.user_id = uag.user_id AND u.is_active = true
+         JOIN public.permissions_state ps ON ps.id AND ps.access_groups_enabled
+        WHERE ag.code = ANY($1::text[])`,
+      [groupCodes],
+    );
+    return result.rows.map((row) => Number(row.user_id));
+  }
+
   async filterActiveUsers(client: DatabaseClient, userIds: number[]): Promise<number[]> {
     if (userIds.length === 0) return [];
     const res = await client.query<{ user_id: string | number }>(
