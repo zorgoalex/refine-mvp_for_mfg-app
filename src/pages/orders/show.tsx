@@ -29,6 +29,7 @@ import { ClientScreenShowHeader } from "../clientScreen/ClientScreenShowHeader";
 import { overlayDetailProductionStatuses } from '../../utils/orderProductionSummary';
 import { OrderDatesBlock } from "./components/sections/OrderDatesBlock";
 import { OrderFinanceBlock } from "./components/sections/OrderFinanceBlock";
+import { OrderColumnCutIssuesAlert, OrderCutIssuesAlert, orderCutColumnRefsKey, orderCutIssuesDetailsKey, startOrderCutIssuesRefresh } from "./components/sections/OrderCutIssuesAlert";
 import { OrderProductionBlock } from "./components/sections/OrderProductionBlock";
 import { OrderProductionFlow, OrderProductionFlowCodes } from "./components/sections/OrderProductionFlow";
 import { OrderMaterialsWorkbenchTable } from "./components/sections/OrderMaterialsWorkbenchTable";
@@ -66,7 +67,7 @@ import {
 } from "../../utils/orderFinancialVisibility";
 import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
 import { cutApi } from "../../api/cutApi";
-import type { CutDetailLastReadyJobRef, CutJobDto, CutJobRef } from "../../api/types/cutApi.types";
+import type { CutDetailLastReadyJobRef, CutJobDto, CutJobRef, CutOrderJobIssues } from "../../api/types/cutApi.types";
 import { cncTelegramApi } from "../../api/cncTelegramApi";
 import type { CncTelegramOrderCuttingSequence } from "../../api/types/cncTelegramApi.types";
 import { projectsApi } from "../../api/projectsApi";
@@ -128,7 +129,7 @@ import {
 } from "./components/tables/OrderDetailColumnSettings";
 import { useCutDetailLastReady } from "./useCutDetailLastReady";
 import { computeOrderBathFilmUsage } from "../cut/cutFilmUsage";
-import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent } from "../cut/cutJobEvents";
+import { CUT_JOB_READY_EVENT, cutJobReadyAffects, readCutJobReadyEvent, subscribeCutJobReady } from "../cut/cutJobEvents";
 import { buildOrderEditAddPaymentPath } from "./orderPaymentIntent";
 import { OperationalPageHeader, useOperationalUi } from "../../ui-operational/OperationalPrimitives";
 import { buildCutJobNameById, CutJobLinks } from "./CutJobLinks";
@@ -244,6 +245,7 @@ const ORDER_DETAIL_SHOW_BAZIS_CUT_COLUMN_WIDTH = 104;
 const ORDER_DETAIL_SHOW_HDF_COLUMN_WIDTH = 86;
 const ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT = 40;
 const ORDER_DETAIL_STATUS_REFRESH_MS = 15_000;
+const ORDER_CUT_ISSUES_REFRESH_MS = 60_000;
 const EMPTY_DETAIL_PRODUCTION_STATUS_MAP = new Map<number, number | null>();
 const ORDER_SHOW_SORT_COLLATOR = new Intl.Collator('ru', { numeric: true, sensitivity: 'base' });
 
@@ -1897,6 +1899,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     }
     return map;
   }, [bathCutJobByDetailId, cutJobByDetailId]);
+  // Jobs a detail's «Раскрой»/«Ванна» column points at right now (the «раскрой не актуален» alert above the list).
+  const columnCutJobIds = useMemo(
+    () => new Set([...cutJobByDetailId.values(), ...bathCutJobByDetailId.values()].map((ref) => ref.cutJobId)),
+    [bathCutJobByDetailId, cutJobByDetailId],
+  );
   const latestReadyCutJobIds = useMemo(
     () => [...new Set([...bathCutJobByDetailId.values()].map((ref) => ref.cutJobId))].sort((a, b) => a - b),
     [bathCutJobByDetailId],
@@ -1981,6 +1988,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const cutOrderJobs = cutOrderJobsState?.scopeKey === showAsyncReadScopeKey
     ? cutOrderJobsState.value
     : [];
+  const [cutOrderIssuesState, setCutOrderIssuesState] = useState<{
+    scopeKey: string;
+    value: CutOrderJobIssues[];
+  } | null>(null);
+  const cutOrderIssues = cutOrderIssuesState?.scopeKey === showAsyncReadScopeKey
+    ? cutOrderIssuesState.value
+    : [];
   const [cncOrderCuttingSequencesState, setCncOrderCuttingSequencesState] = useState<{
     scopeKey: string;
     value: CncTelegramOrderCuttingSequence[];
@@ -2043,6 +2057,51 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   useEffect(() => {
     void refreshCutOrderJobs(record?.order_id);
   }, [record?.order_id, refreshCutOrderJobs]);
+
+  // «Раскрой не актуален»: re-read whenever the order's details change (deleted, resized, re-quantified, other
+  // sheet material) or a cut becomes ready; only the latest request may write (a slower older one is dropped).
+  const cutOrderIssuesSeq = useRef(0);
+  const refreshCutOrderIssues = useCallback(async (orderId?: number | null) => {
+    if (!ordinaryReadActive) return;
+    const seq = ++cutOrderIssuesSeq.current;
+    if (!cutColumnEnabled || !orderId) {
+      setCutOrderIssuesState({ scopeKey: showAsyncReadScopeKey, value: [] });
+      return;
+    }
+    const token = showAsyncReadGuard.capture();
+    if (!token) return;
+    // Advisory: a failed read shows no warning and never hides the cut list.
+    const jobs = await cutApi.listOrderIssues(orderId).then((res) => res.jobs, () => [] as CutOrderJobIssues[]);
+    if (seq === cutOrderIssuesSeq.current && showAsyncReadGuard.isCurrent(token)) {
+      setCutOrderIssuesState({ scopeKey: showAsyncReadScopeKey, value: jobs });
+    }
+  }, [
+    cutColumnEnabled,
+    ordinaryReadActive,
+    showAsyncReadGuard.capture,
+    showAsyncReadGuard.isCurrent,
+    showAsyncReadScopeKey,
+  ]);
+  const cutOrderIssuesDetailsKey = useMemo(() => orderCutIssuesDetailsKey(details), [details]);
+  const cutOrderColumnRefsKey = useMemo(
+    () => orderCutColumnRefsKey(cutJobByDetailId, bathCutJobByDetailId),
+    [bathCutJobByDetailId, cutJobByDetailId],
+  );
+  useEffect(() => {
+    void refreshCutOrderIssues(record?.order_id);
+  }, [record?.order_id, refreshCutOrderIssues, cutOrderIssuesDetailsKey, cutOrderColumnRefsKey]);
+  // Changes this card cannot see in its own details or columns — a cut recalculated anywhere (any tab or window), or
+  // an older shared cut invalidated by a detail transfer in another order — are picked up by a cut-ready
+  // subscription and a bounded poll while the card is visible.
+  useEffect(() => {
+    if (!ordinaryReadActive || !cutColumnEnabled || !record?.order_id || !documentVisible) return undefined;
+    const orderId = record.order_id;
+    return startOrderCutIssuesRefresh({
+      refresh: () => { void refreshCutOrderIssues(orderId); },
+      subscribe: subscribeCutJobReady,
+      intervalMs: ORDER_CUT_ISSUES_REFRESH_MS,
+    });
+  }, [cutColumnEnabled, documentVisible, ordinaryReadActive, record?.order_id, refreshCutOrderIssues]);
 
   useEffect(() => {
     void refreshCncOrderCuttingSequences(record?.order_id);
@@ -4235,6 +4294,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                             <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 3 }}>
                               Раскрой
                             </div>
+                            <OrderCutIssuesAlert jobs={cutOrderIssues} columnCutJobIds={columnCutJobIds} />
                             {cutOrderJobs.length === 0 && cncOrderCuttingSequences.length === 0 ? (
                               <span style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>—</span>
                             ) : (
@@ -4505,6 +4565,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             <OrderCatalogLinesTable rows={backendOrder.catalogLines} canViewFinancials={canViewFinancials} />
           </Card>}
           <div ref={orderShowDetailsBlockRef} className="order-show-details-section">
+            {cutColumnEnabled && <OrderColumnCutIssuesAlert jobs={cutOrderIssues} columnCutJobIds={columnCutJobIds} />}
             {isMobile ? (
               <DetailCardList rows={details} lookups={detailCardLookups} highlightDetailId={highlightDetail}
                 selectionEnabled={cutSelectMode} selectedIds={cutSelectedDetailIds}

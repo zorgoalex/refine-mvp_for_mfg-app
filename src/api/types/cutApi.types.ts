@@ -432,6 +432,32 @@ export interface CutDetailPlacements {
   hasArchived: boolean;
 }
 
+/** What changed in an order detail after a ready cut result was calculated from it. */
+export type CutOrderIssueKind = 'deleted' | 'moved' | 'size_changed' | 'quantity_changed' | 'material_changed';
+
+export interface CutOrderIssue {
+  kind: CutOrderIssueKind;
+  orderDetailId: number;
+  detailNumber: number | null;
+  calculated: string | null;
+  current: string | null;
+}
+
+/** A ready cut job of the order whose current result no longer matches the order's details. */
+export interface CutOrderJobIssues {
+  cutJobId: number;
+  cutNumber: string;
+  name: string;
+  isVacuum: boolean;
+  /** Calculation basis cleared (e.g. details transferred between orders): not shown in the details' columns. */
+  requiresRecalc: boolean;
+  issues: CutOrderIssue[];
+}
+
+export interface CutOrderIssuesResponse {
+  jobs: CutOrderJobIssues[];
+}
+
 export interface CutDetailLastReadyJobRef {
   cutJobId: number;
   resultNo: number;
