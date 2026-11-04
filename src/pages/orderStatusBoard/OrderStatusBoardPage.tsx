@@ -1317,7 +1317,19 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   // background read is still running); a shown board reads its dataset again under the new session.
   const datasetKeyRef = useRef(datasetKey);
   datasetKeyRef.current = datasetKey;
-  useSessionGenerationReset({ active, revisionRef: datasetRevisionRef, onReset: (shown) => resetMdfBoardForNewSession({
+  useSessionGenerationReset({ active, revisionRef: datasetRevisionRef, onReset: (shown) => {
+    // Open return dialogs, the history panel and the print preview show orders, details and baths of the old scope: they close, and a
+    // return selection still resolving is superseded (its late answer would reopen it).
+    mdfReturnResolveSeqRef.current += 1;
+    setMdfCorrectionReturn(null);
+    setMdfReturnIntent(null);
+    // the history panel shows the old scope's order history and search results too
+    setCncHistoryOpen(false);
+    setCncHistoryOrderId(null);
+    setCncHistoryOrderNumber(null);
+    // the print preview holds a copy of the old scope's cards
+    mdfPrint.close();
+    resetMdfBoardForNewSession({
     // a hidden board mounted with a prefetched snapshot must load under the new session when it is shown
     dropInitialSnapshot: () => {
       preserveInitialMdfSnapshotRef.current = false;
@@ -1332,7 +1344,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     clearOrderBoard: () => { cncOrderBoardRequestKeyRef.current = null; setCncOrderBoard(null); },
     setShownKey: (key) => { shownDatasetKeyRef.current = key; },
     reload: () => { void fetchInitial(); },
-  }, { shown, datasetKey: datasetKeyRef.current, sessionGeneration: authSession.getSessionGeneration() }) });
+  }, { shown, datasetKey: datasetKeyRef.current, sessionGeneration: authSession.getSessionGeneration() });
+  } });
 
   useEffect(() => {
     if (!active) return;

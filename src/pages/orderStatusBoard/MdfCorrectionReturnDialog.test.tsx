@@ -3,7 +3,9 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({ preview: vi.fn(), confirm: vi.fn() }));
+const auth = vi.hoisted(() => ({ generation: 1 }));
 vi.mock("../../api/mdfCorrectionApi", () => ({ mdfCorrectionApi: api }));
+vi.mock("../../api/authSession", () => ({ authSession: { getSessionGeneration: () => auth.generation } }));
 vi.mock("antd", () => ({
   Modal: "mock-modal",
   Select: "mock-select",
@@ -88,6 +90,20 @@ describe("MdfCorrectionReturnDialog — new (active engine) selection", () => {
       modal: () => view!.root.findByType("mock-modal" as never),
     };
   };
+
+  it("a preview answered after a permission/scope change is never shown and cannot be confirmed", async () => {
+    auth.generation = 1;
+    let answer!: (value: MdfCorrectionPreviewResponse) => void;
+    api.preview.mockReset().mockReturnValueOnce(new Promise<MdfCorrectionPreviewResponse>(resolve => { answer = resolve; }));
+    const h = await mount();
+    auth.generation = 2;
+    await act(async () => { answer(preview()); });
+    expect(JSON.stringify(h.view.toJSON())).not.toContain("Файл E2E");
+    await act(async () => h.modal().props.onOk());
+    expect(api.confirm).not.toHaveBeenCalled();
+    h.view.unmount();
+    auth.generation = 1;
+  });
 
   it("previews with the selection's sourceToken and confirms once per idempotency key", async () => {
     const h = await mount();

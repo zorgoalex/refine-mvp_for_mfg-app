@@ -1,3 +1,4 @@
+import { authSession } from "../../api/authSession";
 import React, { useEffect, useRef, useState } from "react";
 import { Alert, Button, Modal, Select, Spin } from "antd";
 import { isApiError } from "../../api/apiError";
@@ -169,6 +170,8 @@ function MdfCorrectionReturnActiveDialog({
 
   const load = async (productionStatusId?: number) => {
     const seq = ++sequence.current;
+    // A preview answered under another auth session (re-login, permission/scope change) is never shown.
+    const session = authSession.getSessionGeneration();
     setLoading(true);
     setPreview(null);
     setError(null);
@@ -180,7 +183,7 @@ function MdfCorrectionReturnActiveDialog({
         targetColumn: intent.targetColumn,
         productionStatusId,
       });
-      if (seq !== sequence.current) return;
+      if (seq !== sequence.current || session !== authSession.getSessionGeneration()) return;
       setPreview(result);
       if (pendingStaleNoticeRef.current) {
         pendingStaleNoticeRef.current = false;

@@ -1265,7 +1265,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('if (!cncStrongRefreshInFlightRef.current) setCncOrderBoardLoading(false);');
     // returning to the persistent board keeps it on screen and refreshes in the background
     expect(page).toContain('const shownKey = mdfShownDataKey(datasetKey, authSession.getSessionGeneration());');
-    expect(page).toContain('useSessionGenerationReset({ active, revisionRef: datasetRevisionRef, onReset: (shown) => resetMdfBoardForNewSession({');
+    expect(page).toContain('useSessionGenerationReset({ active, revisionRef: datasetRevisionRef, onReset: (shown) => {');
+    expect(page).toContain('    resetMdfBoardForNewSession({');
     expect(page).toContain('preserveInitialMdfSnapshotRef.current = false;\n      preserveInitialMdfOrderBoardRef.current = false;\n      preserveInitialMdfManualMovesRef.current = false;');
     // inline updates: unchanged cards keep their objects and shared inputs; the move entry point is stable
     expect(page).toContain('reuseUnchangedCncColumns(stableCncPeriodColumnsRef.current, columns)');
@@ -1960,6 +1961,19 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('setCncHistoryCollapsed(false)');
     expect(page).toContain('aria-label={onSelectCard');
     expect(page).toContain('Показать историю заказа');
+  });
+});
+
+describe('MDF board session change closes the return dialogs', () => {
+  it('closes both return dialogs and supersedes a resolving selection on a session generation change', () => {
+    const reset = page.slice(page.indexOf('useSessionGenerationReset({ active, revisionRef: datasetRevisionRef'),
+      page.indexOf('resetMdfBoardForNewSession({'));
+    expect(reset).toContain('mdfReturnResolveSeqRef.current += 1;');
+    expect(reset).toContain('setMdfCorrectionReturn(null);');
+    expect(reset).toContain('setMdfReturnIntent(null);');
+    expect(reset).toContain('setCncHistoryOpen(false);');
+    expect(reset).toContain('setCncHistoryOrderId(null);');
+    expect(reset).toContain('mdfPrint.close();');
   });
 });
 
