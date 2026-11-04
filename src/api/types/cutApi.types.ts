@@ -433,7 +433,7 @@ export interface CutDetailPlacements {
 }
 
 /** What changed in an order detail after a ready cut result was calculated from it. */
-export type CutOrderIssueKind = 'deleted' | 'size_changed' | 'quantity_changed' | 'material_changed';
+export type CutOrderIssueKind = 'deleted' | 'moved' | 'size_changed' | 'quantity_changed' | 'material_changed';
 
 export interface CutOrderIssue {
   kind: CutOrderIssueKind;
@@ -448,6 +448,9 @@ export interface CutOrderJobIssues {
   cutJobId: number;
   cutNumber: string;
   name: string;
+  isVacuum: boolean;
+  /** Calculation basis cleared (e.g. details transferred between orders): not shown in the details' columns. */
+  requiresRecalc: boolean;
   issues: CutOrderIssue[];
 }
 
