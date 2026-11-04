@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-04", title: "NewLine: фильтры и поиск в «Заказах» не пропадают",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "В NewLine после захода в любой заказ и возврата на вкладку «Заказы» пропадали блок фильтров и поле поиска (до перезагрузки). Теперь шапка списка остаётся на месте.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-04", title: "NewLine: быстрый ввод деталей «716×396×2»",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [

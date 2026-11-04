@@ -231,16 +231,18 @@
   padding: 0;
 }
 
-:root[data-ui-variant="workbench"] .evolution-screen-frame:has(.order-show-page--workbench) .ant-page-header-heading,
-:root[data-ui-variant="workbench"] .evolution-screen-frame:has(.order-show-page--workbench) .ant-page-header > .ant-breadcrumb {
+/* Только видимая карточка заказа: открытые вкладки живут в рамке скрытыми ([hidden]), и без :not([hidden] *)
+   правило прятало шапку (фильтры, поиск) и у списка заказов, пока где-то открыт заказ. */
+:root[data-ui-variant="workbench"] .evolution-screen-frame:has(.order-show-page--workbench:not([hidden] *)) .ant-page-header-heading,
+:root[data-ui-variant="workbench"] .evolution-screen-frame:has(.order-show-page--workbench:not([hidden] *)) .ant-page-header > .ant-breadcrumb {
   display: none;
 }
 
-:root[data-ui-variant="workbench"] .evolution-screen-frame:has(.order-show-page--workbench) .ant-page-header {
+:root[data-ui-variant="workbench"] .evolution-screen-frame:has(.order-show-page--workbench:not([hidden] *)) .ant-page-header {
   padding: 0;
 }
 
-:root[data-ui-variant="workbench"] .evolution-screen-frame:has(.order-show-page--workbench) .ant-page-header-content {
+:root[data-ui-variant="workbench"] .evolution-screen-frame:has(.order-show-page--workbench:not([hidden] *)) .ant-page-header-content {
   padding-top: 0;
 }
 
