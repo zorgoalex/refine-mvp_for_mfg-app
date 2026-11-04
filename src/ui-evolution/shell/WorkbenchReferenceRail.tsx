@@ -1,7 +1,8 @@
 import React from 'react';
 import { MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
-import { buildReferenceRail, filterReferenceRail, findReferenceByPath, isReferenceRailHidden, isWideReference } from '../../utils/referenceCatalog';
+import { buildReferenceRail, filterReferenceRail, findReferenceByPath, isReferenceRailHidden, isWideReference, REFERENCE_RAIL_NARROW_QUERY } from '../../utils/referenceCatalog';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useEvolutionNavigation } from './useEvolutionNavigation';
 
 const RAIL_HIDDEN_KEY = 'erp.references.railHidden';
@@ -31,6 +32,8 @@ export const WorkbenchReferenceRail: React.FC = () => {
   const [choice, setChoice] = React.useState(readChoice);
   // широкий справочник: панель открыта вручную — до перехода на другой экран
   const [openedHere, setOpenedHere] = React.useState(false);
+  // узкое окно: панель не отнимает ширину у таблицы, пока её не открыли
+  const narrow = useMediaQuery(REFERENCE_RAIL_NARROW_QUERY);
 
   const groups = React.useMemo(() => buildReferenceRail(sider.categorizedResources), [sider.categorizedResources]);
   const current = React.useMemo(() => findReferenceByPath(groups, pathname), [groups, pathname]);
@@ -60,11 +63,13 @@ export const WorkbenchReferenceRail: React.FC = () => {
   if (!current) return null;
 
   const wide = isWideReference(current.name);
-  const hidden = isReferenceRailHidden({ resourceName: current.name, choice, openedHere, forcedOpen });
+  const hidden = isReferenceRailHidden({ resourceName: current.name, choice, openedHere, forcedOpen, narrow });
   const toggleHidden = () => {
     const next = !hidden;
-    if (wide) {
+    if (wide || narrow) {
+      // выбор на узком окне не запоминается: на широком панель — как выбрали там
       setOpenedHere(!next);
+      if (next) setForcedOpen(false);
       return;
     }
     try {

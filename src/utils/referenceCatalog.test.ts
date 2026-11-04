@@ -81,6 +81,16 @@ describe('reference catalog of the NewLine rail', () => {
     expect(isReferenceRailHidden({ ...base, choice: true, forcedOpen: true })).toBe(false);
   });
 
+  it('folds the rail on a narrow window until opened by hand or from the sidebar entry; the saved choice is not used', () => {
+    const base = { resourceName: 'milling_types', openedHere: false, forcedOpen: false, narrow: true };
+    expect(isReferenceRailHidden({ ...base, choice: null })).toBe(true);
+    expect(isReferenceRailHidden({ ...base, choice: false })).toBe(true);
+    expect(isReferenceRailHidden({ ...base, choice: false, openedHere: true })).toBe(false);
+    expect(isReferenceRailHidden({ ...base, choice: true, forcedOpen: true })).toBe(false);
+    // a wide reference stays folded until opened there, as on a wide window
+    expect(isReferenceRailHidden({ ...base, resourceName: 'films', choice: false, forcedOpen: true })).toBe(true);
+  });
+
   it('replaces references in the sidebar with one entry but keeps suppliers there', () => {
     const groups = buildReferenceRail({
       CRM: [item('suppliers', '/suppliers')],

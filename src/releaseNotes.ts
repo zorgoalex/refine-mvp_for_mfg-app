@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-04", title: "NewLine: справочники на узком окне",
+    services: ["ERP"], repositories: ["repo_erp"],
+    changed: [
+      "Если окно уже 1280 px (ноутбук, окно на пол-экрана), панель со списком справочников по умолчанию свёрнута — таблице справочника достаётся вся ширина. Открыть панель — кнопкой у края или пунктом меню «Справочники». На широком окне всё как раньше.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-04", title: "Раскрой не актуален: предупреждение в заказе и бирки без удалённых деталей",
     services: ["ERP", "Cutting"], repositories: ["repo_erp"],
     added: [

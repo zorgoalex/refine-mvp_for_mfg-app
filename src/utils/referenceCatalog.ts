@@ -87,6 +87,9 @@ export function isWideReference(resourceName: string): boolean {
  * Свёрнута ли панель. Широкий справочник: свёрнута, пока её не открыли вручную на этом экране.
  * Обычный: по сохранённому выбору пользователя, но пункт бокового меню показывает её в любом случае.
  */
+/** Окно, на котором панель справочников по умолчанию свёрнута (см. `narrow`). */
+export const REFERENCE_RAIL_NARROW_QUERY = '(max-width: 1279px)';
+
 export function isReferenceRailHidden(args: {
   resourceName: string;
   /** сохранённый выбор для обычных справочников; `null` — не выбирал */
@@ -95,8 +98,11 @@ export function isReferenceRailHidden(args: {
   openedHere: boolean;
   /** переход из пункта «Справочники» бокового меню */
   forcedOpen: boolean;
+  /** окно уже 1280 px: таблице нужна ширина — панель свёрнута, пока её не открыли (рукой или из меню) */
+  narrow?: boolean;
 }): boolean {
   if (isWideReference(args.resourceName)) return !args.openedHere;
+  if (args.narrow) return !(args.openedHere || args.forcedOpen);
   if (args.forcedOpen) return false;
   return args.choice ?? false;
 }
