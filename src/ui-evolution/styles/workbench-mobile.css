@@ -221,7 +221,8 @@
   flex: 1.4;
 }
 
-:root[data-ui-variant="workbench"] .evolution-shell--wb-phone:has(.wb-mactions) {
+/* место под нижнюю панель действий — только когда видна карточка заказа, а не её скрытая вкладка */
+:root[data-ui-variant="workbench"] .evolution-shell--wb-phone:has(.wb-mactions:not([hidden] *)) {
   padding-bottom: calc(68px + 70px + env(safe-area-inset-bottom, 0px));
 }
 
