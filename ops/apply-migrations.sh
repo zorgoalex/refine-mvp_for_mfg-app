@@ -3190,6 +3190,10 @@ probe_file() {
     290_bazis_wins_saw_backfill*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event='orders.saw_status_backfill' AND entity_type='migration' AND entity_id='290');" \
       "SELECT pg_get_functiondef('public.trg_order_detail_saw_route()'::regprocedure) LIKE '%IN (''new'', ''drawn'')%';" ;;
+    # order.payment_status_changed for every change of orders.payment_status_id (trigger, transaction-local context).
+    291_order_payment_status_event*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='trg_order_payment_status_event' AND t.tgrelid=to_regclass('public.orders') AND t.tgfoid=to_regprocedure('public.order_payment_status_event()') AND t.tgenabled='O' AND NOT t.tgisinternal);" \
+      "SELECT pg_get_functiondef('public.order_payment_status_event()'::regprocedure) LIKE '%erp.event_actor_user_id%';" ;;
     289_inbound_signal_segments*) probe_all \
       "$(q_col inbound_signal_occurrences segment_index)" \
       "$(q_col inbound_signal_occurrences segment_text)" \
@@ -3469,6 +3473,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     290_bazis_wins_saw_backfill*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    291_order_payment_status_event*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     289_inbound_signal_segments*)

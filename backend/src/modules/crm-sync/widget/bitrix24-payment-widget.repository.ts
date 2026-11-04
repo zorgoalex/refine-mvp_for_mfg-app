@@ -1,4 +1,5 @@
 import { beginPaymentAuditCapture, recordCapturedPaymentChanges } from '../../payments/application/payment-change-audit';
+import { setPaymentStatusEventContext } from '../../../shared/payment-status/payment-status-event-context';
 import { createHash, randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import type { AuditService } from '../../../common/audit/audit.service';
@@ -1878,6 +1879,8 @@ export class Bitrix24PaymentWidgetRepository {
         finalAmount,
         paidAmount,
       );
+      // order.payment_status_changed (migration 291): same actor/request as the payment audit below.
+      await setPaymentStatusEventContext(tx, { actorUserId: command.erpActorUserId, source: 'crm-sync-widget', correlationId: command.originatingRequestId });
       await tx.query(
         `UPDATE orders SET paid_amount=$2, payment_date=$3,
                 payment_status_id=$4, version=version+1

@@ -487,6 +487,8 @@ export interface OrderWriteUnitOfWork {
     totals: OrderTotalsDto;
     previousVersion: number | null;
     currentUser: CurrentUser;
+    /** Same request id as the save's payment audit → order.payment_status_changed (migration 291). */
+    requestId: string;
   }): Promise<number>;
   reconcileBazisPanelOrderLinks(
     input: ReconcileBazisPanelOrderLinksInput,

@@ -27,6 +27,7 @@ import type {
   UpdatePaymentRequestDto,
 } from '../dto/payment.dto';
 import { PaymentNotFoundError, PaymentOrderNotFoundError } from '../errors/payment.errors';
+import { setPaymentStatusEventContext } from '../../../shared/payment-status/payment-status-event-context';
 import { evaluateStatusAutomation } from '../../status-automation/application/status-automation-runtime';
 import { detectOnecMatchTransitions, releaseOnecMatchesBeforePaymentDelete } from '../../payments-onec/application/onec-match-transitions';
 
@@ -69,6 +70,8 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
   createPayment(command: CreatePaymentCommand): Promise<PaymentMutationResult> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
+      // Same actor/request as this command's audit (writeAudit) → order.payment_status_changed (migration 291).
+      await setPaymentStatusEventContext(tx, { actorUserId: command.currentUser.id, source: 'payments', correlationId: command.requestId ?? 'payment-command' });
       const orders = await loadOrdersForUpdate(tx, [command.dto.orderId]);
       const order = requireLockedOrder(orders, command.dto.orderId);
       assertPaymentReadyProductionOrder(order);
@@ -127,6 +130,8 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
   updatePayment(command: UpdatePaymentCommand): Promise<PaymentMutationResult> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
+      // Same actor/request as this command's audit (writeAudit) → order.payment_status_changed (migration 291).
+      await setPaymentStatusEventContext(tx, { actorUserId: command.currentUser.id, source: 'payments', correlationId: command.requestId ?? 'payment-command' });
       const { existing, orders } = await lockOrdersThenPayment(tx, command.paymentId, (orderId) => [orderId, command.dto.orderId ?? orderId]);
       const previousOrderId = toNumber(existing.order_id);
       const nextOrderId = command.dto.orderId ?? previousOrderId;
@@ -196,6 +201,8 @@ export class PgPaymentRepository implements PaymentRepositoryPort {
   deletePayment(command: DeletePaymentCommand): Promise<DeletePaymentResponseDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
+      // Same actor/request as this command's audit (writeAudit) → order.payment_status_changed (migration 291).
+      await setPaymentStatusEventContext(tx, { actorUserId: command.currentUser.id, source: 'payments', correlationId: command.requestId ?? 'payment-command' });
       const { existing, orders } = await lockOrdersThenPayment(tx, command.paymentId, (orderId) => [orderId]);
       const orderId = toNumber(existing.order_id);
       const order = requireLockedOrder(orders, orderId);

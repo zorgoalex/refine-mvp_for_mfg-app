@@ -50,6 +50,7 @@ import type {
   ReconcileBazisPanelOrderLinksInput,
   BazisPanelOrderLink,
 } from '../application/order-transaction.types';
+import { setPaymentStatusEventContext } from '../../../shared/payment-status/payment-status-event-context';
 import { evaluateStatusAutomation } from '../../status-automation/application/status-automation-runtime';
 import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
 // VARIANT B: dead after shadow removal — delete in follow-up
@@ -1629,9 +1630,12 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     totals: OrderTotalsDto;
     previousVersion: number | null;
     currentUser: CurrentUser;
+    requestId: string;
   }): Promise<number> {
     const nextVersion = input.previousVersion === null ? 1 : input.previousVersion + 1;
 
+    // order.payment_status_changed (migration 291): the saving user and the save's payment-audit request id.
+    await setPaymentStatusEventContext(this.tx, { actorUserId: input.currentUser.id, source: 'orders', correlationId: input.requestId });
     await this.tx.query(
       `
       UPDATE orders

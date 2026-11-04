@@ -338,6 +338,44 @@ describe('PgPaymentRepository', () => {
     expect(auditInsert!.params[1]).toBe('payment');
     expect(auditInsert!.params[10]).toBe(30);
   });
+
+  // order.payment_status_changed (migration 291): every payment command sets the event context before its order
+  // UPDATE, with the command user and the request id that its payment audit writes (a missing id → 'payment-command').
+  describe('payment status event context', () => {
+    const contextOf = (queries: Array<{ text: string; params: unknown[] }>) => {
+      const contextIndex = queries.findIndex((query) => query.text.includes("set_config('erp.event_actor_user_id'"));
+      const firstOrderUpdate = queries.findIndex((query) => normalizeSql(query.text).startsWith('UPDATE orders SET paid_amount'));
+      const audit = queries.find((query) => /INSERT INTO audit_log/i.test(query.text) && /related_payment_id/i.test(query.text));
+      return { contextIndex, firstOrderUpdate, params: queries[contextIndex]?.params, audit };
+    };
+
+    it.each([
+      ['create', 'request-1', 'request-1'],
+      ['create', undefined, 'payment-command'],
+      ['update', 'request-2', 'request-2'],
+      ['delete', 'request-3', 'request-3'],
+      ['delete', undefined, 'payment-command'],
+    ] as const)('%s (requestId %s) → context before the order UPDATE, correlation %s = audit request id', async (command, requestId, expected) => {
+      const database = command === 'create'
+        ? createDatabase({ existingPayment: false })
+        : createDatabase({ paymentOrderId: 15, orderTotals: { 15: { paidAmount: 0, paymentDate: null } } });
+      const repository = new PgPaymentRepository(database.service);
+      if (command === 'create') {
+        await repository.createPayment({
+          currentUser: currentUser(), dto: { orderId: 15, typePaidId: 1, amount: 250, paymentDate: '2026-05-01' }, requestId,
+        });
+      } else if (command === 'update') {
+        await repository.updatePayment({ currentUser: currentUser(), paymentId: 30, dto: { amount: 400 }, requestId });
+      } else {
+        await repository.deletePayment({ currentUser: currentUser(), paymentId: 30, requestId });
+      }
+      const { contextIndex, firstOrderUpdate, params, audit } = contextOf(database.queries);
+      expect(contextIndex).toBeGreaterThan(-1);
+      expect(contextIndex).toBeLessThan(firstOrderUpdate);
+      expect(params).toEqual(['1', 'payments', expected]);
+      expect(audit?.params).toContain(expected);
+    });
+  });
 });
 
 function createDatabase(options: {

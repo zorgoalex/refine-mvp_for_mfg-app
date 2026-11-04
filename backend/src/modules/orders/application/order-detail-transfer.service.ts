@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { setPaymentStatusEventContext } from '../../../shared/payment-status/payment-status-event-context';
 import { appendOrderReadVisibilitySql } from '../../../permissions/policies/order-read-scope-sql';
 import { mapProductionSummary, type ProductionSummaryRow } from '../../../shared/production-status/production-summary';
 import { ApiError } from '../../../common/errors/api-error';
@@ -282,6 +283,8 @@ export class OrderDetailTransferService {
     const deadlineJobs: Array<{ orderId: number; eventType: 'ORDER_CREATED' | 'ORDER_UPDATED' }> = [];
     const response = await this.ports.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
+      // order.payment_status_changed (migration 291): same actor/request as the transfer's audit.
+      await setPaymentStatusEventContext(tx, { actorUserId: command.currentUser.id, source: 'orders-detail-transfer', correlationId: requestId });
       const idempotency = await reconcileTransferIdempotency(tx, command);
       if (idempotency.completedResponse) {
         return idempotency.completedResponse;

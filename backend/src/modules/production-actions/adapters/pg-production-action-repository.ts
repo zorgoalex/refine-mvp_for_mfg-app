@@ -6,6 +6,7 @@ import type { AuditRelatedEntity } from '../../../common/audit/related-entities'
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import { markStageEventWriter } from '../../../shared/production-status/stage-event-writer';
+import { markPaymentStatusEventEmitted } from '../../../shared/payment-status/payment-status-event-context';
 import { mdfCutReadinessCtes } from '../../../shared/cnc-material/cut-readiness-sql';
 import type { MdfBoardDetailScope } from '../../status-automation/application/mdf-board-event.types';
 import type { CurrentUser } from '../../../permissions/current-user';
@@ -554,6 +555,9 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         return response;
       }
 
+      // This action writes order.payment_status_changed itself (below, with the command idempotency key): the DB
+      // trigger (migration 291) stays silent in this transaction — one producer, also before the migration exists.
+      await markPaymentStatusEventEmitted(tx);
       const nextVersion = await updatePaymentStatus(tx, order.orderId, status.paymentStatusId);
       const auditId = await writeAudit(tx, {
         event: 'orders.payment_status_change',
@@ -605,6 +609,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           orderId: order.orderId,
           clientId: order.clientId,
           paymentStatusId: status.paymentStatusId,
+          previousPaymentStatusId: order.paymentStatusId,
           action: 'payment_status_change',
           scope: { source: 'order-header' },
           idempotencyKey: command.dto.idempotencyKey,

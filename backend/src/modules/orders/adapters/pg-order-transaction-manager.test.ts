@@ -142,6 +142,7 @@ describe('PgOrderTransactionManager', () => {
           totals: totals(),
           previousVersion: 2,
           currentUser: currentUser(),
+          requestId: 'req-save-1',
         }),
       ).resolves.toBe(3);
       await uow.writeAuditEvent({
@@ -166,6 +167,13 @@ describe('PgOrderTransactionManager', () => {
     expect(sql).not.toContain('DELETE FROM order_details');
     expect(sql).toContain('SELECT recalc_order_production_status($1)');
     expect(sql).toContain('INSERT INTO audit_log');
+    // order.payment_status_changed (migration 291): the context is set right before the totals UPDATE, with the
+    // saving user and the save's request id.
+    const contextIndex = database.queries.findIndex((query) => query.text.includes("set_config('erp.event_actor_user_id'"));
+    const totalsIndex = database.queries.findIndex((query) => /UPDATE orders\s+SET total_amount/.test(normalizeSql(query.text)));
+    expect(contextIndex).toBeGreaterThan(-1);
+    expect(contextIndex).toBe(totalsIndex - 1);
+    expect(database.queries[contextIndex].params).toEqual([String(currentUser().id), 'orders', 'req-save-1']);
   });
 
   it('exposes the same transaction client through getTransactionClient()', async () => {

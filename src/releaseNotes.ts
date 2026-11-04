@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-04", title: "Уведомления «Изменение статуса оплаты» — при любом платеже",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "Правила уведомлений «Изменение статуса оплаты» срабатывают при внесении, правке и удалении платежа, при сохранении заказа, переносе деталей и оплатах из Bitrix24 — а не только при ручной смене статуса оплаты. В тексте — «изменён с «A» на «B»», в событии — кто и каким запросом это сделал.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-04", title: "Календарь: «Только производство» по умолчанию выключен",
     services: ["ERP"], repositories: ["repo_erp"],
     changed: [

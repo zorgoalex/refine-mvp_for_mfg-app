@@ -307,6 +307,7 @@ export class OrderTransactionService {
         totals: prepared.totals,
         previousVersion: null,
         currentUser: command.currentUser,
+        requestId: command.requestId ?? 'orders-create',
       });
       // A new order had no payments: every saved payment is a payments.create of this user.
       await this.recordOrderFormPayments(unitOfWork, command.currentUser, command.requestId ?? 'orders-create');
@@ -656,6 +657,7 @@ export class OrderTransactionService {
         totals: prepared.totals,
         previousVersion: lockedOrder.version,
         currentUser: command.currentUser,
+        requestId: command.requestId ?? 'orders-update',
       });
       await this.recordOrderFormPayments(unitOfWork, command.currentUser, command.requestId ?? 'orders-update');
       await unitOfWork.recordCatalogLinesChange(command.orderId, catalogPlan, command.currentUser, command.requestId ?? 'orders-update');

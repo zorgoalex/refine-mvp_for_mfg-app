@@ -1,4 +1,5 @@
 import { ORDER_MANAGER_CANDIDATE_SQL } from '../../orders/domain/order-manager-assignment';
+import { setPaymentStatusEventContext, type PaymentStatusEventContext } from '../../../shared/payment-status/payment-status-event-context';
 import { beginPaymentAuditCapture, recordCapturedPaymentChanges } from '../../payments/application/payment-change-audit';
 import { assertOrderReadable } from '../../../permissions/policies/order-read-visibility';
 import { createHash, randomUUID } from 'node:crypto';
@@ -3277,7 +3278,7 @@ export class PgBitrix24ReverseRepository {
         } else {
           await beginPaymentAuditCapture(tx);
           await materializeActivePayments(tx, Number(request.request_id), orderId, [payment.bitrix_payment_id]);
-          await recalculatePaymentState(tx, orderId);
+          await recalculatePaymentState(tx, orderId, { actorUserId: input.actorUserId, source: 'crm-sync-reverse-auto', correlationId: input.requestId });
           // The widget branch writes its own payment audit inside its materialization (no duplicate here).
           await recordCapturedPaymentChanges(tx, {
             actor: { id: input.actorUserId, username: actor.username, role: 'integration_service' },
@@ -3465,7 +3466,9 @@ export class PgBitrix24ReverseRepository {
         true,
       );
       const deletedCount = deleted.rowCount ?? 0;
-      if (count > 0 || deletedCount > 0) await recalculatePaymentState(tx, orderId);
+      if (count > 0 || deletedCount > 0) {
+        await recalculatePaymentState(tx, orderId, { actorUserId: input.actorUserId, source: 'crm-sync-reverse-manual', correlationId: input.auditRequestId });
+      }
       // Changed or soft-deleted payments of active 1C receipt matches → review (the match itself stays: `changed`).
       if (count > 0 || deletedCount > 0) {
         // Soft-deleted payments by id: one moved to another order is not found through this order (code review R1-5).
@@ -3713,7 +3716,9 @@ export class PgBitrix24ReverseRepository {
         ? await materializeMappedOrderPaymentRows(tx, input.orderId, activePaymentIds)
         : await materializeActivePayments(tx, paymentOwner.requestId, input.orderId, activePaymentIds);
       deletedPaymentCount = deleted.rowCount ?? 0;
-      if (changedPaymentCount > 0 || deletedPaymentCount > 0) await recalculatePaymentState(tx, input.orderId);
+      if (changedPaymentCount > 0 || deletedPaymentCount > 0) {
+        await recalculatePaymentState(tx, input.orderId, { actorUserId: input.actorUserId, source: 'crm-sync-reverse-manual', correlationId: input.auditRequestId });
+      }
       // Changed or soft-deleted payments of active 1C receipt matches → review (the match itself stays: `changed`).
       if (changedPaymentCount > 0 || deletedPaymentCount > 0) {
         await detectOnecMatchTransitions(tx, { orderIds: [input.orderId], paymentIds: deleted.rows.map((row) => Number(row.payment_id)) },
@@ -6533,9 +6538,11 @@ async function materializePaymentRows(
   return changed;
 }
 
+// `event`: same actor/request as the caller's payment audit → order.payment_status_changed (migration 291).
 async function recalculatePaymentState(
   tx: TransactionClient,
   orderId: number,
+  event: PaymentStatusEventContext,
 ): Promise<void> {
   const order = await tx.query<{
     final_amount: string | number | null;
@@ -6567,6 +6574,7 @@ async function recalculatePaymentState(
     finalAmount,
     paidAmount,
   );
+  await setPaymentStatusEventContext(tx, event);
   await tx.query(
     `UPDATE orders
         SET paid_amount=$2, payment_date=$3, payment_status_id=$4,
