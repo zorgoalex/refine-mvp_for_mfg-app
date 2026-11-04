@@ -401,6 +401,32 @@ export interface CutDetailPlacementsResponseDto {
   hasArchived: boolean;
 }
 
+/** What changed in an order detail after a ready cut result was calculated from it. */
+export type CutOrderIssueKind = 'deleted' | 'size_changed' | 'quantity_changed' | 'material_changed';
+
+export interface CutOrderIssueDto {
+  kind: CutOrderIssueKind;
+  orderDetailId: number;
+  detailNumber: number | null;
+  /** Value the cut was calculated with (size «H×W», quantity), null when not applicable. */
+  calculated: string | null;
+  /** Current value in the order, null when not applicable (deleted detail). */
+  current: string | null;
+}
+
+/** A ready, non-archived cut job whose current result no longer matches the order's details. */
+export interface CutOrderJobIssuesDto {
+  cutJobId: number;
+  cutNumber: string;
+  name: string;
+  issues: CutOrderIssueDto[];
+}
+
+export interface CutOrderIssuesResponseDto {
+  /** Only jobs with at least one issue; empty when every cut of the order is current. */
+  jobs: CutOrderJobIssuesDto[];
+}
+
 /** One detail's latest-created ready (calculated) cut job. */
 export interface CutDetailLastReadyJobRefDto {
   cutJobId: number;

@@ -35,6 +35,7 @@ function repo(overrides: Partial<CutRepositoryPort> = {}): CutRepositoryPort {
     listFilmOptionsForCut: reject,
     renderSheetPng: reject,
     listDetailLastReady: () => Promise.resolve({ details: [] }),
+    listOrderCutIssues: () => Promise.resolve({ jobs: [] }),
     ...overrides,
   } as CutRepositoryPort;
 }

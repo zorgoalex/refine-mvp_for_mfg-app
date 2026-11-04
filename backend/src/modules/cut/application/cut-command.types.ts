@@ -6,6 +6,7 @@ import type {
   CreateCutJobRequestDto,
   CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
+  CutOrderIssuesResponseDto,
   CutFilmOptionDto,
   CutJobDeleteImpactDto,
   CutJobDto,
@@ -263,6 +264,12 @@ export interface DetailPlacementsQuery {
   requestId?: string;
 }
 
+export interface OrderCutIssuesQuery {
+  currentUser: CurrentUser;
+  orderId: number;
+  requestId?: string;
+}
+
 export interface DetailLastReadyQuery {
   currentUser: CurrentUser;
   /** detail ids whose latest-created ready cut job is resolved (one row max per detail) */
@@ -417,6 +424,7 @@ export interface CutRepositoryPort {
   listFilmOptionsForCut(query: ListFilmOptionsForCutQuery): Promise<CutFilmOptionDto[]>;
   listDetailPlacements(query: DetailPlacementsQuery): Promise<CutDetailPlacementsResponseDto>;
   listDetailLastReady(query: DetailLastReadyQuery): Promise<CutDetailLastReadyResponseDto>;
+  listOrderCutIssues(query: OrderCutIssuesQuery): Promise<CutOrderIssuesResponseDto>;
   renderSheetPng(query: RenderSheetPngQuery): Promise<Buffer>;
   renderSheetSvg(query: RenderSheetSvgQuery): Promise<string>;
   renderGroupPdf(query: RenderGroupPdfQuery): Promise<Buffer>;

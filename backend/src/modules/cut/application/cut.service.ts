@@ -13,6 +13,7 @@ import type {
   CutResultStateCommand,
   CutSheetTypeOption,
   DetailLastReadyQuery,
+  OrderCutIssuesQuery,
   DetailPlacementsQuery,
   EligibleDetailsQuery,
   GetCutJobQuery,
@@ -162,6 +163,11 @@ export class CutService implements OnModuleInit, OnModuleDestroy {
   async listDetailLastReady(query: DetailLastReadyQuery) {
     this.require(query.currentUser, 'cut.view', { requestId: query.requestId });
     return this.ports.cut.listDetailLastReady(query);
+  }
+
+  async listOrderCutIssues(query: OrderCutIssuesQuery) {
+    this.require(query.currentUser, 'cut.view', { requestId: query.requestId });
+    return this.ports.cut.listOrderCutIssues(query);
   }
 
   async renderSheetPng(query: RenderSheetPngQuery) {

@@ -29,6 +29,7 @@ import { ClientScreenShowHeader } from "../clientScreen/ClientScreenShowHeader";
 import { overlayDetailProductionStatuses } from '../../utils/orderProductionSummary';
 import { OrderDatesBlock } from "./components/sections/OrderDatesBlock";
 import { OrderFinanceBlock } from "./components/sections/OrderFinanceBlock";
+import { OrderCutIssuesAlert, orderCutIssuesDetailsKey } from "./components/sections/OrderCutIssuesAlert";
 import { OrderProductionBlock } from "./components/sections/OrderProductionBlock";
 import { OrderProductionFlow, OrderProductionFlowCodes } from "./components/sections/OrderProductionFlow";
 import { OrderMaterialsWorkbenchTable } from "./components/sections/OrderMaterialsWorkbenchTable";
@@ -66,7 +67,7 @@ import {
 } from "../../utils/orderFinancialVisibility";
 import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
 import { cutApi } from "../../api/cutApi";
-import type { CutDetailLastReadyJobRef, CutJobDto, CutJobRef } from "../../api/types/cutApi.types";
+import type { CutDetailLastReadyJobRef, CutJobDto, CutJobRef, CutOrderJobIssues } from "../../api/types/cutApi.types";
 import { cncTelegramApi } from "../../api/cncTelegramApi";
 import type { CncTelegramOrderCuttingSequence } from "../../api/types/cncTelegramApi.types";
 import { projectsApi } from "../../api/projectsApi";
@@ -1981,6 +1982,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const cutOrderJobs = cutOrderJobsState?.scopeKey === showAsyncReadScopeKey
     ? cutOrderJobsState.value
     : [];
+  const [cutOrderIssuesState, setCutOrderIssuesState] = useState<{
+    scopeKey: string;
+    value: CutOrderJobIssues[];
+  } | null>(null);
+  const cutOrderIssues = cutOrderIssuesState?.scopeKey === showAsyncReadScopeKey
+    ? cutOrderIssuesState.value
+    : [];
   const [cncOrderCuttingSequencesState, setCncOrderCuttingSequencesState] = useState<{
     scopeKey: string;
     value: CncTelegramOrderCuttingSequence[];
@@ -2044,6 +2052,35 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     void refreshCutOrderJobs(record?.order_id);
   }, [record?.order_id, refreshCutOrderJobs]);
 
+  // «Раскрой не актуален»: re-read whenever the order's details change (deleted, resized, re-quantified, other
+  // sheet material) or a cut becomes ready; only the latest request may write (a slower older one is dropped).
+  const cutOrderIssuesSeq = useRef(0);
+  const refreshCutOrderIssues = useCallback(async (orderId?: number | null) => {
+    if (!ordinaryReadActive) return;
+    const seq = ++cutOrderIssuesSeq.current;
+    if (!cutColumnEnabled || !orderId) {
+      setCutOrderIssuesState({ scopeKey: showAsyncReadScopeKey, value: [] });
+      return;
+    }
+    const token = showAsyncReadGuard.capture();
+    if (!token) return;
+    // Advisory: a failed read shows no warning and never hides the cut list.
+    const jobs = await cutApi.listOrderIssues(orderId).then((res) => res.jobs, () => [] as CutOrderJobIssues[]);
+    if (seq === cutOrderIssuesSeq.current && showAsyncReadGuard.isCurrent(token)) {
+      setCutOrderIssuesState({ scopeKey: showAsyncReadScopeKey, value: jobs });
+    }
+  }, [
+    cutColumnEnabled,
+    ordinaryReadActive,
+    showAsyncReadGuard.capture,
+    showAsyncReadGuard.isCurrent,
+    showAsyncReadScopeKey,
+  ]);
+  const cutOrderIssuesDetailsKey = useMemo(() => orderCutIssuesDetailsKey(details), [details]);
+  useEffect(() => {
+    void refreshCutOrderIssues(record?.order_id);
+  }, [record?.order_id, refreshCutOrderIssues, cutOrderIssuesDetailsKey]);
+
   useEffect(() => {
     void refreshCncOrderCuttingSequences(record?.order_id);
   }, [record?.order_id, refreshCncOrderCuttingSequences]);
@@ -2054,13 +2091,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       const payload = readCutJobReadyEvent(event);
       if (!payload || !cutJobReadyAffects(payload, { detailIds: cutDetailIds, orderId: record?.order_id })) return;
       void refreshCutOrderJobs(record?.order_id);
+      void refreshCutOrderIssues(record?.order_id);
       void refreshCncOrderCuttingSequences(record?.order_id);
     };
     window.addEventListener(CUT_JOB_READY_EVENT, handler);
     return () => {
       window.removeEventListener(CUT_JOB_READY_EVENT, handler);
     };
-  }, [cutColumnEnabled, cutDetailIds, ordinaryReadActive, record?.order_id, refreshCutOrderJobs, refreshCncOrderCuttingSequences]);
+  }, [cutColumnEnabled, cutDetailIds, ordinaryReadActive, record?.order_id, refreshCutOrderJobs, refreshCutOrderIssues, refreshCncOrderCuttingSequences]);
 
   const bathFilmUsage = useMemo(
     () => computeOrderBathFilmUsage(
@@ -4235,6 +4273,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                             <div style={{ fontSize: 12, fontWeight: 600, color: '#1677ff', marginBottom: 3 }}>
                               Раскрой
                             </div>
+                            <OrderCutIssuesAlert jobs={cutOrderIssues} />
                             {cutOrderJobs.length === 0 && cncOrderCuttingSequences.length === 0 ? (
                               <span style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>—</span>
                             ) : (
