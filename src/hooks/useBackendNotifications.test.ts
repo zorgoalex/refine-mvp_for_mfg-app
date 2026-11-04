@@ -388,7 +388,7 @@ describe('useBackendNotifications hook', () => {
     const loaded = renderHook(true);
     const refreshPromise = loaded.refresh();
 
-    await loaded.markAllAsRead();
+    await loaded.markAllAsRead([unread.notificationId]);
     let state = renderHook(true);
 
     expect(state.notifications).toEqual([{ ...toPanelNotification(unread), read: true }]);
@@ -400,6 +400,98 @@ describe('useBackendNotifications hook', () => {
 
     expect(state.notifications).toEqual([{ ...toPanelNotification(unread), read: true }]);
     expect(state.unreadCount).toBe(0);
+  });
+
+  it('marks as read only the unread notifications shown in the list', async () => {
+    const shownUnread = createBackendNotification();
+    const shownRead = { ...createBackendNotification(), notificationId: '33333333-3333-4333-8333-333333333333', readAt: '2026-10-27T10:00:00.000Z' };
+    notificationsApiMock.list.mockResolvedValueOnce(createListResponse([shownUnread, shownRead], 2));
+    notificationsApiMock.markAllRead.mockResolvedValueOnce({ updatedCount: 1 });
+
+    renderHook(true);
+    await flushPromises();
+    // The panel passes what it displays; an id it does not display (another unread one) must not be sent.
+    await renderHook(true).markAllAsRead([shownUnread.notificationId, shownRead.notificationId]);
+    const state = renderHook(true);
+
+    expect(notificationsApiMock.markAllRead).toHaveBeenCalledWith([shownUnread.notificationId]);
+    expect(state.unreadCount).toBe(1);
+    expect(state.notifications.every((notification) => notification.read)).toBe(true);
+  });
+
+  it('does not call the server when nothing shown is unread', async () => {
+    notificationsApiMock.list.mockResolvedValueOnce(createListResponse([], 0));
+
+    renderHook(true);
+    await flushPromises();
+    await renderHook(true).markAllAsRead([]);
+
+    expect(notificationsApiMock.markAllRead).not.toHaveBeenCalled();
+  });
+
+  it('does not mark a loaded unread notification the panel did not display', async () => {
+    const displayed = createBackendNotification();
+    const hidden = createBackendNotification({ notificationId: '44444444-4444-4444-8444-444444444444' });
+    notificationsApiMock.list.mockResolvedValueOnce(createListResponse([displayed, hidden], 2));
+    notificationsApiMock.markAllRead.mockResolvedValueOnce({ updatedCount: 1 });
+
+    renderHook(true);
+    await flushPromises();
+    await renderHook(true).markAllAsRead([displayed.notificationId]);
+    const state = renderHook(true);
+
+    expect(notificationsApiMock.markAllRead).toHaveBeenCalledWith([displayed.notificationId]);
+    expect(state.notifications.find((n) => n.id === hidden.notificationId)?.read).toBe(false);
+    expect(state.unreadCount).toBe(1);
+  });
+
+  it('reconciles the unread count from the server after mark-all (marked row displaced beyond the page)', async () => {
+    const a = createBackendNotification();
+    const b = createBackendNotification({ notificationId: '66666666-6666-4666-8666-666666666666' });
+    const markAllRead = createDeferred<{ updatedCount: number }>();
+    notificationsApiMock.list
+      .mockResolvedValueOnce(createListResponse([a], 1))
+      // refresh before the PATCH commits: B is new, A fell beyond the first page, server count 2
+      .mockResolvedValueOnce(createListResponse([b], 2))
+      // reconciliation after the PATCH: authoritative count 1
+      .mockResolvedValueOnce(createListResponse([b], 1));
+    notificationsApiMock.markAllRead.mockReturnValueOnce(markAllRead.promise);
+
+    renderHook(true);
+    await flushPromises();
+    const loaded = renderHook(true);
+    const markAllPromise = loaded.markAllAsRead([a.notificationId]);
+    await flushPromises();
+    await loaded.refresh();
+    markAllRead.resolve({ updatedCount: 1 });
+    await markAllPromise;
+    await flushPromises();
+
+    expect(renderHook(true).unreadCount).toBe(1);
+  });
+
+  it('does not subtract twice when a refresh lands before the mark-all response', async () => {
+    const a = createBackendNotification();
+    const b = createBackendNotification({ notificationId: '55555555-5555-4555-8555-555555555555' });
+    const markAllRead = createDeferred<{ updatedCount: number }>();
+    notificationsApiMock.list
+      .mockResolvedValueOnce(createListResponse([a], 1))
+      .mockResolvedValueOnce(createListResponse([b, { ...a, readAt: '2026-10-27T10:00:00.000Z' }], 1));
+    notificationsApiMock.markAllRead.mockReturnValueOnce(markAllRead.promise);
+
+    renderHook(true);
+    await flushPromises();
+    const loaded = renderHook(true);
+    const markAllPromise = loaded.markAllAsRead([a.notificationId]);
+    await flushPromises();
+    // A refresh started after the mutation (e.g. a balloon event) already shows A read and B unread.
+    await loaded.refresh();
+    markAllRead.resolve({ updatedCount: 1 });
+    await markAllPromise;
+    const state = renderHook(true);
+
+    expect(state.unreadCount).toBe(1);
+    expect(state.notifications.find((n) => n.id === a.notificationId)?.read).toBe(true);
   });
 
   it('ignores stale refresh responses after delete succeeds', async () => {
@@ -444,7 +536,7 @@ describe('useBackendNotifications hook', () => {
     renderHook(true);
     await flushPromises();
     const loaded = renderHook(true);
-    const markAllPromise = loaded.markAllAsRead();
+    const markAllPromise = loaded.markAllAsRead([unread.notificationId]);
     const refreshPromise = loaded.refresh();
 
     markAllRead.resolve({ updatedCount: 1 });
