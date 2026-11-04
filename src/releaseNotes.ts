@@ -29,6 +29,14 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-04", title: "Фильтры и поиск в списках не пропадают после захода в заказ",
+    services: ["ERP"], repositories: ["repo_erp"],
+    fixed: [
+      "После захода в любой заказ и возврата на вкладку «Заказы» (и другие списки) пропадали блок фильтров и поле поиска — до перезагрузки страницы. Касалось вариантов NewLine, «Линия» и «Воздух». Теперь шапки списков остаются на месте.",
+      "NewLine на телефоне: лишний пустой отступ внизу экранов, пока заказ открыт во вкладке, больше не появляется.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-04", title: "Клиенты: блок фильтров, как в других справочниках",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
