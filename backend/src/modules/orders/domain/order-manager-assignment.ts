@@ -57,9 +57,18 @@ export function resolveOrderManagerAssignment(input: OrderManagerAssignmentInput
   };
 }
 
-/** A manager must be an active ERP user who is not a service account. */
+/**
+ * Who may be the manager of an order (SQL predicate over `users u`): an active, non-service ERP user who can see
+ * orders (`orders.view` among the effective permissions — role and access groups). Integration accounts that log in
+ * but never work with orders (e.g. the 1C operator account) are not candidates. One predicate for the candidate list,
+ * the save command and the snapshot import.
+ */
+export const ORDER_MANAGER_CANDIDATE_SQL =
+  "u.is_active AND NOT u.is_service_account AND EXISTS (SELECT 1 FROM user_effective_permissions p WHERE p.user_id = u.user_id AND p.permission_name = 'orders.view')";
+
+/** A manager must be an active ERP user who can see orders (not a service or integration account). */
 export function invalidOrderManagerError(managerId: string): ApiError {
-  return new ApiError(422, 'ORDER_MANAGER_INVALID', 'Менеджером заказа может быть только активный пользователь ERP', {
+  return new ApiError(422, 'ORDER_MANAGER_INVALID', 'Менеджером заказа может быть только активный пользователь ERP с доступом к заказам', {
     managerId,
   });
 }
