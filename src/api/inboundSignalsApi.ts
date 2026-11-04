@@ -15,11 +15,15 @@ export interface SignalRow {
   sender: string; message_text: string; sent_at: string; received_at: string;
   signal_code: string | null; signal_name: string | null; state: string | null;
   reason_code: string | null; order_id: string | null; order_name: string | null; version: number;
+  /** Position of the signal in a split message; the lines it came from — only for a user with the resolve right. */
+  segment_index?: number; segment_text?: string | null;
 }
 export interface SignalList { items: SignalRow[]; total: number; attention: number; completed: number; relayEnabled: boolean; automationEnabled: boolean }
 export interface SignalDetail {
   id: string; version: number; signalCode: string; signalName: string; orderId: string | null; state: string;
   message: Pick<SignalRow, 'channel'|'source_name'|'sender'|'message_text'|'sent_at'|'received_at'>;
+  /** The lines of a split message this signal came from (masked for a user without the resolve right); null — the whole message. */
+  fragment?: string | null; segmentIndex?: number;
   steps: { occurred_at: string; event_code: string; actor_user_id: string | null; details: Record<string, unknown> }[];
   actions: { event: string; occurred_at: string; rule_name: string; reason: string | null; action_type: string; target_status_id: string | null }[];
   technical?: { requestId: string; configVersion: number; ruleCodes: string[]; attemptCount: number };
@@ -39,5 +43,17 @@ export const inboundSignalsApi = {
   command: (id: string, action: 'resolve'|'dismiss'|'retry', body: { version: number; orderId?: number; previewHash?: string; reason?: string }, key: string) => httpClient.post(apiRoutes.inboundSignals.command(id, action), body, { headers: { 'Idempotency-Key': key } }),
   configuration: () => httpClient.get<SignalConfiguration>(apiRoutes.inboundSignals.configuration),
   saveConfiguration: (body: SignalConfiguration) => httpClient.put<SignalConfiguration>(apiRoutes.inboundSignals.configuration, body),
-  test: (configuration: SignalConfiguration, text: string, source: string) => httpClient.post<{ ruleCode: string; signalCode: string; references: string[] }[]>(apiRoutes.inboundSignals.test, { configuration, text, source }),
+  test: async (configuration: SignalConfiguration, text: string, source: string) =>
+    normalizeTemplateTest(await httpClient.post<TemplateTestResponse>(apiRoutes.inboundSignals.test, { configuration, text, source, units: true }), text),
 };
+
+export interface TemplateMatch { ruleCode: string; signalCode: string; references: string[] }
+export interface TemplateUnit { segmentIndex: number; segmentText: string; signalCode: string; ruleCodes: string[]; references: string[] }
+export interface TemplateTest { matches: TemplateMatch[]; units: TemplateUnit[]; split: boolean; tooManyReferences: boolean }
+type TemplateTestResponse = TemplateMatch[] | TemplateTest;
+/** A backend that does not know `units` answers with the plain array: shown as one signal per rule, as before. */
+export function normalizeTemplateTest(response: TemplateTestResponse, text = ''): TemplateTest {
+  if (!Array.isArray(response)) return response;
+  return { matches: response, split: false, tooManyReferences: false,
+    units: response.map((match, segmentIndex) => ({ segmentIndex, segmentText: text, signalCode: match.signalCode, ruleCodes: [match.ruleCode], references: match.references })) };
+}

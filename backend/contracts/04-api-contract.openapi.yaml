@@ -241,8 +241,35 @@ paths:
                 configuration: { $ref: '#/components/schemas/MessageProcessingConfiguration' }
                 text: { type: string, maxLength: 16000 }
                 source: { type: string, maxLength: 64 }
+                units: { type: boolean, description: 'true — answer with the object below (how the message is split into signals); omitted/false — the plain array, as before' }
       responses:
-        '201': { description: Matching rule/signal codes and extracted references; no intake or business writes }
+        '201':
+          description: Matching rule/signal codes and extracted references; no intake or business writes
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    description: Without units
+                    items: { $ref: '#/components/schemas/MessageProcessingTemplateMatch' }
+                  - type: object
+                    description: With units=true
+                    required: [matches, units, split, tooManyReferences]
+                    properties:
+                      matches: { type: array, items: { $ref: '#/components/schemas/MessageProcessingTemplateMatch' } }
+                      split: { type: boolean, description: The message is split into several signals }
+                      tooManyReferences: { type: boolean, description: More than 20 numbers — the message goes to review }
+                      units:
+                        type: array
+                        items:
+                          type: object
+                          required: [segmentIndex, segmentText, signalCode, ruleCodes, references]
+                          properties:
+                            segmentIndex: { type: integer }
+                            segmentText: { type: string }
+                            signalCode: { type: string }
+                            ruleCodes: { type: array, items: { type: string } }
+                            references: { type: array, items: { type: string } }
   /api/v1/catalog-items:
     get:
       tags: [Catalog]
@@ -23234,6 +23261,13 @@ components:
         order_id: { type: string, nullable: true }
         order_name: { type: string, nullable: true }
         version: { type: integer, nullable: true }
+    MessageProcessingTemplateMatch:
+      type: object
+      required: [ruleCode, signalCode, references]
+      properties:
+        ruleCode: { type: string }
+        signalCode: { type: string }
+        references: { type: array, items: { type: string } }
     MessageProcessingConfiguration:
       type: object
       additionalProperties: false

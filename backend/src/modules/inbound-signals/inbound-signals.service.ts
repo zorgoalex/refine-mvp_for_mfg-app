@@ -15,7 +15,11 @@ import { evaluateStatusAutomation, isStatusAutomationEnabled } from '../status-a
 import { listEnabledRulesForEvent, loadOrderAutomationState } from '../status-automation/adapters/pg-status-automation-repository';
 import { selectApplicableRules } from '../status-automation/domain/status-automation-evaluator';
 import type { StatusAutomationEvent } from '../status-automation/application/status-automation.types';
-import { digest, extractReferences, matchRules, messageKey, parseConfiguration, parseWahaGroup, type InboundMessage, type Resolver, type SignalConfiguration } from './inbound-signals.domain';
+import { digest, extractReferences, matchRules, messageKey, parseConfiguration, parseWahaGroup, planSignalGroups, projectVisibleText,
+  type GroupReference, type InboundMessage, type Resolver, type SignalConfiguration } from './inbound-signals.domain';
+
+/** A reference of a split group with the order it led to at intake (null — not found or ambiguous). */
+type ResolvedReference = GroupReference & { orderId: string | null };
 
 const listSchema = z.object({
   page: z.coerce.number().int().min(1).max(10000).default(1),
@@ -36,6 +40,7 @@ type Occurrence = {
   id: string; message_id: string; signal_code: string; signal_name: string; order_id: string | null;
   state: string; version: number; rule_codes: string[]; processing_request_id: string;
   attempt_count: number; lock_token: string | null; source_code: string; config_version: number; resolved_by: string | null; execution_guard: string | null;
+  segment_index: number; segment_text: string | null; group_references: ResolvedReference[] | null; visible_text: string | null;
 };
 type ConfigRow = { version: number; document: Omit<SignalConfiguration, 'version'>; source_activation: Record<string, string> };
 function invalid(): never { throw new ApiError(422, 'SIGNAL_INPUT_INVALID', 'Проверьте поля запроса'); }
@@ -48,6 +53,13 @@ function scopeSql(actor: CurrentUser, params: unknown[]): string {
   const scope = policyScopeSetsForUser(actor).orders.view;
   const index = scopeNeedsActor(scope) ? params.push(actor.id) : null;
   return buildOrderReadScopePredicate(scope, index, index === null ? 'FALSE' : orderAssignmentExistsSql('o', index), 'o');
+}
+
+/** Step detail keys that hold an order id. */
+const STEP_ORDER_KEYS = ['orderId', 'targetOrderId', 'previousOrderId'] as const;
+/** The message text a user may see in the list and search (see the list projection). */
+function visibleTextSql(canResolve: boolean): string {
+  return canResolve ? 'm.message_text' : "CASE WHEN s.segment_text IS NOT NULL THEN coalesce(s.visible_text,'') ELSE m.message_text END";
 }
 
 @Injectable()
@@ -117,13 +129,23 @@ export class InboundSignalsService implements OnModuleInit, OnModuleDestroy {
   }
   async testTemplate(body: unknown, actor: CurrentUser) {
     this.requireEnabled(); requirePermission(actor, 'message_signals.manage_config');
-    const parsed = z.object({ configuration: configurationSchemaForTest(), text: z.string().max(16000), source: z.string().max(64) }).safeParse(body);
+    const parsed = z.object({ configuration: configurationSchemaForTest(), text: z.string().max(16000), source: z.string().max(64),
+      units: z.boolean().optional() }).safeParse(body);
     if (!parsed.success) invalid();
     const config = parseConfiguration(parsed.data.configuration);
-    return matchRules(parsed.data.text, parsed.data.source, config).map(rule => ({
+    const matches = matchRules(parsed.data.text, parsed.data.source, config).map(rule => ({
       ruleCode: rule.code, signalCode: rule.signalCode,
       references: extractReferences(parsed.data.text, config.resolvers.find(r => r.code === rule.resolverCode)!),
     }));
+    // The array stays the answer for clients that do not ask for units (compatibility with the earlier frontend).
+    if (!parsed.data.units) return matches;
+    const plan = planSignalGroups(parsed.data.text, parsed.data.source, config);
+    const units = plan.kind === 'legacy'
+      ? matches.map((match, segmentIndex) => ({ segmentIndex, segmentText: parsed.data.text, signalCode: match.signalCode,
+          ruleCodes: [match.ruleCode], references: match.references }))
+      : plan.groups.map(group => ({ segmentIndex: group.groupIndex, segmentText: group.text, signalCode: group.signalCode,
+          ruleCodes: group.ruleCodes, references: group.references.map(r => r.reference) }));
+    return { matches, units, split: plan.kind === 'split', tooManyReferences: plan.kind === 'split' && plan.tooMany };
   }
   async acceptWaha(body: unknown, session: string, requestId: string): Promise<boolean> {
     if (!this.enabled()) return false;
@@ -149,24 +171,102 @@ export class InboundSignalsService implements OnModuleInit, OnModuleDestroy {
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
       [key, message.channel, source.code, source.name, message.sender, message.text, message.sentAt, row.version, requestId, rules.length > 0]);
       const messageId = saved.rows[0].id;
-      for (const signalCode of [...new Set(rules.map(r => r.signalCode))]) {
-        const signalRules = rules.filter(r => r.signalCode === signalCode);
-        const resolved = await Promise.all(signalRules.map(async rule => {
-          const resolver = config.resolvers.find(r => r.code === rule.resolverCode)!;
-          return this.resolveReferences(tx, extractReferences(message.text, resolver), resolver);
-        }));
-        const targets = [...new Set(resolved.flat())];
-        const orderId = targets.length === 1 && resolved.every(ids => ids.length === 1) ? targets[0] : null;
-        const reason = orderId ? null : targets.length > 1 ? 'ambiguous_reference' : 'reference_not_found';
-        const savedSignal = await tx.query<{ id: string }>(`INSERT INTO inbound_signal_occurrences(message_id,signal_code,signal_name,rule_codes,order_id,state,reason_code,processing_request_id)
-          VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-        [messageId, signalCode, config.signals.find(s => s.code === signalCode)!.name, JSON.stringify(signalRules.map(r => r.code)), orderId,
-          orderId ? 'pending' : 'needs_review', reason, randomUUID()]);
-        await this.step(tx, savedSignal.rows[0].id, 'signal_detected', null, { configVersion: row.version, ruleCodes: signalRules.map(r => r.code) });
-        await this.step(tx, savedSignal.rows[0].id, orderId ? 'order_resolved' : reason!, null, orderId ? { orderId } : {});
+      const plan = planSignalGroups(message.text, source.code, config);
+      if (plan.kind === 'legacy') {
+        for (const signalCode of [...new Set(rules.map(r => r.signalCode))]) {
+          const signalRules = rules.filter(r => r.signalCode === signalCode);
+          const resolved = await Promise.all(signalRules.map(async rule => {
+            const resolver = config.resolvers.find(r => r.code === rule.resolverCode)!;
+            return this.resolveReferences(tx, extractReferences(message.text, resolver), resolver);
+          }));
+          const targets = [...new Set(resolved.flat())];
+          const orderId = targets.length === 1 && resolved.every(ids => ids.length === 1) ? targets[0] : null;
+          const reason = orderId ? null : targets.length > 1 ? 'ambiguous_reference' : 'reference_not_found';
+          await this.insertOccurrence(tx, { messageId, signalCode, ruleCodes: signalRules.map(r => r.code), orderId, reason,
+            configVersion: row.version, config, segment: null });
+        }
+      } else {
+        await this.acceptSplit(tx, messageId, plan, config, row.version);
       }
       return { accepted: true, messageId };
     });
+  }
+  /**
+   * A split message: one occurrence per (group, signal, order). Every reference of a group must lead to exactly one
+   * order, otherwise the whole group goes to review as one occurrence without an order (decision of the user 02.11).
+   * The same order with the same signal in another group of the message is one occurrence (the first group).
+   */
+  private async acceptSplit(tx: TransactionClient, messageId: string, plan: Extract<ReturnType<typeof planSignalGroups>, { kind: 'split' }>,
+    config: SignalConfiguration, configVersion: number) {
+    let segmentIndex = 0;
+    if (plan.tooMany) {
+      // One review occurrence per signal: too many numbers to trust a split.
+      for (const signalCode of [...new Set(plan.groups.map(g => g.signalCode))]) {
+        const signalGroups = plan.groups.filter(g => g.signalCode === signalCode);
+        const text = signalGroups.map(g => g.text).join('\n');
+        const refs: ResolvedReference[] = signalGroups.flatMap(g => g.references.map(r => ({ ...r, orderId: null })));
+        await this.insertOccurrence(tx, { messageId, signalCode, ruleCodes: [...new Set(signalGroups.flatMap(g => g.ruleCodes))],
+          orderId: null, reason: 'too_many_references', configVersion, config,
+          segment: { index: segmentIndex++, text, references: refs } });
+      }
+      return;
+    }
+    // Units are collected first: the same order with the same signal in a later group is the first group's unit, and the
+    // later group's references (and lines) join its evidence, so the worker re-checks them all before applying.
+    type Unit = { signalCode: string; ruleCodes: string[]; orderId: string | null; reason: string | null; text: string; references: ResolvedReference[] };
+    const units: Unit[] = [];
+    const byKey = new Map<string, Unit>();
+    for (const group of plan.groups) {
+      const refs: ResolvedReference[] = [];
+      let ambiguous = false;
+      for (const reference of group.references) {
+        const resolver = config.resolvers.find(r => r.code === reference.resolverCode)!;
+        const ids = await this.resolveReferences(tx, [reference.reference], resolver);
+        if (ids.length > 1) ambiguous = true;
+        refs.push({ ...reference, orderId: ids.length === 1 ? ids[0] : null });
+      }
+      if (!refs.length || refs.some(r => r.orderId === null)) {
+        units.push({ signalCode: group.signalCode, ruleCodes: group.ruleCodes, orderId: null,
+          reason: ambiguous ? 'ambiguous_reference' : 'reference_not_found', text: group.text, references: refs });
+        continue;
+      }
+      for (const orderId of [...new Set(refs.map(r => r.orderId!))]) {
+        const key = `${group.signalCode}:${orderId}`;
+        const first = byKey.get(key);
+        if (!first) {
+          const unit: Unit = { signalCode: group.signalCode, ruleCodes: [...group.ruleCodes], orderId, reason: null, text: group.text, references: [...refs] };
+          byKey.set(key, unit);
+          units.push(unit);
+          continue;
+        }
+        for (const ref of refs) {
+          if (!first.references.some(r => r.resolverCode === ref.resolverCode && r.reference === ref.reference)) first.references.push(ref);
+        }
+        for (const rule of group.ruleCodes) if (!first.ruleCodes.includes(rule)) first.ruleCodes.push(rule);
+        if (!first.text.split('\n').includes(group.text)) first.text = `${first.text}\n${group.text}`;
+      }
+    }
+    for (const unit of units) {
+      await this.insertOccurrence(tx, { messageId, signalCode: unit.signalCode, ruleCodes: unit.ruleCodes, orderId: unit.orderId,
+        reason: unit.reason, configVersion, config, segment: { index: segmentIndex++, text: unit.text, references: unit.references } });
+    }
+  }
+  private async insertOccurrence(tx: TransactionClient, input: { messageId: string; signalCode: string; ruleCodes: string[];
+    orderId: string | null; reason: string | null; configVersion: number; config: SignalConfiguration;
+    segment: { index: number; text: string; references: ResolvedReference[] } | null }) {
+    const { segment } = input;
+    const savedSignal = await tx.query<{ id: string }>(`INSERT INTO inbound_signal_occurrences(message_id,signal_code,signal_name,rule_codes,order_id,state,reason_code,processing_request_id,
+        segment_index,segment_text,group_references,visible_text)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+    [input.messageId, input.signalCode, input.config.signals.find(s => s.code === input.signalCode)!.name, JSON.stringify(input.ruleCodes),
+      input.orderId, input.orderId ? 'pending' : 'needs_review', input.reason, randomUUID(),
+      segment?.index ?? 0, segment?.text ?? null, segment ? JSON.stringify(segment.references) : null,
+      segment ? projectVisibleText(segment.text, segment.references, input.orderId) : null]);
+    const id = savedSignal.rows[0].id;
+    // Steps never carry the references or orders of other occurrences (they are shown to scoped users).
+    await this.step(tx, id, 'signal_detected', null, { configVersion: input.configVersion, ruleCodes: input.ruleCodes,
+      ...(segment ? { segmentIndex: segment.index } : {}) });
+    await this.step(tx, id, input.orderId ? 'order_resolved' : input.reason!, null, input.orderId ? { orderId: input.orderId } : {});
   }
   private async resolveReferences(tx: TransactionClient, references: string[], resolver: Resolver): Promise<string[]> {
     if (!references.length || references.length > 20) return [];
@@ -191,10 +291,13 @@ export class InboundSignalsService implements OnModuleInit, OnModuleDestroy {
     const params: unknown[] = [];
     const scope = scopeSql(actor, params);
     const canResolve = actor.permissions.includes('message_signals.resolve');
+    // One projection for the text shown, searched and counted: a unit of a split message shows a user without the resolve
+    // right only its own masked fragment, never the whole message (it can name orders outside the user's scope).
+    const text = visibleTextSql(canResolve);
     const where = ['m.expires_at>now()', `((s.order_id IS NOT NULL AND o.delete_flag=false AND ${scope})${canResolve ? ' OR s.order_id IS NULL' : ''})`];
     const add = (sql: string, value: unknown) => { params.push(value); where.push(sql.replace('?', `$${params.length}`)); };
     if (q.diagnostic !== 'true') where.push('s.id IS NOT NULL');
-    if (q.q) add('(m.message_text ILIKE ?)', `%${q.q.replace(/[\\%_]/g, '\\$&')}%`);
+    if (q.q) add(`(${text} ILIKE ?)`, `%${q.q.replace(/[\\%_]/g, '\\$&')}%`);
     if (q.channel) add('m.channel=?', q.channel);
     if (q.source) add('m.source_code=?', q.source);
     if (q.signal) add('s.signal_code=?', q.signal);
@@ -205,8 +308,9 @@ export class InboundSignalsService implements OnModuleInit, OnModuleDestroy {
     const base = `FROM inbound_messages m LEFT JOIN inbound_signal_occurrences s ON s.message_id=m.id LEFT JOIN orders o ON o.order_id=s.order_id WHERE ${where.join(' AND ')}`;
     const count = await this.db.query<{ total: string; attention: string; completed: string }>(`SELECT count(*) AS total,count(*) FILTER(WHERE s.state IN ('needs_review','failed')) AS attention,count(*) FILTER(WHERE s.state IN ('succeeded','no_action')) AS completed ${base}`, params);
     const limit = params.push(q.pageSize), offset = params.push((q.page-1)*q.pageSize);
-    const rows = await this.db.query(`SELECT m.id AS message_id,m.channel,m.source_name,m.source_code,m.sender,m.message_text,m.sent_at,m.received_at,
-      s.id,s.signal_code,s.signal_name,s.state,s.reason_code,s.order_id,s.version,s.updated_at,o.order_name ${base}
+    const rows = await this.db.query(`SELECT m.id AS message_id,m.channel,m.source_name,m.source_code,m.sender,${text} AS message_text,m.sent_at,m.received_at,
+      s.id,s.signal_code,s.signal_name,s.state,s.reason_code,s.order_id,s.version,s.updated_at,o.order_name,s.segment_index,
+      ${canResolve ? 's.segment_text' : 'NULL::text'} AS segment_text ${base}
       ORDER BY m.received_at DESC,m.id DESC,s.id DESC LIMIT $${limit} OFFSET $${offset}`, params);
     return { items: rows.rows, total: Number(count.rows[0].total), attention: Number(count.rows[0].attention), completed: Number(count.rows[0].completed),
       page: q.page, pageSize: q.pageSize, relayEnabled: this.env.get('BACKEND_INBOUND_SIGNALS_RELAY_OWNER', { infer: true }) === 'in_process',
@@ -225,16 +329,46 @@ export class InboundSignalsService implements OnModuleInit, OnModuleDestroy {
   async detail(id: string, actor: CurrentUser) {
     this.requireEnabled(); requirePermission(actor, 'message_signals.view');
     const signal = await this.occurrence(this.db, id, actor);
-    const message = await this.db.query('SELECT channel,source_name,sender,message_text,sent_at,received_at FROM inbound_messages WHERE id=$1', [signal.message_id]);
-    const steps = await this.db.query('SELECT occurred_at,event_code,actor_user_id,details FROM inbound_signal_steps WHERE signal_id=$1 ORDER BY id', [id]);
+    const canResolve = actor.permissions.includes('message_signals.resolve');
+    const message = await this.db.query<{ message_text: string }>('SELECT channel,source_name,sender,message_text,sent_at,received_at FROM inbound_messages WHERE id=$1', [signal.message_id]);
+    const shownMessage = message.rows[0] && signal.segment_text !== null && !canResolve
+      ? { ...message.rows[0], message_text: signal.visible_text ?? '' } : message.rows[0];
+    const fragment = signal.segment_text === null ? null : canResolve ? signal.segment_text : signal.visible_text;
+    const rawSteps = await this.db.query<{ details: Record<string, unknown> }>('SELECT occurred_at,event_code,actor_user_id,details FROM inbound_signal_steps WHERE signal_id=$1 ORDER BY id', [id]);
+    const steps = canResolve ? rawSteps.rows : await this.projectStepOrders(rawSteps.rows, actor);
     const audits = await this.db.query(`SELECT event,created_at AS occurred_at,metadata_json->>'ruleName' AS rule_name,metadata_json->>'reason' AS reason,
       metadata_json->>'actionType' AS action_type,metadata_json->>'targetStatusId' AS target_status_id
       FROM audit_log WHERE request_id=$1 AND related_order_id=$2 AND event IN ('status_automation.rule_applied','status_automation.rule_skipped') ORDER BY created_at`, [signal.processing_request_id, signal.order_id]);
     return { id: signal.id, version: signal.version, signalCode: signal.signal_code, signalName: signal.signal_name, orderId: signal.order_id,
-      state: signal.state, message: message.rows[0], steps: actor.permissions.includes('message_signals.technical') ? steps.rows
-        : steps.rows.map(step => ({ ...step, details: { reason: step.details.reason ?? null, orderId: step.details.orderId ?? null } })), actions: audits.rows,
+      state: signal.state, message: shownMessage, fragment, segmentIndex: signal.segment_index,
+      steps: actor.permissions.includes('message_signals.technical') ? steps
+        : steps.map(step => ({ ...step, details: { reason: step.details.reason ?? null, orderId: step.details.orderId ?? null } })), actions: audits.rows,
       ...(actor.permissions.includes('message_signals.technical') ? { technical: { requestId: signal.processing_request_id,
         configVersion: signal.config_version, ruleCodes: signal.rule_codes, attemptCount: signal.attempt_count } } : {}) };
+  }
+  /**
+   * History shown to a user without the resolve right: an order id in a step (an earlier target of a re-assigned
+   * signal, for example) is shown only when that order is in the user's scope, otherwise «…». Stored history is kept.
+   */
+  private async projectStepOrders<T extends { details: Record<string, unknown> }>(steps: T[], actor: CurrentUser): Promise<T[]> {
+    const ids = [...new Set(steps.flatMap(step => STEP_ORDER_KEYS.map(key => step.details?.[key])
+      .filter((value): value is string | number => value !== null && value !== undefined && /^\d{1,18}$/.test(String(value))).map(String)))];
+    let visible = new Set<string>();
+    if (ids.length) {
+      const params: unknown[] = [ids];
+      const scope = scopeSql(actor, params);
+      const rows = await this.db.query<{ order_id: string }>(`SELECT o.order_id FROM orders o WHERE o.order_id = ANY($1::bigint[]) AND o.delete_flag=false AND ${scope}`, params);
+      visible = new Set(rows.rows.map(r => String(r.order_id)));
+    }
+    return steps.map(step => {
+      if (!step.details) return step;
+      const details = { ...step.details };
+      for (const key of STEP_ORDER_KEYS) {
+        const value = details[key];
+        if (value !== null && value !== undefined && !visible.has(String(value))) details[key] = '…';
+      }
+      return { ...step, details };
+    });
   }
   async orderOptions(search: string, actor: CurrentUser) {
     this.requireEnabled(); requirePermission(actor, 'message_signals.resolve');
@@ -295,9 +429,14 @@ export class InboundSignalsService implements OnModuleInit, OnModuleDestroy {
         next = 'dismissed';
         executionGuard = null;
       } else if (signal.state !== 'failed' || !signal.order_id) conflict();
+      // Whenever the order of a split unit changes, its fragment is re-projected for the new order in the same statement:
+      // only references that led to that order at intake stay visible (a manual order without one shows no number).
+      const visibleText = signal.segment_text === null ? null
+        : projectVisibleText(signal.segment_text, signal.group_references ?? [], orderId === null ? null : String(orderId));
       await tx.query(`UPDATE inbound_signal_occurrences SET order_id=$2,state=$3,reason_code=$4,version=version+1,resolved_by=$5,execution_guard=$6,
-        attempt_count=0,next_attempt_at=now(),locked_at=NULL,lock_token=NULL,updated_at=now(),finished_at=CASE WHEN $3='dismissed' THEN now() ELSE NULL END WHERE id=$1`,
-      [id, orderId, next, action === 'dismiss' ? input.reason : null, actor.id, executionGuard]);
+        attempt_count=0,next_attempt_at=now(),locked_at=NULL,lock_token=NULL,updated_at=now(),finished_at=CASE WHEN $3='dismissed' THEN now() ELSE NULL END,
+        visible_text=$7 WHERE id=$1`,
+      [id, orderId, next, action === 'dismiss' ? input.reason : null, actor.id, executionGuard, visibleText]);
       await this.step(tx,id,action,actor.id,{ orderId, ...(action === 'dismiss' ? { reason: input.reason } : {}) });
       await this.audit(tx,`message_signals.${action}`,id,actor,requestId,{ orderId, state: next });
       const response = { id, state: next, version: signal.version + 1 };
@@ -340,7 +479,14 @@ export class InboundSignalsService implements OnModuleInit, OnModuleDestroy {
           }
           const order = await tx.query('SELECT order_id FROM orders WHERE order_id=$1 AND delete_flag=false FOR UPDATE', [signal.order_id]);
           if (!order.rowCount) { await this.finish(tx,signal,'needs_review','order_unavailable'); return; }
-          if (!signal.execution_guard) {
+          if (!signal.execution_guard && signal.segment_text !== null) {
+            // A unit of a split message: every reference of its group must still lead to the order it led to at intake
+            // (point-in-time check under this order's lock, the same guarantee as the whole-message check below; the
+            // action rests on the unit's own reference, the siblings are a «doubtful group → review» policy).
+            if (!(await this.groupStillResolves(tx, signal, config.document))) {
+              await this.finish(tx, signal, 'needs_review', 'reference_changed'); return;
+            }
+          } else if (!signal.execution_guard) {
             const message = await tx.query<{ message_text: string }>('SELECT message_text FROM inbound_messages WHERE id=$1', [signal.message_id]);
             const rules = config.document.rules.filter(r => signal.rule_codes.includes(r.code) && r.enabled);
             for (const rule of rules) {
@@ -371,6 +517,17 @@ export class InboundSignalsService implements OnModuleInit, OnModuleDestroy {
         });
       }
     }
+  }
+  private async groupStillResolves(tx: TransactionClient, signal: Occurrence, document: Omit<SignalConfiguration, 'version'>): Promise<boolean> {
+    const refs = signal.group_references ?? [];
+    if (!refs.length || !refs.some(r => r.orderId === String(signal.order_id))) return false;
+    for (const ref of refs) {
+      const resolver = document.resolvers.find(r => r.code === ref.resolverCode);
+      if (!resolver || ref.orderId === null) return false;
+      const ids = await this.resolveReferences(tx, [ref.reference], resolver);
+      if (ids.length !== 1 || ids[0] !== ref.orderId) return false;
+    }
+    return true;
   }
   private async finish(tx: TransactionClient, signal: Occurrence, state: string, reason: string | null) {
     await tx.query(`UPDATE inbound_signal_occurrences SET state=$2,reason_code=$3,version=version+1,updated_at=now(),
