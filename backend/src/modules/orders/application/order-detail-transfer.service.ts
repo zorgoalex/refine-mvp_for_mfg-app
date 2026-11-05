@@ -18,6 +18,7 @@ import type { OrderDto } from '../dto/order.dto';
 import type { CalculatedOrderDetailDto, NormalizedSaveOrderPaymentDto, OrderTotalsDto } from '../dto/save-order.dto';
 import { OrderNameDuplicateError, OrderNotFoundError, OrderVersionConflictError } from '../errors/order.errors';
 import { PgOrderReadRepository } from '../adapters/pg-order-read-repository';
+import { openMdfOrderCommand } from '../../mdf-board/adapters/mdf-order-cascade';
 import type { OrderDeadlineSyncPort, OrderPermissionCheckerPort } from './order-transaction.types';
 
 const SOURCE = 'backend-orders-command';
@@ -40,6 +41,8 @@ export interface TransferOrderDetailsCommand {
   idempotencyKey: string;
   dto: TransferOrderDetailsDto;
   requestId?: string;
+  /** §5.4e `X-MDF-Confirmation`; never part of the idempotency request hash. */
+  mdfConfirmation?: { digest: string };
 }
 
 export interface OrderTransferTargetDto {
@@ -376,6 +379,8 @@ export class OrderDetailTransferService {
         ? [command.sourceOrderId, targetOrderId]
         : [command.sourceOrderId];
       const lockedDetails = await lockLiveDetails(tx, detailOrderIds);
+      const mdf = await openMdfOrderCommand(tx, 'orders.transfer_details');
+      await mdf.captureBefore(detailOrderIds);
       const sourceDetails = lockedDetails.filter((detail) => toNumber(detail.order_id) === command.sourceOrderId);
       const targetExistingDetails = lockedDetails.filter((detail) => toNumber(detail.order_id) === targetOrderId);
       const selectedSet = new Set(command.dto.detailIds);
@@ -526,6 +531,11 @@ export class OrderDetailTransferService {
           sourceIdempotencyKey: command.idempotencyKey,
         });
       }
+      // MDF consequence of the final state of both orders; a moved member position rolls back the transfer.
+      await mdf.finish({ user: command.currentUser, requestId,
+        commandKey: `orders.transfer_details:${command.idempotencyKey}`,
+        orderIds: [command.sourceOrderId, targetOrderId].sort((a, b) => a - b),
+        confirmation: command.mdfConfirmation ?? null });
       persistedSourceVersion = await readOrderVersion(tx, command.sourceOrderId);
       persistedTargetVersion = await readOrderVersion(tx, targetOrderId);
       sourceAfter = await loadOrderSnapshot(tx, command.sourceOrderId);
@@ -602,7 +612,7 @@ export class OrderDetailTransferService {
         deadlineJobs.push({ orderId: targetOrderId, eventType: 'ORDER_UPDATED' });
       }
       return completed;
-    });
+    }, { mdf: { writer: 'orders.transfer_details', capability: 'order-demand' } });
 
     for (const job of deadlineJobs) {
       await this.ports.deadlineSync?.syncOrderDeadlinesAfterSave({

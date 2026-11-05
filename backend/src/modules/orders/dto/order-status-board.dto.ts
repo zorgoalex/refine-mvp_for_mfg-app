@@ -14,6 +14,8 @@ export interface OrderStatusBoardCardDetailDto {
   detailNumber: number | null;
   quantity: number;
   bazisCutQuantity: number;
+  /** MDF demand of the detail (same material rule as the MDF engine's demand). */
+  mdfEligible: boolean;
 }
 
 export interface OrderStatusBoardCardDto {

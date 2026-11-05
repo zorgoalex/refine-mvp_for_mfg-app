@@ -25,6 +25,8 @@ class WorkerConfigTest(unittest.TestCase):
         self.assertEqual(config.session_lease_ttl_seconds, 90)
         self.assertEqual(config.session_lease_heartbeat_seconds, 10)
         self.assertEqual(config.media_restore_poll_interval_seconds, 15)
+        self.assertFalse(config.mdf_observations_enabled)
+        self.assertEqual(config.mdf_observation_poll_interval_seconds, 60)
 
     def test_glm_ocr_fallback_requires_explicit_enable(self) -> None:
         with patch.dict(os.environ, {
@@ -108,6 +110,16 @@ class WorkerConfigTest(unittest.TestCase):
 
         self.assertEqual(config.poll_interval_seconds, 60)
         self.assertEqual(config.import_queue_poll_interval_seconds, 4)
+
+    def test_mdf_observations_require_explicit_opt_in_and_have_separate_interval(self) -> None:
+        with patch.dict(os.environ, {
+            "CNC_TELEGRAM_MDF_OBSERVATIONS_ENABLED": "true",
+            "CNC_TELEGRAM_MDF_OBSERVATION_POLL_INTERVAL_SECONDS": "75",
+        }, clear=True):
+            config = WorkerConfig.from_env()
+
+        self.assertTrue(config.mdf_observations_enabled)
+        self.assertEqual(config.mdf_observation_poll_interval_seconds, 75)
 
     def test_writer_runs_on_prod_stack(self) -> None:
         with patch.dict(os.environ, {

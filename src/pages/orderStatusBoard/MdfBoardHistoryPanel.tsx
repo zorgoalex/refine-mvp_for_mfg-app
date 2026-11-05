@@ -18,6 +18,7 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { authSession } from '../../api/authSession';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
 import type {
   MdfBoardHistoryColumn,
@@ -57,20 +58,24 @@ export const MdfBoardHistoryPanel: React.FC<MdfBoardHistoryPanelProps> = ({
   const [error, setError] = useState<string | null>(null);
   const searchRevision = useRef(0);
   const historyRevision = useRef(0);
+  // Answers of another auth session (re-login, permission/scope change) or of an unmounted panel are never shown.
+  useEffect(() => () => { searchRevision.current += 1; historyRevision.current += 1; }, []);
 
   useEffect(() => {
     const revision = ++searchRevision.current;
+    const session = authSession.getSessionGeneration();
+    const current = () => searchRevision.current === revision && session === authSession.getSessionGeneration();
     const timer = window.setTimeout(() => {
       setSearching(true);
       void cncTelegramApi.searchMdfBoardHistoryOrders(search, 20, { cache: 'no-store' })
         .then((response) => {
-          if (searchRevision.current === revision) setOptions(response.data);
+          if (current()) setOptions(response.data);
         })
         .catch(() => {
-          if (searchRevision.current === revision) setOptions([]);
+          if (current()) setOptions([]);
         })
         .finally(() => {
-          if (searchRevision.current === revision) setSearching(false);
+          if (current()) setSearching(false);
         });
     }, search ? 250 : 0);
     return () => window.clearTimeout(timer);
@@ -85,19 +90,21 @@ export const MdfBoardHistoryPanel: React.FC<MdfBoardHistoryPanelProps> = ({
       return;
     }
     const revision = ++historyRevision.current;
+    const session = authSession.getSessionGeneration();
+    const current = () => historyRevision.current === revision && session === authSession.getSessionGeneration();
     setLoading(true);
     setError(null);
     void cncTelegramApi.mdfBoardHistory(selectedOrderId, boardDate, { cache: 'no-store' })
       .then((response) => {
-        if (historyRevision.current === revision) setHistory(response);
+        if (current()) setHistory(response);
       })
       .catch((requestError: unknown) => {
-        if (historyRevision.current !== revision) return;
+        if (!current()) return;
         setHistory(null);
         setError(requestError instanceof Error ? requestError.message : 'Не удалось загрузить историю');
       })
       .finally(() => {
-        if (historyRevision.current === revision) setLoading(false);
+        if (current()) setLoading(false);
       });
   }, [boardDate, selectedOrderId]);
 

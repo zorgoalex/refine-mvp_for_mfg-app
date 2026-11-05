@@ -287,6 +287,7 @@ class ImportWorkerTest(unittest.TestCase):
             worker = object.__new__(CncTelegramWorker)
             worker.config = types.SimpleNamespace(
                 can_send_manual_svg_uploads=True,
+                manual_import_enabled=True,
                 poll_interval_seconds=0.05,
             )
             stop_event = asyncio.Event()
@@ -347,6 +348,7 @@ class ImportWorkerTest(unittest.TestCase):
             worker = object.__new__(CncTelegramWorker)
             worker.config = types.SimpleNamespace(
                 can_send_manual_svg_uploads=False,
+                manual_import_enabled=True,
                 poll_interval_seconds=60,
                 # Test value keeps the regression fast; production default is 5s.
                 import_queue_poll_interval_seconds=0.05,
@@ -375,6 +377,41 @@ class ImportWorkerTest(unittest.TestCase):
             # manual/restore still retain that old interval.
             self.assertLess(import_calls[1] - import_calls[0], 0.5)
             self.assertEqual(worker.process_manual_svg_telegram_send_requests.call_count, 0)
+
+        asyncio.run(scenario())
+
+    def test_observation_success_cooldown_allows_multiple_due_sources_to_drain(self) -> None:
+        async def scenario() -> None:
+            worker = object.__new__(CncTelegramWorker)
+            worker.config = types.SimpleNamespace(
+                can_send_manual_svg_uploads=False,
+                manual_import_enabled=False,
+                mdf_observations_enabled=True,
+                poll_interval_seconds=60,
+                import_queue_poll_interval_seconds=5,
+                # Keep the test fast; production default is 60s, with a
+                # maximum 5s pause after a successful claim.
+                mdf_observation_poll_interval_seconds=0.05,
+            )
+            stop_event = asyncio.Event()
+            processed_at: list[float] = []
+
+            async def claim_one_due(*args: object, **kwargs: object) -> int:
+                processed_at.append(time.monotonic())
+                if len(processed_at) == 2:
+                    stop_event.set()
+                return 1
+
+            worker.process_mdf_cnc_observation_queue = AsyncMock(side_effect=claim_one_due)
+            await asyncio.wait_for(
+                worker.poll_queue_scheduler(object(), object(), "-100", stop_event),
+                timeout=0.5,
+            )
+            self.assertEqual(len(processed_at), 2)
+            self.assertGreaterEqual(processed_at[1] - processed_at[0], 0.04)
+            # The backend selects another due source; worker does not impose
+            # the full 60-second empty-queue interval between successful claims.
+            self.assertLess(processed_at[1] - processed_at[0], 0.5)
 
         asyncio.run(scenario())
 

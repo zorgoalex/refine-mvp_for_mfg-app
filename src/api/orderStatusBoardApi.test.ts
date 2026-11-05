@@ -161,6 +161,32 @@ describe('orderStatusBoardApi MDF manual moves', () => {
     expect(() => orderStatusBoardApi.deleteMdfManualMove('packet','p',command as never)).toThrow();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+  it('reads engine bath duplicates in chunks of ≤ 100 valid ids', async () => {
+    const ids = Array.from({ length: 150 }, (_, i) => `cut-result:${i + 1}`);
+    const fetchMock = mockFetch({ generatedAt: 'a', baths: [{ bathCardId: 'cut-result:1' }] },
+      { generatedAt: 'b', baths: [{ bathCardId: 'cut-result:120' }] });
+    const baths = await orderStatusBoardApi.listMdfBathDuplicates([...ids, 'packet:1']);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const first = new URL(String(fetchMock.mock.calls[0][0]), 'http://x');
+    expect(first.pathname).toBe('/api/v1/orders/status-board/mdf-bath-duplicates');
+    expect(first.searchParams.get('bathCardIds')!.split(',')).toHaveLength(100);
+    expect(baths.map(b => b.bathCardId)).toEqual(['cut-result:1', 'cut-result:120']);
+  });
+
+  it('posts a bath duplicate decision with its idempotency key and validates it before fetch', async () => {
+    const response = { generatedAt: 'now', resolution: { resolutionId: 1 }, auditId: '5', replayed: false };
+    const fetchMock = mockFetch(response);
+    const request = { bathCardId: 'cut-result:868', otherBathCardId: 'cut-result:854', action: 'keep_both' as const,
+      expectedDigest: 'd'.repeat(64) };
+    await expect(orderStatusBoardApi.resolveMdfBathDuplicate(request, 'bath-dup:1234')).resolves.toEqual(response);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/status-board/mdf-bath-duplicates/resolve');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(JSON.stringify(request));
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Idempotency-Key')).toBe('bath-dup:1234');
+    expect(() => orderStatusBoardApi.resolveMdfBathDuplicate(request, 'short')).toThrow();
+    expect(() => orderStatusBoardApi.resolveMdfBathDuplicate({ ...request, expectedDigest: 'x' }, 'bath-dup:1234')).toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 function mockFetch(...bodies: unknown[]) {

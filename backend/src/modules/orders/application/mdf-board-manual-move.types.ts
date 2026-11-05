@@ -19,6 +19,8 @@ export interface UpsertMdfBoardManualMoveCommand {
   cardKind: MdfBoardManualCardKind;
   cardId: string;
   targetColumn: MdfBoardManualTargetColumn;
+  /** Engine active, non-MDF machine file only: the column the operator saw. */
+  expectedColumn?: 'parsed' | 'completed' | 'completed_laminated';
   requestId?: string;
 }
 

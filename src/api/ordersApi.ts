@@ -1,5 +1,6 @@
 import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
+import { buildMdfConfirmationHeaders } from '../utils/mdfOrderConflict';
 import type {
   ChangeOrderStatusRequest,
   DeleteOrderRequest,
@@ -52,6 +53,25 @@ export interface OrderHistoryEvent {
 export interface OrderHistoryListResponse {
   data: OrderHistoryEvent[];
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+/**
+ * Passed to a mutating ordersApi call when the caller is resending an MDF
+ * board conflict's identical request after the user confirmed it: adds
+ * header X-MDF-Confirmation: <digest> alongside the request's own headers.
+ */
+export interface MdfConfirmationOptions {
+  confirmationDigest?: string;
+}
+
+function confirmationHeaders(options?: MdfConfirmationOptions): Record<string, string> {
+  return options?.confirmationDigest ? buildMdfConfirmationHeaders(options.confirmationDigest) : {};
+}
+
+function confirmationRequestOptions(
+  options?: MdfConfirmationOptions,
+): { headers: Record<string, string> } | undefined {
+  return options?.confirmationDigest ? { headers: confirmationHeaders(options) } : undefined;
 }
 
 export const ordersApi = {
@@ -153,16 +173,25 @@ export const ordersApi = {
     );
   },
 
-  async create(dto: SaveOrderDto): Promise<SaveOrderResponse> {
-    const response = await httpClient.post<SaveOrderResponse>(apiRoutes.orders.list, dto);
+  async create(dto: SaveOrderDto, options?: MdfConfirmationOptions): Promise<SaveOrderResponse> {
+    const response = await httpClient.post<SaveOrderResponse>(
+      apiRoutes.orders.list,
+      dto,
+      confirmationRequestOptions(options),
+    );
     emitOrderDataChanged(response.order.header.orderId);
     return response;
   },
 
-  async update(orderId: number, dto: SaveOrderDto): Promise<SaveOrderResponse> {
+  async update(
+    orderId: number,
+    dto: SaveOrderDto,
+    options?: MdfConfirmationOptions,
+  ): Promise<SaveOrderResponse> {
     const response = await httpClient.put<SaveOrderResponse>(
       apiRoutes.orders.byId(validateOrderId(orderId)),
       dto,
+      confirmationRequestOptions(options),
     );
     emitOrderDataChanged(response.order.header.orderId);
     return response;
@@ -217,7 +246,11 @@ export const ordersApi = {
     );
   },
 
-  delete(orderId: number, request: DeleteOrderRequest): Promise<DeleteOrderResponse> {
+  delete(
+    orderId: number,
+    request: DeleteOrderRequest,
+    options?: MdfConfirmationOptions,
+  ): Promise<DeleteOrderResponse> {
     const version = validateOrderVersion(request.version);
     return httpClient.request<DeleteOrderResponse>(
       apiRoutes.orders.byId(validateOrderId(orderId)),
@@ -226,6 +259,7 @@ export const ordersApi = {
         headers: {
           'If-Match': `"${version}"`,
           'Idempotency-Key': request.idempotencyKey ?? createOrderDeleteIdempotencyKey(),
+          ...confirmationHeaders(options),
         },
       },
     );
@@ -234,6 +268,7 @@ export const ordersApi = {
   transferDetails(
     orderId: number,
     request: TransferOrderDetailsRequest,
+    options?: MdfConfirmationOptions,
   ): Promise<TransferOrderDetailsResponse> {
     const version = validateOrderVersion(request.sourceVersion);
     const body = {
@@ -249,6 +284,7 @@ export const ordersApi = {
           'Content-Type': 'application/json',
           'If-Match': `"${version}"`,
           'Idempotency-Key': request.idempotencyKey ?? createOrderTransferIdempotencyKey(),
+          ...confirmationHeaders(options),
         },
         body: JSON.stringify(body),
       },

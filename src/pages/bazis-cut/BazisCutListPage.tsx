@@ -5,6 +5,7 @@ import { Button, Card, Input, Popconfirm, Space, Typography, message } from 'ant
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
+import { isApiError } from '../../api/apiError';
 import { bazisCutApi, type BazisCutSetListItemDto, type BazisCutSourceRefDto } from '../../api/bazisCutApi';
 import { OrderDeletedTag, hasDeletedOrderReference, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
@@ -48,7 +49,11 @@ export const BazisCutListPage: React.FC = () => {
       if (items.length === 1 && page > 1) setPage(page - 1);
       else await load();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Не удалось удалить набор');
+      if (isApiError(error, 'MDF_SET_HAS_PRODUCTION_HISTORY')) {
+        message.error('У набора есть история в производственном учёте — его нельзя удалить');
+      } else {
+        message.error(error instanceof Error ? error.message : 'Не удалось удалить набор');
+      }
     } finally {
       setDeletingSetId(null);
     }

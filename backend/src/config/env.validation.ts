@@ -259,6 +259,15 @@ export const envSchema = z
     BACKEND_MDF_PINNED_DISPATCH: booleanFromEnv.default(false),
     BACKEND_MDF_JOB_WORKER: booleanFromEnv.default(false),
     BACKEND_MDF_PUBLISHED_READS: booleanFromEnv.default(false),
+    // §5.8 demand-drift reconciler system actor (user id); unset ⇒ reconciler off. Runs only with the job worker.
+    BACKEND_MDF_RECONCILER_ACTOR_ID: z.union([z.string().trim().regex(/^[1-9]\d{0,15}$/), emptyTrimmedStringFromEnv]).optional(),
+    // §5.2b BASIS refill producer (composition new rows); enable only after the compatible worker is live.
+    BACKEND_MDF_BAZIS_REFILL: booleanFromEnv.default(false),
+    // §5.4e confirmed order corrections (reduction/detachment); readers/validators ship first, producer off.
+    BACKEND_MDF_ORDER_CORRECTIONS: booleanFromEnv.default(false),
+    // «Разобрать дубль» МДФ-доски: дубли на карточках ванн (чтение) и команда keep_both/rework_mark (запись, выкл. ⇒ 503).
+    BACKEND_MDF_BATH_DUPLICATES_READ: booleanFromEnv.default(false),
+    BACKEND_MDF_BATH_DUPLICATES_WRITE: booleanFromEnv.default(false),
     // Phase A safety gate: legacy background Telegram ingest is fail-closed.
     // The break-glass path remains unavailable until Phase B persists an
     // approved bounded scan artifact.

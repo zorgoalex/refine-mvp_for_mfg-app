@@ -24,6 +24,12 @@ const columns: Record<MdfSourceKind, readonly MdfSourceColumn[]> = {
   bath: ['baths', 'baths_ready', 'baths_laminated', 'completed_baths'],
 };
 
+/** The kind-scoped allowlist behind `manual`; shared with the intentional-empty
+ * projection bypass, which cannot run the full resolver (zero members). */
+export function isMdfSourceColumnAllowed(kind: MdfSourceKind, column: string): column is MdfSourceColumn {
+  return (columns[kind] as readonly string[]).includes(column);
+}
+
 /** Placement only: cannot manufacture quantities, accept evidence, allocate
  * supply or run rules. Shadow is the first consumer; legacy readers still own
  * production placement until the separate connection/cutover gates pass. */
@@ -46,7 +52,8 @@ export function resolveMdfSourceColumn(input: MdfSourceColumnInput): MdfSourceCo
       : { column: 'baths', reason: 'awaiting_cut', issues: [] };
   } else {
     const cut = input.cutConfirmed || manual === 'completed' || manual === 'completed_laminated';
-    if (allAt(issued)) result = { column: 'completed_laminated', reason: 'all_issued', issues: [] };
+    // A machine file needs its own cut signal; issued details of a remake never imply cut.
+    if (allAt(issued) && (cut || input.kind === 'bazisCutSet')) result = { column: 'completed_laminated', reason: 'all_issued', issues: [] };
     else if (allAt(packed) && (cut || input.kind === 'bazisCutSet')) result = {
       column: 'completed_laminated', reason: cut ? 'cut_and_all_packed' : 'all_packed', issues: [],
     };

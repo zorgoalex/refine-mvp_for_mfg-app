@@ -1,5 +1,5 @@
 import { mapOrderDtoToFormValues, mapOrderFormToSaveOrderDto } from '../api/mappers/orderMapper';
-import { ordersApi } from '../api/ordersApi';
+import { ordersApi, type MdfConfirmationOptions } from '../api/ordersApi';
 import type { SaveOrderResponse } from '../api/types/orderApi.types';
 import { useOrderFormStore } from '../stores/orderFormStore';
 import type { OrderFormValues } from '../types/orders';
@@ -20,10 +20,14 @@ interface OrderStoreSync {
 }
 
 export interface SaveOrderViaBackendDependencies {
-  createOrder: (dto: ReturnType<typeof mapOrderFormToSaveOrderDto>) => Promise<SaveOrderResponse>;
+  createOrder: (
+    dto: ReturnType<typeof mapOrderFormToSaveOrderDto>,
+    options?: MdfConfirmationOptions,
+  ) => Promise<SaveOrderResponse>;
   updateOrder: (
     orderId: number,
     dto: ReturnType<typeof mapOrderFormToSaveOrderDto>,
+    options?: MdfConfirmationOptions,
   ) => Promise<SaveOrderResponse>;
   toSaveDto: typeof mapOrderFormToSaveOrderDto;
   toFormValues: typeof mapOrderDtoToFormValues;
@@ -31,6 +35,12 @@ export interface SaveOrderViaBackendDependencies {
   // so a late completion does not resurrect the destroyed store.
   getOrderStore: () => OrderStoreSync | null;
   invalidate?: InvalidateFn;
+  /**
+   * Set when this call is the user-confirmed resend of an MDF board conflict's
+   * identical request: threaded through to createOrder/updateOrder so they
+   * attach header X-MDF-Confirmation: <digest>.
+   */
+  confirmationDigest?: string;
 }
 
 export async function saveOrderViaBackend(
@@ -40,9 +50,16 @@ export async function saveOrderViaBackend(
 ): Promise<number> {
   const deps = resolveDependencies(dependencies);
   const dto = deps.toSaveDto(values);
-  const result = isEdit
-    ? await deps.updateOrder(requireEditableOrderId(values), dto)
-    : await deps.createOrder(dto);
+  // Extra arg omitted entirely (not passed as literal undefined) when there is no
+  // confirmation digest, so a default createOrder/updateOrder call still reads as a
+  // plain two-arg call (matches ordersApi.create/update's optional third param).
+  const result = deps.confirmationDigest
+    ? (isEdit
+      ? await deps.updateOrder(requireEditableOrderId(values), dto, { confirmationDigest: deps.confirmationDigest })
+      : await deps.createOrder(dto, { confirmationDigest: deps.confirmationDigest }))
+    : (isEdit
+      ? await deps.updateOrder(requireEditableOrderId(values), dto)
+      : await deps.createOrder(dto));
 
   const formValues = deps.toFormValues(result.order);
   // Skip store writes if the draft slice was discarded while the save was in flight.
@@ -69,6 +86,7 @@ function resolveDependencies(
     toFormValues: dependencies.toFormValues ?? mapOrderDtoToFormValues,
     getOrderStore: dependencies.getOrderStore ?? (() => useOrderFormStore.getState()),
     invalidate: dependencies.invalidate,
+    confirmationDigest: dependencies.confirmationDigest,
   };
 }
 

@@ -14,6 +14,7 @@ import type { SaveOrderDto } from '../dto/save-order.dto';
 import { PgOrderTransactionManager } from './pg-order-transaction-manager';
 import { PgOrderSnapshot } from './pg-order-snapshot';
 import type { OrderSnapshotDto } from '../dto/order-snapshot.dto';
+import { discardMdfCommandBoundary, enterMdfCommand, type MdfCommandWriter } from '../../mdf-board/application/mdf-command-boundary';
 
 const url = process.env.ERP_ORDER_CATALOG_TEST_DATABASE_URL;
 class FixtureDatabase extends DatabaseService {
@@ -25,10 +26,13 @@ class FixtureDatabase extends DatabaseService {
     if (this.failCatalogOutbox && sql.includes('INSERT INTO outbox_events') && params[0] === 'order.catalog_lines_changed') await this.client.query('SELECT 1/0');
     return this.client.query<T>(sql, [...params]);
   }
-  override async transaction<T>(fn: (tx: TransactionClient) => Promise<T>): Promise<T> {
+  override async transaction<T>(fn: (tx: TransactionClient) => Promise<T>, options: { mdf?: MdfCommandWriter } = {}): Promise<T> {
+    // Order commands enter the MDF command boundary (§5.4a); honour it like DatabaseService does.
+    const tx: TransactionClient = { raw: this.client, query: this.query.bind(this) } as TransactionClient;
     await this.client.query('SAVEPOINT order_catalog_command');
     try {
-      const result = await fn({ raw: this.client, query: this.query.bind(this) });
+      if (options.mdf) await enterMdfCommand(tx, options.mdf);
+      const result = await fn(tx);
       await this.client.query('SET CONSTRAINTS ALL IMMEDIATE');
       await this.client.query('SET CONSTRAINTS ALL DEFERRED');
       await this.client.query('RELEASE SAVEPOINT order_catalog_command');
@@ -37,6 +41,8 @@ class FixtureDatabase extends DatabaseService {
       await this.client.query('ROLLBACK TO SAVEPOINT order_catalog_command');
       await this.client.query('RELEASE SAVEPOINT order_catalog_command');
       throw error;
+    } finally {
+      discardMdfCommandBoundary(tx);
     }
   }
 }

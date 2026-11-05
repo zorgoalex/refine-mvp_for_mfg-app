@@ -116,7 +116,8 @@ describe('PgMdfBoardManualMoveRepository', () => {
   });
 
   it('observes deletion as visual clear before dispatch, not production return', async () => {
-    const tx = fakeTx([rows(), rows([row()]), rows(), rows([{ audit_id: 'audit-clear' }])]);
+    // boundary, current move, delete, owner orders (normalized audit dimensions), audit.
+    const tx = fakeTx([rows(), rows([row()]), rows(), rows([{ order_id: 7 }]), rows([{ audit_id: 'audit-clear' }])]);
     await new PgMdfBoardManualMoveRepository(fakeDatabase(tx)).delete({
       currentUser: user(), cardKind: 'packet', cardId: 'packet-1', requestId: 'clear',
     });

@@ -11,7 +11,8 @@ function view(): MdfSessionSnapshot {
     schemaVersion: 1,mode: 'active',revision: '1',generatedAt: 'now',dateFrom: '2026-07-22',dateTo: '2026-09-22',
     cards: [{ ...source,displayName: 'E2E file',column: 'parsed',sourceCreatedAt: '2026-09-01',
       acceptedRevision: 'r1',receivedRevision: 'r1',commandToken: 'a'.repeat(64),issues: [] }],
-    members: [],positions: [],pendingJobs: [],trackedJobs: [],issues: [],
+    members: [],positions: [],pendingJobs: [],trackedJobs: [],
+    presentation: [],progress: [],orders: [],unregistered: [],issues: [],
   } };
 }
 const json=(body: unknown,status=200) => new Response(JSON.stringify(body),{ status,headers: { 'Content-Type': 'application/json' } });

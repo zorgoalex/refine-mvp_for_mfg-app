@@ -91,7 +91,7 @@ describe('Basis-cut UI integration guards', () => {
     expect(card).toContain('aria-label="Выделить все отфильтрованные детали набора"');
     expect(card).toContain('columnWidth: DETAIL_SELECTION_COLUMN_WIDTH');
     expect(card).toContain('fixed: true');
-    expect(card).toContain('setSelectedDetailIds(event.target.checked ? filteredDetailIds : [])');
+    expect(card).toContain('setSelectedDetailIds(event.target.checked ? selectableDetailIds : [])');
     expect(card).toContain('Удалить выделенные');
     expect(card).toContain('removeSelectedDetails');
     expect(card).toContain('Будет удалено строк деталей');
@@ -152,5 +152,20 @@ describe('Basis-cut UI integration guards', () => {
     expect(card).toContain('<Table.Summary fixed="bottom">');
     expect(card).toContain('Итого позиций:');
     expect(card).toContain('formatBazisCutAreaM2(setTotals.totalAreaM2)');
+  });
+
+  // fixes-r1 finding 3 (A2): the backend's `loadMdfBazisCompositionReadiness` now answers `null` (not
+  // `MDF_SOURCE_NOT_REGISTERED`) for a set outside the MDF ledger with no MDF-eligible row, so it can take the
+  // LEGACY editor path — this only works end-to-end because the FE already treats a null `mdfComposition` as
+  // "not composition mode" everywhere it gates editing. Guard that source-level contract stays intact (existing
+  // behaviour; the A2 fix is backend-only) so a future edit cannot silently start treating null as composition mode.
+  it('takes the legacy edit/delete/add path whenever mdfComposition is null (A2: backend-authoritative legacy eligibility)', () => {
+    expect(card).toContain('const compositionInfo = set?.mdfComposition ?? null;');
+    expect(card).toContain('const compositionMode = compositionInfo !== null;');
+    // Legacy row actions (edit/delete) render only when NOT in composition mode.
+    expect(card).toMatch(/if \(!compositionMode\) \{\s*return <Space><Button aria-label="Редактировать"/);
+    expect(modal).toContain('if (!current.mdfComposition) {');
+    expect(modal).toContain('// Legacy engine (no composition readiness reported): unchanged addDetails path.');
+    expect(modal).toContain('addToExisting(current, orderId, detailIds, hdfDetailIds, idempotencyKey, owner)');
   });
 });

@@ -23,9 +23,27 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF allocation exec
   beforeAll(async () => {
     await db.connect();
     await db.query(`CREATE SCHEMA ${schema}; SET search_path=${schema},public`);
-    for (const file of ['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql']) {
+    for (const file of ['165_mdf_engine_foundation.sql', '166_mdf_engine_fences.sql',
+      '174_mdf_execution_context.sql','273_mdf_published_bath_coverage.sql','277_mdf_bath_declared_coverage.sql', '175_mdf_command_placement.sql', '178_mdf_correction_receipts.sql', '188_mdf_order_cascade_intents.sql', '189_mdf_placement_inputs.sql', '190_mdf_bath_transitions.sql', '191_mdf_order_corrections.sql', '192_mdf_board_presentation_history.sql', '195_mdf_baseline_population.sql']) {
       await db.query(readFileSync(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
+    await db.query(`CREATE TABLE bazis_cut_sets(bazis_cut_set_id bigint PRIMARY KEY,name text,
+      version bigint NOT NULL DEFAULT 0,created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now());
+      CREATE TABLE bazis_cut_set_details(bazis_cut_set_detail_id bigint PRIMARY KEY,
+        bazis_cut_set_id bigint NOT NULL,source_order_id bigint,source_order_detail_id bigint,
+        source_order_hdf_detail_id bigint,quantity bigint NOT NULL DEFAULT 1,
+        cut_enabled boolean NOT NULL DEFAULT true,material_name text,
+        created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now())`);
+    for (const file of ['182_mdf_physical_lineage.sql', '185_mdf_bazis_composition.sql']) {
+      await db.query(readFileSync(new URL(`../../../../db/migrations/${file}`, import.meta.url), 'utf8'));
+    }
+    const expectedLocal = ['bazis_cut_set_details', 'bazis_cut_sets',
+      'mdf_bazis_assignment_states', 'mdf_bazis_composition_intents'];
+    expect((await db.query<{ relname: string }>(`SELECT c.relname FROM pg_class c
+      JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relkind='r'
+        AND c.relname=ANY($2::text[]) ORDER BY c.relname`, [schema, expectedLocal]))
+      .rows.map(r => r.relname)).toEqual(expectedLocal);
     await db.query(`CREATE TABLE orders(order_id bigint PRIMARY KEY,delete_flag boolean NOT NULL DEFAULT false);
       CREATE TABLE cut_result(cut_result_id bigint PRIMARY KEY,created_at timestamptz NOT NULL);
       CREATE TABLE audit_log (LIKE public.audit_log INCLUDING DEFAULTS INCLUDING GENERATED);
@@ -159,7 +177,12 @@ describe.skipIf(process.env.MDF_ENGINE_INTEGRATION !== '1')('MDF allocation exec
     const saved = await tx(c => recordMdfReceipt(c, { ...f.receipts[0], revisionKey: '2',
       expectedFence: { version: '1', correctionEpoch: '0' }, lines: f.receipts[0].lines.map(l => l.stageCode !== 'cut' ? l
         : { ...l, rework: kind === 'rework', evidenceKind: kind === 'declaration' ? 'declaration' : 'physical' }) }));
-    expect(await tx(c => executeMdfAllocation(c, saved.jobId))).toMatchObject({ readyBathIds: [], reservedCount: 0 });
+    const result = await tx(c => executeMdfAllocation(c, saved.jobId));
+    // Neither is ledger supply. A declared (manually credited) cut may still close the bath through credited readiness —
+    // with its own coverage and no reservation; a rework cut never does.
+    expect(result).toMatchObject({ reservedCount: 0,
+      readyBathIds: kind === 'declaration' ? [f.bathIds[0]] : [],
+      declaredCoverage: kind === 'declaration' ? [expect.objectContaining({ bathId: f.bathIds[0], quantity: 10 })] : [] });
   });
   it('requires full own lamination before consuming reserved supply', async () => {
     const f = await fixture([10], [10]);

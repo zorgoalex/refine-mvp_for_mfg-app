@@ -4542,6 +4542,228 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/orders/status-board/mdf-bath-duplicates:
+    get:
+      tags:
+        - Orders
+      operationId: listMdfBathDuplicates
+      summary: Дубли и пометки переделки выбранных ванн (карточки движка вне чтения доски)
+      description: >-
+        Для гибридной доски: ванны движка, которых нет в /cnc-telegram/today (поиск, фокус, старые карточки).
+        Возвращает только ванны, все заказы которых видны пользователю (неактивная ванна — с пустыми списками); пары — по тем же правилам, что
+        duplicates[] чтения доски (redaction, подсказка, решения). Включается BACKEND_MDF_BATH_DUPLICATES_READ
+        (выключено ⇒ 503).
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - name: bathCardIds
+          in: query
+          required: true
+          description: До 100 значений cut-result:<id> через запятую.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Пары и пометки запрошенных ванн
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [generatedAt, baths]
+                properties:
+                  generatedAt: { type: string, format: date-time }
+                  baths:
+                    type: array
+                    items:
+                      type: object
+                      required: [bathCardId, duplicates, reworkMarks, reworkDetailCount]
+                      properties:
+                        bathCardId: { type: string }
+                        duplicates: { type: array, items: { type: object } }
+                        reworkMarks: { type: array, items: { type: object } }
+                        reworkDetailCount: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/orders/status-board/mdf-bath-duplicates/resolve:
+    post:
+      tags:
+        - Orders
+      operationId: resolveMdfBathDuplicate
+      summary: Разобрать дубль ванн МДФ-доски — «Оставить обе» или пометить общие детали ванны как переделку
+      description: >-
+        Две активные ванны разных заданий раскроя с общими деталями (duplicates[] карточки ванны в
+        /cnc-telegram/today). Записывает решение keep_both или rework_mark (только метка, круг переделки не
+        открывается); данные раскроя не меняются, архивация — существующей командой «Раскроя». Решение действует,
+        пока серверный digest пары тот же (expectedDigest из чтения доски): пересчёт, архивация или изменение состава
+        любой стороны снимает решение. Требует cut.manage и orders.view и scope просмотра каждого заказа обеих ванн.
+        Аудит mdf_board.bath_duplicate_resolved и событие outbox — в той же транзакции. Повтор с тем же
+        Idempotency-Key и телом возвращает сохранённое решение (replayed=true) без новых записей; тот же ключ с
+        другим телом — 409. Включается BACKEND_MDF_BATH_DUPLICATES_WRITE (выключено ⇒ 503).
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Уникальный ключ действия пользователя; сохранять при сетевом повторе той же команды.
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 200
+            pattern: '^[A-Za-z0-9._:-]{8,200}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [bathCardId, otherBathCardId, action, expectedDigest]
+              properties:
+                bathCardId:
+                  type: string
+                  description: Ванна, на которой открыто окно; для rework_mark — помечаемая ванна.
+                  pattern: '^cut-result:[1-9][0-9]{0,15}$'
+                otherBathCardId:
+                  type: string
+                  pattern: '^cut-result:[1-9][0-9]{0,15}$'
+                action:
+                  type: string
+                  enum: [keep_both, rework_mark]
+                expectedDigest:
+                  type: string
+                  pattern: '^[a-f0-9]{64}$'
+      responses:
+        '200':
+          description: Решение записано или повтор той же команды
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [generatedAt, resolution, auditId, replayed]
+                properties:
+                  generatedAt: { type: string, format: date-time }
+                  auditId: { type: string, nullable: true }
+                  replayed: { type: boolean }
+                  resolution:
+                    type: object
+                    required: [resolutionId, action, bathA, bathB, targetBath, otherBathCardId, digest, sharedCount, orderIds, createdAt]
+                    properties:
+                      resolutionId: { type: integer }
+                      action: { type: string, enum: [keep_both, rework_mark] }
+                      bathA: { type: string }
+                      bathB: { type: string }
+                      targetBath: { type: string }
+                      otherBathCardId: { type: string }
+                      digest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                      sharedCount: { type: integer }
+                      orderIds: { type: array, items: { type: integer } }
+                      createdAt: { type: string, format: date-time }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: MDF_BATH_DUPLICATE_STALE (ванны изменились, digest не совпал) или IDEMPOTENCY_KEY_REUSED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/orders/status-board/mdf-drift:
+    get:
+      tags:
+        - Orders
+      operationId: listMdfDemandDriftConflicts
+      summary: Открытые расхождения спроса МДФ, видимые пользователю (§5.8 сверщик)
+      description: >-
+        Только чтение. Сверщик спроса сравнивает зафиксированный спрос принятых источников
+        с текущим (изменения справочников и любые другие изменения вне команд заказа) и
+        записывает устойчивую строку конфликта при необходимости подтверждения или жёстком
+        конфликте. Список не создаёт подтверждений и не меняет карточки.
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      responses:
+        '200':
+          description: Открытые расхождения, видимые пользователю по scope orders.view
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MdfDemandDriftConflict'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/orders/status-board/mdf-drift/{conflictId}/confirm:
+    parameters:
+      - name: conflictId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags:
+        - Orders
+      operationId: confirmMdfDemandDrift
+      summary: Разрешить расхождение спроса МДФ через тот же подтверждённый каскад заказа
+      description: >-
+        Без digest — 409-предпросмотр с mdfConfirmation.digest (как при обычном
+        подтверждении сохранения заказа). С digest — применяет каскад для связной
+        компоненты источников, помечает конфликт(ы) разрешёнными и записывает аудит.
+        Требует orders.update и видимость ВСЕХ затронутых заказов.
+      security:
+        - bearerAuth: []
+      x-permission: orders.update
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                digest:
+                  type: string
+                  pattern: '^[a-f0-9]{64}$'
+      responses:
+        '200':
+          description: Расхождение(я) разрешено(ы)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - resolved
+                properties:
+                  resolved:
+                    type: integer
+                    minimum: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Расхождение не найдено
+        '409':
+          description: Предпросмотр (mdfConfirmation.digest), уже разрешено, либо устаревший digest
+        '422':
+          $ref: '#/components/responses/ValidationError'
   /api/v1/orders/status-board/mdf:
     get:
       operationId: getPublishedMdfBoard
@@ -4559,8 +4781,10 @@ paths:
       security: [{ bearerAuth: [] }]
       parameters:
         - { name: dateTo, in: query, schema: { type: string, format: date } }
+        - { name: displayFrom, in: query, description: 'Начало окна показа карточек (§5.8 P1); по умолчанию dateTo минус 6 дней, не может выходить за пределы двухмесячного окна dateTo.', schema: { type: string, format: date } }
         - { name: orderIds, in: query, description: До 100 положительных safe-integer ID через запятую, schema: { type: string } }
         - { name: jobIds, in: query, description: До 20 UUID через запятую; все владельцы зафиксированного состава и потребности должны быть доступны, schema: { type: string } }
+        - { name: searchOrderIds, in: query, description: 'Поиск (§5.6): до 100 ID заказов через запятую; дополнительно выбирает карточки этих заказов, включая старые и завершённые (каждый заказ проверяется на доступ). В отличие от orderIds, который добавляет только итоги позиций карточек заказов.', schema: { type: string } }
         - { name: focusKind, in: query, schema: { type: string, enum: [packet, bazisCutSet, bath] } }
         - { name: focusId, in: query, description: Обязателен вместе с focusKind; UUID файла, ID БАЗИС либо cut-result:ID, schema: { type: string } }
         - { name: If-None-Match, in: header, schema: { type: string } }
@@ -4635,6 +4859,88 @@ paths:
         '409': { description: Устаревший digest, конфликт ключа либо параллельное изменение }
         '422': { description: Возврат заблокирован условиями карточки }
         '503': { description: Изменения заказов отключены }
+  /api/v1/orders/status-board/mdf-engine:
+    get:
+      tags: [Orders]
+      operationId: getMdfEngineMode
+      summary: Режим производственного учёта МДФ для выбора диалога возврата
+      description: >-
+        Только чтение. Старый диалог возврата допустим лишь в legacy/shadow; в active — только новый возврат
+        (mdf-corrections), в read_only — без подтверждения.
+      responses:
+        '200':
+          description: Режим и включено ли согласованное чтение
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mode, publishedReads]
+                properties:
+                  mode: { type: string, enum: [legacy, shadow, active, read_only] }
+                  publishedReads: { type: boolean }
+        '401': { description: Требуется вход }
+        '403': { description: Нужна permission orders.view }
+        '503': { description: Режим учёта недоступен }
+  /api/v1/orders/status-board/mdf-corrections/{cardKind}/{cardId}/preview:
+    parameters:
+      - { name: cardKind, in: path, required: true, schema: { type: string, enum: [packet, bath, bazisCutSet] } }
+      - { name: cardId, in: path, required: true, description: Lowercase packet UUID, safe positive integer Bazis ID, or cut-result:<safe positive integer>, schema: { type: string, maxLength: 100 } }
+    post:
+      tags: [Orders]
+      operationId: previewMdfActiveProductionReturn
+      summary: Предпросмотр исправления принятого свидетельства MDF
+      description: >-
+        Отдельный active-протокол. Сервер проверяет зафиксированный режим MDF;
+        предпросмотр не меняет учётные данные. Показывает связанные ванны,
+        количества и независимые floors. HDF не включается.
+      security: [{ bearerAuth: [] }]
+      x-permissions: [orders.view, production.tasks.update, orders.change_production_status]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MdfActiveProductionReturnPreviewRequest' }
+      responses:
+        '200':
+          description: Consequences and digest for explicit confirmation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MdfActiveProductionReturnPreview' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/orders/status-board/mdf-corrections/{cardKind}/{cardId}/confirm:
+    parameters:
+      - { name: cardKind, in: path, required: true, schema: { type: string, enum: [packet, bath, bazisCutSet] } }
+      - { name: cardId, in: path, required: true, description: Lowercase packet UUID, safe positive integer Bazis ID, or cut-result:<safe positive integer>, schema: { type: string, maxLength: 100 } }
+    post:
+      tags: [Orders]
+      operationId: confirmMdfActiveProductionReturn
+      summary: Подтвердить исправление принятого свидетельства MDF
+      description: >-
+        Атомарно исправляет источник, связанные доказательства ванн, распределения,
+        затронутые статусы, аудит, очередь и ключ повтора. Тот же actor/key
+        возвращает ранее сохранённый ответ без повторных эффектов.
+      security: [{ bearerAuth: [] }]
+      x-permissions: [orders.view, production.tasks.update, orders.change_production_status]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MdfActiveProductionReturnConfirmRequest' }
+      responses:
+        '200':
+          description: Persisted correction response and queued publication jobs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MdfActiveProductionReturnConfirmResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/v1/orders/status-board/mdf-manual-moves:
     get:
       tags:
@@ -5051,7 +5357,7 @@ paths:
         '404':
           $ref: '#/components/responses/OrderNotFound'
         '409':
-          $ref: '#/components/responses/OrderVersionConflict'
+          $ref: '#/components/responses/OrderMdfConflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '429':
@@ -5092,7 +5398,7 @@ paths:
         '404':
           $ref: '#/components/responses/OrderNotFound'
         '409':
-          description: Версия заказа устарела или idempotency key уже используется другим запросом
+          description: Версия заказа устарела, idempotency key уже используется другим запросом, или удаление затрагивает учтённое производство МДФ (коды MDF_ORDER_*, см. OrderMdfConflict)
           content:
             application/json:
               schema:
@@ -5189,6 +5495,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/OrderNotFound' }
+        '409': { $ref: '#/components/responses/OrderMdfConflict' }
         '503': { $ref: '#/components/responses/FeatureDisabled' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -5323,7 +5630,7 @@ paths:
         '404':
           $ref: '#/components/responses/OrderNotFound'
         '409':
-          description: ORDER_VERSION_CONFLICT, ORDER_NOT_DELETED, ORDER_NAME_DUPLICATE или ORDER_RESTORE_CONFLICT
+          description: ORDER_VERSION_CONFLICT, ORDER_NOT_DELETED, ORDER_NAME_DUPLICATE, ORDER_RESTORE_CONFLICT или MDF_ORDER_* (см. OrderMdfConflict)
           content:
             application/json:
               schema:
@@ -5463,7 +5770,7 @@ paths:
         '404':
           $ref: '#/components/responses/OrderNotFound'
         '409':
-          $ref: '#/components/responses/OrderVersionConflict'
+          $ref: '#/components/responses/OrderMdfConflict'
         '422':
           $ref: '#/components/responses/ValidationError'
         '503':
@@ -15588,6 +15895,150 @@ paths:
         '201': { description: Import item failure recorded }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /api/v1/cnc-telegram/observation-worker/claim:
+    post:
+      tags: [CncTelegramObservationWorker]
+      operationId: claimCncTelegramMdfObservation
+      summary: Claim one server-selected source for a bounded fresh CNC observation
+      description: >-
+        No source, packet, detail, rank, or version is accepted from the caller. The claim binds the registered
+        exact Telegram group and current MDF head/epoch; the worker must refetch those exact messages after claim.
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - {name: X-CNC-Telegram-Session-Token, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 240}}
+        - {name: X-CNC-Telegram-Session-Generation, in: header, required: true, schema: {type: integer, minimum: 1}}
+        - {name: X-CNC-Telegram-Chat-Id, in: header, required: false, schema: {type: string, maxLength: 120}}
+        - {name: X-CNC-Telegram-Worker-Instance, in: header, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: A bounded claim or null when no source is due
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [claim]
+                properties:
+                  claim:
+                    type: object
+                    nullable: true
+                    additionalProperties: false
+                    required: [claimId, claimToken, claimGeneration, expiresAt, packetId, sourceChatId, messages, acceptedRevisionKey, headVersion, correctionEpoch, rawSourceVersion, observationVersion]
+                    properties:
+                      claimId: {type: string, format: uuid}
+                      claimToken: {type: string, minLength: 32, maxLength: 240}
+                      claimGeneration: {type: integer, minimum: 1}
+                      expiresAt: {type: string, format: date-time}
+                      packetId: {type: string, format: uuid}
+                      sourceChatId: {type: string, minLength: 1, maxLength: 120}
+                      messages:
+                        type: array
+                        minItems: 1
+                        maxItems: 3
+                        items:
+                          type: object
+                          additionalProperties: false
+                          required: [messageId, role, sha256]
+                          properties:
+                            messageId: {type: integer, minimum: 1}
+                            role: {type: string, enum: [svg, gcode, image]}
+                            sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+                      acceptedRevisionKey: {type: string}
+                      headVersion: {type: string, pattern: '^[0-9]+$'}
+                      correctionEpoch: {type: string, pattern: '^[0-9]+$'}
+                      rawSourceVersion: {type: string, pattern: '^[0-9]+$'}
+                      observationVersion: {type: string, pattern: '^[0-9]+$'}
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/observation-worker/claims/{claimId}/complete:
+    post:
+      tags: [CncTelegramObservationWorker]
+      operationId: completeCncTelegramMdfObservation
+      summary: Complete a claim with post-claim facts for its exact message group
+      description: >-
+        Client-supplied packet targets, source versions, timestamps, and completion classifications are rejected.
+        Every registered message must be present and identity/hash verified; fetch failures use the fail endpoint.
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - {name: claimId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-CNC-Telegram-Session-Token, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 240}}
+        - {name: X-CNC-Telegram-Session-Generation, in: header, required: true, schema: {type: integer, minimum: 1}}
+        - {name: X-CNC-Telegram-Chat-Id, in: header, required: false, schema: {type: string, maxLength: 120}}
+        - {name: X-CNC-Telegram-Worker-Instance, in: header, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [claimId, claimToken, claimGeneration, messages]
+              properties:
+                claimId: {type: string, format: uuid}
+                claimToken: {type: string, minLength: 32, maxLength: 240}
+                claimGeneration: {type: integer, minimum: 1}
+                messages:
+                  type: array
+                  minItems: 1
+                  maxItems: 3
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [messageId, chatId, role, sha256, present, thumbsUp]
+                    properties:
+                      messageId: {type: integer, minimum: 1}
+                      chatId: {type: string, minLength: 1, maxLength: 120}
+                      role: {type: string, enum: [svg, gcode, image]}
+                      sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+                      present: {type: boolean, enum: [true]}
+                      thumbsUp: {type: boolean}
+      responses:
+        '200': { description: Immutable observation result or exact replay }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/observation-worker/claims/{claimId}/fail:
+    post:
+      tags: [CncTelegramObservationWorker]
+      operationId: failCncTelegramMdfObservation
+      summary: Fail a bounded claim when exact-message refetch or validation fails
+      description: No failure request can select a source, set completion state, or provide a client source version.
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - {name: claimId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-CNC-Telegram-Session-Token, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 240}}
+        - {name: X-CNC-Telegram-Session-Generation, in: header, required: true, schema: {type: integer, minimum: 1}}
+        - {name: X-CNC-Telegram-Chat-Id, in: header, required: false, schema: {type: string, maxLength: 120}}
+        - {name: X-CNC-Telegram-Worker-Instance, in: header, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [claimToken, claimGeneration, reason]
+              properties:
+                claimToken: {type: string, minLength: 32, maxLength: 240}
+                claimGeneration: {type: integer, minimum: 1}
+                reason: {type: string, enum: [FETCH_FAILED, MESSAGE_MISSING, MESSAGE_MEDIA_MISMATCH, MESSAGE_GROUP_INCOMPLETE]}
+      responses:
+        '200': { description: Claim failure accepted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
   /api/v1/cnc-telegram/today:
     get:
       tags:
@@ -15956,6 +16407,9 @@ paths:
       tags: [CncTelegramMedia]
       operationId: claimManualSvgTelegramSends
       summary: Claim queued manual SVG files for Telegram sending
+      description: >-
+        Capable tasks may include observationBindingVersion: 1 when an immutable
+        bounded source snapshot was captured. Older workers can ignore the optional field.
       security: [{ bearerAuth: [] }]
       x-permission: cut.manage
       responses:
@@ -15969,6 +16423,12 @@ paths:
       tags: [CncTelegramMedia]
       operationId: completeManualSvgTelegramSend
       summary: Complete one manual SVG Telegram send request
+      description: >-
+        Successful capable sends may include explicit per-file sentFiles bindings
+        (fileId, messageId, sourceSha256, mediaSha256) or
+        observationBindingError: MEDIA_VERIFICATION_FAILED. Older completions
+        without either field remain supported but do not register an observation
+        target. A conflicting replay or stale lease returns 409.
       security: [{ bearerAuth: [] }]
       x-permission: cut.manage
       parameters:
@@ -15982,6 +16442,7 @@ paths:
         '200': { description: OK }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationError' }
         '503': { $ref: '#/components/responses/FeatureDisabled' }
 
@@ -16723,17 +17184,25 @@ paths:
       tags: [CutJobs]
       operationId: setCutResultCurrent
       summary: Mark a completed cut result as acting for a cut job
+      description: >-
+        In the active MDF engine a change of the job's current result retires its active bath and captures
+        the new one (bath lifecycle); then If-Match and Idempotency-Key are required (428 MDF_BATH_FENCE_REQUIRED).
+        409 codes: CUT_JOB_STALE_VERSION, MDF_BATH_HAS_PRODUCTION, MDF_BATH_TRANSITION_PENDING,
+        MDF_BATH_RESULT_RETIRED, MDF_BATH_LIFECYCLE_STALE, MDF_BATH_SUCCESSOR_INVALID, MDF_ENGINE_READ_ONLY.
       security: [{ bearerAuth: [] }]
       x-permission: cut.manage
       parameters:
         - { name: cutJobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
         - { name: resultNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: If-Match, in: header, required: false, schema: { type: string }, description: Cut job version the operator saw }
+        - { name: Idempotency-Key, in: header, required: false, schema: { type: string, maxLength: 200 } }
       responses:
         '200': { description: OK }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '428': { description: 'MDF_BATH_FENCE_REQUIRED — If-Match and Idempotency-Key required for a bath-changing switch' }
         '503': { $ref: '#/components/responses/FeatureDisabled' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -18003,6 +18472,58 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/bazis-cut-sets/{setId}/composition/preview:
+    parameters:
+      - { $ref: '#/components/parameters/BazisCutSetId' }
+    post:
+      tags: [BazisCutSets]
+      operationId: previewBazisCutSetComposition
+      summary: Preview a production-safe composition change of a Basis-cut set (new MDF engine)
+      description: >-
+        Active MDF engine only. desiredRows is the complete list of rows that stay; an omitted row is
+        deleted, an empty list empties the set. Physical cut and bath reservations are retained;
+        detail production statuses do not change.
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BazisCutCompositionRequest' } } }
+      responses:
+        '200':
+          description: Consequences of the composition change
+          content: { application/json: { schema: { $ref: '#/components/schemas/BazisCutCompositionPreview' } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/bazis-cut-sets/{setId}/composition/confirm:
+    parameters:
+      - { $ref: '#/components/parameters/BazisCutSetId' }
+    post:
+      tags: [BazisCutSets]
+      operationId: confirmBazisCutSetComposition
+      summary: Confirm a previewed composition change; queued for production accounting
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BazisCutCompositionConfirmRequest' } } }
+      responses:
+        '200':
+          description: Queued, unchanged or replayed composition command
+          content: { application/json: { schema: { $ref: '#/components/schemas/BazisCutCompositionConfirmResult' } } }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationError' }
         '503': { $ref: '#/components/responses/FeatureDisabled' }
@@ -22522,6 +23043,33 @@ components:
                     currentVersion: 8
                     clientVersion: 7
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    OrderMdfConflict:
+      description: >-
+        Конфликт версии заказа (ORDER_VERSION_CONFLICT) или изменение затрагивает учтённое производство
+        МДФ-доски: MDF_ORDER_SOURCE_PENDING, MDF_ORDER_SOURCE_ATTENTION, MDF_ORDER_PHYSICAL_CONFLICT,
+        MDF_ORDER_ASSIGNMENT_CONFLICT, MDF_ORDER_DEMAND_EMPTY, MDF_ORDER_LOCK_CONTENTION (повторить),
+        MDF_ORDER_SCOPE_LIMIT, MDF_ENGINE_READ_ONLY. Команда целиком откатывается. details.cards —
+        карточки, отфильтрованные по области просмотра заказов (hiddenOwners без id/названий/количеств).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+          examples:
+            mdfPhysicalConflict:
+              value:
+                error:
+                  code: MDF_ORDER_PHYSICAL_CONFLICT
+                  message: Изменение затрагивает уже распиленные или зарезервированные позиции МДФ-доски — сначала оформите возврат
+                  details:
+                    cards:
+                      - reason: MDF_ORDER_PHYSICAL_CONFLICT
+                        sourceKind: bazisCutSet
+                        sourceId: '41'
+                        displayName: Набор 41
+                        orderIds: [9001]
+                        positions: [{ orderId: 9001, detailId: 900101, before: 10, after: 8 }]
+                        hiddenOwners: false
+                  requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
     IdempotencyConflict:
       description: Конфликт idempotency key
       content:
@@ -23365,8 +23913,96 @@ components:
     MdfPublishedSnapshot:
       type: object
       additionalProperties: false
-      required: [schemaVersion, mode, revision, generatedAt, dateFrom, dateTo, cards, members, positions, pendingJobs, trackedJobs, issues]
+      required: [schemaVersion, mode, revision, generatedAt, dateFrom, dateTo, cards, members, positions, pendingJobs, trackedJobs, issues, presentation, progress, orders, unregistered]
       properties:
+        presentation:
+          type: array
+          description: >-
+            Оформление карточек (§5.6) из того же снимка. Составочно-зависимые данные (позиции с размерами, превью, имена
+            файлов) — только если привязка принятой ревизии совпадает с текущими сырыми данными (иначе stale=true и
+            composition=null — минимальная карточка). Позиции — только видимых заказов; имена файлов, превью и живые
+            аннотации — только когда видимы все владельцы карточки.
+          items:
+            type: object
+            required: [kind, id, stale, composition, live]
+            properties:
+              kind: { type: string, enum: [packet, bazisCutSet, bath] }
+              id: { type: string }
+              stale: { type: boolean }
+              composition:
+                type: object
+                nullable: true
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        orderId: { type: integer }
+                        detailId: { type: integer, nullable: true }
+                        detailNumber: { nullable: true }
+                        widthMm: { type: number, nullable: true }
+                        heightMm: { type: number, nullable: true }
+                        quantity: { type: number }
+                  programName: { type: string, nullable: true }
+                  externalKey: { type: string, nullable: true }
+                  materialName: { type: string, nullable: true }
+                  hasSheetImage: { type: boolean }
+                  svgCutJobId: { type: number, nullable: true }
+                  svgCutResultId: { type: number, nullable: true }
+                  cuttingSequenceNo: { type: number, nullable: true }
+                  cutJobId: { type: number, nullable: true }
+                  cutJobName: { type: string, nullable: true }
+                  resultNo: { type: number, nullable: true }
+                  revisionNo: { type: number, nullable: true }
+              live:
+                type: object
+                nullable: true
+                description: Живые аннотации (текущие значения, не привязаны к ревизии).
+                properties:
+                  comments: {}
+                  rework: { type: boolean }
+                  thumbsUp: { type: boolean }
+                  completionStatus: { type: string, nullable: true }
+                  dowelingLinks: {}
+                  name: { type: string, nullable: true }
+        progress:
+          type: array
+          maxItems: 20000
+          description: Прогресс конкретной карточки по её собственным принятым строкам (выбывшие позиции исключены); итоги позиций — в positions.
+          items:
+            type: object
+            required: [kind, id, orderId, detailId, member, cut, laminated]
+            properties:
+              kind: { type: string }
+              id: { type: string }
+              orderId: { type: integer }
+              detailId: { type: integer }
+              member: { type: number }
+              cut: { type: number }
+              laminated: { type: number }
+        orders:
+          type: array
+          description: Названия видимых заказов карточек.
+          items:
+            type: object
+            required: [orderId, orderName]
+            properties:
+              orderId: { type: integer }
+              orderName: { type: string }
+        unregistered:
+          type: array
+          maxItems: 200
+          description: Файлы станка и наборы БАЗИС окна, ещё не учтённые движком, все заказы которых видимы («Ожидает учёта», только чтение).
+          items:
+            type: object
+            required: [kind, id, displayName, sourceCreatedAt, orderIds]
+            properties:
+              kind: { type: string, enum: [packet, bazisCutSet] }
+              id: { type: string }
+              displayName: { type: string }
+              sourceCreatedAt: { type: string }
+              orderIds: { type: array, items: { type: integer } }
         schemaVersion: { type: integer, enum: [1] }
         mode: { type: string, enum: [legacy, shadow, active, read_only] }
         revision: { type: string, pattern: '^[0-9]+$' }
@@ -24443,6 +25079,83 @@ components:
             createdBy: { type: integer, format: int64, nullable: true }
             updatedBy: { type: integer, format: int64, nullable: true }
             details: { type: array, items: { $ref: '#/components/schemas/BazisCutSetDetail' } }
+            mdfComposition: { $ref: '#/components/schemas/BazisCutCompositionReadiness' }
+    BazisCutCompositionReadiness:
+      type: object
+      description: GET only, active/read_only MDF engine; absent in legacy/shadow (legacy editor applies).
+      additionalProperties: false
+      required: [available, sourceToken, reason, eligibleRowIds]
+      properties:
+        available: { type: boolean }
+        sourceToken: { type: string, pattern: '^[a-f0-9]{64}$', nullable: true }
+        eligibleRowIds:
+          type: array
+          description: Server-resolved ordinary MDF rows the composition may keep or change; other rows are preserved raw.
+          items: { type: string, pattern: '^[1-9][0-9]{0,18}$' }
+        reason:
+          type: string
+          nullable: true
+          enum: [MDF_ENGINE_READ_ONLY, MDF_SOURCE_NOT_REGISTERED, MDF_PUBLICATION_PENDING, MDF_SOURCE_ISSUES, MDF_PARTIAL_ACCESS, null]
+    BazisCutCompositionRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, sourceToken, desiredRows]
+      properties:
+        expectedVersion: { type: string, pattern: '^[1-9][0-9]{0,18}$' }
+        sourceToken: { type: string, pattern: '^[a-f0-9]{64}$' }
+        desiredRows:
+          type: array
+          maxItems: 5000
+          description: >-
+            Complete desired list. Existing eligible rows by rowId; refill rows (flag BACKEND_MDF_BAZIS_REFILL)
+            by newDetailId of an ordinary MDF detail of a current owner order, built server-side.
+          items:
+            oneOf:
+              - type: object
+                additionalProperties: false
+                required: [rowId, quantity]
+                properties:
+                  rowId: { type: string, pattern: '^[1-9][0-9]{0,18}$' }
+                  quantity: { type: integer, minimum: 1, maximum: 1000000 }
+              - type: object
+                additionalProperties: false
+                required: [newDetailId, quantity]
+                properties:
+                  newDetailId: { type: integer, minimum: 1 }
+                  quantity: { type: integer, minimum: 1, maximum: 1000000 }
+    BazisCutCompositionConfirmRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, sourceToken, desiredRows, expectedDigest]
+      properties:
+        expectedVersion: { type: string, pattern: '^[1-9][0-9]{0,18}$' }
+        sourceToken: { type: string, pattern: '^[a-f0-9]{64}$' }
+        desiredRows: { $ref: '#/components/schemas/BazisCutCompositionRequest/properties/desiredRows' }
+        expectedDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+    BazisCutCompositionPreview:
+      type: object
+      required: [status, beforeVersion, previewDigest, assignmentChanges, retainedPhysical, preservedAllocations, blockers]
+      properties:
+        status: { type: string, enum: [ready, unchanged, blocked] }
+        beforeVersion: { type: string }
+        previewDigest: { type: string, nullable: true }
+        assignmentChanges: { type: array, items: { type: object } }
+        retainedPhysical: { type: array, items: { type: object } }
+        preservedAllocations: { type: array, items: { type: object } }
+        blockers: { type: array, items: { type: object } }
+    BazisCutCompositionConfirmResult:
+      type: object
+      required: [status, replay]
+      properties:
+        status: { type: string, enum: [queued, unchanged] }
+        jobId: { type: string, format: uuid }
+        intentId: { type: string, format: uuid }
+        assignmentStateId: { type: string, format: uuid }
+        auditId: { type: string }
+        outboxId: { type: string }
+        version: { type: string }
+        beforeVersion: { type: string }
+        replay: { type: boolean }
     BazisCutMutationResult:
       type: object
       required: [set]
@@ -26775,6 +27488,200 @@ components:
               label: { type: string }
               before: { type: string }
               after: { type: string }
+    MdfActiveProductionReturnPreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [sourceToken, targetColumn]
+      properties:
+        sourceToken: { type: string, pattern: '^[a-f0-9]{64}$' }
+        targetColumn: { type: string, enum: [parsed, completed, baths, baths_ready, baths_laminated] }
+        productionStatusId: { type: integer, minimum: 1, maximum: 9007199254740991 }
+    MdfActiveProductionReturnConfirmRequest:
+      type: object
+      additionalProperties: false
+      required: [sourceToken, targetColumn, expectedDigest, idempotencyKey]
+      properties:
+        sourceToken: { type: string, pattern: '^[a-f0-9]{64}$' }
+        targetColumn: { type: string, enum: [parsed, completed, baths, baths_ready, baths_laminated] }
+        productionStatusId: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        expectedDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+        idempotencyKey: { type: string, pattern: '^[A-Za-z0-9._:-]{1,128}$', maxLength: 128 }
+    MdfActiveProductionReturnPreview:
+      type: object
+      required: [protocol, status, source, targetColumn, targetStage, stages, sourceToken, headFence, digest, affectedOrderIds, details, affectedBaths, allocationReleases, allocationReplacements, deferredPriorAutomation, cncFreshnessBaseline, blockers, warnings]
+      properties:
+        protocol: { type: string, enum: [mdf-correction-v1] }
+        status: { type: string, enum: [ready, blocked] }
+        source:
+          type: object
+          required: [kind, id, label]
+          properties:
+            kind: { type: string, enum: [packet, bath, bazisCutSet] }
+            id: { type: string }
+            label: { type: string }
+        targetColumn: { type: string, enum: [parsed, completed, baths, baths_ready, baths_laminated] }
+        targetStage: { $ref: '#/components/schemas/MdfProductionReturnStage' }
+        stages: { type: array, items: { $ref: '#/components/schemas/MdfProductionReturnStage' } }
+        sourceToken: { type: string, pattern: '^[a-f0-9]{64}$' }
+        headFence:
+          type: object
+          required: [version, correctionEpoch]
+          properties:
+            version: { type: string, pattern: '^[1-9][0-9]*$' }
+            correctionEpoch: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+        digest: { type: string, nullable: true, pattern: '^[a-f0-9]{64}$' }
+        affectedOrderIds: { type: array, items: { type: integer, minimum: 1 } }
+        details:
+          type: array
+          items:
+            type: object
+            required: [orderId, detailId, cutCoverage, laminatedCoverage, independentFloorRank, afterRank, after, orderName, detailNumber, beforeStatus, afterStatus, cardQuantity, statusKept]
+            properties:
+              orderId: { type: integer, minimum: 1 }
+              detailId: { type: integer, minimum: 1 }
+              cutCoverage: { type: integer, minimum: 0 }
+              laminatedCoverage: { type: integer, minimum: 0 }
+              independentFloorRank: { type: integer, nullable: true }
+              afterRank: { type: integer, nullable: true }
+              after: { $ref: '#/components/schemas/MdfCorrectionPositionQuantity' }
+              orderName: { type: string }
+              detailNumber: { type: integer, nullable: true }
+              beforeStatus: { type: string, nullable: true }
+              afterStatus: { type: string, nullable: true }
+              cardQuantity: { type: integer, minimum: 0, description: Количество позиции в этой карточке (after.quantity — вся деталь) }
+              statusKept: { type: boolean, description: Независимое подтверждение сохраняет текущий статус }
+        sourceAfter:
+          type: object
+          required: [afterColumn, afterIssues]
+          description: Итоговая колонка возвращаемой карточки (единая функция размещения §5.4d)
+          properties:
+            afterColumn: { type: string, nullable: true }
+            afterIssues: { type: array, items: { type: string } }
+        orders:
+          type: array
+          description: Следствия для статуса заказа; доска его не меняет — только включённые правила автостатусов (предпросмотр в откатываемой точке сохранения, повторная проверка при подтверждении)
+          items:
+            type: object
+            required: [orderId, orderName, before, after, beforeStatusId, afterStatusId]
+            properties:
+              orderId: { type: integer, minimum: 1 }
+              orderName: { type: string }
+              before: { type: string, nullable: true }
+              after: { type: string, nullable: true }
+              beforeStatusId: { type: integer, nullable: true }
+              afterStatusId: { type: integer, nullable: true }
+        affectedBaths:
+          type: array
+          items:
+            type: object
+            required: [source, previousRevision, cancelledLaminationQuantity, beforeColumn, manualPlacementColumnBefore, manualPlacementColumnAfter, clearsManualPlacementOverride, afterColumn, afterIssues]
+            properties:
+              source: { $ref: '#/components/schemas/MdfCorrectionSource' }
+              previousRevision: { type: string }
+              cancelledLaminationQuantity: { type: integer, minimum: 0 }
+              beforeColumn: { type: string, nullable: true }
+              manualPlacementColumnBefore: { type: string, nullable: true }
+              manualPlacementColumnAfter: { type: string, nullable: true }
+              clearsManualPlacementOverride: { type: boolean }
+              afterColumn: { type: string, nullable: true, description: Итоговая колонка ванны после возврата }
+              afterIssues: { type: array, items: { type: string }, description: 'Непусто, если колонка станет известна только после пересчёта (например READINESS_AFTER_RECALCULATION)' }
+        allocationReleases: { type: array, items: { type: string, format: uuid } }
+        allocationReplacements: { type: array, items: { $ref: '#/components/schemas/MdfCorrectionAllocationReplacement' } }
+        deferredPriorAutomation: { type: array, items: { $ref: '#/components/schemas/MdfCorrectionDeferredJobEffect' } }
+        cncFreshnessBaseline:
+          allOf:
+            - { $ref: '#/components/schemas/MdfCncFreshnessBaseline' }
+          nullable: true
+        blockers: { type: array, items: { $ref: '#/components/schemas/MdfCorrectionBlocker' } }
+        warnings: { type: array, items: { type: string } }
+    MdfActiveProductionReturnConfirmResponse:
+      type: object
+      required: [preview, auditId, outboxId, requestId, jobIds]
+      properties:
+        preview: { $ref: '#/components/schemas/MdfActiveProductionReturnPreview' }
+        auditId: { type: string, format: uuid }
+        outboxId: { type: string, format: uuid }
+        requestId: { type: string }
+        jobIds: { type: array, items: { type: string, format: uuid } }
+    MdfCorrectionSource:
+      type: object
+      required: [kind, id]
+      properties:
+        kind: { type: string, enum: [packet, bazisCutSet, bath, order, orderDetail] }
+        id: { type: string }
+    MdfCorrectionPositionQuantity:
+      type: object
+      required: [orderId, detailId, quantity, rawCut, rawRolled, cut, rolled, creditedCut, creditedRolled, remaining]
+      properties:
+        orderId: { type: integer, minimum: 1 }
+        detailId: { type: integer, minimum: 1 }
+        quantity: { type: integer, minimum: 0 }
+        rawCut: { type: integer, minimum: 0 }
+        rawRolled: { type: integer, minimum: 0 }
+        cut: { type: integer, minimum: 0 }
+        rolled: { type: integer, minimum: 0 }
+        creditedCut: { type: integer, minimum: 0 }
+        creditedRolled: { type: integer, minimum: 0 }
+        remaining: { type: integer, minimum: 0 }
+    MdfCorrectionAllocationReplacement:
+      type: object
+      required: [oldAllocationId, evidenceLine, bathRevision, orderId, detailId, quantity, state]
+      properties:
+        oldAllocationId: { type: string, format: uuid }
+        evidenceLine:
+          oneOf:
+            - type: object
+              required: [kind, evidenceLineId]
+              properties:
+                kind: { type: string, enum: [existing] }
+                evidenceLineId: { type: string, format: uuid }
+            - type: object
+              required: [kind, sourceKind, sourceId, lineKey]
+              properties:
+                kind: { type: string, enum: [replacement] }
+                sourceKind: { type: string, enum: [packet, bazisCutSet, bath, order, orderDetail] }
+                sourceId: { type: string }
+                lineKey: { type: string }
+        bathRevision:
+          oneOf:
+            - type: object
+              required: [kind, revision]
+              properties:
+                kind: { type: string, enum: [existing] }
+                revision: { type: string }
+            - type: object
+              required: [kind, sourceId]
+              properties:
+                kind: { type: string, enum: [replacement] }
+                sourceId: { type: string }
+        orderId: { type: integer, minimum: 1 }
+        detailId: { type: integer, minimum: 1 }
+        quantity: { type: integer, minimum: 1 }
+        state: { type: string, enum: [reserved, consumed] }
+    MdfCorrectionDeferredJobEffect:
+      type: object
+      required: [jobId, source, status, affectedOrderIds]
+      properties:
+        jobId: { type: string, format: uuid }
+        source: { $ref: '#/components/schemas/MdfCorrectionSource' }
+        status: { type: string, enum: [pending, needs_attention] }
+        affectedOrderIds: { type: array, items: { type: integer, minimum: 1 } }
+    MdfCncFreshnessBaseline:
+      type: object
+      required: [packetId, sourceVersion, correctionEpoch, state]
+      properties:
+        packetId: { type: string, format: uuid }
+        sourceVersion: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+        correctionEpoch: { type: string, pattern: '^(0|[1-9][0-9]*)$' }
+        state: { type: string, enum: [waiting_pending] }
+    MdfCorrectionBlocker:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+        sourceId: { type: string }
+        allocationId: { type: string, format: uuid }
+        position: { type: string }
     MdfBoardManualMoveTargetColumn:
       type: string
       enum:
@@ -26891,6 +27798,36 @@ components:
         jobId:
           type: string
           description: Задание пересчёта active-движка; очистка не отзывает физические факты.
+
+    MdfDemandDriftConflict:
+      type: object
+      additionalProperties: false
+      required:
+        - conflictId
+        - sourceKind
+        - sourceId
+        - code
+        - orderIds
+        - detectedAt
+      properties:
+        conflictId:
+          type: string
+          format: uuid
+        sourceKind:
+          type: string
+          enum: [packet, bazisCutSet, bath, order]
+        sourceId:
+          type: string
+        code:
+          type: string
+          enum: [CONFIRMATION_REQUIRED, HARD_CONFLICT, BLOCKED_BY_CLOSURE, MDF_RECONCILE_SCOPE_LIMIT]
+        orderIds:
+          type: array
+          items:
+            type: integer
+        detectedAt:
+          type: string
+          format: date-time
 
     OrderStatusBoardResponse:
       type: object

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import { loadReturnSnapshot, returnSourceOwners } from './mdf-return-snapshot';
@@ -8,6 +9,12 @@ import type { TransactionClient } from '../../../database/database.types';
 import { observeMdfShadowCommand } from '../../mdf-board/application/mdf-shadow';
 import { requireMdfCommandBoundary } from '../../mdf-board/application/mdf-command-boundary';
 import { executeMdfManualCommand } from '../../mdf-board/adapters/mdf-manual-command';
+import { loadCncBazisCutSetBoardColumn, loadCncPacketBoardColumn } from '../../cnc-telegram/adapters/pg-cnc-telegram-repository';
+import { CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE, CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE,
+  cncPacketCountsForMdfReadinessSql } from '../../../shared/cnc-material';
+import type { CurrentUser } from '../../../permissions/current-user';
+import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
+import { allowsScopeSet, policyScopeSetsForUser, scopeSetHas } from '../../../permissions/policies/scope';
 import type { MdfBoardEventInput } from '../../status-automation/application/mdf-board-event.types';
 import {
   dispatchMdfBoardEvent,
@@ -65,9 +72,17 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
   }
 
   async upsert(command: UpsertMdfBoardManualMoveCommand): Promise<MdfBoardManualMoveUpsertResponseDto> {
-    const mdf = { writer: 'mdf.manual.upsert',capability: command.cardKind === 'order' ? 'legacy-only' : 'queued' } as const;
+    const mdf = { writer: 'mdf.manual.upsert',capability: 'queued' } as const;
     return this.database.transaction(async (tx) => {
-      if ((await requireMdfCommandBoundary(tx,mdf)).queued) return executeMdfManualCommand(tx,command);
+      if ((await requireMdfCommandBoundary(tx,mdf)).queued) {
+        // The new MDF board has no order cards (only packets, BASIS sets and baths): explicit refusal, not 503.
+        if (command.cardKind === 'order') throw new ApiError(409, 'MDF_ORDER_CARD_NOT_SUPPORTED',
+          'В новом производственном учёте заказ не является карточкой МДФ-доски — переносите файлы, наборы и ванны');
+        const route = await routeQueuedCommand(tx, command);
+        if (route.route === 'replay') return route.response;
+        if (route.route === 'non_mdf') return executeNonMdfPlacement(tx, command);
+        return executeMdfManualCommand(tx,command);
+      }
       await setSessionUser(tx, command.currentUser.id);
       if (command.cardKind !== 'order') {
         await tx.query('SET LOCAL jit=off');
@@ -168,9 +183,17 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
   }
 
   async delete(command: DeleteMdfBoardManualMoveCommand): Promise<MdfBoardManualMoveDeleteResponseDto> {
-    const mdf = { writer: 'mdf.manual.clear',capability: command.cardKind === 'order' ? 'legacy-only' : 'queued' } as const;
+    const mdf = { writer: 'mdf.manual.clear',capability: 'queued' } as const;
     return this.database.transaction(async (tx) => {
-      if ((await requireMdfCommandBoundary(tx,mdf)).queued) return executeMdfManualCommand(tx,command);
+      if ((await requireMdfCommandBoundary(tx,mdf)).queued) {
+        // The new MDF board has no order cards (only packets, BASIS sets and baths): explicit refusal, not 503.
+        if (command.cardKind === 'order') throw new ApiError(409, 'MDF_ORDER_CARD_NOT_SUPPORTED',
+          'В новом производственном учёте заказ не является карточкой МДФ-доски — переносите файлы, наборы и ванны');
+        if ((await routeQueuedCommand(tx, command)).route !== 'engine') {
+          throw new ApiError(409, 'MDF_NON_MDF_RETURN_UNSUPPORTED', NON_MDF_RETURN_MESSAGE);
+        }
+        return executeMdfManualCommand(tx,command);
+      }
       await setSessionUser(tx, command.currentUser.id);
       const current = await loadMoveForUpdate(tx, command.cardKind, command.cardId);
       if (!current) {
@@ -215,7 +238,8 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
           notificationEventEmitted: false,
           notificationEventDecision: 'polling_refresh_contract',
         }),
-        relatedEntities: relatedEntities(command.cardKind, command.cardId),
+        relatedEntities: relatedEntities(command.cardKind, command.cardId,
+          await loadRelatedOrderIds(tx, command.cardKind, command.cardId)),
       });
       if (command.cardKind !== 'order') {
         const event: MdfBoardEventInput = {
@@ -235,6 +259,205 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
       };
     }, { mdf });
   }
+}
+
+const NON_MDF_RETURN_MESSAGE = 'Возврат карточки не из МДФ при новом учёте недоступен — обратитесь к администратору';
+const NON_MDF_PACKET_COLUMNS = ['parsed', 'completed', 'completed_laminated'] as const;
+type NonMdfPacketColumn = typeof NON_MDF_PACKET_COLUMNS[number];
+type QueuedPacketRoute =
+  | { route: 'engine' }
+  | { route: 'non_mdf' }
+  | { route: 'replay'; response: MdfBoardManualMoveUpsertResponseDto };
+
+interface NonMdfReplayPayload {
+  nonMdf: true; requestDigest: string; orderIds: number[]; response: MdfBoardManualMoveUpsertResponseDto;
+}
+
+/** Engine active (queued boundary): a machine file of another material (HDF, chipboard…) is outside the engine. It
+ * keeps its forward manual placement through `executeNonMdfPlacement` (a BASIS set with no MDF detail likewise);
+ * everything else stays the engine's.
+ * The replay of an earlier command is resolved BEFORE routing and for EVERY card kind (both replay stores share the
+ * actor's key space), so a lost response survives a later material/head change and a key never runs twice. No source
+ * lock is taken here (lock order: owners → source, see the command). */
+async function routeQueuedCommand(
+  tx: TransactionClient,
+  command: UpsertMdfBoardManualMoveCommand | DeleteMdfBoardManualMoveCommand,
+): Promise<QueuedPacketRoute> {
+  const key = command.idempotencyKey;
+  if (key && /^[A-Za-z0-9._:-]{1,128}$/.test(key)) {
+    // Same command-key lock as the engine command: equal keys serialize across both paths.
+    await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
+      `mdf-manual-command:${JSON.stringify([command.currentUser.id, key])}`]);
+    const engineReplay = await tx.query(`SELECT 1 FROM mdf_manual_command_results
+      WHERE actor_user_id=$1 AND command_key=$2`, [command.currentUser.id, key]);
+    if (engineReplay.rows.length) return { route: 'engine' };
+    const replay = (await tx.query<{ payload: NonMdfReplayPayload }>(`SELECT payload_json payload FROM outbox_events
+      WHERE idempotency_key=$1`, [nonMdfPlacementKey(command.currentUser, key)])).rows[0]?.payload;
+    if (replay?.nonMdf === true) {
+      if ((command.cardKind !== 'packet' && command.cardKind !== 'bazisCutSet') || !('targetColumn' in command)
+        || replay.requestDigest !== nonMdfRequestDigest(command)) {
+        throw new ApiError(409, 'IDEMPOTENCY_CONFLICT', 'Ключ повтора уже использован для другой команды');
+      }
+      // Authorization is rechecked for every replay; the recorded owners, not the current ones.
+      await authorizeNonMdfOwners(tx, command.currentUser, replay.orderIds);
+      return { route: 'replay', response: replay.response };
+    }
+  }
+  if (command.cardKind !== 'packet' && command.cardKind !== 'bazisCutSet') return { route: 'engine' };
+  return (await classifyQueuedNonMdf(tx, command.cardKind, command.cardId)) === 'non_mdf'
+    ? { route: 'non_mdf' } : { route: 'engine' };
+}
+
+type NonMdfCardKind = 'packet' | 'bazisCutSet';
+
+async function classifyQueuedNonMdf(tx: TransactionClient, kind: NonMdfCardKind, id: string): Promise<'engine' | 'non_mdf'> {
+  return kind === 'packet' ? classifyQueuedPacket(tx, id) : classifyQueuedBazisCutSet(tx, id);
+}
+
+/** `non_mdf`: a BASIS set with no MDF detail (e.g. ХДФ only) AND no engine ownership — the same rule as the board's
+ * non-MDF set card. A set with any MDF detail, or with an engine head carrying demand (e.g. an intentional-empty set after
+ * a composition command removed its last MDF row), belongs to the engine and is validated there. */
+async function classifyQueuedBazisCutSet(tx: TransactionClient, setId: string): Promise<'engine' | 'non_mdf'> {
+  const row = (await tx.query<{ mdf: boolean; owned: boolean }>(`SELECT EXISTS (SELECT 1 FROM bazis_cut_set_details d
+        WHERE d.bazis_cut_set_id=s.bazis_cut_set_id
+          AND COALESCE(d.material_name,'') ~* '${CNC_MDF_MATERIAL_MARKER_PATTERN_SOURCE}'
+          AND COALESCE(d.material_name,'') !~* '${CNC_OTHER_MATERIAL_MARKER_PATTERN_SOURCE}') mdf,
+      EXISTS (SELECT 1 FROM mdf_source_heads h JOIN mdf_revision_demand d ON d.source_kind=h.source_kind
+        AND d.source_id=h.source_id AND d.revision_key IN (h.received_revision_key, h.accepted_revision_key)
+        WHERE h.source_kind='bazisCutSet' AND h.source_id=s.bazis_cut_set_id::text) owned
+    FROM bazis_cut_sets s WHERE s.bazis_cut_set_id::text=$1`, [setId])).rows[0];
+  return !row || row.mdf || row.owned ? 'engine' : 'non_mdf';
+}
+
+/** `non_mdf`: another material AND no engine ownership. A head whose revisions have no demand is diagnostic (shadow
+ * capture of an excluded material), not ownership. A non-MDF file whose head carries demand needs reconciliation. */
+async function classifyQueuedPacket(tx: TransactionClient, packetId: string): Promise<'engine' | 'non_mdf'> {
+  const row = (await tx.query<{ mdf: boolean; owned: boolean }>(`SELECT ${cncPacketCountsForMdfReadinessSql('p')} mdf,
+      EXISTS (SELECT 1 FROM mdf_source_heads h JOIN mdf_revision_demand d ON d.source_kind=h.source_kind
+        AND d.source_id=h.source_id AND d.revision_key IN (h.received_revision_key, h.accepted_revision_key)
+        WHERE h.source_kind='packet' AND h.source_id=p.packet_id::text) owned
+    FROM cnc_telegram_packets p WHERE p.packet_id::text=$1`, [packetId])).rows[0];
+  if (!row || row.mdf) return 'engine';
+  if (row.owned) throw new ApiError(409, 'MDF_COMMAND_RECONCILIATION_REQUIRED', 'Состав карточки требует проверки');
+  return 'non_mdf';
+}
+
+/** Forward placement of a non-MDF machine file or BASIS set under the active engine. Lock order matches the engine
+ * command: boundary → command key → owner orders → `mdf-source` → head → source row; routing is revalidated under the
+ * locks and a changed source fails with `MDF_SOURCE_STALE` instead of switching paths inside the transaction. */
+async function executeNonMdfPlacement(
+  tx: TransactionClient,
+  command: UpsertMdfBoardManualMoveCommand,
+): Promise<MdfBoardManualMoveUpsertResponseDto> {
+  const user = command.currentUser;
+  if (!user.permissions.includes('production.tasks.update')) {
+    throw new ApiError(403, 'PERMISSION_DENIED', 'Нет права изменять производственные карточки');
+  }
+  if (!command.idempotencyKey || !/^[A-Za-z0-9._:-]{1,128}$/.test(command.idempotencyKey)) {
+    throw new ApiError(409, 'MDF_IDEMPOTENCY_KEY_REQUIRED', 'Команда требует уникального ключа повтора');
+  }
+  const target = command.targetColumn as NonMdfPacketColumn;
+  const expected = command.expectedColumn;
+  if (!NON_MDF_PACKET_COLUMNS.includes(target) || !expected) {
+    throw new ApiError(409, 'MDF_SOURCE_STALE', 'Карточка изменилась. Обновите доску');
+  }
+  if (NON_MDF_PACKET_COLUMNS.indexOf(target) <= NON_MDF_PACKET_COLUMNS.indexOf(expected)) {
+    throw new ApiError(409, 'MDF_NON_MDF_RETURN_UNSUPPORTED', NON_MDF_RETURN_MESSAGE);
+  }
+  const kind = command.cardKind as NonMdfCardKind;
+  const loadOwners = () => kind === 'packet'
+    ? loadPacketOrderIds(tx, command.cardId) : loadBazisCutSetBoardOrderIds(tx, command.cardId);
+  const owners = await loadOwners();
+  const liveOwners = await authorizeNonMdfOwners(tx, user, owners);
+  await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
+    [`mdf-source:${JSON.stringify([kind, command.cardId])}`]);
+  await tx.query(`SELECT 1 FROM mdf_source_heads WHERE source_kind=$1 AND source_id=$2 FOR UPDATE`, [kind, command.cardId]);
+  const locked = await tx.query(kind === 'packet'
+    ? `SELECT 1 FROM cnc_telegram_packets WHERE packet_id::text=$1 FOR UPDATE`
+    : `SELECT 1 FROM bazis_cut_sets WHERE bazis_cut_set_id::text=$1 FOR UPDATE`, [command.cardId]);
+  const revalidated = locked.rows.length ? await classifyQueuedNonMdf(tx, kind, command.cardId) : 'engine';
+  const ownersNow = await loadOwners();
+  if (revalidated !== 'non_mdf' || JSON.stringify(ownersNow) !== JSON.stringify(owners)) {
+    throw new ApiError(409, 'MDF_SOURCE_STALE', 'Карточка изменилась. Обновите доску');
+  }
+  const currentColumn = kind === 'packet'
+    ? await loadCncPacketBoardColumn(tx, command.cardId) : await loadCncBazisCutSetBoardColumn(tx, command.cardId);
+  if (currentColumn !== expected) {
+    throw new ApiError(409, 'MDF_SOURCE_STALE', 'Карточка изменилась. Обновите доску');
+  }
+  await setSessionUser(tx, user.id);
+  const current = await loadMoveForUpdate(tx, kind, command.cardId);
+  const actorUserId = toNullableUserId(user.id);
+  const saved = current ? await updateMove(tx, command, actorUserId) : await insertMove(tx, command, actorUserId);
+  const requestId = command.requestId ?? 'mdf-board-manual-move';
+  const auditId = await auditService.record(tx, {
+    event: current ? 'mdf_board.manual_move.updated' : 'mdf_board.manual_move.created',
+    entityType: 'mdf_board_manual_move',
+    entityId: manualMoveEntityId(kind, command.cardId),
+    actorUserId: user.id,
+    actorUsername: user.username,
+    actorRole: user.role,
+    requestId,
+    source: 'mdf-active-non-mdf-command',
+    statusField: 'target_column',
+    statusCode: target,
+    before: current ? auditShape(current) : null,
+    after: auditShape(saved),
+    diff: { targetColumn: { before: current?.targetColumn ?? expected, after: saved.targetColumn } },
+    metadata: auditMetadata(kind, command.cardId, {
+      operation: current ? 'update' : 'create', engineMode: 'active', nonMdf: true, expectedColumn: expected,
+      relatedOrderIds: liveOwners,
+      // Engine active: MDF status automation belongs to the engine; an excluded material never yields MDF events.
+      statusAutomationDecision: 'engine_active_non_mdf_skip',
+      notificationEventEmitted: true, notificationEventDecision: 'card_placed_outbox',
+    }),
+    relatedEntities: relatedEntities(kind, command.cardId, liveOwners),
+  });
+  const response: MdfBoardManualMoveUpsertResponseDto = {
+    generatedAt: new Date().toISOString(), changed: true, move: saved, auditId,
+  };
+  // Domain event and durable replay record in one idempotent row (any owner count, including none).
+  const payload: NonMdfReplayPayload & Record<string, unknown> = {
+    nonMdf: true, actorUserId: Number(user.id), requestId, auditId, sourceKind: kind, sourceId: command.cardId,
+    targetColumn: target, orderIds: liveOwners, requestDigest: nonMdfRequestDigest(command), response,
+  };
+  await tx.query(`INSERT INTO outbox_events(event_type,aggregate_type,aggregate_id,payload_json,idempotency_key)
+    VALUES ('mdf_board.card_placed','mdf_board_card',$1,$2::jsonb,$3) ON CONFLICT (idempotency_key) DO NOTHING`,
+  [`${kind}:${command.cardId}`, JSON.stringify(payload), nonMdfPlacementKey(user, command.idempotencyKey)]);
+  return response;
+}
+
+/** Owner orders locked in id order (the engine's order), each viewable and updatable by the actor. A file without a
+ * live production-order owner needs the unscoped production-task grant. Returns the live owners. */
+async function authorizeNonMdfOwners(tx: TransactionClient, user: CurrentUser, orderIds: readonly number[]): Promise<number[]> {
+  const locked = (await tx.query<{ id: number; createdBy: string | null; managerId: string | null; assigned: string[] }>(`
+    SELECT o.order_id::float8 id,o.created_by::text "createdBy",o.manager_id::text "managerId",
+      ARRAY(SELECT u.user_id::text FROM order_workshops w JOIN users u ON u.employee_id=w.responsible_employee_id
+        WHERE w.order_id=o.order_id AND NOT w.delete_flag AND u.is_active ORDER BY u.user_id) assigned
+    FROM orders o WHERE o.order_id=ANY($1::bigint[]) AND NOT o.delete_flag AND o.order_kind='production_order'
+    ORDER BY o.order_id FOR NO KEY UPDATE OF o`, [[...orderIds]])).rows;
+  const scopes = policyScopeSetsForUser(user).productionTasks.update;
+  if (!locked.length) {
+    if (!scopeSetHas(scopes, 'all')) throw new ApiError(403, 'PERMISSION_DENIED', 'Нет доступа к файлу без заказа');
+    return [];
+  }
+  const policy = new OrderAccessPolicy();
+  for (const o of locked) {
+    const subject = { orderId: o.id, createdByUserId: o.createdBy, managerUserId: o.managerId, assignedUserIds: o.assigned };
+    if (!policy.canView(user, subject) || !(policy.canUpdate(user, subject) || allowsScopeSet(user, scopes, subject))) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Нет доступа ко всем заказам карточки');
+    }
+  }
+  return locked.map(o => o.id);
+}
+
+function nonMdfPlacementKey(user: CurrentUser, key: string): string {
+  return `mdf-manual:${user.id}:${key}:placed`;
+}
+
+function nonMdfRequestDigest(command: UpsertMdfBoardManualMoveCommand): string {
+  return createHash('sha256').update(JSON.stringify([command.cardKind, command.cardId, command.targetColumn,
+    command.expectedColumn ?? null, 'nonMdf'])).digest('hex');
 }
 
 async function loadMoveForUpdate(
@@ -457,6 +680,20 @@ async function loadBazisCutSetOrderIds(tx: TransactionClient, cardId: string): P
     `,
     [bazisCutSetId],
   );
+  return normalizeOrderIds(result.rows.map((row) => row.order_id));
+}
+
+/** Every owner of a set as the board resolves it: the row's order, else the order of its source detail. The non-MDF
+ * move authorizes, locks, audits and replays against this complete set. */
+async function loadBazisCutSetBoardOrderIds(tx: TransactionClient, cardId: string): Promise<number[]> {
+  const bazisCutSetId = toPositiveSafeInteger(cardId);
+  if (bazisCutSetId === null) return [];
+  const result = await tx.query<{ order_id: string | number | null }>(`SELECT DISTINCT
+      COALESCE(detail.source_order_id, source_detail.order_id) AS order_id
+    FROM bazis_cut_set_details detail
+    LEFT JOIN order_details source_detail ON source_detail.detail_id = detail.source_order_detail_id
+    WHERE detail.bazis_cut_set_id = $1 AND COALESCE(detail.source_order_id, source_detail.order_id) IS NOT NULL
+    ORDER BY 1`, [bazisCutSetId]);
   return normalizeOrderIds(result.rows.map((row) => row.order_id));
 }
 

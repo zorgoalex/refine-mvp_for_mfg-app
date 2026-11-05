@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { BazisCutService } from '../application/bazis-cut.service';
 import { BazisCutSetsController } from './bazis-cut-sets.controller';
 import { BazisCutRuntimeConfigService } from './bazis-cut-runtime-config.service';
+import { PgMdfBazisCompositionCommand } from '../../mdf-board/adapters/mdf-bazis-composition-command';
 
 const backendRoot = existsSync(resolve(process.cwd(), 'backend/contracts'))
   ? resolve(process.cwd(), 'backend')
@@ -16,6 +17,7 @@ const controller = readFileSync(resolve(backendRoot, 'src/modules/bazis-cut/http
 
 @Module({ controllers: [BazisCutSetsController], providers: [
   { provide: BazisCutService, useValue: {} }, { provide: BazisCutRuntimeConfigService, useValue: {} },
+  { provide: PgMdfBazisCompositionCommand, useValue: {} },
 ] })
 class SwaggerTestModule {}
 
@@ -39,8 +41,8 @@ describe('Bazis-cut OpenAPI contract', () => {
   });
 
   it('keeps matching Swagger metadata on every command route', () => {
-    expect(controller.match(/@ApiHeader\(commandHeader\)/g)).toHaveLength(7);
-    expect(controller.match(/@ApiParam\(idParameter\)/g)).toHaveLength(7);
+    expect(controller.match(/@ApiHeader\(commandHeader\)/g)).toHaveLength(8);
+    expect(controller.match(/@ApiParam\(idParameter\)/g)).toHaveLength(9);
     expect(controller).toContain("@ApiProduces('application/vnd.ms-excel')");
     expect(controller).toContain("description: 'Strict full replacement: all 33 editable Basis fields plus expectedVersion'");
     expect(controller.match(/@ApiQuery\(/g)).toHaveLength(7);

@@ -126,6 +126,8 @@ async function captureMdfShadow(tx: TransactionClient, state: PendingShadow): Pr
     const explicit = 'command' in prepared ? prepared : null;
     const revisionKey = `${explicit ? 'shadow-command' : 'shadow'}:${digest(input.sourceIdempotencyKey)}`;
     await recordMdfReceipt(tx, {
+      // Shadow intake re-reads the raw legacy composition: it establishes membership ⇒ binds presentation.
+      presentation: 'compute',
       sourceKind: input.source.kind, sourceId: input.source.id, revisionKey, origin: explicit ? 'manual' : 'legacy',
       actorUserId: input.actor.id === null ? null : Number(input.actor.id), requestId: input.requestId, causeKey: input.sourceIdempotencyKey,
       expectedFence: head ? { version: head.version, correctionEpoch: head.correction_epoch } : null,

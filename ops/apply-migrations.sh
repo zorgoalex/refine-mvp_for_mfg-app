@@ -291,6 +291,8 @@ q_con_def_on_safe() { echo "SELECT COALESCE((SELECT pg_get_constraintdef(oid)=\$
 q_con_hash_on() { echo "SELECT COALESCE((SELECT md5(pg_get_constraintdef(oid))='$3' FROM pg_constraint WHERE conname='$1' AND conrelid='public.$2'::regclass), false);"; }
 q_idx_hash() { echo "SELECT COALESCE((SELECT md5(indexdef)='$2' FROM pg_indexes WHERE schemaname='public' AND indexname='$1'), false);"; }
 q_fun_hash() { echo "SELECT COALESCE((SELECT md5(pg_get_functiondef(oid))='$2' FROM pg_proc WHERE oid=to_regprocedure('$1')), false);"; }
+q_fun_hash_either() { echo "SELECT COALESCE((SELECT md5(pg_get_functiondef(oid)) IN ('$2','$3') FROM pg_proc WHERE oid=to_regprocedure('$1')), false);"; }
+q_colset_fun_hash_pair() { echo "SELECT CASE WHEN (SELECT md5(pg_get_functiondef(oid))='$7' FROM pg_proc WHERE oid=to_regprocedure('$6')) THEN (SELECT COALESCE(md5(string_agg(format('%s|%s|%s|%s|%s',ordinal_position,column_name,data_type,is_nullable,COALESCE(column_default,'∅')), ', ' ORDER BY ordinal_position))='$3',false) FROM information_schema.columns WHERE table_schema='public' AND table_name='$1' AND column_name=ANY(string_to_array('$2',','))) WHEN (SELECT md5(pg_get_functiondef(oid))='$8' FROM pg_proc WHERE oid=to_regprocedure('$6')) THEN (SELECT COALESCE(md5(string_agg(format('%s|%s|%s|%s|%s',ordinal_position,column_name,data_type,is_nullable,COALESCE(column_default,'∅')), ', ' ORDER BY ordinal_position))='$5',false) FROM information_schema.columns WHERE table_schema='public' AND table_name='$1' AND column_name=ANY(string_to_array('$4',','))) ELSE false END;"; }
 q_colset_hash() { echo "SELECT COALESCE((SELECT md5(string_agg(format('%s|%s|%s|%s|%s',ordinal_position,column_name,data_type,is_nullable,COALESCE(column_default,'∅')), ', ' ORDER BY ordinal_position))='$3' FROM information_schema.columns WHERE table_schema='public' AND table_name='$1' AND column_name=ANY(string_to_array('$2',','))), false);"; }
 q_conset_hash() { echo "SELECT COALESCE((SELECT md5(string_agg(conname||'|'||contype::text||'|'||confdeltype::text||'|'||pg_get_constraintdef(oid), ', ' ORDER BY conname))='$3' FROM pg_constraint WHERE connamespace='public'::regnamespace AND conrelid::regclass::text='$1' AND conname=ANY(string_to_array('$2',','))), false);"; }
 q_idxset_hash() { echo "SELECT COALESCE((SELECT md5(string_agg(indexname||'|'||indexdef, ', ' ORDER BY indexname))='$3' FROM pg_indexes WHERE schemaname='public' AND tablename='$1' AND indexname=ANY(string_to_array('$2',','))), false);"; }
@@ -2188,6 +2190,237 @@ probe_file() {
                      "$(q_con_on mdf_shadow_commands mdf_shadow_commands_check1)" \
                      "$(q_idx idx_mdf_shadow_commands_source)" \
                      "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public.mdf_shadow_commands') AND tgname='mdf_shadow_commands_immutable' AND tgenabled='O' AND tgfoid=to_regprocedure('public.mdf_reject_evidence_change()'));" ;;
+    # МДФ-доска «Разобрать дубль»: решения по паре ванн (keep_both / rework_mark), уникальный ключ команды.
+    287_mdf_bath_duplicate_resolutions*) probe_all \
+      "$(q_tbl mdf_bath_duplicate_resolutions)" \
+      "$(q_con_on mdf_bath_duplicate_resolutions uq_mdf_bath_duplicate_resolutions_command_key)" \
+      "$(q_con_on mdf_bath_duplicate_resolutions chk_mdf_bath_duplicate_resolutions_action)" \
+      "$(q_con_on mdf_bath_duplicate_resolutions chk_mdf_bath_duplicate_resolutions_target)" \
+      "$(q_idx idx_mdf_bath_duplicate_resolutions_bath_a)" \
+      "$(q_idx idx_mdf_bath_duplicate_resolutions_bath_b)" ;;
+    # MDF bath readiness from credited cut: declared coverage + republish job marker.
+    277_mdf_bath_declared_coverage*) probe_all \
+      "$(q_col mdf_published_source_members declared_covered_quantity)" \
+      "$(q_con_on mdf_published_source_members mdf_published_member_declared_coverage_check)" \
+      "SELECT to_regclass('public.mdf_republish_jobs') IS NOT NULL;" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid='public.mdf_republish_jobs'::regclass AND t.tgname='mdf_republish_job_immutable' AND NOT t.tgisinternal);" \
+      ;;
+    # Hybrid MDF board: a bath member's cut coverage frozen with its publication.
+    273_mdf_published_bath_coverage*) probe_all \
+      "$(q_col mdf_published_source_members covered_quantity)" \
+      "$(q_con_on mdf_published_source_members mdf_published_member_covered_quantity_check)" \
+      ;;
+    # §5.8 cutover controls (delta to 195, not a whole re-probe): durable RECOVERY freeze columns + owner
+    # function, demand-drift conflicts table + its cutover fence, and the catalog classification guard on
+    # materials/sheet_material_types (checked on a representative sample, not every constraint).
+    # §5.8 logic audit B1: the lineage head guard admits a contract-less revision without physical lines.
+    201_mdf_lineage_genesis_guard*) probe_all \
+      "$(q_fun_hash 'public.mdf_guard_physical_lineage_source_head()' 4895f75ef2c486bccd3715f8ab8e6dab)" \
+      ;;
+    199_mdf_cutover_controls*) probe_all \
+      "$(q_col mdf_freeze_guard recovery_frozen_at)" \
+      "$(q_col mdf_freeze_guard recovery_reason)" \
+      "$(q_col mdf_engine_state mode_changed_at)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid='public.mdf_engine_state'::regclass AND t.tgname='mdf_mode_changed_at_stamp' AND t.tgfoid=to_regprocedure('public.mdf_stamp_mode_changed_at()') AND NOT t.tgisinternal);" \
+      "SELECT to_regprocedure('public.mdf_recovery_owned()') IS NOT NULL;" \
+      "$(q_tbl mdf_demand_drift_conflicts)" \
+      "$(q_con_on mdf_demand_drift_conflicts mdf_demand_drift_conflicts_pkey)" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.mdf_demand_drift_conflicts'::regclass AND contype='u' AND pg_get_constraintdef(oid) LIKE '%source_kind%source_id%predecessor_revision_key%live_demand_digest%');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.mdf_demand_drift_conflicts'::regclass AND contype='c' AND pg_get_constraintdef(oid) LIKE '%CONFIRMATION_REQUIRED%');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.mdf_demand_drift_conflicts'::regclass AND contype='f' AND confrelid=to_regclass('public.users'));" \
+      "$(q_idx idx_mdf_demand_drift_conflicts_open)" \
+      "$(q_stmt_trg mdf_cutover_fence mdf_demand_drift_conflicts mdf_cutover_fence 62 '' '')" \
+      "$(q_stmt_trg mdf_cutover_fence cut_result_archive_state mdf_cutover_fence 62 '' '')" \
+      "SELECT to_regprocedure('public.mdf_material_is_mdf(text)') IS NOT NULL;" \
+      "SELECT mdf_material_is_mdf('МДФ фасад') AND NOT mdf_material_is_mdf('ЛДСП мдф-имитация');" \
+      "SELECT to_regprocedure('public.mdf_guard_catalog_classification()') IS NOT NULL;" \
+      "SELECT to_regclass('public.sheet_material_types') IS NULL OR EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='mdf_catalog_classification_guard' AND t.tgrelid=to_regclass('public.sheet_material_types') AND t.tgfoid=to_regprocedure('public.mdf_guard_catalog_classification()') AND t.tgtype=19 AND t.tgenabled='O' AND NOT t.tgisinternal);" \
+      "SELECT to_regclass('public.materials') IS NULL OR EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='mdf_catalog_classification_guard' AND t.tgrelid=to_regclass('public.materials') AND t.tgfoid=to_regprocedure('public.mdf_guard_catalog_classification()') AND t.tgtype=19 AND t.tgenabled='O' AND NOT t.tgisinternal);" ;;
+    # §5.7b baseline population: run manifest + durable freeze guard + a cutover fence on every
+    # engine/inventory table (checked on a representative sample, not the whole ARRAY) + baseline
+    # markers on mdf_revision_context + the legacy-acceptance guard on mdf_source_heads.
+    195_mdf_baseline_population*) probe_all \
+      "$(q_tbl mdf_baseline_runs)" \
+      "$(q_tbl mdf_baseline_run_items)" \
+      "$(q_tbl mdf_baseline_run_preexisting)" \
+      "$(q_tbl mdf_freeze_guard)" \
+      "SELECT count(*)=1 FROM mdf_freeze_guard;" \
+      "SELECT to_regprocedure('public.mdf_baseline_owned()') IS NOT NULL;" \
+      "$(q_stmt_trg mdf_freeze_guard_row mdf_freeze_guard mdf_guard_freeze_guard 27 '' '')" \
+      "$(q_stmt_trg mdf_freeze_guard_truncate mdf_freeze_guard mdf_guard_freeze_guard 34 '' '')" \
+      "$(q_stmt_trg mdf_baseline_run_guard mdf_baseline_runs mdf_guard_baseline_run 31 '' '')" \
+      "$(q_stmt_trg mdf_baseline_item_guard mdf_baseline_run_items mdf_guard_baseline_append_only 31 '' '')" \
+      "$(q_stmt_trg mdf_baseline_preexisting_guard mdf_baseline_run_preexisting mdf_guard_baseline_append_only 31 '' '')" \
+      "$(q_col mdf_revision_context baseline_run_id)" \
+      "$(q_col mdf_revision_context closure)" \
+      "$(q_con_on mdf_revision_context mdf_context_baseline_check)" \
+      "$(q_stmt_trg mdf_legacy_acceptance_guard mdf_source_heads mdf_guard_legacy_acceptance 23 '' '')" \
+      "SELECT to_regclass('public.orders') IS NULL OR EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='mdf_cutover_fence' AND t.tgrelid=to_regclass('public.orders') AND t.tgfoid=to_regprocedure('public.mdf_cutover_fence()') AND t.tgtype=62 AND t.tgenabled='O' AND NOT t.tgisinternal);" \
+      "SELECT to_regclass('public.order_details') IS NULL OR EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='mdf_cutover_fence' AND t.tgrelid=to_regclass('public.order_details') AND t.tgfoid=to_regprocedure('public.mdf_cutover_fence()') AND t.tgtype=62 AND t.tgenabled='O' AND NOT t.tgisinternal);" \
+      "SELECT to_regclass('public.cnc_telegram_packets') IS NULL OR EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='mdf_cutover_fence' AND t.tgrelid=to_regclass('public.cnc_telegram_packets') AND t.tgfoid=to_regprocedure('public.mdf_cutover_fence()') AND t.tgtype=62 AND t.tgenabled='O' AND NOT t.tgisinternal);" \
+      "SELECT to_regclass('public.mdf_evidence_revisions') IS NULL OR EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='mdf_cutover_fence' AND t.tgrelid=to_regclass('public.mdf_evidence_revisions') AND t.tgfoid=to_regprocedure('public.mdf_cutover_fence()') AND t.tgtype=62 AND t.tgenabled='O' AND NOT t.tgisinternal);" \
+      "SELECT to_regclass('public.mdf_bazis_composition_intents') IS NULL OR EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='mdf_cutover_fence' AND t.tgrelid=to_regclass('public.mdf_bazis_composition_intents') AND t.tgfoid=to_regprocedure('public.mdf_cutover_fence()') AND t.tgtype=62 AND t.tgenabled='O' AND NOT t.tgisinternal);" \
+      "SELECT to_regprocedure('public.mdf_reset_delete_baseline_rows(uuid)') IS NOT NULL;" \
+      "SELECT to_regprocedure('public.mdf_reset_unactivated_baseline(uuid)') IS NOT NULL;" \
+      "SELECT NOT has_function_privilege('public','mdf_reset_delete_baseline_rows(uuid)','EXECUTE');" \
+      "SELECT NOT has_function_privilege('public','mdf_reset_unactivated_baseline(uuid)','EXECUTE');" ;;
+    192_mdf_board_presentation_history*) probe_all \
+      "$(q_tbl mdf_revision_presentation)" \
+      "$(q_con_on mdf_revision_presentation mdf_revision_presentation_pkey)" \
+      "$(q_con_on mdf_revision_presentation mdf_revision_presentation_presentation_digest_check)" \
+      "$(q_con_on mdf_revision_presentation mdf_revision_presentation_source_kind_source_id_revision_k_fkey)" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_revision_presentation') AND t.tgname='mdf_revision_presentation_immutable' AND t.tgfoid=to_regprocedure('public.mdf_reject_revision_presentation_change()') AND t.tgtype=27 AND t.tgenabled='O' AND NOT t.tgisinternal;" \
+      "SELECT to_regprocedure('public.mdf_source_presentation_digest(text,text)') IS NOT NULL;" \
+      "SELECT to_regclass('public.mdf_board_history_events') IS NULL OR (COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.record_mdf_board_history_from_audit()'))='cb273b6a454a8c02ffce436caa6f8863', false) AND COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.record_mdf_board_history_from_audit_relation()'))='3a0cefb994d1231bb6fda6677fa2077e', false));" ;;
+    191_mdf_order_corrections*) probe_all \
+      "$(q_tbl mdf_position_detachments)" \
+      "$(q_col mdf_order_cascade_intents confirmed)" \
+      "$(q_col mdf_order_cascade_intents preview_digest)" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_position_detachments') AND t.tgname='mdf_position_detachment_immutable' AND t.tgfoid=to_regprocedure('public.mdf_reject_position_detachment_change()') AND t.tgenabled='O' AND NOT t.tgisinternal;" \
+      "SELECT to_regclass('public.mdf_physical_lineage_contracts') IS NULL OR COALESCE((SELECT md5(pg_get_functiondef(oid)) FROM pg_proc WHERE oid=to_regprocedure('public.mdf_validate_physical_lineage_seal()'))='f303a542a2e940954763bfa8a5d44bbe', false);" ;;
+    190_mdf_bath_transitions*) probe_all \
+      "$(q_tbl mdf_bath_transitions)" \
+      "SELECT to_regprocedure('public.mdf_guard_bath_transition_insert()') IS NOT NULL AND to_regprocedure('public.mdf_validate_bath_transition_commit()') IS NOT NULL AND to_regprocedure('public.mdf_reject_bath_transition_change()') IS NOT NULL;" \
+      "SELECT count(*)=3 FROM (VALUES ('mdf_bath_transition_insert_guard','mdf_guard_bath_transition_insert()'),('mdf_bath_transition_immutable','mdf_reject_bath_transition_change()'),('mdf_bath_transition_commit_guard','mdf_validate_bath_transition_commit()')) expected(trg,fun) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.mdf_bath_transitions') AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.'||fun) AND t.tgenabled='O' AND NOT t.tgisinternal;" \
+      "SELECT to_regclass('public.mdf_revision_jobs') IS NOT NULL;" ;;
+    189_mdf_placement_inputs*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='mdf_published_sources' AND column_name='placement_inputs' AND data_type='jsonb');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='mdf_published_sources_placement_inputs_object' AND conrelid='public.mdf_published_sources'::regclass AND contype='c' AND convalidated);" \
+      "SELECT to_regprocedure('public.mdf_placement_inputs_valid(jsonb,bigint)') IS NOT NULL;" ;;
+    188_mdf_order_cascade_intents*) probe_all \
+      "$(q_tbl mdf_order_cascade_intents)" \
+      "SELECT to_regprocedure('public.mdf_guard_order_cascade_intent_insert()') IS NOT NULL AND to_regprocedure('public.mdf_validate_order_cascade_intent_commit()') IS NOT NULL AND to_regprocedure('public.mdf_reject_order_cascade_intent_change()') IS NOT NULL;" \
+      "SELECT count(*)=3 FROM (VALUES ('mdf_order_cascade_intent_insert_guard','mdf_guard_order_cascade_intent_insert()'),('mdf_order_cascade_intent_immutable','mdf_reject_order_cascade_intent_change()'),('mdf_order_cascade_intent_commit_guard','mdf_validate_order_cascade_intent_commit()')) expected(trg,fun) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.mdf_order_cascade_intents') AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.'||fun) AND t.tgenabled='O' AND NOT t.tgisinternal;" ;;
+    187_mdf_bazis_refill_rows*) probe_all \
+      "$(q_tbl mdf_bazis_raw_row_creations)" "$(q_tbl mdf_bazis_composition_new_rows)" \
+      "SELECT count(*)=4 FROM information_schema.columns WHERE table_schema='public' AND table_name='mdf_bazis_raw_row_creations' AND column_name=ANY(ARRAY['row_id','set_id','created_txid','created_at']);" \
+      "SELECT count(*)=7 FROM information_schema.columns WHERE table_schema='public' AND table_name='mdf_bazis_composition_new_rows';" \
+      "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.mdf_bazis_composition_new_rows'::regclass AND contype='p' AND convalidated AND pg_get_constraintdef(oid) LIKE '%intent_id, row_id%');" \
+      "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.mdf_bazis_raw_row_creations'::regclass AND contype='p' AND convalidated AND pg_get_constraintdef(oid) LIKE '%row_id, created_txid%');" \
+      "SELECT count(*)=1 FROM pg_constraint WHERE conrelid='public.mdf_bazis_composition_new_rows'::regclass AND contype='f' AND convalidated AND confdeltype='r' AND confrelid=to_regclass('public.mdf_bazis_composition_intents');" \
+      "SELECT count(*)=4 FROM (VALUES ('bazis_cut_set_details','mdf_bazis_raw_row_creation_log','mdf_log_bazis_raw_row_creation()',5),('mdf_bazis_raw_row_creations','mdf_bazis_raw_row_creation_immutable','mdf_reject_bazis_refill_log_change()',27),('mdf_bazis_composition_new_rows','mdf_bazis_composition_new_row_insert_guard','mdf_guard_bazis_composition_new_row_insert()',7),('mdf_bazis_composition_new_rows','mdf_bazis_composition_new_row_immutable','mdf_reject_bazis_refill_log_change()',27)) expected(tbl,trg,fun,kind) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.'||tbl) AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.'||fun) AND t.tgtype=kind AND t.tgenabled='O' AND NOT t.tgisinternal;" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.mdf_bazis_raw_row_creations'),to_regclass('public.mdf_bazis_composition_new_rows')]) AND NOT convalidated);" ;;
+    185_mdf_bazis_composition*) probe_all \
+      "$(q_tbl mdf_evidence_revisions)" "$(q_tbl mdf_revision_context)" "$(q_tbl mdf_revision_demand)" \
+      "$(q_tbl mdf_revision_seals)" "$(q_tbl mdf_evidence_lines)" "$(q_tbl mdf_source_heads)" \
+      "$(q_tbl mdf_physical_lineage_contracts)" "$(q_tbl mdf_physical_lineage_transitions)" \
+      "$(q_tbl mdf_recalculation_jobs)" "$(q_tbl mdf_bath_allocations)" \
+      "$(q_tbl bazis_cut_sets)" "$(q_tbl bazis_cut_set_details)" \
+      "$(q_colset_hash mdf_bazis_assignment_states source_kind,source_id,revision_key,assignment_state_id,root_intent_id,predecessor_revision_key,predecessor_state_id,membership_digest,intentional_empty,created_at 7c8e35fd85174def4370da92813f0bda)" \
+      "$(q_colset_hash mdf_bazis_composition_intents intent_id,job_id,source_kind,source_id,revision_key,predecessor_revision_key,assignment_state_id,set_id,set_version,raw_snapshot_digest,membership_digest,intentional_empty,owner_ids,allocation_snapshot_digest,preview_digest,actor_user_id,request_id,command_key,created_at 25d043103a689c70d3732e862a2a69e2)" \
+      "$(q_conset_hash mdf_bazis_assignment_states fk_mdf_bazis_assignment_root_intent,mdf_bazis_assignment_states_check,mdf_bazis_assignment_states_membership_digest_check,mdf_bazis_assignment_states_pkey,mdf_bazis_assignment_states_revision_key_check,mdf_bazis_assignment_states_source_id_check,mdf_bazis_assignment_states_source_kind_check,mdf_bazis_assignment_states_source_kind_source_id_predeces_fkey,mdf_bazis_assignment_states_source_kind_source_id_revision__key,mdf_bazis_assignment_states_source_kind_source_id_revision_fkey 28027224d245e073777c3a83adadcb15)" \
+      "$(q_conset_hash mdf_bazis_composition_intents mdf_bazis_composition_intent_job_guard,mdf_bazis_composition_intents_actor_user_id_check,mdf_bazis_composition_intents_actor_user_id_command_key_key,mdf_bazis_composition_intents_allocation_snapshot_digest_check,mdf_bazis_composition_intents_check,mdf_bazis_composition_intents_command_key_check,mdf_bazis_composition_intents_job_id_fkey,mdf_bazis_composition_intents_job_id_key,mdf_bazis_composition_intents_membership_digest_check,mdf_bazis_composition_intents_owner_ids_check,mdf_bazis_composition_intents_owner_ids_check1,mdf_bazis_composition_intents_pkey,mdf_bazis_composition_intents_predecessor_revision_key_check,mdf_bazis_composition_intents_preview_digest_check,mdf_bazis_composition_intents_raw_snapshot_digest_check,mdf_bazis_composition_intents_request_id_check,mdf_bazis_composition_intents_revision_key_check,mdf_bazis_composition_intents_set_id_check,mdf_bazis_composition_intents_set_version_check,mdf_bazis_composition_intents_source_id_check,mdf_bazis_composition_intents_source_kind_check,mdf_bazis_composition_intents_source_kind_source_id_predec_fkey,mdf_bazis_composition_intents_source_kind_source_id_revisi_fkey,mdf_bazis_composition_intents_source_kind_source_id_revisio_key 25c766d22da2e71829e9945daf195c01)" \
+      "$(q_idxset_hash mdf_bazis_assignment_states idx_mdf_bazis_assignment_state_id,mdf_bazis_assignment_states_pkey,mdf_bazis_assignment_states_source_kind_source_id_revision__key 2ea244aca9759044c36943e27c621536)" \
+      "$(q_idxset_hash mdf_bazis_composition_intents idx_mdf_bazis_composition_intent_job,mdf_bazis_composition_intents_actor_user_id_command_key_key,mdf_bazis_composition_intents_job_id_key,mdf_bazis_composition_intents_pkey,mdf_bazis_composition_intents_source_kind_source_id_revisio_key 2ea3abb5d89f4f8b489c53825b3e398a)" \
+      "$(q_fun_hash 'public.mdf_guard_bazis_assignment_state_insert()' 2d6c181ca20df43da653d44409a9073a)" \
+      "$(q_fun_hash 'public.mdf_guard_bazis_assignment_state_seal()' aaa36c569106fe12b38a8d71ebb4f45f)" \
+      "$(q_fun_hash 'public.mdf_guard_bazis_composition_intent_insert()' 8fe6e4df8cbeff3c28b44959da4e412b)" \
+      "$(q_fun_hash 'public.mdf_validate_bazis_composition_intent_job()' 006a828cf13a2b5f9f116bab7813c115)" \
+      "$(q_fun_hash 'public.mdf_reject_bazis_composition_marker_change()' 93cbd0bde882a11eeecbb86623beb05a)" \
+      "SELECT count(*)=6 FROM (VALUES ('mdf_bazis_assignment_states','mdf_bazis_assignment_state_insert_guard','mdf_guard_bazis_assignment_state_insert()',7),('mdf_bazis_assignment_states','mdf_bazis_assignment_state_immutable','mdf_reject_bazis_composition_marker_change()',27),('mdf_bazis_composition_intents','mdf_bazis_composition_intent_insert_guard','mdf_guard_bazis_composition_intent_insert()',7),('mdf_bazis_composition_intents','mdf_bazis_composition_intent_immutable','mdf_reject_bazis_composition_marker_change()',27),('mdf_bazis_composition_intents','mdf_bazis_composition_intent_job_guard','mdf_validate_bazis_composition_intent_job()',5),('mdf_revision_seals','mdf_bazis_assignment_state_seal_guard','mdf_guard_bazis_assignment_state_seal()',7)) expected(tbl,trg,fun,kind) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.'||tbl) AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.'||fun) AND t.tgtype=kind AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector AND (trg<>'mdf_bazis_composition_intent_job_guard' OR (t.tgdeferrable AND t.tginitdeferred));" \
+      "WITH expected(tbl,ref,expected_count) AS (VALUES ('mdf_bazis_assignment_states','mdf_revision_seals',2),('mdf_bazis_assignment_states','mdf_bazis_composition_intents',1),('mdf_bazis_composition_intents','mdf_recalculation_jobs',1),('mdf_bazis_composition_intents','mdf_bazis_assignment_states',1),('mdf_bazis_composition_intents','mdf_revision_seals',1)), actual AS (SELECT local.relname AS tbl,remote.relname AS ref,count(*) AS fk_count FROM pg_constraint c JOIN pg_class local ON local.oid=c.conrelid JOIN pg_namespace local_ns ON local_ns.oid=local.relnamespace JOIN pg_class remote ON remote.oid=c.confrelid JOIN pg_namespace remote_ns ON remote_ns.oid=remote.relnamespace WHERE local_ns.nspname='public' AND local.relname IN ('mdf_bazis_assignment_states','mdf_bazis_composition_intents') AND c.contype='f' AND c.confdeltype='r' AND c.convalidated AND remote_ns.nspname='public' GROUP BY local.relname,remote.relname) SELECT (SELECT COALESCE(sum(fk_count),0)=6 FROM actual) AND NOT EXISTS (SELECT 1 FROM expected e LEFT JOIN actual a ON a.tbl=e.tbl AND a.ref=e.ref WHERE COALESCE(a.fk_count,0)<>e.expected_count);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.mdf_bazis_assignment_states'),to_regclass('public.mdf_bazis_composition_intents')]) AND NOT convalidated);" \
+      "SELECT (SELECT count(*)=10 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_bazis_assignment_states')) AND (SELECT count(*)=24 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_bazis_composition_intents'));" \
+      "SELECT (SELECT count(*)=3 FROM pg_indexes WHERE schemaname='public' AND tablename='mdf_bazis_assignment_states') AND (SELECT count(*)=5 FROM pg_indexes WHERE schemaname='public' AND tablename='mdf_bazis_composition_intents');" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=ANY(ARRAY[to_regclass('public.mdf_bazis_assignment_states'),to_regclass('public.mdf_bazis_composition_intents')]) AND (NOT indisvalid OR NOT indisready));" ;;
+    # mdf_validate_physical_lineage_seal's hash below accepts two bodies: 191 conditionally
+    # redefines it in place (adding the position-detachment exception) once
+    # mdf_order_cascade_intents/mdf_position_detachments exist, so both the pre-191 and
+    # post-191 definitions are a valid 182 end-state (same dual-state pattern as 180's
+    # q_colset_fun_hash_pair for its own later-extended function/columns).
+    182_mdf_physical_lineage*) probe_all \
+      "$(q_tbl mdf_evidence_revisions)" "$(q_tbl mdf_revision_context)" "$(q_tbl mdf_revision_demand)" \
+      "$(q_tbl mdf_revision_seals)" "$(q_tbl mdf_source_heads)" "$(q_tbl mdf_evidence_lines)" \
+      "$(q_colset_hash mdf_physical_lineage_contracts source_kind,source_id,revision_key,operation,production_authority,predecessor_accepted_revision_key,manifest_digest,dropped_predecessor_evidence_line_ids,created_at 5138882885769bc7fa70ca08c9f31850)" \
+      "$(q_conset_hash mdf_physical_lineage_contracts chk_mdf_physical_lineage_authority,mdf_physical_lineage_contract_source_kind_source_id_predec_fkey,mdf_physical_lineage_contract_source_kind_source_id_revisi_fkey,mdf_physical_lineage_contracts_manifest_digest_check,mdf_physical_lineage_contracts_operation_check,mdf_physical_lineage_contracts_pkey,mdf_physical_lineage_contracts_production_authority_check,mdf_physical_lineage_contracts_revision_key_check,mdf_physical_lineage_contracts_source_id_check,mdf_physical_lineage_contracts_source_kind_check a1c435fd8e1718dfa27fc51b6e97a5b1)" \
+      "$(q_idxset_hash mdf_physical_lineage_contracts mdf_physical_lineage_contracts_pkey d86e35e02578b17a844033efe13a00ce)" \
+      "$(q_colset_hash mdf_physical_lineage_transitions source_kind,source_id,revision_key,evidence_line_id,action,predecessor_evidence_line_id,canonical_origin_evidence_line_id,created_at 75284260f5fbdf3850fce32f3c4ec0dd)" \
+      "$(q_conset_hash mdf_physical_lineage_transitions chk_mdf_physical_lineage_transition_parent,mdf_physical_lineage_transiti_canonical_origin_evidence_li_fkey,mdf_physical_lineage_transiti_predecessor_evidence_line_id_fkey,mdf_physical_lineage_transiti_source_kind_source_id_revisi_fkey,mdf_physical_lineage_transiti_source_kind_source_id_revisi_key1,mdf_physical_lineage_transiti_source_kind_source_id_revisio_key,mdf_physical_lineage_transitions_action_check,mdf_physical_lineage_transitions_evidence_line_id_fkey,mdf_physical_lineage_transitions_pkey e8ffa2aa2aeba0b52cc70a1c10c47509)" \
+      "$(q_idxset_hash mdf_physical_lineage_transitions mdf_physical_lineage_transiti_source_kind_source_id_revisi_key1,mdf_physical_lineage_transiti_source_kind_source_id_revisio_key,mdf_physical_lineage_transitions_pkey 9953302b7dd61a70a78069d48d67bff5)" \
+      "$(q_fun_hash 'public.mdf_guard_physical_lineage_insert()' 5f33a57477dcf2397fa18783d9b7ecae)" \
+      "$(q_fun_hash 'public.mdf_guard_physical_lineage_immutable()' 39d2c9d9500956c4bca2546c68d8cc15)" \
+      "$(q_fun_hash_either 'public.mdf_validate_physical_lineage_seal()' 3067d8c18cdc8b1603397ce68a56824b f303a542a2e940954763bfa8a5d44bbe)" \
+      "$(q_fun_hash_either 'public.mdf_guard_physical_lineage_source_head()' d2ab89206c2d81b774c16779d302d789 4895f75ef2c486bccd3715f8ab8e6dab)" \
+      "$(q_fun_hash 'public.mdf_guard_source_fence()' 5865eedf3ea4c2cf2b715b6ac210d49a)" \
+      "$(q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8)" \
+      "$(q_fun_hash 'public.mdf_guard_accepted_revision()' 945aada9b298e291ecda1442e6391f6d)" \
+      "$(q_fun_hash 'public.mdf_guard_job_effect_policy_binding()' 45e1620014c367515f61c170f2bcf0f5)" \
+      "SELECT count(*)=6 FROM (VALUES ('mdf_physical_lineage_contracts','mdf_physical_lineage_contract_insert_guard','mdf_guard_physical_lineage_insert()',7),('mdf_physical_lineage_contracts','mdf_physical_lineage_contract_immutable','mdf_guard_physical_lineage_immutable()',27),('mdf_physical_lineage_transitions','mdf_physical_lineage_transition_insert_guard','mdf_guard_physical_lineage_insert()',7),('mdf_physical_lineage_transitions','mdf_physical_lineage_transition_immutable','mdf_guard_physical_lineage_immutable()',27),('mdf_revision_seals','mdf_physical_lineage_seal_guard','mdf_validate_physical_lineage_seal()',7),('mdf_source_heads','mdf_physical_lineage_source_head_guard','mdf_guard_physical_lineage_source_head()',23)) expected(tbl,trg,fun,kind) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.'||tbl) AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.'||fun) AND t.tgtype=kind AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "SELECT count(*)=6 AND (SELECT count(*)=2 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_physical_lineage_contracts') AND contype='f') AND (SELECT count(*)=4 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_physical_lineage_transitions') AND contype='f') FROM (VALUES ('mdf_physical_lineage_contracts','mdf_revision_context','mdf_physical_lineage_contract_source_kind_source_id_revisi_fkey'),('mdf_physical_lineage_contracts','mdf_revision_seals','mdf_physical_lineage_contract_source_kind_source_id_predec_fkey'),('mdf_physical_lineage_transitions','mdf_evidence_lines','mdf_physical_lineage_transitions_evidence_line_id_fkey'),('mdf_physical_lineage_transitions','mdf_evidence_lines','mdf_physical_lineage_transiti_predecessor_evidence_line_id_fkey'),('mdf_physical_lineage_transitions','mdf_evidence_lines','mdf_physical_lineage_transiti_canonical_origin_evidence_li_fkey'),('mdf_physical_lineage_transitions','mdf_physical_lineage_contracts','mdf_physical_lineage_transiti_source_kind_source_id_revisi_fkey')) expected(tbl,ref,fk) JOIN pg_constraint c ON c.conrelid=to_regclass('public.'||tbl) AND c.conname=fk AND c.contype='f' AND c.confdeltype='r' AND c.confrelid=to_regclass('public.'||ref) JOIN pg_class remote ON remote.oid=c.confrelid JOIN pg_namespace remote_ns ON remote_ns.oid=remote.relnamespace AND remote_ns.nspname='public' AND remote.relname=ref;" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.mdf_physical_lineage_contracts'),to_regclass('public.mdf_physical_lineage_transitions')]) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=ANY(ARRAY[to_regclass('public.mdf_physical_lineage_contracts'),to_regclass('public.mdf_physical_lineage_transitions')]) AND (NOT indisvalid OR NOT indisready));" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_source_heads') AND t.tgname='mdf_source_fence_guard' AND t.tgfoid=to_regprocedure('public.mdf_guard_source_fence()') AND t.tgtype=27 AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "SELECT count(*)=2 FROM (VALUES ('mdf_revision_context','mdf_context_immutable'),('mdf_revision_demand','mdf_demand_immutable')) expected(tbl,trg) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.'||tbl) AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.mdf_reject_evidence_change()') AND t.tgtype=27 AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_recalculation_jobs') AND t.tgname='mdf_job_effect_policy_binding' AND t.tgfoid=to_regprocedure('public.mdf_guard_job_effect_policy_binding()') AND t.tgtype=23 AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_source_heads') AND t.tgname='mdf_accepted_revision_guard' AND t.tgfoid=to_regprocedure('public.mdf_guard_accepted_revision()') AND t.tgtype=19 AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" ;;
+    181_cnc_manual_send_observation*) probe_all \
+      "$(q_tbl cnc_manual_svg_telegram_send_requests)" "$(q_tbl cnc_manual_svg_telegram_send_request_files)" \
+      "$(q_tbl cnc_manual_svg_upload_files)" "$(q_tbl cnc_telegram_packets)" "$(q_tbl mdf_cnc_observation_targets)" \
+      "$(q_colset_hash cnc_manual_svg_observation_claim_snapshots send_request_id,lease_generation,worker_instance_id,session_generation,lease_token_hash,packet_id,destination_chat_id,requested_file_count,files_qualified,files_snapshot,source_eligible,source_fence,ineligible_reason,created_at eca628417e7d71f4f05e9bd1d1e3729c)" \
+      "$(q_colset_hash cnc_manual_svg_observation_send_bindings send_request_id,lease_generation,sent_chat_id,transport_message_ids,sent_files,binding_error,completion_digest,created_at 0ea7fefef06e9a2981bb9e939b2181ce)" \
+      "$(q_colset_hash cnc_manual_svg_observation_registration_work send_request_id,lease_generation,work_state,reason,attempt_count,next_attempt_at,created_at,updated_at f473e0973769cfbcb60aa715664b5d30)" \
+      "$(q_colset_hash mdf_cnc_observation_targets packet_id,import_item_id,candidate_id,source_chat_id,source_group_message_id,message_bindings,registered_revision_key,registered_membership_digest,accepted_revision_key,last_observation_version,work_state,next_due_at,claim_id,claim_token_hash,claim_generation,claim_worker_instance_id,claim_session_generation,claim_expires_at,claim_head_version,claim_correction_epoch,claim_raw_source_version,claim_observation_version,created_at,updated_at,registration_kind,manual_send_request_id 48bbfe7c44d81a3641ca98da18e89227)" \
+      "$(q_conset_hash cnc_manual_svg_observation_claim_snapshots chk_cnc_manual_svg_observation_snapshot_shape,cnc_manual_svg_observation_claim_sna_requested_file_count_check,cnc_manual_svg_observation_claim_snap_destination_chat_id_check,cnc_manual_svg_observation_claim_snaps_session_generation_check,cnc_manual_svg_observation_claim_snapsh_ineligible_reason_check,cnc_manual_svg_observation_claim_snapsho_lease_generation_check,cnc_manual_svg_observation_claim_snapsho_lease_token_hash_check,cnc_manual_svg_observation_claim_snapshots_files_snapshot_check,cnc_manual_svg_observation_claim_snapshots_pkey,cnc_manual_svg_observation_claim_snapshots_send_request_id_fkey,cnc_manual_svg_observation_claim_snapshots_source_fence_check cb172fa1f14d23161886f580e7b8be3e)" \
+      "$(q_conset_hash cnc_manual_svg_observation_send_bindings chk_cnc_manual_svg_observation_binding_choice,cnc_manual_svg_observation_se_send_request_id_lease_genera_fkey,cnc_manual_svg_observation_send_bin_transport_message_ids_check,cnc_manual_svg_observation_send_binding_completion_digest_check,cnc_manual_svg_observation_send_bindings_binding_error_check,cnc_manual_svg_observation_send_bindings_lease_generation_check,cnc_manual_svg_observation_send_bindings_pkey,cnc_manual_svg_observation_send_bindings_sent_chat_id_check,cnc_manual_svg_observation_send_bindings_sent_files_check 3b2f3cf98c8132022bd8cfe45f620967)" \
+      "$(q_conset_hash cnc_manual_svg_observation_registration_work chk_cnc_manual_svg_observation_work_reason,cnc_manual_svg_observation_re_send_request_id_lease_genera_fkey,cnc_manual_svg_observation_registration__lease_generation_check,cnc_manual_svg_observation_registration_wor_attempt_count_check,cnc_manual_svg_observation_registration_work_pkey,cnc_manual_svg_observation_registration_work_reason_check,cnc_manual_svg_observation_registration_work_work_state_check 7f7dba43c6b43af86ce34657040e7770)" \
+      "$(q_conset_hash mdf_cnc_observation_targets chk_mdf_cnc_observation_target_claim,chk_mdf_cnc_observation_target_registration_kind,mdf_cnc_observation_targets_accepted_revision_key_check,mdf_cnc_observation_targets_candidate_id_fkey,mdf_cnc_observation_targets_claim_generation_check,mdf_cnc_observation_targets_claim_token_hash_check,mdf_cnc_observation_targets_import_item_id_fkey,mdf_cnc_observation_targets_import_item_id_key,mdf_cnc_observation_targets_last_observation_version_check,mdf_cnc_observation_targets_manual_send_request_id_fkey,mdf_cnc_observation_targets_message_bindings_check,mdf_cnc_observation_targets_packet_id_fkey,mdf_cnc_observation_targets_pkey,mdf_cnc_observation_targets_registered_membership_digest_check,mdf_cnc_observation_targets_registered_revision_key_check,mdf_cnc_observation_targets_source_chat_id_check,mdf_cnc_observation_targets_source_group_message_id_check,mdf_cnc_observation_targets_work_state_check 02fad0863784f5bf8c13310d873be105)" \
+      "$(q_idxset_hash cnc_manual_svg_observation_claim_snapshots cnc_manual_svg_observation_claim_snapshots_pkey c246869b70663118d9fce67e3a34acf6)" \
+      "$(q_idxset_hash cnc_manual_svg_observation_send_bindings cnc_manual_svg_observation_send_bindings_pkey 73f6d4083eec681244cc51c8a5b6e39d)" \
+      "$(q_idxset_hash cnc_manual_svg_observation_registration_work cnc_manual_svg_observation_registration_work_pkey,idx_cnc_manual_svg_observation_registration_due 3f83026700f84394068c1c6b624b0cd5)" \
+      "$(q_idxset_hash mdf_cnc_observation_targets mdf_cnc_observation_targets_pkey,mdf_cnc_observation_targets_import_item_id_key,idx_mdf_cnc_observation_due,uq_mdf_cnc_observation_manual_send ac9e56036817b6c6baeb29ac2112d261)" \
+      "$(q_fun_hash 'public.mdf_guard_cnc_manual_svg_observation_append_only()' b2f7ad914fece1fa6e50a291108a884f)" \
+      "$(q_fun_hash 'public.mdf_guard_cnc_manual_svg_observation_work()' 6fb75265fe9bab58adda8bb558593ff7)" \
+      "$(q_fun_hash 'public.mdf_guard_cnc_observation_target()' d241972faa5d662ff436a873690ff619)" \
+      "SELECT count(*)=4 FROM (VALUES ('cnc_manual_svg_observation_claim_snapshots','cnc_manual_svg_observation_claim_immutable','mdf_guard_cnc_manual_svg_observation_append_only()',27),('cnc_manual_svg_observation_send_bindings','cnc_manual_svg_observation_binding_immutable','mdf_guard_cnc_manual_svg_observation_append_only()',27),('cnc_manual_svg_observation_registration_work','cnc_manual_svg_observation_work_guard','mdf_guard_cnc_manual_svg_observation_work()',31),('mdf_cnc_observation_targets','mdf_cnc_observation_target_guard','mdf_guard_cnc_observation_target()',31)) expected(tbl,trg,fun,kind) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.'||tbl) AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.'||fun) AND t.tgtype=kind AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "SELECT count(*)=7 FROM (VALUES ('cnc_manual_svg_observation_claim_snapshots','cnc_manual_svg_telegram_send_requests'),('cnc_manual_svg_observation_send_bindings','cnc_manual_svg_observation_claim_snapshots'),('cnc_manual_svg_observation_registration_work','cnc_manual_svg_observation_send_bindings'),('mdf_cnc_observation_targets','cnc_telegram_packets'),('mdf_cnc_observation_targets','cnc_telegram_import_candidates'),('mdf_cnc_observation_targets','cnc_telegram_import_items'),('mdf_cnc_observation_targets','cnc_manual_svg_telegram_send_requests')) expected(tbl,ref) JOIN pg_constraint c ON c.conrelid=to_regclass('public.'||tbl) AND c.contype='f' AND c.confrelid=to_regclass('public.'||ref) WHERE NOT EXISTS (SELECT 1 FROM pg_constraint bad WHERE bad.conrelid=ANY(ARRAY[to_regclass('public.cnc_manual_svg_observation_claim_snapshots'),to_regclass('public.cnc_manual_svg_observation_send_bindings'),to_regclass('public.cnc_manual_svg_observation_registration_work'),to_regclass('public.mdf_cnc_observation_targets')]) AND bad.contype='f' AND bad.confrelid=to_regclass('public.mdf_recalculation_jobs')) AND (SELECT count(*)=1 FROM pg_constraint WHERE conrelid=to_regclass('public.cnc_manual_svg_observation_claim_snapshots') AND contype='f') AND (SELECT count(*)=1 FROM pg_constraint WHERE conrelid=to_regclass('public.cnc_manual_svg_observation_send_bindings') AND contype='f') AND (SELECT count(*)=1 FROM pg_constraint WHERE conrelid=to_regclass('public.cnc_manual_svg_observation_registration_work') AND contype='f') AND (SELECT count(*)=4 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_cnc_observation_targets') AND contype='f');" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.cnc_manual_svg_observation_claim_snapshots'),to_regclass('public.cnc_manual_svg_observation_send_bindings'),to_regclass('public.cnc_manual_svg_observation_registration_work'),to_regclass('public.mdf_cnc_observation_targets')]) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=ANY(ARRAY[to_regclass('public.cnc_manual_svg_observation_claim_snapshots'),to_regclass('public.cnc_manual_svg_observation_send_bindings'),to_regclass('public.cnc_manual_svg_observation_registration_work'),to_regclass('public.mdf_cnc_observation_targets')]) AND (NOT indisvalid OR NOT indisready));" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_cnc_observation_targets') AND conname='chk_mdf_cnc_observation_target_registration_kind' AND contype='c' AND convalidated AND md5(pg_get_constraintdef(oid))='204acf8f78ca96322703a19077e5e145');" ;;
+    180_mdf_cnc_observations*) probe_all \
+      "$(q_tbl cnc_telegram_packets)" "$(q_tbl cnc_telegram_import_candidates)" "$(q_tbl cnc_telegram_import_items)" \
+      "$(q_tbl mdf_source_heads)" "$(q_tbl mdf_recalculation_jobs)" "$(q_tbl mdf_cnc_return_fences)" \
+      "$(q_colset_fun_hash_pair mdf_cnc_observation_targets packet_id,import_item_id,candidate_id,source_chat_id,source_group_message_id,message_bindings,registered_revision_key,registered_membership_digest,accepted_revision_key,last_observation_version,work_state,next_due_at,claim_id,claim_token_hash,claim_generation,claim_worker_instance_id,claim_session_generation,claim_expires_at,claim_head_version,claim_correction_epoch,claim_raw_source_version,claim_observation_version,created_at,updated_at 58c9e312f16b38ba45c5534146e41ace packet_id,import_item_id,candidate_id,source_chat_id,source_group_message_id,message_bindings,registered_revision_key,registered_membership_digest,accepted_revision_key,last_observation_version,work_state,next_due_at,claim_id,claim_token_hash,claim_generation,claim_worker_instance_id,claim_session_generation,claim_expires_at,claim_head_version,claim_correction_epoch,claim_raw_source_version,claim_observation_version,created_at,updated_at,registration_kind,manual_send_request_id 48bbfe7c44d81a3641ca98da18e89227 'public.mdf_guard_cnc_observation_target()' 518942b013d23e6160eb47e06237a0d2 d241972faa5d662ff436a873690ff619)" \
+      "$(q_conset_hash mdf_cnc_observation_targets chk_mdf_cnc_observation_target_claim,mdf_cnc_observation_targets_accepted_revision_key_check,mdf_cnc_observation_targets_candidate_id_fkey,mdf_cnc_observation_targets_claim_generation_check,mdf_cnc_observation_targets_claim_token_hash_check,mdf_cnc_observation_targets_import_item_id_fkey,mdf_cnc_observation_targets_import_item_id_key,mdf_cnc_observation_targets_last_observation_version_check,mdf_cnc_observation_targets_message_bindings_check,mdf_cnc_observation_targets_packet_id_fkey,mdf_cnc_observation_targets_pkey,mdf_cnc_observation_targets_registered_membership_digest_check,mdf_cnc_observation_targets_registered_revision_key_check,mdf_cnc_observation_targets_source_chat_id_check,mdf_cnc_observation_targets_source_group_message_id_check,mdf_cnc_observation_targets_work_state_check 14d491731eb52f0a2c23e87fdb8129df)" \
+      "$(q_idxset_hash mdf_cnc_observation_targets idx_mdf_cnc_observation_due,mdf_cnc_observation_targets_import_item_id_key,mdf_cnc_observation_targets_pkey 7821d51124214275c01987dacf631670)" \
+      "$(q_colset_hash mdf_cnc_observation_receipts claim_id,packet_id,claim_generation,claim_token_hash,worker_instance_id,session_generation,head_version,correction_epoch,raw_source_version,observation_version,report_state,failure_code,report_digest,report,result,created_at b9f99f4745220b221cbf5884e57ff0ed)" \
+      "$(q_conset_hash mdf_cnc_observation_receipts chk_mdf_cnc_observation_receipt_failure,mdf_cnc_observation_receipts_claim_generation_check,mdf_cnc_observation_receipts_claim_token_hash_check,mdf_cnc_observation_receipts_correction_epoch_check,mdf_cnc_observation_receipts_failure_code_check,mdf_cnc_observation_receipts_head_version_check,mdf_cnc_observation_receipts_observation_version_check,mdf_cnc_observation_receipts_packet_id_fkey,mdf_cnc_observation_receipts_pkey,mdf_cnc_observation_receipts_raw_source_version_check,mdf_cnc_observation_receipts_report_check,mdf_cnc_observation_receipts_report_digest_check,mdf_cnc_observation_receipts_report_state_check,mdf_cnc_observation_receipts_result_check,mdf_cnc_observation_receipts_session_generation_check a11437465812fd395e0de3193864263d)" \
+      "$(q_idxset_hash mdf_cnc_observation_receipts idx_mdf_cnc_observation_receipt_sequence,mdf_cnc_observation_receipts_pkey aafc76b66f97eccf6e9769810c00a936)" \
+      "$(q_colset_hash mdf_cnc_observation_job_authorities job_id,packet_id,claim_id,authority,created_at 6a9edc964e9da23dd9ca659d7a27297c)" \
+      "$(q_conset_hash mdf_cnc_observation_job_authorities mdf_cnc_observation_job_authorities_authority_check,mdf_cnc_observation_job_authorities_claim_id_fkey,mdf_cnc_observation_job_authorities_claim_id_key,mdf_cnc_observation_job_authorities_packet_id_fkey,mdf_cnc_observation_job_authorities_pkey 8e5c2533815f1dd0184e7851c9e60b94)" \
+      "$(q_idxset_hash mdf_cnc_observation_job_authorities mdf_cnc_observation_job_authorities_claim_id_key,mdf_cnc_observation_job_authorities_pkey 7cdb1d017c3efa3cb34ea09c72bf89d0)" \
+      "$(q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8)" \
+      "SELECT count(*)=3 FROM (VALUES ('mdf_cnc_observation_targets','mdf_cnc_observation_target_guard','mdf_guard_cnc_observation_target()',31),('mdf_cnc_observation_receipts','mdf_cnc_observation_receipt_immutable','mdf_reject_evidence_change()',27),('mdf_cnc_observation_job_authorities','mdf_cnc_observation_job_authority_immutable','mdf_reject_evidence_change()',27)) expected(tbl,trg,fun,kind) JOIN pg_trigger t ON t.tgrelid=to_regclass('public.'||tbl) AND t.tgname=trg AND t.tgfoid=to_regprocedure('public.'||fun) AND t.tgtype=kind AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "SELECT count(*)=6 FROM (VALUES ('mdf_cnc_observation_targets','cnc_telegram_packets'),('mdf_cnc_observation_targets','cnc_telegram_import_candidates'),('mdf_cnc_observation_targets','cnc_telegram_import_items'),('mdf_cnc_observation_receipts','mdf_cnc_observation_targets'),('mdf_cnc_observation_job_authorities','mdf_cnc_observation_targets'),('mdf_cnc_observation_job_authorities','mdf_cnc_observation_receipts')) expected(tbl,ref) JOIN pg_constraint c ON c.conrelid=to_regclass('public.'||tbl) AND c.contype='f' AND c.confrelid=to_regclass('public.'||ref) WHERE NOT EXISTS (SELECT 1 FROM pg_constraint bad WHERE bad.conrelid=to_regclass('public.'||tbl) AND bad.contype='f' AND bad.confrelid=to_regclass('public.mdf_recalculation_jobs'));" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.mdf_cnc_observation_targets'),to_regclass('public.mdf_cnc_observation_receipts'),to_regclass('public.mdf_cnc_observation_job_authorities')]) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=ANY(ARRAY[to_regclass('public.mdf_cnc_observation_targets'),to_regclass('public.mdf_cnc_observation_receipts'),to_regclass('public.mdf_cnc_observation_job_authorities')]) AND (NOT indisvalid OR NOT indisready));" ;;
+    179_mdf_active_return*) probe_all \
+      "$(q_colset_hash mdf_correction_command_results actor_user_id,command_key,request_digest,source_kind,source_id,order_ids,response,created_at 472e096aaefa864ed4b6e46f3626351d)" \
+      "$(q_conset_hash mdf_correction_command_results mdf_correction_command_results_actor_user_id_check,mdf_correction_command_results_command_key_check,mdf_correction_command_results_order_ids_check,mdf_correction_command_results_pkey,mdf_correction_command_results_request_digest_check,mdf_correction_command_results_response_check,mdf_correction_command_results_source_id_check,mdf_correction_command_results_source_kind_check 12852bdfb98b41e1bc7b8525cfb57ca4)" \
+      "$(q_idxset_hash mdf_correction_command_results mdf_correction_command_results_pkey 8904331b527955cd6afb69762cb245f8)" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_correction_command_results') AND t.tgname='mdf_correction_command_result_immutable' AND t.tgfoid=to_regprocedure('public.mdf_reject_evidence_change()') AND t.tgtype=27 AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "$(q_colset_hash mdf_correction_job_effect_suppressions job_id,affected_order_id,correction_source_kind,correction_source_id,correction_epoch,command_key,created_at 277b3a158b9ae318826ac38d3dc335c2)" \
+      "$(q_conset_hash mdf_correction_job_effect_suppressions mdf_correction_job_effect_suppressions_affected_order_id_check,mdf_correction_job_effect_suppressions_command_key_check,mdf_correction_job_effect_suppressions_correction_epoch_check,mdf_correction_job_effect_suppressio_correction_source_id_check,mdf_correction_job_effect_suppress_correction_source_kind_check,mdf_correction_job_effect_suppressions_pkey cebc56e18c6d83644a0a0db1784b530e)" \
+      "$(q_idxset_hash mdf_correction_job_effect_suppressions idx_mdf_correction_job_effect_suppressions_order,mdf_correction_job_effect_suppressions_pkey 9027e841e29fbf97366380dfc9283c10)" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_correction_job_effect_suppressions') AND t.tgname='mdf_correction_job_effect_suppression_immutable' AND t.tgfoid=to_regprocedure('public.mdf_reject_evidence_change()') AND t.tgtype=27 AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conrelid=to_regclass('public.mdf_correction_job_effect_suppressions') AND c.contype='f' AND c.confrelid=to_regclass('public.mdf_recalculation_jobs'));" \
+      "$(q_colset_hash mdf_cnc_return_fences packet_id,correction_epoch,baseline_source_version,pending_source_version,completion_source_version,state,created_at,updated_at 9e3d189a5bb7f2694778eb04c97b9fb4)" \
+      "$(q_conset_hash mdf_cnc_return_fences mdf_cnc_return_fences_baseline_source_version_check,mdf_cnc_return_fences_correction_epoch_check,mdf_cnc_return_fences_packet_id_fkey,mdf_cnc_return_fences_pkey,mdf_cnc_return_fences_state_check 8d0c64ba064394cb48bd7ac95d7d811f)" \
+      "$(q_idxset_hash mdf_cnc_return_fences mdf_cnc_return_fences_pkey fa6c7fddbb7d49d529ce84a8d4b4b37b)" \
+      "$(q_fun_hash 'public.mdf_guard_cnc_return_fence()' d026131d8311f356670a7d23d54d73aa)" \
+      "$(q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8)" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_cnc_return_fences') AND t.tgname='mdf_cnc_return_fence_guard' AND t.tgfoid=to_regprocedure('public.mdf_guard_cnc_return_fence()') AND t.tgtype=31 AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.mdf_correction_command_results'),to_regclass('public.mdf_correction_job_effect_suppressions'),to_regclass('public.mdf_cnc_return_fences')]) AND NOT convalidated);" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_index WHERE indrelid=ANY(ARRAY[to_regclass('public.mdf_correction_command_results'),to_regclass('public.mdf_correction_job_effect_suppressions'),to_regclass('public.mdf_cnc_return_fences')]) AND (NOT indisvalid OR NOT indisready));" ;;
+    178_mdf_correction_receipts*) probe_all \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='mdf_revision_context' AND column_name='effect_policy' AND data_type='text' AND is_nullable='NO' AND column_default='''forward''::text');" \
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='mdf_recalculation_jobs' AND column_name='effect_policy' AND data_type='text' AND is_nullable='NO' AND column_default='''forward''::text');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_revision_context') AND conname='mdf_revision_context_effect_policy_check' AND contype='c' AND convalidated AND md5(pg_get_constraintdef(oid))='762134ad47d34c70223ce0ce81067951');" \
+      "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.mdf_recalculation_jobs') AND conname='mdf_recalculation_jobs_effect_policy_check' AND contype='c' AND convalidated AND md5(pg_get_constraintdef(oid))='762134ad47d34c70223ce0ce81067951');" \
+      "$(q_fun_hash 'public.mdf_guard_job_effect_policy_binding()' 45e1620014c367515f61c170f2bcf0f5)" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_recalculation_jobs') AND t.tgname='mdf_job_effect_policy_binding' AND t.tgfoid=to_regprocedure('public.mdf_guard_job_effect_policy_binding()') AND t.tgtype=23 AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "$(q_fun_hash 'public.mdf_reject_evidence_change()' a51e1b51d407124a856f1993d9c54fe8)" \
+      "SELECT count(*)=1 FROM pg_trigger t WHERE t.tgrelid=to_regclass('public.mdf_revision_context') AND t.tgname='mdf_context_immutable' AND t.tgfoid=to_regprocedure('public.mdf_reject_evidence_change()') AND t.tgtype=27 AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgattr=''::int2vector;" \
+      "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=ANY(ARRAY[to_regclass('public.mdf_revision_context'),to_regclass('public.mdf_recalculation_jobs')]) AND NOT convalidated);" ;;
     177_cut_result_typed_hdf*) probe_all \
       "SELECT count(*)=2 FROM pg_attribute WHERE attrelid=to_regclass('public.cut_result_placement') AND attname IN ('order_detail_id','order_hdf_detail_id') AND atttypid='bigint'::regtype AND NOT attnotnull AND NOT attisdropped;" \
       "$(q_con_hash_on chk_cut_result_placement_source_only_order cut_result_placement 62ea16377e0581db7bf34d6683754b9a)" \
@@ -3091,6 +3324,60 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
+    287_mdf_bath_duplicate_resolutions*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    277_mdf_bath_declared_coverage*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    273_mdf_published_bath_coverage*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    201_mdf_lineage_genesis_guard*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    199_mdf_cutover_controls*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    195_mdf_baseline_population*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    192_mdf_board_presentation_history*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    191_mdf_order_corrections*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    190_mdf_bath_transitions*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    189_mdf_placement_inputs*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    188_mdf_order_cascade_intents*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    187_mdf_bazis_refill_rows*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    185_mdf_bazis_composition*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    182_mdf_physical_lineage*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    181_cnc_manual_send_observation*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    180_mdf_cnc_observations*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    179_mdf_active_return*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    178_mdf_correction_receipts*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
     177_cut_result_typed_hdf*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;

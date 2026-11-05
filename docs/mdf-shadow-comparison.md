@@ -335,6 +335,14 @@ publication in the durable job transaction. Failures roll back effects while
 retaining the receipt for retry. Compatible forward revisions retain exact stock
 allocations; changed composition, quantities or missing proof require correction.
 
+A bath touching a blocked position contributes neither raw nor credited stage
+quantities to this publication, even when its own lamination revision is sealed
+and accepted. It carries `ALLOCATION_BASELINE_UNKNOWN`; independent verified
+cut evidence and unaffected baths still count. The immutable evidence and existing
+reservations/consumption remain intact, and its detail-derived column can remain
+laminated. Withholding uncertain quantities does not itself cancel a production
+stage or roll back detail statuses: that requires a confirmed correction.
+
 `BACKEND_MDF_JOB_WORKER=false` controls the registered scheduler independently of
 notifications. It processes at most ten jobs sequentially per tick; active engine
 mode is a second mandatory gate. `BACKEND_MDF_PUBLISHED_READS=false` controls
@@ -348,6 +356,87 @@ Keep both flags false until live producers, corrections, frontend, verified
 historical baseline and the cutover procedure are connected and checked together.
 The current shadow producer does not supply execution context. Setting the engine
 to active directly is not a supported activation procedure.
+
+### Correction primitives (not an active return endpoint)
+
+`planMdfCorrection` is a pure consequence planner. A return below the cut stage
+removes only that source's cut proof and lamination attributed through its exact
+allocations. Between cut and lamination it preserves cut stock, cancels linked
+lamination and proposes new reserved allocations. At or above lamination both
+facts remain. A direct bath return never cancels machine-file cut proof.
+Independent evidence and explicit order/detail declarations retain their quantity
+floors; partial coverage does not establish a whole-position stage. Ambiguous
+partial lamination, stale allocation revisions or insufficient supply block the
+plan. The planner emits replacement specifications, not database writes.
+
+Migration `178_mdf_correction_receipts.sql` must precede deployment of the new
+receipt/runner code. It adds an immutable `effect_policy` to sealed execution
+context and jobs: existing receipts and jobs default to `forward`. A job must
+match its sealed context; `publish_only` without that context is rejected.
+Historical context-free forward receipts remain unverified, not newly trusted.
+
+The internal `recordMdfReceipt(..., { correction: true })` path requires a current
+accepted/received revision, matching version/epoch, complete context, acceptance,
+and no unreleased source allocations. The owning correction command must release
+affected allocations before calling it, then insert replacement allocations
+against the new immutable revisions within the same transaction. The new receipt increments
+the correction epoch and version together; replay does not increment them again.
+Its `publish_only` job recalculates allocation/accounting and publishes, but does
+not execute forward automation from unchanged sibling evidence. Old-epoch jobs
+are superseded. Normal future receipts still use the forward policy.
+
+These primitives do not authorize a rollback by themselves. The active command
+must still provide permissions, complete scope locks, preview/digest confirmation,
+allocation replacements, detail changes, audit/outbox, idempotency and the real CNC
+fresh-signal fence. No public return API is connected by migration178; the legacy
+return remains fenced in active/read-only mode. Keep activation flags off.
+
+### Accepted correction API (activation still gated)
+
+Migration `179_mdf_active_return.sql` adds actor-scoped immutable command results,
+per-job/per-order forward-effect fences and CNC correction-time version baselines.
+Apply it before deploying the new worker or correction API. It does not enable
+the engine, worker, published reader or CNC producer.
+
+The separate endpoints are
+`POST /api/v1/orders/status-board/mdf-corrections/:cardKind/:cardId/preview` and
+`POST /api/v1/orders/status-board/mdf-corrections/:cardKind/:cardId/confirm`.
+The legacy `mdf-return` endpoints retain their separate SERIALIZABLE protocol.
+New requests require `sourceToken`, `targetColumn` and optionally
+`productionStatusId`. The server resolves stages from the active catalogue;
+clients cannot submit ranks, identities, permissions or effect policies. No reason
+is required. Confirm also requires `expectedDigest` and an actor-scoped
+`idempotencyKey` matching `[A-Za-z0-9._:-]{1,128}`.
+
+Each new command owns a READ COMMITTED transaction and checks locked active mode.
+Preview makes no business writes. It shows exact affected quantities, independent
+coverage floors, linked bath cancellations, manual-placement effects and old
+automation effects to suppress. Unknown provenance blocks confirmation rather
+than guessing. Access to every owner in the bounded dependency closure is checked;
+changed closure requires a fresh transaction. The digest covers current evidence,
+demand, statuses, allocations and prior-job effects, not the visible board period.
+
+Confirm releases exact old allocations, appends corrected immutable receipts and
+inserts replacement allocations. Detail changes, order summaries, audit, outbox,
+new jobs and the exact replay response commit together. Replaying the same command
+checks current access to its original owners and returns the stored response.
+Dependent bath manual overrides are cleared; the selected source receives the
+requested placement. Independent accepted work is not removed.
+
+A pre-existing forward job may otherwise undo a return through another bath in
+its component. Correction therefore records immutable fences for that job and
+the affected orders, without locking or modifying its job row. The worker checks
+these fences after owner locks: it still accounts and publishes all data, but
+skips old forward effects for fenced orders. Other orders and later new jobs are
+not suppressed. New correction jobs remain `publish_only`.
+
+This API is not connected to the page yet. Completed affected orders are protected.
+Ready/issued orders currently require a separate status transition: coordinated
+header/declaration correction remains an explicit cutover gate, not a new final
+business rule. CNC version baselines are persisted, but the real producer still
+needs fresh-pending then strictly newer completion enforcement. Merely creating
+a baseline does not prove that stale CNC signals are rejected. UI, remaining
+writers and historical reconciliation must be completed before activation.
 
 ### Manual commands through the queue (activation still gated)
 
@@ -376,8 +465,18 @@ Tagged command transactions acquire the shared cutover fence before business
 effects and explicitly use READ COMMITTED. Stricter isolation is rejected before
 starting: an advisory-lock wait under a repeatable snapshot could otherwise read
 the pre-cutover mode. This boundary must cover the remaining writers before any
-activation. Ordinary unsupported writers and serializable returns are not yet
-connected by this increment.
+activation. Ordinary unsupported writers are not yet connected by this increment.
+
+The legacy production-return preview and confirmation have a separate, fixed
+legacy-only entrance. They retain SERIALIZABLE isolation: after the shared
+cutover fence, a separate `SELECT mode ... FOR SHARE` detects a mode-row change
+made after the transaction snapshot. Such a race rolls back as `MDF_RETURN_STALE`;
+it cannot authorize a return using the previous legacy mode. An existing boundary
+cache cannot be reused to enter this protocol, nor can its cache authorize queued
+commands. Both preview simulation and confirmation (including idempotent replay)
+reject active/read_only before any domain reads or writes. Legacy/shadow return
+behavior is unchanged. This is cutover protection, **not** the accepted-accounting
+correction adapter; that adapter remains required before activation.
 
 ### Browser command protocol and exact progress
 
@@ -438,3 +537,97 @@ snapshots are not rewritten. Legacy bath readiness/visibility and the shadow
 comparison scope exclude typed HDF placements; unknown non-HDF placements
 still block complete composition. Apply migration 177 before deploying
 backend readers or relying on mixed/HDF calculation data.
+
+### Normal vacuum calculations through the queue (activation still gated)
+
+In active mode the normal calculation command captures each new vacuum result
+as `bath / cut-result:<id>`. Membership comes from digest-matched normalized
+result projections and the locked typed basket, not an archive JSON read by the
+MDF adapter. Result, membership receipt, pending job, audit and outbox commit
+together. The optional legacy synthetic packet is not created in this path.
+Creation proves membership only: it never proves cutting or lamination.
+
+Both calculation transactions acquire the cutover fence before sorted owner
+and detail locks. Current permissions cover every owner; a completed replay
+also reauthorizes the frozen result owners. No transaction spans the optimizer
+call. A changed composition or mode rejects persistence. A private-owner-token
+settlement closes only that attempt, returns its job to draft and emits
+`cut_job.calculate_rejected`; it cannot modify details, groups or MDF evidence.
+This narrowly scoped settlement remains available in read-only mode.
+
+First results may accept verified membership. A partial position is valid:
+two placed pieces of an order position requiring four remain two pieces, while
+the full order demand stays frozen in execution context. Recalculation records
+new membership as unaccepted, preserves earlier evidence and requires review.
+No timestamp or missing ledger row grants historical trust.
+
+Historical reconciliation, result lifecycle and manual-layout replacement remain unconnected;
+manual-layout writes reject in active mode. Typed HDF is excluded from MDF
+membership even if its material name contains MDF. Migration177 aligns immutable
+snapshot validation and label-map projection with typed `hdf-*` identities.
+HDF placements retain a separate `order_hdf_detail_id`; their `order_detail_id`
+is null, including when both source tables use the same numeric ID. Existing
+snapshots are not rewritten, and HDF supplies no MDF membership or quantity.
+Legacy bath readiness/visibility and shadow comparison scope also exclude typed
+HDF placements; unknown non-HDF placements still block complete composition.
+Apply migration177 before deploying these readers or relying on mixed/HDF
+calculation in either mode.
+No projection bypass or historical acceptance is added.
+Keep engine activation and worker/read flags gated until the full chain is ready.
+
+### New manual SVG machine cards through the queue (activation still gated)
+
+Direct manual SVG upload now has a transaction-entrance mode fence. In active
+mode, a newly inserted machine-file card records its exact ordinary MDF
+membership, complete owning demand and pinned rules in the same transaction as
+the packet, cut result, audit and outbox. Upload is membership, never physical
+cutting: even a whole-order comment or advanced detail status adds no cut credit.
+Foreign material in the file metadata or live detail excludes it. HDF remains
+outside MDF accounting. Normal position quantities aggregate within the file
+and cannot exceed live demand; explicit rework remains separate.
+Parsed membership must exactly match effective placements in the compact,
+digest-matched projection of that SVG's saved result. Missing or extra positions,
+unknown placements or quantity disagreement retain the upload as unaccepted;
+neither side is silently treated as authoritative. Parser and result digests
+are sealed into the receipt. This check does not read archive JSON.
+
+Owner authorization and sorted full-detail locks precede source locks. Exact
+idempotency replay rechecks owner access and creates no new job. Unresolved
+composition remains visible with verification issues and contributes no accepted
+credit. Queue failure cannot roll back a committed upload. The upload audit and
+created outbox event contain `mdfJobId` and `mdfEvidence: membership_only`.
+
+In active mode, a new command for an existing packet/source file is rejected
+before restoration or metadata promotion; these operations still need correction
+adapters. Explicit Telegram import completion uses the bounded producer below.
+The intentionally disabled background CNC endpoint is not re-enabled. Legacy
+and shadow uploads retain their current behavior. These remaining gates prohibit
+activation; public engine stays legacy and worker/read flags stay off.
+
+### Explicit Telegram import through the queue (activation still gated)
+
+`completeImport` is a queued command in active mode. It loads the requester's
+current active user/role, enabled catalog permissions and orders.view scope.
+The worker's permissions never replace the requester's. Authorization, sorted
+order/detail locks precede worker-session, item and SVG-source locks. Persisted
+source identity, requester, inferred owners and layout are rechecked after waits;
+drift rejects the transaction. Item and session lease checks remain mandatory.
+The uploaded file names/hashes must match the confirmed Telegram source set;
+decoded bytes are independently verified by the normal SVG persistence path.
+
+Only an internal transaction-local handoff permits active intentional-copy
+import. Duplicate detection is refreshed under the source lock; changed matches
+require reconfirmation. Acknowledging a duplicate permits a separate visible
+card, but does not certify another physical run or mark it as rework. Its
+membership stays unaccepted, contributing no confirmed quantities. Incomplete
+identity also stays unaccepted while retaining uniquely resolved own members.
+MDF eligibility, HDF exclusion, exact result projection checks and membership-only
+receipts reuse the direct SVG path. Import success never means machine completion.
+
+Import status, packet/result, receipt/job, audit and outbox commit together;
+the import audit/outbox include `mdfJobId` and retain requester/worker attribution.
+Terminal replay reauthorizes current and frozen owners, verifies the original
+item lease/source and creates no new receipt or job. A failed queued rule leaves
+the completed import intact and can be retried without applying other positions.
+Legacy/shadow behavior and disabled background ingest remain unchanged.
+This connects one producer, not the remaining correction/UI/history gates.

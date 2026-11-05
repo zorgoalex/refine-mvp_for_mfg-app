@@ -15,19 +15,23 @@ export const mdfPublishedApi = {
     assertMdfSession(sessionGeneration);
     const params=new URLSearchParams();
     if (query.dateTo!==undefined) params.set('dateTo',query.dateTo);
+    if (query.displayFrom!==undefined) params.set('displayFrom',query.displayFrom);
     if (query.focus) {
       params.set('focusKind',query.focus.kind);
       params.set('focusId',query.focus.id);
     }
     if (query.orderIds?.length) params.set('orderIds',query.orderIds.join(','));
     if (query.jobIds?.length) params.set('jobIds',query.jobIds.join(','));
+    if (query.searchOrderIds?.length) params.set('searchOrderIds',query.searchOrderIds.join(','));
     try {
       const snapshot=await httpClient.get<MdfPublishedSnapshot>(
         `${apiRoutes.orders.statusBoardMdfPublished}${params.size ? `?${params}` : ''}`,
         { signal,cache: 'no-store' },
       );
       assertMdfSession(sessionGeneration);
-      if (snapshot.schemaVersion!==1 || !Array.isArray(snapshot.trackedJobs)) {
+      if (snapshot.schemaVersion!==1 || !Array.isArray(snapshot.trackedJobs)
+        || !Array.isArray(snapshot.presentation) || !Array.isArray(snapshot.progress)
+        || !Array.isArray(snapshot.orders) || !Array.isArray(snapshot.unregistered)) {
         throw new Error('MDF_PUBLICATION_CONTRACT_INVALID');
       }
       return { sessionGeneration,snapshot };
