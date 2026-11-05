@@ -1,0 +1,160 @@
+/* «NewLine»: print of the MDF board. The sheet is a copy of the board's columns (its own cards and colours), put in a
+   `.status-board-page--cnc` wrapper so the board styles apply; here the copy is let out of the screen layout (no fixed
+   heights, inner scrolling or sticky headers), the dialog, the preview and the isolation while printing. */
+
+.wb-mdf-print-dialog__options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.wb-mdf-print-dialog__columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 4px;
+  margin-top: 12px;
+}
+
+.wb-mdf-print-dialog__columns .ant-checkbox-wrapper {
+  margin: 0;
+  padding: 3px 10px 3px 8px;
+  border: 1px solid var(--evo-border, #d6dbe4);
+  border-left: 4px solid var(--wb-mdf-column, #8c8c8c);
+  border-radius: 8px;
+}
+
+.wb-mdf-print-dialog__columns b {
+  color: var(--evo-text-secondary, #5b6474);
+  font-weight: 600;
+}
+
+.wb-mdf-print-dialog__hint {
+  margin: 10px 0 12px;
+  color: var(--evo-text-secondary, #5b6474);
+  font-size: 12.5px;
+}
+
+/* --- the sheet (preview and paper) --- */
+.wb-mdf-print-sheet.status-board-page {
+  box-sizing: border-box;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  background: #fff;
+  color: #1d2433;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+/* a copy restarts on-screen entry animations; the paper is taken a frame later, so no motion on it */
+.wb-mdf-print-sheet,
+.wb-mdf-print-sheet * {
+  animation: none !important;
+  transition: none !important;
+}
+
+.wb-mdf-print-sheet__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.wb-mdf-print-sheet__header b {
+  font-size: 16px;
+}
+
+.wb-mdf-print-sheet .status-board-columns {
+  display: grid !important;
+  gap: 8px;
+  min-width: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.wb-mdf-print-sheet .status-board-column,
+.wb-mdf-print-sheet .status-board-column * {
+  max-height: none !important;
+}
+
+.wb-mdf-print-sheet .status-board-column {
+  height: auto !important;
+  overflow: visible !important;
+}
+
+.wb-mdf-print-sheet .status-board-column > *,
+.wb-mdf-print-sheet .status-board-column__cards,
+.wb-mdf-print-sheet .cnc-today-column__cards {
+  height: auto !important;
+  overflow: visible !important;
+}
+
+.wb-mdf-print-sheet .status-board-column__header {
+  position: static !important;
+}
+
+.wb-mdf-print-sheet .status-board-card,
+.wb-mdf-print-sheet .cnc-deferred-card {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* controls of the live board are not printed (order numbers are buttons too — they stay) */
+.wb-mdf-print-sheet .cnc-card-display-toggle,
+.wb-mdf-print-sheet .status-board-column-help,
+.wb-mdf-print-sheet .status-board-column__header .ant-btn {
+  visibility: hidden;
+}
+
+/* --- preview in the dialog --- */
+.wb-mdf-print-preview {
+  max-height: 56vh;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: #e9ecf1;
+}
+
+.wb-mdf-print-preview__empty {
+  color: var(--evo-text-secondary, #5b6474);
+}
+
+.wb-mdf-print-preview__sheet > .wb-mdf-print-sheet {
+  padding: 8mm !important;
+  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.18);
+  zoom: 0.7;
+}
+
+.wb-mdf-print-preview[data-paper="A3"] .wb-mdf-print-preview__sheet > .wb-mdf-print-sheet {
+  zoom: 0.5;
+}
+
+/* --- paper: only the sheet (not the app, the open dialog, the calendar print or the former compact print) --- */
+.wb-mdf-print-live {
+  display: none;
+}
+
+@media print {
+  html.wb-mdf-printing,
+  html.wb-mdf-printing body {
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  html.wb-mdf-printing body > :not(.wb-mdf-print-live) {
+    display: none !important;
+  }
+
+  html.wb-mdf-printing body > .wb-mdf-print-live {
+    display: block !important;
+  }
+}
