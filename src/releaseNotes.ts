@@ -29,6 +29,13 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-16", title: "Загрузка SVG и «Базис раскрой» снова работают без «Internal server error»",
+    services: ["ERP", "Cutting"], repositories: ["repo_erp"],
+    fixed: [
+      "Загрузка SVG-файла в «Раскрое» (окно «Загрузить SVG»), сохранение деталей в «Базис раскрое» и завершение импорта файлов из чата станка больше не падают с «Internal server error»: проверка автостатусов МДФ-доски при загрузке считала все ванны сразу и с ростом их числа перестала укладываться в отведённое время. Теперь проверяются только ванны с деталями загружаемого файла — в 3–5 раз быстрее, результат автостатусов прежний.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-05", title: "Заказ: доставка и смена запуска",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
