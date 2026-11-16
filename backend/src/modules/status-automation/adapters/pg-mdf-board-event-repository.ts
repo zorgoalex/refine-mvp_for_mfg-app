@@ -116,11 +116,23 @@ export async function loadMdfBoardEvents(
       FROM bath_members m LEFT JOIN mdf_board_manual_moves move
         ON move.card_kind = 'bath' AND move.card_id = ('cut-result:' || m.cut_result_id::text)
       GROUP BY m.cut_result_id
+    ), relevant_baths AS MATERIALIZED (
+      -- Only the baths this source touches, and the details in them. Totals stay summed over ALL baths of a
+      -- detail (the filter is on the detail, not the bath). Without this narrowing the planner, misestimating
+      -- the CTEs at a couple of rows, rescanned every bath per detail and the query outgrew the 10 s timeout.
+      SELECT DISTINCT member.cut_result_id FROM bath_members member JOIN direct_machine_details direct
+        ON direct.order_id=member.order_id AND direct.detail_id=member.detail_id
+      WHERE $1 IN ('packet','bazisCutSet')
+      UNION SELECT b.cut_result_id FROM latest_baths b
+      WHERE $1='bath' AND ('cut-result:' || b.cut_result_id::text)=$2
+    ), relevant_details AS MATERIALIZED (
+      SELECT DISTINCT m.order_id, m.detail_id FROM bath_members m JOIN relevant_baths r USING(cut_result_id)
     ), bath_totals AS (
       SELECT m.order_id, m.detail_id, SUM(m.quantity) AS present_quantity,
         SUM(CASE WHEN s.column_key IN ('baths_ready','baths_laminated','completed_baths') THEN m.quantity ELSE 0 END) AS ready_quantity,
         SUM(CASE WHEN s.column_key IN ('baths_laminated','completed_baths') THEN m.quantity ELSE 0 END) AS laminated_quantity
       FROM bath_members m JOIN bath_states s USING(cut_result_id)
+      JOIN relevant_details rd ON rd.order_id=m.order_id AND rd.detail_id=m.detail_id
       WHERE m.resolved AND m.mdf_relevant AND NOT m.excluded GROUP BY m.order_id, m.detail_id
     ), events AS (
       SELECT DISTINCT m.kind, m.card_id, m.order_id, m.detail_id,
@@ -136,15 +148,9 @@ export async function loadMdfBoardEvents(
           WHEN s.column_key='baths_ready' THEN 'mdf.board.baths_ready' ELSE 'mdf.board.baths' END,
         CASE WHEN s.column_key IN ('baths_laminated','completed_baths') THEN total.laminated_quantity
           WHEN s.column_key='baths_ready' THEN total.ready_quantity ELSE total.present_quantity END
-      FROM bath_members m JOIN bath_states s USING(cut_result_id)
+      FROM relevant_baths r JOIN bath_members m USING(cut_result_id) JOIN bath_states s USING(cut_result_id)
       JOIN bath_totals total ON total.order_id=m.order_id AND total.detail_id=m.detail_id
-      WHERE m.resolved AND m.mdf_relevant AND (
-        ($1='bath' AND ('cut-result:' || m.cut_result_id::text)=$2)
-        OR ($1 IN ('packet','bazisCutSet') AND EXISTS (
-          SELECT 1 FROM bath_members member JOIN direct_machine_details direct
-            ON direct.order_id=member.order_id AND direct.detail_id=member.detail_id
-          WHERE member.cut_result_id=m.cut_result_id))
-      )
+      WHERE m.resolved AND m.mdf_relevant
     )
     SELECT e.*, GREATEST(COALESCE(d.quantity,1),1) AS required_quantity
     FROM events e JOIN order_details d ON d.detail_id=e.detail_id AND d.order_id=e.order_id
