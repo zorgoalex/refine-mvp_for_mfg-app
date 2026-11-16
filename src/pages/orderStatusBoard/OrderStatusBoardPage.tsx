@@ -1,6 +1,9 @@
 import { Popover, Tooltip } from '../../ui/tooltipDelay';
 import { requestReworkStart } from '../orders/components/rework/reworkStartRequests';
 import { useReworkOrderStatusIds } from '../orders/components/rework/useReworkOrderStatusIds';
+import { MdfPrintDialog } from './mdfPrint/MdfPrintDialog';
+import { mdfPrint, useMdfPrintState } from './mdfPrint/mdfPrintStore';
+import { useOptionalUiVariant } from '../../ui-variant/UiVariantProvider';
 import { MdfProductionReturnDialog, isMdfBackwardMove, type MdfReturnIntent } from './MdfProductionReturnDialog';
 import { keepsShownMdfBoard, mdfShownDataKey, resetMdfBoardForNewSession } from './mdfBoardSessionData';
 import {
@@ -609,6 +612,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const canViewCncCutMaps = can('cut.view');
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  // «NewLine»: «Печать» of the MDF board in any card mode (column ticks, A4/A3) — mdfPrint/*
+  const isWorkbenchUi = useOptionalUiVariant()?.variant === 'workbench';
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const currentUser = authSession.getUser();
   const todayCncWorkday = dayjs().format('YYYY-MM-DD');
@@ -1192,7 +1197,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   // background read is still running); a shown board reads its dataset again under the new session.
   const datasetKeyRef = useRef(datasetKey);
   datasetKeyRef.current = datasetKey;
-  useSessionGenerationReset({ active, revisionRef: datasetRevisionRef, onReset: (shown) => resetMdfBoardForNewSession({
+  useSessionGenerationReset({ active, revisionRef: datasetRevisionRef, onReset: (shown) => {
+    // the print preview holds a copy of the old scope's cards
+    mdfPrint.close();
+    resetMdfBoardForNewSession({
     // a hidden board mounted with a prefetched snapshot must load under the new session when it is shown
     dropInitialSnapshot: () => {
       preserveInitialMdfSnapshotRef.current = false;
@@ -1207,7 +1215,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     clearOrderBoard: () => { cncOrderBoardRequestKeyRef.current = null; setCncOrderBoard(null); },
     setShownKey: (key) => { shownDatasetKeyRef.current = key; },
     reload: () => { void fetchInitial(); },
-  }, { shown, datasetKey: datasetKeyRef.current, sessionGeneration: authSession.getSessionGeneration() }) });
+  }, { shown, datasetKey: datasetKeyRef.current, sessionGeneration: authSession.getSessionGeneration() });
+  } });
 
   useEffect(() => {
     if (!active) return;
@@ -3152,7 +3161,16 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 }
               />
             </div>
-            {cncCardDisplayMode !== 'standard' && (
+            {isWorkbenchUi ? (
+              <Button
+                size="small"
+                className="status-board-toolbar__wb-print"
+                icon={<PrinterOutlined />}
+                onClick={() => mdfPrint.open()}
+              >
+                Печать
+              </Button>
+            ) : cncCardDisplayMode !== 'standard' && (
               <Tooltip title="Печать всех колонок и карточек в альбомном формате">
                 <Button
                   size="small"
@@ -3899,6 +3917,12 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   showFinancials,
 }) => {
   const isOperational = useOperationalUi();
+  const isWorkbenchUi = useOptionalUiVariant()?.variant === 'workbench';
+  const mdfPrintState = useMdfPrintState();
+  // «NewLine» print: while its dialog is open every card is drawn (no deferred or held-back cards), so the board
+  // itself can be printed as it looks on screen in the chosen card mode
+  const mdfPrintAll = isWorkbenchUi && mdfPrintState.open;
+  const mdfPrintSourceRef = useRef<HTMLDivElement | null>(null);
   const [standardCardOverrides, setStandardCardOverrides] =
     useState<Set<string>>(() => new Set());
   const orderColumnRefs = useRef<Partial<Record<CncOrderDisplayColumnKey, HTMLElement | null>>>({});
@@ -4182,6 +4206,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     : 'var(--status-board-cnc-column-width, 220px)';
   const highlightedOrderKeys = relationContext?.activeOrderKeys ?? null;
   const deferOverflowCards = !overflowCardsVisible
+    && !mdfPrintAll
     && cardDisplayMode === 'standard'
     && !focusedCardId
     && !relationContext
@@ -4193,6 +4218,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   return (
     <>
       <div
+        ref={mdfPrintSourceRef}
+        data-mdf-print-mode={cardDisplayMode}
         className={[
           'status-board-columns status-board-columns--cnc',
           cncStandardColumnLayout ? 'status-board-columns--cnc-standard' : '',
@@ -4405,8 +4432,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                     );
                     return (
                       <CncDeferredCard
-                        key={card.orderId}
-                        defer={shouldDeferCncCard(
+                        key={`${card.orderId}:${mdfPrintState.generation}`}
+                        defer={!mdfPrintAll && shouldDeferCncCard(
                           cardDisplayMode,
                           'order',
                           String(card.orderId),
@@ -4521,8 +4548,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
 
                     return (
                       <CncDeferredCard
-                        key={bath.bathCardId}
-                        defer={shouldDeferCncCard(
+                        key={`${bath.bathCardId}:${mdfPrintState.generation}`}
+                        defer={!mdfPrintAll && shouldDeferCncCard(
                           cardDisplayMode,
                           'bath',
                           bath.bathCardId,
@@ -4609,8 +4636,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                     );
                     return (
                       <CncDeferredCard
-                        key={`bazis:${bazisCutSet.bazisCutSetId}`}
-                        defer={shouldDeferCncCard(
+                        key={`${`bazis:${bazisCutSet.bazisCutSetId}`}:${mdfPrintState.generation}`}
+                        defer={!mdfPrintAll && shouldDeferCncCard(
                           cardDisplayMode,
                           'bazisCutSet',
                           String(bazisCutSet.bazisCutSetId),
@@ -4683,8 +4710,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                   );
                   return (
                     <CncDeferredCard
-                      key={`packet:${packet.packetId}`}
-                      defer={shouldDeferCncCard(
+                      key={`${`packet:${packet.packetId}`}:${mdfPrintState.generation}`}
+                      defer={!mdfPrintAll && shouldDeferCncCard(
                         cardDisplayMode,
                         'packet',
                         packet.packetId,
@@ -4817,6 +4844,19 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
         />,
         document.body,
       )}
+      {isWorkbenchUi ? (
+        <MdfPrintDialog
+          columns={displayColumns.map((column) => ({
+            key: column.key,
+            title: cncColumnDisplayTitle(column),
+            total: column.total,
+            color: cncColumnBadgeColor(column.key),
+          }))}
+          printDate={printDate}
+          modeLabel={CNC_CARD_DISPLAY_OPTIONS.find((option) => option.value === cardDisplayMode)?.label ?? ''}
+          getBoard={() => mdfPrintSourceRef.current}
+        />
+      ) : null}
     </>
   );
 };

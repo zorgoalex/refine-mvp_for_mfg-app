@@ -1,0 +1,141 @@
+/* «NewLine»: printed production calendar. A sheet is a copy of the calendar's own week rows inside its
+   `.calendar-board--wb` classes (so the NewLine card styles apply); here the copy is let out of the screen layout
+   (no fixed heights or inner scrolling), the dialog, the preview and the isolation while printing. */
+
+.wb-cal-print-sheet.calendar-board {
+  box-sizing: border-box;
+  display: block !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  margin: 0 0 12px !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  background: #fff;
+  color: #1d2433;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+.wb-cal-print-sheet__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.wb-cal-print-sheet__header b {
+  font-size: 16px;
+}
+
+.wb-cal-print-sheet__filters,
+.wb-cal-print-sheet__stamp {
+  color: #5b6474;
+}
+
+.wb-cal-print-sheet__stamp {
+  margin-left: auto;
+}
+
+.wb-cal-print-sheet .calendar-grid {
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.wb-cal-print-sheet .calendar-row,
+.wb-cal-print-sheet .day-column,
+.wb-cal-print-sheet .day-column__orders {
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.wb-cal-print-sheet .order-card {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* the cards fade in from opacity 0 on screen; a copy would restart that and print blank, so no motion on paper */
+.wb-cal-print-sheet,
+.wb-cal-print-sheet * {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* the send-to-chat icon of the day header is a screen action */
+.wb-cal-print-sheet .day-column__send {
+  visibility: hidden;
+}
+
+/* --- dialog and preview --- */
+.wb-cal-print-dialog__options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.wb-cal-print-dialog__summary {
+  color: var(--evo-text-secondary, #5b6474);
+}
+
+.wb-cal-print-dialog__hint {
+  margin: 8px 0 12px;
+  color: var(--evo-text-secondary, #5b6474);
+  font-size: 12.5px;
+}
+
+.wb-cal-print-preview {
+  max-height: 60vh;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: #e9ecf1;
+}
+
+.wb-cal-print-preview .wb-cal-print-sheet {
+  padding: 8mm !important;
+  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.18);
+  zoom: 0.62;
+}
+
+.wb-cal-print-preview[data-paper="A3"] .wb-cal-print-sheet {
+  zoom: 0.45;
+}
+
+/* --- paper: only the sheets (not the app, the open dialog or the MDF board print) --- */
+.wb-cal-print-live {
+  display: none;
+}
+
+@media print {
+  html.wb-cal-printing,
+  html.wb-cal-printing body {
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  html.wb-cal-printing body > :not(.wb-cal-print-live) {
+    display: none !important;
+  }
+
+  html.wb-cal-printing body > .wb-cal-print-live {
+    display: block !important;
+  }
+
+  .wb-cal-print-live .wb-cal-print-sheet {
+    margin: 0 !important;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .wb-cal-print-live .wb-cal-print-sheet:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+}
