@@ -46,6 +46,8 @@ export interface ServiceRuleState {
   ruleCode: string;
   isEnabled: boolean;
   roleCodes: string[];
+  /** Access groups (plan v6 §5): members of active groups while the switch is on; a rule with them is not «default». */
+  groupCodes: string[];
   userIds: number[];
   /** md5 `recipients_json` — сверка в транзакции записи: сменились получатели — запись прогона пропускается (R1-4). */
   recipientsHash: string;
@@ -55,6 +57,19 @@ export interface ServiceRuleState {
 export interface ServiceRuleGuard {
   ruleCode: string;
   recipientsHash: string;
+  /**
+   * Access groups (plan v6 §5): the recipient is checked again at write time against the rule's current recipients and
+   * the current memberships/switch — group changes do not change the rule's hash. Same arguments as ruleRecipients.
+   */
+  eligibility?: {
+    defaultPermission: string;
+    required: string[];
+    /**
+     * permissions_state.version read before the recipients were selected and their content computed (scope): any
+     * authorization change since (a narrowed scope included) skips the write; the next run recomputes.
+     */
+    authorizationVersion?: number;
+  };
 }
 
 export interface ServiceNotificationInput {
@@ -75,6 +90,26 @@ export interface ServiceNotificationInput {
  * буквальному праву (текущая матрица ролей), сканер «потребность изменилась после отметки», нераспределённые приходы,
  * запись уведомления сервиса вместе с событием outbox (одна транзакция, идемпотентно по ключу).
  */
+/** Users a service rule reaches (see ruleRecipients); `$6` narrows to one user (the write-time check). */
+const ELIGIBLE_USERS_SQL = `SELECT u.user_id::text AS user_id, u.username, u.role_id
+         FROM users u
+         JOIN roles r ON r.role_id = u.role_id AND r.is_active = true
+        WHERE u.is_active = true AND COALESCE(u.is_service_account, false) = false
+          AND CASE WHEN $1::text IS NOT NULL
+                   THEN EXISTS (SELECT 1 FROM user_effective_permissions uep
+                                 WHERE uep.user_id = u.user_id AND uep.permission_name = $1)
+                   ELSE (r.role_code = ANY($2::text[]) OR u.user_id = ANY($3::bigint[])
+                         OR EXISTS (SELECT 1 FROM user_access_groups uag
+                                      JOIN access_groups ag ON ag.group_id = uag.group_id AND ag.is_active
+                                      JOIN permissions_state ps ON ps.id AND ps.access_groups_enabled
+                                     WHERE uag.user_id = u.user_id AND ag.code = ANY($5::text[]))) END
+          AND NOT EXISTS (
+            SELECT 1 FROM unnest($4::text[]) AS need(permission_name)
+             WHERE NOT EXISTS (SELECT 1 FROM user_effective_permissions uep
+                                WHERE uep.user_id = u.user_id AND uep.permission_name = need.permission_name))
+          AND ($6::bigint IS NULL OR u.user_id = $6::bigint)
+        ORDER BY u.user_id`;
+
 export class PgProcurementNotificationsRepository {
   private readonly write = new PgNotificationWriteAdapter();
 
@@ -110,7 +145,13 @@ export class PgProcurementNotificationsRepository {
 
   /** Активные пользователи, у роли которых буквально есть право (матрица ролей, не статические умолчания). */
   async permissionHolders(permission: string): Promise<CurrentUser[]> {
-    return this.selectUsers({ byPermission: permission, roleCodes: [], userIds: [] }, [permission]);
+    return this.selectUsers({ byPermission: permission, roleCodes: [], groupCodes: [], userIds: [] }, [permission]);
+  }
+
+  /** permissions_state.version — captured before a digest run selects recipients and computes their content. */
+  async authorizationVersion(): Promise<number> {
+    const row = (await this.database.query<{ version: string }>('SELECT version FROM permissions_state WHERE id = true')).rows[0];
+    return Number(row?.version ?? 0);
   }
 
   async loadRule(ruleCode: string): Promise<ServiceRuleState> {
@@ -119,12 +160,10 @@ export class PgProcurementNotificationsRepository {
          FROM notification_rules WHERE rule_code = $1`,
       [ruleCode],
     )).rows[0];
-    const recipients = (row?.recipients_json ?? {}) as { roleCodes?: unknown; userIds?: unknown };
     return {
       ruleCode,
       isEnabled: row?.is_enabled === true,
-      roleCodes: Array.isArray(recipients.roleCodes) ? recipients.roleCodes.filter((code): code is string => typeof code === 'string') : [],
-      userIds: Array.isArray(recipients.userIds) ? recipients.userIds.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0) : [],
+      ...parseServiceRecipients(row?.recipients_json),
       recipientsHash: row?.recipients_hash ?? '',
     };
   }
@@ -134,30 +173,22 @@ export class PgProcurementNotificationsRepository {
    * пользователи выбранных ролей ∪ выбранные пользователи; ВСЕГДА только активные несервисные с каждым правом из
    * `required` (буквально по матрице ролей) — данные закупа не уходят тому, кто их не видит.
    */
-  async ruleRecipients(rule: Pick<ServiceRuleState, 'roleCodes' | 'userIds'>, defaultPermission: string, required: string[]): Promise<CurrentUser[]> {
-    const custom = rule.roleCodes.length > 0 || rule.userIds.length > 0;
-    return this.selectUsers(custom ? { byPermission: null, roleCodes: rule.roleCodes, userIds: rule.userIds } : { byPermission: defaultPermission, roleCodes: [], userIds: [] }, required);
+  async ruleRecipients(rule: Pick<ServiceRuleState, 'roleCodes' | 'groupCodes' | 'userIds'>, defaultPermission: string, required: string[]): Promise<CurrentUser[]> {
+    // groupCodes make the rule custom even while access groups are off: then they reach nobody, never «everybody».
+    const groupCodes = rule.groupCodes ?? [];
+    const custom = rule.roleCodes.length > 0 || groupCodes.length > 0 || rule.userIds.length > 0;
+    return this.selectUsers(custom
+      ? { byPermission: null, roleCodes: rule.roleCodes, groupCodes, userIds: rule.userIds }
+      : { byPermission: defaultPermission, roleCodes: [], groupCodes: [], userIds: [] }, required);
   }
 
   private async selectUsers(
-    filter: { byPermission: string | null; roleCodes: string[]; userIds: number[] },
+    filter: { byPermission: string | null; roleCodes: string[]; groupCodes: string[]; userIds: number[] },
     required: string[],
   ): Promise<CurrentUser[]> {
     const rows = (await this.database.query<{ user_id: string; username: string | null; role_id: string | number }>(
-      `SELECT u.user_id::text AS user_id, u.username, u.role_id
-         FROM users u
-         JOIN roles r ON r.role_id = u.role_id AND r.is_active = true
-        WHERE u.is_active = true AND COALESCE(u.is_service_account, false) = false
-          AND CASE WHEN $1::text IS NOT NULL
-                   THEN EXISTS (SELECT 1 FROM user_effective_permissions uep
-                                 WHERE uep.user_id = u.user_id AND uep.permission_name = $1)
-                   ELSE (r.role_code = ANY($2::text[]) OR u.user_id = ANY($3::bigint[])) END
-          AND NOT EXISTS (
-            SELECT 1 FROM unnest($4::text[]) AS need(permission_name)
-             WHERE NOT EXISTS (SELECT 1 FROM user_effective_permissions uep
-                                WHERE uep.user_id = u.user_id AND uep.permission_name = need.permission_name))
-        ORDER BY u.user_id`,
-      [filter.byPermission, filter.roleCodes, filter.userIds, required],
+      ELIGIBLE_USERS_SQL,
+      [filter.byPermission, filter.roleCodes, filter.userIds, required, filter.groupCodes, null],
     )).rows;
     // Effective authorization of each user (same snapshot as the token), in the order of the query.
     const effective = await loadEvaluationUsersWith(this.database, rows.map((row) => row.user_id), { requireActiveRole: true });
@@ -295,6 +326,20 @@ export class PgProcurementNotificationsRepository {
     }));
   }
 
+  private async stillEligible(
+    client: DatabaseClient,
+    userId: number,
+    recipientsJson: unknown,
+    eligibility: NonNullable<ServiceRuleGuard['eligibility']>,
+  ): Promise<boolean> {
+    const recipients = parseServiceRecipients(recipientsJson);
+    const custom = recipients.roleCodes.length > 0 || recipients.groupCodes.length > 0 || recipients.userIds.length > 0;
+    const rows = await client.query(ELIGIBLE_USERS_SQL, custom
+      ? [null, recipients.roleCodes, recipients.userIds, eligibility.required, recipients.groupCodes, userId]
+      : [eligibility.defaultPermission, [], [], eligibility.required, [], userId]);
+    return (rows.rowCount ?? 0) > 0;
+  }
+
   /**
    * Уведомление сервиса (§5.7 п.4): событие outbox с ключом идемпотентности и in_app-запись с ключом `${key}:in_app`
    * в одной транзакции; повтор с тем же ключом ничего не создаёт. Событие сразу «processed»: реле его не обрабатывает.
@@ -303,14 +348,24 @@ export class PgProcurementNotificationsRepository {
     return this.database.transaction(async (client: DatabaseClient) => {
       let balloonMode: BalloonMode | null = null;
       if (guard) {
+        // Access groups: authorization commands (memberships, the switch) take permissions_state FOR UPDATE first; this
+        // share lock — taken first here too — orders the write after any such change, so the check below sees it.
+        if (guard.eligibility) {
+          const state = await client.query<{ version: string }>('SELECT version FROM permissions_state WHERE id = true FOR SHARE');
+          const authorizationVersion = guard.eligibility.authorizationVersion;
+          if (authorizationVersion !== undefined && Number(state.rows[0]?.version) !== authorizationVersion) return false;
+        }
         // Точка сериализации с PATCH правила (R1-4): FOR SHARE строки правила ДО вставок; выключено или получатели
         // сменились после выборки прогона — запись пропускается (следующий прогон выберет заново).
-        const rule = (await client.query<{ is_enabled: boolean; recipients_hash: string; channels_json: unknown; balloon_mode: string | null }>(
-          `SELECT is_enabled, md5(COALESCE(recipients_json, '{}'::jsonb)::text) AS recipients_hash, channels_json, balloon_mode
+        const rule = (await client.query<{ is_enabled: boolean; recipients_hash: string; recipients_json: unknown; channels_json: unknown; balloon_mode: string | null }>(
+          `SELECT is_enabled, md5(COALESCE(recipients_json, '{}'::jsonb)::text) AS recipients_hash, recipients_json, channels_json, balloon_mode
              FROM notification_rules WHERE rule_code = $1 FOR SHARE`,
           [guard.ruleCode],
         )).rows[0];
         if (!rule || rule.is_enabled !== true || rule.recipients_hash !== guard.recipientsHash) return false;
+        // The recipient now: still in the rule's audience (role, user, ACTIVE group with the switch on) and with the
+        // required rights — a removal or the switch turned off between the selection and this write drops the write.
+        if (guard.eligibility && !(await this.stillEligible(client, input.userId, rule.recipients_json, guard.eligibility))) return false;
         // Балун — по строке правила под той же блокировкой (план 2026-10-03 R1-4): смена канала/режима во время прохода
         // учитывается в момент записи.
         balloonMode = balloonFor({
@@ -344,4 +399,15 @@ export class PgProcurementNotificationsRepository {
       return result.created;
     });
   }
+}
+
+/** Recipients of a service rule as stored (unknown shapes ignored). */
+function parseServiceRecipients(value: unknown): { roleCodes: string[]; groupCodes: string[]; userIds: number[] } {
+  const recipients = (value ?? {}) as { roleCodes?: unknown; groupCodes?: unknown; userIds?: unknown };
+  const codes = (list: unknown) => (Array.isArray(list) ? list.filter((code): code is string => typeof code === 'string') : []);
+  return {
+    roleCodes: codes(recipients.roleCodes),
+    groupCodes: codes(recipients.groupCodes),
+    userIds: Array.isArray(recipients.userIds) ? recipients.userIds.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0) : [],
+  };
 }

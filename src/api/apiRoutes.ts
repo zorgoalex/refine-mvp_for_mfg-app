@@ -378,6 +378,14 @@ export const apiRoutes = {
     byId: (ruleId: string) => backendApiPath(`/notification-rules/${encodeURIComponent(ruleId)}`),
     eventTypes: backendApiPath('/notification-event-types'),
   },
+  accessGroups: {
+    list: backendApiPath('/permissions/access-groups'),
+    settings: backendApiPath('/permissions/access-groups/settings'),
+    lookup: backendApiPath('/permissions/access-groups/lookup'),
+    byId: (groupId: number) => backendApiPath(`/permissions/access-groups/${groupId}`),
+    permissions: (groupId: number) => backendApiPath(`/permissions/access-groups/${groupId}/permissions`),
+    members: (groupId: number) => backendApiPath(`/permissions/access-groups/${groupId}/members`),
+  },
   permissions: {
     rolesMatrix: backendApiPath('/permissions/roles-matrix'),
     resetRoleToDefaults: (roleId: number) =>
@@ -518,6 +526,8 @@ export const apiRoutes = {
     changePassword: (userId: number) => backendApiPath(`/users/${userId}/change-password`),
     deactivate: (userId: number) => backendApiPath(`/users/${userId}/deactivate`),
     activate: (userId: number) => backendApiPath(`/users/${userId}/activate`),
+    authorization: (userId: number) => backendApiPath(`/users/${userId}/authorization`),
+    accessGroups: (userId: number) => backendApiPath(`/users/${userId}/access-groups`),
   },
   vlm: {
     health: backendApiPath('/vlm/health'),

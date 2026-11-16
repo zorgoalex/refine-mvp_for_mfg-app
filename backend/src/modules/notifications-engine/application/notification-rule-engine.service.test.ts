@@ -104,6 +104,23 @@ describe('NotificationRuleEngineService.processEvent', () => {
     expect(deps.notificationWrite.insertIfAbsent).not.toHaveBeenCalled();
   });
 
+  it('access groups: a rule naming groups takes the permissions_state share lock BEFORE resolving recipients', async () => {
+    const order: string[] = [];
+    const lockingClient = { query: vi.fn(async (sql: string) => { order.push(sql); return { rows: [], rowCount: 1 }; }) };
+    const deps = fakes({
+      ruleRepo: { listEnabledByEvent: vi.fn(async () => [rule({ recipients: { groupCodes: ['managers'] } })]) },
+      recipientResolver: { resolve: vi.fn(async () => { order.push('resolve'); return [1]; }) },
+    });
+    await service(deps).processEvent(lockingClient as any, event());
+    expect(order).toEqual(['SELECT version FROM permissions_state WHERE id = true FOR SHARE', 'resolve']);
+
+    // without groups: no lock (the existing behaviour)
+    const plainClient = { query: vi.fn() };
+    const plain = fakes({ ruleRepo: { listEnabledByEvent: vi.fn(async () => [rule({ recipients: { userIds: [1] } })]) } });
+    await service(plain).processEvent(plainClient as any, event());
+    expect(plainClient.query).not.toHaveBeenCalled();
+  });
+
   it('multi-fires: two enabled matching rules both fire and write per (rule, recipient)', async () => {
     const ruleA = rule({ notificationRuleId: 'rule-a', recipients: { userIds: [1, 2] } });
     const ruleB = rule({ notificationRuleId: 'rule-b', recipients: { resolvers: ['stage_assignee'] } });

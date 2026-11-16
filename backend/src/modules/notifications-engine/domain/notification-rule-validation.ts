@@ -1,4 +1,4 @@
-import { getEventDefinition } from './notification-event-registry';
+import { eventSupportsAccessGroups, getEventDefinition } from './notification-event-registry';
 import {
   NOTIFICATION_CHANNELS,
   BALLOON_MODES,
@@ -7,6 +7,8 @@ import {
   type NotificationRuleConditions,
   type NotificationRuleRecipients,
 } from './notification-rule.types';
+
+const ACCESS_GROUP_CODE = /^[a-z][a-z0-9_]{1,40}$/;
 
 export interface ValidateRuleContext {
   knownRoleCodes: readonly string[];
@@ -68,7 +70,7 @@ export function validateNotificationRuleInput(
     return { ok: false, code: 'INVALID_BALLOON_MODE', detail: String(input.balloonMode) };
   }
 
-  const { resolvers = [], roleCodes = [], userIds = [] } = input.recipients ?? {};
+  const { resolvers = [], roleCodes = [], groupCodes = [], userIds = [] } = input.recipients ?? {};
   // Событие сервиса (сводки закупа): получатели — роли и/или пользователи (пусто — умолчание сервиса: право
   // «Закупки: управление»); способы определения (resolvers) не применимы. Сервис всегда сверяет право получателя.
   if (def.owner === 'service') {
@@ -80,7 +82,7 @@ export function validateNotificationRuleInput(
       || (input.titleTemplate ?? null) !== null || (input.messageTemplate ?? null) !== null) {
       return { ok: false, code: 'SERVICE_EVENT_FIELDS_FIXED' };
     }
-  } else if (resolvers.length === 0 && roleCodes.length === 0 && userIds.length === 0) {
+  } else if (resolvers.length === 0 && roleCodes.length === 0 && groupCodes.length === 0 && userIds.length === 0) {
     return { ok: false, code: 'EMPTY_RECIPIENTS' };
   }
   for (const resolver of resolvers) {
@@ -91,6 +93,15 @@ export function validateNotificationRuleInput(
   for (const roleCode of roleCodes) {
     if (!ctx.knownRoleCodes.includes(roleCode)) {
       return { ok: false, code: 'UNKNOWN_ROLE_CODE', detail: roleCode };
+    }
+  }
+  if (groupCodes.length > 0 && !eventSupportsAccessGroups(def)) {
+    return { ok: false, code: 'ACCESS_GROUPS_UNSUPPORTED_FOR_EVENT', detail: input.eventType };
+  }
+  // Codes only here; that the groups exist is checked in the rule's transaction (with a lock against their deletion).
+  for (const groupCode of groupCodes) {
+    if (typeof groupCode !== 'string' || !ACCESS_GROUP_CODE.test(groupCode)) {
+      return { ok: false, code: 'INVALID_GROUP_CODE', detail: String(groupCode) };
     }
   }
   for (const userId of userIds) {

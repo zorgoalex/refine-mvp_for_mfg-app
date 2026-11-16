@@ -27,6 +27,7 @@ export interface NotificationRuleDraft {
   excludeOrderStatusIds: number[];
   resolvers: RecipientResolverKind[];
   roleCodes: string[];
+  groupCodes: string[];
   userIds: number[];
   titleTemplate: string;
   messageTemplate: string;
@@ -54,6 +55,7 @@ export function emptyDraft(): NotificationRuleDraft {
     excludeOrderStatusIds: [],
     resolvers: [],
     roleCodes: [],
+    groupCodes: [],
     userIds: [],
     titleTemplate: '',
     messageTemplate: '',
@@ -77,6 +79,7 @@ export function buildDraftFromRule(rule: NotificationRuleDto): NotificationRuleD
     excludeOrderStatusIds: [...(rule.conditions.excludeOrderStatusIds ?? [])],
     resolvers: rule.recipients.resolvers ?? [],
     roleCodes: [...(rule.recipients.roleCodes ?? [])],
+    groupCodes: [...(rule.recipients.groupCodes ?? [])],
     userIds: [...(rule.recipients.userIds ?? [])],
     titleTemplate: rule.titleTemplate ?? '',
     messageTemplate: rule.messageTemplate ?? '',
@@ -144,6 +147,7 @@ function buildRecipients(draft: Partial<NotificationRuleDraft>) {
   const recipients: {
     resolvers?: RecipientResolverKind[];
     roleCodes?: string[];
+    groupCodes?: string[];
     userIds?: number[];
   } = {};
 
@@ -153,6 +157,10 @@ function buildRecipients(draft: Partial<NotificationRuleDraft>) {
 
   if (draft.roleCodes?.length) {
     recipients.roleCodes = [...draft.roleCodes];
+  }
+
+  if (draft.groupCodes?.length) {
+    recipients.groupCodes = [...draft.groupCodes];
   }
 
   if (draft.userIds?.length) {
@@ -205,12 +213,14 @@ export function buildUpdatePayload(
   if (draft.eventType && isServiceEventType(draft.eventType)) {
     // Сервисное правило закупа: получатели отправляются ВСЕГДА — пустой выбор `{}` сбрасывает к умолчанию
     // (иначе backend оставил бы прежних получателей, план 2026-10-02 R1-1); способы определения не применимы.
+    // groupCodes always explicit: the backend keeps a rule's groups when the key is absent (older clients).
     result.recipients = {
       ...(recipients.roleCodes ? { roleCodes: recipients.roleCodes } : {}),
+      groupCodes: recipients.groupCodes ?? [],
       ...(recipients.userIds ? { userIds: recipients.userIds } : {}),
     };
   } else if (Object.keys(recipients).length > 0) {
-    result.recipients = recipients;
+    result.recipients = { ...recipients, groupCodes: recipients.groupCodes ?? [] };
   }
 
   if (draft.titleTemplate !== undefined) result.titleTemplate = normalizeTemplate(draft.titleTemplate);

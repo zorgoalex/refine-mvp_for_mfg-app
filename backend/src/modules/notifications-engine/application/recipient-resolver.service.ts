@@ -20,6 +20,9 @@ export class RecipientResolverService {
     if (recipients.roleCodes?.length) {
       for (const id of await this.sources.resolveRoleMembers(client, recipients.roleCodes)) ids.add(id);
     }
+    if (recipients.groupCodes?.length) {
+      for (const id of await this.sources.resolveAccessGroupMembers(client, recipients.groupCodes)) ids.add(id);
+    }
     for (const id of recipients.userIds ?? []) ids.add(id);
     if (ids.size === 0) return [];
     const active = await this.sources.filterActiveUsers(client, [...ids]);

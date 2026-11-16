@@ -5,6 +5,18 @@ import type { VisibilityPort } from '../ports/visibility.port';
 import { RecipientResolverService } from './recipient-resolver.service';
 
 describe('RecipientResolverService', () => {
+  it('adds the members of access groups (the source decides: nobody while access groups are off)', async () => {
+    const sources = fakeSources({
+      resolveAccessGroupMembers: vi.fn(async () => [30, 7]),
+      filterActiveUsers: vi.fn(async (_client, userIds: number[]) => userIds),
+    });
+    const visibility = fakeVisibility({ filterByBaseVisibility: vi.fn(async (_client, userIds: number[]) => userIds) });
+    const result = await new RecipientResolverService(sources, visibility).resolve({} as any, { groupCodes: ['managers'], userIds: [7] }, ctx());
+    expect([...result].sort((a, b) => a - b)).toEqual([7, 30]);
+    expect(sources.resolveAccessGroupMembers).toHaveBeenCalledWith({}, ['managers']);
+    expect(sources.resolveRoleMembers).not.toHaveBeenCalled();
+  });
+
   it('resolves, dedupes, filters active users, and applies base visibility', async () => {
     const sources = fakeSources({
       resolveDynamic: vi.fn(async () => [10]),
@@ -88,6 +100,7 @@ function fakeSources(overrides: Partial<RecipientSourcePort> = {}): RecipientSou
   return {
     resolveDynamic: vi.fn(async () => []),
     resolveRoleMembers: vi.fn(async () => []),
+    resolveAccessGroupMembers: vi.fn(async () => []),
     filterActiveUsers: vi.fn(async () => []),
     ...overrides,
   };

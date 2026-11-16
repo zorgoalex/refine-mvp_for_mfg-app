@@ -212,6 +212,13 @@ export class NotificationRuleEngineService {
       if (rule.groupId == null) return true;
       return groupIds.has(rule.groupId.toLowerCase());
     });
+    // Access groups (plan v6 §5): members of a group and their visibility must come from ONE authorization state. Every
+    // authorization command takes permissions_state FOR UPDATE first; this share lock (taken before any row lock of
+    // this transaction — only reads precede it) keeps memberships, the switch and grants fixed until the event's
+    // notifications and deliveries are written.
+    if (matchingRules.some((rule) => (rule.recipients.groupCodes?.length ?? 0) > 0)) {
+      await client.query('SELECT version FROM permissions_state WHERE id = true FOR SHARE');
+    }
 
     let matched = 0;
     let created = 0;

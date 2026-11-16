@@ -473,12 +473,29 @@ def audit_sql(event, run, details):
     )
 
 
-def flag_sql(value, run, details):
-    """Lock permissions_state (lock order of the matrix commands), audit, set the flag, return the role matrix."""
+# Access groups (plan 2026-10-29 R7 §6): while permissions_state.access_groups_enabled is on, group grants reach Hasura
+# only through the predicates of B and the money columns closed by F2, so neither may be reverted. The check runs after
+# the permissions_state lock in the same transaction as the revert's barrier: the backend command that turns groups on
+# takes that lock too, so a revert and an enable cannot overtake each other. Column-agnostic (before migration 285 the
+# column is missing and the switch counts as off).
+GROUPS_ENABLED_MARKER = "ACCESS_GROUPS_ENABLED"
+
+
+def groups_off_guard_sql(step):
+    return ("DO $ag_guard$ BEGIN IF (SELECT coalesce((to_jsonb(ps) ->> 'access_groups_enabled')::boolean, false) "
+            "FROM public.permissions_state ps WHERE ps.id = true) THEN "
+            f"RAISE EXCEPTION '{GROUPS_ENABLED_MARKER}: access groups are on; turn them off before reverting step {step}'; "
+            "END IF; END $ag_guard$; ")
+
+
+def flag_sql(value, run, details, groups_off_step=None):
+    """Lock permissions_state (lock order of the matrix commands), audit, set the flag, return the role matrix.
+    `groups_off_step`: refuse (whole transaction) while access groups are on."""
     state = "true" if value else "false"
     metadata = {"correlationId": run["runId"], "operator": run["operator"], **details}
     return (
         "SELECT version FROM public.permissions_state WHERE id = true FOR UPDATE; "
+        + (groups_off_guard_sql(groups_off_step) if groups_off_step else "") +
         "INSERT INTO public.audit_log (event, entity_type, entity_id, username, request_id, source, before_json, after_json, diff_json, metadata_json) "
         "SELECT 'permissions.hasura_access_predicates.update', 'permissions_state', 'hasura_access_predicates', "
         f"{_quote('ops:' + run['operator'])}, {_quote(run['runId'])}, 'ops', "
@@ -554,6 +571,7 @@ def fin_state_sql(target, permission, run, details, keep_users=False, revert_int
     intent = _jsonb(revert_intent) if (target == "reverting" and revert_intent is not None) else (
         "hasura_financials_revert" if target == "reverting" else "NULL")
     return ("SELECT version FROM public.permissions_state WHERE id = true FOR UPDATE; "
+            + (groups_off_guard_sql("F2") if target == "reverting" else "")
             + _fin_audit_sql(target, run, details)
             + f"UPDATE public.permissions_state SET hasura_financials_state = {_quote(target)}, hasura_financials_users = {users}, "
             f"hasura_financials_revert = {intent}, updated_at = now() WHERE id = true; "
@@ -579,6 +597,7 @@ def revert_start_sql(permission, allow_reopen, run, details):
     condition = "true" if allow_reopen else f"hasura_financials_users IS NOT NULL AND NOT EXISTS ({lost})"
     # The barrier, its audit (override + reopened users) and the durable intent of this revert: one transaction.
     return ("SELECT version FROM public.permissions_state WHERE id = true FOR UPDATE; "
+            + groups_off_guard_sql("F2")
             + _fin_audit_sql("reverting", run, {**details, "allowReopen": allow_reopen},
                              f"hasura_financials_state = 'closed' AND {condition}", f"jsonb_build_object('reopened', {reopened})")
             + "UPDATE public.permissions_state SET hasura_financials_state = 'reverting', "
@@ -591,6 +610,7 @@ class HasuraError(Exception):
     def __init__(self, status_code, body):
         super().__init__(f"HTTP {status_code}: {body[:300]}")
         self.status_code = status_code
+        self.body = body
 
 
 class Hasura:
@@ -635,9 +655,20 @@ class Hasura:
                           "FROM public.permissions_state ps WHERE ps.id = true", True)
         return rows == ["true"]
 
-    def set_flag(self, value, run, details):
+    def set_flag(self, value, run, details, groups_off_step=None):
         """Sets the flag under the permissions_state lock and returns the role matrix of that same transaction."""
-        return sorted(self._rows(flag_sql(value, run, details), False))
+        return sorted(self._groups_off(lambda: self._rows(flag_sql(value, run, details, groups_off_step), False)))
+
+    @staticmethod
+    def _groups_off(call):
+        """The refusal of groups_off_guard_sql as a RuleError (nothing of that transaction was written)."""
+        try:
+            return call()
+        except HasuraError as error:
+            if GROUPS_ENABLED_MARKER in getattr(error, "body", ""):
+                raise RuleError("access groups are on (permissions_state.access_groups_enabled): turn them off in "
+                                "«Конфигурация → Группы доступа» first; nothing was changed") from None
+            raise
 
     def audit(self, event, run, details):
         self._rows(audit_sql(event, run, details) + "SELECT 'ok'", False)
@@ -647,7 +678,7 @@ class Hasura:
         return rows[0] if rows else "open"
 
     def set_financials_state(self, target, permission, run, details, keep_users=False, revert_intent=None):
-        return sorted(self._rows(fin_state_sql(target, permission, run, details, keep_users, revert_intent), False), key=int)
+        return sorted(self._groups_off(lambda: self._rows(fin_state_sql(target, permission, run, details, keep_users, revert_intent), False)), key=int)
 
     def financials_revert(self):
         """The durable intent of the revert under way (None outside `reverting`)."""
@@ -656,7 +687,7 @@ class Hasura:
         return json.loads(rows[0]) if rows else None
 
     def revert_financials_start(self, permission, allow_reopen, run, details):
-        return sorted(self._rows(revert_start_sql(permission, allow_reopen, run, details), False), key=int)
+        return sorted(self._groups_off(lambda: self._rows(revert_start_sql(permission, allow_reopen, run, details), False)), key=int)
 
     def financials_users(self):
         """The users snapshot of F2 stored with `closed` (None when there is none)."""
@@ -952,7 +983,8 @@ def cmd_revert(hasura, step, state_dir, allow_reopen, run, log):
         if not same_metadata(current, after):
             raise RuleError("metadata changed after step B; refusing to restore the old snapshot over it")
         # From here the backend refuses every narrowing; the comparison below cannot be overtaken.
-        matrix_now = hasura.set_flag(False, run, {"operation": "revert-B-start", "step": "B", "generation": generation})
+        matrix_now = hasura.set_flag(False, run, {"operation": "revert-B-start", "step": "B", "generation": generation},
+                                     groups_off_step="B")
         lost = lost_grants(_read_json(os.path.join(current_dir, "matrix-at-B.json")), matrix_now)
         if lost:
             log(f"Role grants narrowed after step B ({len(lost)}): " + ", ".join(lost[:50]) + (" …" if len(lost) > 50 else ""))

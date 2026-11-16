@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError } from '../../../api/apiError';
 import { notificationRulesApi } from '../../../api/notificationRulesApi';
 import { groupsApi } from '../../../api/groupsApi';
+import { accessGroupsApi } from '../../../api/accessGroupsApi';
 import type {
   DeadlineNotificationEntityType,
   NotificationEventTypeDto,
@@ -148,7 +149,8 @@ function eventTypeLabel(eventType: string): string {
 function describeRecipients(
   rule: NotificationRuleDto,
   roleNameByCode: ReadonlyMap<string, string>,
-  userNameById: ReadonlyMap<number, string>
+  userNameById: ReadonlyMap<number, string>,
+  accessGroupNameByCode: ReadonlyMap<string, string> = new Map()
 ): string {
   const parts: string[] = [];
   if (rule.recipients.resolvers?.length) {
@@ -162,6 +164,13 @@ function describeRecipients(
     parts.push(
       `роли: ${rule.recipients.roleCodes
         .map((code) => roleNameByCode.get(code) ?? 'Роль удалена из справочника')
+        .join(', ')}`
+    );
+  }
+  if (rule.recipients.groupCodes?.length) {
+    parts.push(
+      `группы доступа: ${rule.recipients.groupCodes
+        .map((code) => accessGroupNameByCode.get(code) ?? code)
         .join(', ')}`
     );
   }
@@ -218,6 +227,7 @@ function isRecipientDraftValid(draft: NotificationRuleDraft): boolean {
   if (isServiceEventType(draft.eventType)) return true;
   if (draft.resolvers.length > 0) return true;
   if (draft.roleCodes.length > 0) return true;
+  if (draft.groupCodes.length > 0) return true;
   if (draft.userIds.length > 0) return true;
   return false;
 }
@@ -374,6 +384,51 @@ export function NotificationRulesConfig() {
     [draft.userIds, userOptions]
   );
   const referencesError = orderStatusesError ?? rolesError ?? usersError;
+
+  // Access groups to pick (stage 4): a lookup readable with notifications.manage_rules; on failure the chosen codes
+  // still show (as codes) and the rule keeps them.
+  const [accessGroupOptions, setAccessGroupOptions] = useState<Array<SelectOption<string>>>([]);
+  const [accessGroupsLoading, setAccessGroupsLoading] = useState(false);
+  useEffect(() => {
+    if (!canView) return;
+    let cancelled = false;
+    setAccessGroupsLoading(true);
+    accessGroupsApi.lookup()
+      .then((groups) => {
+        if (!cancelled) {
+          setAccessGroupOptions(groups.map((group) => ({ value: group.code, label: group.isActive ? group.name : `${group.name} (выключена)` })));
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setAccessGroupsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canView]);
+  const accessGroupNameByCode = useMemo(
+    () => new Map(accessGroupOptions.map((option) => [option.value, option.label])),
+    [accessGroupOptions]
+  );
+  const selectedAccessGroupOptions = useMemo(
+    () => withMissingOptions(accessGroupOptions, draft.groupCodes, 'Группа доступа не найдена'),
+    [draft.groupCodes, accessGroupOptions]
+  );
+  // Shown for events that resolve rule recipients; an event delivered by another path refuses groups (backend too).
+  const accessGroupsSelect = (placeholder: string) => (selectedEventType?.supportsAccessGroups === false && draft.groupCodes.length === 0 ? null : (
+    <Select<string[]>
+      mode="multiple"
+      value={draft.groupCodes}
+      onChange={(values) => updateDraft({ groupCodes: values })}
+      options={selectedAccessGroupOptions}
+      placeholder={placeholder}
+      loading={accessGroupsLoading}
+      optionFilterProp="label"
+      showSearch
+      allowClear
+    />
+  ));
 
   const loadGroupOptions = useCallback(async (search?: string) => {
     setGroupOptionsLoading(true);
@@ -675,8 +730,8 @@ export function NotificationRulesConfig() {
               key: 'recipients',
               render: (_, rule) => (
                 <Text type="secondary">{isServiceEventType(rule.eventType)
-                  ? describeServiceRecipients(rule.eventType, (rule.recipients.roleCodes?.length || rule.recipients.userIds?.length) ? describeRecipients(rule, roleNameByCode, userNameById) : null)
-                  : describeRecipients(rule, roleNameByCode, userNameById)}</Text>
+                  ? describeServiceRecipients(rule.eventType, (rule.recipients.roleCodes?.length || rule.recipients.groupCodes?.length || rule.recipients.userIds?.length) ? describeRecipients(rule, roleNameByCode, userNameById, accessGroupNameByCode) : null)
+                  : describeRecipients(rule, roleNameByCode, userNameById, accessGroupNameByCode)}</Text>
               ),
             },
             {
@@ -893,6 +948,7 @@ export function NotificationRulesConfig() {
                   showSearch
                   allowClear
                 />
+                {accessGroupsSelect('Группы доступа (пусто — по умолчанию)')}
                 <Select<number[]>
                   mode="multiple"
                   value={draft.userIds}
@@ -907,7 +963,7 @@ export function NotificationRulesConfig() {
               </Space>
             </Form.Item>
           ) : (
-          <Form.Item label="Получатели" required>
+          <Form.Item label="Получатели" required extra="Участники групп доступа получают уведомления, только пока группы доступа включены.">
             <Space direction="vertical" size={6} style={{ width: '100%' }}>
               <Select<RecipientResolverKind[]>
                 mode="multiple"
@@ -932,6 +988,7 @@ export function NotificationRulesConfig() {
                 showSearch
                 allowClear
               />
+              {accessGroupsSelect('Группы доступа')}
               <Select<number[]>
                 mode="multiple"
                 value={draft.userIds}

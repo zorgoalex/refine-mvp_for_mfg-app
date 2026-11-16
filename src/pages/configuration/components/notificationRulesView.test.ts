@@ -197,6 +197,7 @@ describe('notificationRulesView', () => {
         excludeOrderStatusIds: [7, 8],
         resolvers: ['order_manager'],
         roleCodes: ['admin'],
+        groupCodes: [],
         userIds: [],
         titleTemplate: 'Deadline expired',
         messageTemplate: 'Order {orderId} deadline expired',
@@ -281,16 +282,28 @@ describe('notificationRulesView', () => {
     const { describeServiceRecipients } = await import('./notificationRulesView');
     const base = { eventType: 'procurement.receipt_unallocated', priority: 100, isEnabled: true, channels: ['in_app'] } as unknown as NotificationRuleDraft;
     const chosen = buildUpdatePayload({ ...base, resolvers: [], roleCodes: ['manager'], userIds: [7] } as NotificationRuleDraft, 'кому', '2026-10-02T00:00:00.000Z');
-    expect(chosen.recipients).toEqual({ roleCodes: ['manager'], userIds: [7] });
+    expect(chosen.recipients).toEqual({ roleCodes: ['manager'], groupCodes: [], userIds: [7] });
     const cleared = buildUpdatePayload({ ...base, resolvers: [], roleCodes: [], userIds: [] } as NotificationRuleDraft, 'сброс', '2026-10-02T00:00:00.000Z');
-    expect(cleared.recipients).toEqual({});
+    expect(cleared.recipients).toEqual({ groupCodes: [] });
     const stray = buildUpdatePayload({ ...base, resolvers: ['order_manager'], roleCodes: [], userIds: [3] } as unknown as NotificationRuleDraft, 'x', '2026-10-02T00:00:00.000Z');
-    expect(stray.recipients).toEqual({ userIds: [3] });
+    expect(stray.recipients).toEqual({ groupCodes: [], userIds: [3] });
     // Обычное правило: пустые получатели по-прежнему не отправляются.
     expect(buildUpdatePayload({ ...base, eventType: 'order.status_changed', resolvers: [], roleCodes: [], userIds: [] } as NotificationRuleDraft, 'x', '2026-10-02T00:00:00.000Z').recipients).toBeUndefined();
     expect(describeServiceRecipients('procurement.receipt_unallocated', null)).toBe('По умолчанию: все с правом «Закупки: управление»');
     expect(describeServiceRecipients('procurement.receipt_unallocated', 'пользователи: Иван')).toBe('пользователи: Иван (только с правом «Закупки: просмотр»)');
     expect(describeServiceRecipients('procurement.deficit_digest', 'роли: Снабжение')).toBe('роли: Снабжение (только с правом «Закупки: управление»)');
+  });
+
+  it('access groups (stage 4): groupCodes round-trip through the draft and both payloads, service rules included', () => {
+    const rule = { ...baseRule, recipients: { roleCodes: ['admin'], groupCodes: ['manager_change'] } };
+    const draft = buildDraftFromRule(rule);
+    expect(draft.groupCodes).toEqual(['manager_change']);
+    expect(buildCreatePayload({ ...draft, resolvers: [] }).recipients).toEqual({ roleCodes: ['admin'], groupCodes: ['manager_change'] });
+    expect(buildUpdatePayload({ ...draft, resolvers: [], roleCodes: [] }, 'x', '2026-11-01T00:00:00.000Z').recipients).toEqual({ groupCodes: ['manager_change'] });
+    expect(emptyDraft().groupCodes).toEqual([]);
+    // A service rule with only groups is a custom choice (not the default «everybody with the right»).
+    const service = { ...draft, eventType: 'procurement.receipt_unallocated', resolvers: [], roleCodes: [], userIds: [] } as NotificationRuleDraft;
+    expect(buildUpdatePayload(service, 'кому', '2026-11-01T00:00:00.000Z').recipients).toEqual({ groupCodes: ['manager_change'] });
   });
 
   it('balloon channel (plan 2026-10-03): draft keeps the rule balloon mode; payloads send channels and balloonMode', () => {

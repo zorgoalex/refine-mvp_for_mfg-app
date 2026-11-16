@@ -17,6 +17,7 @@ import { ALLOCATION_ROLES, BALLOON_MODES, NOTIFICATION_CHANNELS, PROCUREMENT_CHA
 interface ParsedRecipientsShape {
   resolvers?: string[];
   roleCodes?: string[];
+  groupCodes?: string[];
   userIds?: number[];
 }
 
@@ -59,6 +60,7 @@ const recipientsSchema = z
   .object({
     resolvers: stringArraySchema.optional(),
     roleCodes: stringArraySchema.optional(),
+    groupCodes: z.array(z.string()).max(50).optional(),
     userIds: integerArraySchema.optional(),
   })
   .strict();
