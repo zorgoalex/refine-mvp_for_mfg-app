@@ -5,7 +5,12 @@ import type {
 } from '../../api/types/cncTelegramApi.types';
 
 const VISUAL_SIZE_RE = /(?<width>\d+(?:[.,]\d+)?)\s*[xхХX*×]\s*(?<height>\d+(?:[.,]\d+)?)/;
-const VISUAL_ORDER_RE = /\b(?<order>\d{4,})\b/;
+// An order line has a word with a standalone 4+ digit number. The order name is that whole word, up to the
+// spaces: "3160-1", "1499/1", "1604-дубль", "АБ-3160-1" (not just "3160"). A leading "#"/"№" and edge brackets are
+// not part of the name. Words without such a number ("К51", but also "18MM", "mdf16") are not taken from labels:
+// those details come from the contour Comments.
+const VISUAL_ORDER_RE = /\b\d{4,}\b/u;
+const VISUAL_ORDER_WORD_EDGE_RE = /^[«"'(\[#№]+|[»"')\],;:.]+$/gu;
 const VISUAL_DETAIL_RE = /(?:поз\.?|позиция|дет\.?|деталь|#)?\s*(?<detail>\d{1,5})/i;
 const NUMBER_RE = /-?\d+(?:[.,]\d+)?(?:[eE][+-]?\d+)?/g;
 const TRANSFORM_NUMBER_TOKEN_RE = /^\s*,?\s*(-?\d+(?:[.,]\d+)?(?:[eE][+-]?\d+)?)/;
@@ -772,8 +777,12 @@ function hasExplicitVisualLabelNear(
 export function parseVisualOrderLine(text: string): string | null {
   const explicit = /^заказ\s*[:№]\s*(.{1,200})$/iu.exec(text.trim());
   if (explicit && !/[\u0000-\u001f\u007f-\u009f]/.test(explicit[1])) return explicit[1].trim() || null;
-  const match = VISUAL_ORDER_RE.exec(text);
-  return match?.groups?.order ?? null;
+  for (const word of text.trim().split(/\s+/u)) {
+    if (!VISUAL_ORDER_RE.test(word)) continue;
+    const name = word.replace(VISUAL_ORDER_WORD_EDGE_RE, '');
+    if (name && name.length <= 200 && !/[\u0000-\u001f\u007f-\u009f]/u.test(name) && VISUAL_ORDER_RE.test(name)) return name;
+  }
+  return null;
 }
 
 function parseVisualDetailLine(text: string): number | null {

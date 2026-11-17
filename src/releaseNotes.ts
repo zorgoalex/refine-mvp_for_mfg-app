@@ -29,6 +29,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
+    version: APP_VERSION, date: "2026-11-17", title: "Загрузка SVG: номер заказа с дефисом распознаётся целиком",
+    services: ["ERP", "Cutting"], repositories: ["repo_erp"],
+    added: [
+      "Создание заказа: под номером заказа подсказка «только цифры, не меньше 4 (например, 3160)»; другой номер подсвечивается предупреждением, но сохранить заказ можно.",
+    ],
+    fixed: [
+      "Загрузка SVG раскроя: номер заказа в подписи детали читается целиком — «3160-1» больше не превращается в «3160», детали не уходят в чужой заказ. Знак «#»/«№» перед номером не считается частью номера.",
+    ],
+  },
+  {
     version: APP_VERSION, date: "2026-11-16", title: "Загрузка SVG и «Базис раскрой» снова работают без «Internal server error»",
     services: ["ERP", "Cutting"], repositories: ["repo_erp"],
     fixed: [

@@ -450,3 +450,31 @@ it('accepts explicit Unicode order labels without guessing from prose', () => {
   expect(parseVisualOrderLine('Заказ: 12')).toBe('12');
   expect(parseVisualOrderLine('Просто текст')).toBeNull();
 });
+
+it('reads the whole order name from a visible label: dashes, slashes and letters, but no spaces', () => {
+  expect(parseVisualOrderLine('3160-1')).toBe('3160-1');
+  expect(parseVisualOrderLine('2423-1')).toBe('2423-1');
+  expect(parseVisualOrderLine('1702-1031')).toBe('1702-1031');
+  expect(parseVisualOrderLine('1499/1')).toBe('1499/1');
+  expect(parseVisualOrderLine('1604-дубль')).toBe('1604-дубль');
+  expect(parseVisualOrderLine('1258тест')).toBe('1258тест');
+  expect(parseVisualOrderLine('АБ-3160-1')).toBe('АБ-3160-1');
+  expect(parseVisualOrderLine('3160')).toBe('3160');
+  expect(parseVisualOrderLine('3160-1 неоклассика')).toBe('3160-1');
+  expect(parseVisualOrderLine('2884 тест')).toBe('2884');
+  expect(parseVisualOrderLine('Заказ 3160-1')).toBe('3160-1');
+  expect(parseVisualOrderLine('(3160-1),')).toBe('3160-1');
+});
+
+it('keeps the number designation out of the order name', () => {
+  expect(parseVisualOrderLine('#3160')).toBe('3160');
+  expect(parseVisualOrderLine('№3160')).toBe('3160');
+  expect(parseVisualOrderLine('№ 3160-1')).toBe('3160-1');
+  expect(parseVisualOrderLine('#3160-1')).toBe('3160-1');
+});
+
+it('does not take positions, service words or prose for an order name', () => {
+  for (const text of ['# 12', '#12', '№5', 'поз.3', '12', 'К51', '18MM', 'mdf16', '18MM2800', 'неоклассика', 'Просто текст', '']) {
+    expect(parseVisualOrderLine(text)).toBeNull();
+  }
+});
