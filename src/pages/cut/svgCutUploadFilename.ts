@@ -6,6 +6,9 @@ export interface SvgCutUploadFileNameHints {
 
 const SVG_EXTENSION_RE = /\.svg$/i;
 const ORDER_NUMBER_RE = /\d{3,8}/g;
+// An order name is the whole word around its number, as in part labels: "3160-1", "1604-дубль", not just "3160".
+const ORDER_WORD_SEPARATOR_RE = /[\s_,;]+/u;
+const ORDER_WORD_EDGE_RE = /^[«"'(\[#№]+|[»"')\],;:.]+$/gu;
 const MATERIAL_THICKNESS_RE = /(\d{1,2})\s*(?:m{2}|мм)/i;
 
 export function parseSvgCutUploadFileNameHints(fileName: string): SvgCutUploadFileNameHints {
@@ -21,10 +24,18 @@ export function parseSvgCutUploadFileNameHints(fileName: string): SvgCutUploadFi
   const orderNames = uniquePreservingOrder(
     orderSegment
       .split('+')
-      .flatMap((part) => part.match(ORDER_NUMBER_RE) ?? []),
+      .flatMap((part) => part.split(ORDER_WORD_SEPARATOR_RE))
+      .flatMap(orderNamesFromWord),
   );
 
   return { machineName, orderNames, materialName };
+}
+
+function orderNamesFromWord(word: string): string[] {
+  const name = word.replace(ORDER_WORD_EDGE_RE, '');
+  if (!/\d{3,}/.test(name)) return [];
+  if (/^\d+$/.test(name)) return name.match(ORDER_NUMBER_RE) ?? [];
+  return name.length <= 200 ? [name] : [];
 }
 
 function splitOrderSegmentAndMaterial(rawOrderSegment: string): { orderSegment: string; materialName: string | null } {

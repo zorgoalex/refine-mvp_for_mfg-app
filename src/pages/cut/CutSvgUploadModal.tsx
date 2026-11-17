@@ -1,5 +1,5 @@
 import { useSvgUploadDetailValidation } from './useSvgUploadDetailValidation';
-import { svgUploadOrderNames } from './svgUploadOrderNames';
+import { missingSvgOrdersWarning, svgFileNameOnlyOrderNames, svgUploadOrderNames } from './svgUploadOrderNames';
 import { Tooltip } from '../../ui/tooltipDelay';
 import { useOwnedObjectUrlState } from './useOwnedObjectUrlState';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -586,7 +586,11 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       }
       const sourceOrderNames = svgUploadOrderNames(result.cutLayout.items, fileNameHints.orderNames);
       if (sourceOrderNames.length > 0) {
-        await applyFileNameOrderHints(sourceOrderNames, generation);
+        await applyFileNameOrderHints(
+          sourceOrderNames,
+          svgFileNameOnlyOrderNames(result.cutLayout.items, fileNameHints.orderNames),
+          generation,
+        );
       }
       if (generation !== fileParseGeneration.current) return;
       if (result.cutLayout.status === 'valid') {
@@ -611,7 +615,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     }
   }
 
-  async function applyFileNameOrderHints(orderNames: string[], generation: number) {
+  async function applyFileNameOrderHints(orderNames: string[], fileNameOnlyOrders: string[], generation: number) {
     setSourceOrderLookupLoading(true);
     try {
       const lookup = await findOrdersByFileNameHints(orderNames);
@@ -622,10 +626,10 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         message.success(`Заказы из SVG найдены: ${lookup.matchedOrderNames.join(', ')}`);
       }
       if (lookup.missingOrderNames.length > 0) {
-        message.warning(`Не найдены заказы из SVG: ${lookup.missingOrderNames.join(', ')}`);
+        message.warning(missingSvgOrdersWarning(lookup.missingOrderNames, fileNameOnlyOrders), 10);
       }
     } catch {
-      if (generation === fileParseGeneration.current) message.warning('Не удалось найти заказы из SVG');
+      if (generation === fileParseGeneration.current) message.warning(`Не удалось найти заказы из SVG: ${orderNames.map(name => `«${name}»`).join(', ')}`, 10);
     } finally {
       if (generation === fileParseGeneration.current) setSourceOrderLookupLoading(false);
     }

@@ -44,4 +44,16 @@ describe('parseSvgCutUploadFileNameHints', () => {
       materialName: 'Фанера 12мм',
     });
   });
+
+  it('keeps the whole order name with a dash or letters', () => {
+    expect(parseSvgCutUploadFileNameHints('CNC#2_3160-1+3179-18MM.svg')).toEqual({
+      machineName: 'CNC#2',
+      orderNames: ['3160-1', '3179'],
+      materialName: 'МДФ 18мм',
+    });
+    expect(parseSvgCutUploadFileNameHints('CNC#1_1604-дубль+1499.svg').orderNames).toEqual(['1604-дубль', '1499']);
+    expect(parseSvgCutUploadFileNameHints('CNC#1_3160-1.svg').orderNames).toEqual(['3160-1']);
+    expect(parseSvgCutUploadFileNameHints('CNC#1_#3160+№3161.svg').orderNames).toEqual(['3160', '3161']);
+    expect(parseSvgCutUploadFileNameHints('CNC#1_3160_3161.svg').orderNames).toEqual(['3160', '3161']);
+  });
 });
