@@ -711,6 +711,12 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
             <p className="ant-upload-text">SVG-файл раскроя</p>
             <p className="ant-upload-hint">Файл проверяется сразу после выбора</p>
           </Upload.Dragger>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }} data-testid="svg-upload-order-name-hint">
+            Номер заказа в подписи детали читается целым словом до пробела, если в нём есть число из 4+ цифр:
+            3160-1, 1604-дубль, 1499/1; «#3160» и «№3160» — как 3160. Подпись важнее комментария SVG. Номер без
+            4 цифр подряд (К51) берётся только из комментария детали: без комментария деталь не распознается, а
+            рядом с подписью другого заказа может взять её номер.
+          </Typography.Text>
 
           {parsed && (
             <SvgValidationSummary

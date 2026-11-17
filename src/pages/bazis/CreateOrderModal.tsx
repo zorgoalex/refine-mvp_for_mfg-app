@@ -15,6 +15,7 @@ import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
 import { resolveDefaultNewOrderStatusId } from '../../domain/orderStatusDefaults';
 import { createBackendSelectProps, useOrderFormData } from '../../hooks/useOrderFormData';
 import { RevisionTree } from './RevisionTree';
+import { ORDER_NUMBER_HINT } from '../orders/orderNumberHint';
 
 const { Text } = Typography;
 
@@ -256,7 +257,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
               name="orderName"
               style={{ minWidth: 220, flex: 1 }}
               rules={[{ required: true, message: 'Укажите номер заказа' }, nameRule('order_name')]}
-              extra={defaultOrderNameLoading ? 'Подбираю следующий номер…' : undefined}
+              extra={defaultOrderNameLoading ? 'Подбираю следующий номер…' : ORDER_NUMBER_HINT}
             >
               <Input placeholder="Например, 1259" />
             </Form.Item>
