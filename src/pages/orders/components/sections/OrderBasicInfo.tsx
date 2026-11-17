@@ -40,6 +40,7 @@ import {
   isWorkspaceOperationOwnershipLost,
   runPageOwnedWorkspaceOperation,
 } from '../../../../workspace/workspaceOperationPins';
+import { isRecommendedOrderNumber, ORDER_NUMBER_HINT } from '../../orderNumberHint';
 
 interface OrderBasicInfoProps {
   /** Bazis draft-режим: клиент зафиксирован клиентом Базис-проекта (backend
@@ -488,8 +489,13 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
             <Form.Item
               label="Название заказа"
               required
-              help={!header.order_name && 'Обязательное поле'}
-              validateStatus={!header.order_name ? 'error' : ''}
+              help={!header.order_name
+                ? 'Обязательное поле'
+                : !header.order_id && !isRecommendedOrderNumber(header.order_name) ? ORDER_NUMBER_HINT : undefined}
+              extra={!header.order_id && !header.order_name ? ORDER_NUMBER_HINT : undefined}
+              validateStatus={!header.order_name
+                ? 'error'
+                : !header.order_id && !isRecommendedOrderNumber(header.order_name) ? 'warning' : ''}
             >
               <Input
                 value={header.order_name}

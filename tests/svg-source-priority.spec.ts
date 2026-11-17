@@ -105,3 +105,85 @@ test('unidentified safe contours render even when no detail can be imported; uns
   expect(result).toMatchObject({status:'invalid',accepted:0,requested:0,contours:1,injected:0});
   expect(result.text).toContain('# <Test>');
 });
+
+test('order names with a dash stay whole: CNC#2 3160-1 + 3179', async ({page}) => {
+  const svg = readFileSync('tests/fixtures/svg-source-priority/dashed-order-3160-1.svg', 'utf8');
+  const parsed = await page.evaluate(svg => window.svgPriorityParser.parseSvgCutUploadText(svg, 'CNC#2_3160-1+3179-18MM.svg'), svg);
+  const identities = parsed.cutLayout.items.map(item => `${item.orderName}#${item.detailNumber}`).sort();
+  expect(identities).toEqual([
+    '3160-1#1', '3160-1#11', '3160-1#11', '3160-1#12', '3160-1#12', '3160-1#3', '3160-1#4', '3160-1#5', '3160-1#5', '3160-1#7',
+    '3179#7', '3179#8', '3179#9', '3179#9',
+  ]);
+  expect(parsed.cutLayout.reasons).toEqual([]);
+});
+
+const parseIdentities = async (page: import('@playwright/test').Page, svg: string) => page.evaluate(svg => {
+  const parsed = window.svgPriorityParser.parseSvgCutUploadText(svg, 'service-labels.svg');
+  return parsed.cutLayout.items.map(item => `${item.sourceElementId}=${item.orderName}#${item.detailNumber}`).sort();
+}, svg);
+
+test('a service label between the order and the position does not take the order line', async ({page}) => {
+  for (const service of ['18MM', 'mdf16', 'Лист1']) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000mm" height="500mm" viewBox="0 0 1000 500">
+      <rect id="a-PartContour" x="20" y="20" width="200" height="200"><metadata><odm name="Comments" value="3160-1#12#@200*200@"/></metadata></rect>
+      <rect id="b-PartContour" x="240" y="20" width="200" height="200"><metadata><odm name="Comments" value="3179#9#@200*200@"/></metadata></rect>
+      <text x="120" y="60">3160-1</text><text x="120" y="80">${service}</text><text x="120" y="100"># 12</text><text x="120" y="120">200*200</text>
+      <text x="340" y="60">3179</text><text x="340" y="80">${service}</text><text x="340" y="100"># 9</text><text x="340" y="120">200*200</text>
+    </svg>`;
+    expect(await parseIdentities(page, svg)).toEqual(['a-PartContour=3160-1#12', 'b-PartContour=3179#9']);
+  }
+});
+
+test('the number sign is not part of the order name, with or without Comments', async ({page}) => {
+  for (const [sign, comments] of [['#', true], ['№', true], ['#', false]] as const) {
+    const meta = comments ? '<metadata><odm name="Comments" value="3160#12#@200*200@"/></metadata>' : '';
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000mm" height="500mm" viewBox="0 0 1000 500">
+      <rect id="a-PartContour" x="20" y="20" width="200" height="200">${meta}</rect>
+      <g><text x="120" y="60">${sign}3160</text><text x="120" y="100"># 12</text><text x="120" y="120">200*200</text></g>
+    </svg>`;
+    expect(await parseIdentities(page, svg)).toEqual(['a-PartContour=3160#12']);
+  }
+});
+
+test('foreign Comments do not promote service words; a letters order name comes from its contour Comments', async ({page}) => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000mm" height="500mm" viewBox="0 0 1000 500">
+    <rect id="a-PartContour" x="20" y="20" width="200" height="200"><metadata><odm name="Comments" value="К51#3#@200*200@"/></metadata></rect>
+    <rect id="b-PartContour" x="600" y="20" width="200" height="200"><metadata><odm name="Comments" value="3160#12#@200*200@"/></metadata></rect>
+    <metadata><odm name="Comments" value="18MM#0#@1*1@"/><odm name="Comments" value="18MM#1#@1*1@"/></metadata>
+    <g><text x="120" y="60">К51</text><text x="120" y="100"># 3</text><text x="120" y="120">200*200</text></g>
+    <text x="700" y="60">3160</text><text x="700" y="80">18MM</text><text x="700" y="100"># 12</text><text x="700" y="120">200*200</text>
+  </svg>`;
+  expect(await parseIdentities(page, svg)).toEqual(['a-PartContour=К51#3', 'b-PartContour=3160#12']);
+});
+
+test('the label wins over Comments for an order name with a 4-digit number; other names come from Comments', async ({page}) => {
+  const cases = [
+    ['3160-1', '3160#3#@200*200@', '3160-1'],
+    ['1604-дубль', '3160#3#@200*200@', '1604-дубль'],
+    ['К51', 'К51#3#@200*200@', 'К51'],
+  ] as const;
+  for (const [label, comments, expected] of cases) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000mm" height="500mm" viewBox="0 0 1000 500">
+      <rect id="a-PartContour" x="20" y="20" width="200" height="200"><metadata><odm name="Comments" value="${comments}"/></metadata></rect>
+      <g><text x="120" y="60">${label}</text><text x="120" y="100"># 3</text><text x="120" y="120">200*200</text></g>
+    </svg>`;
+    expect(await parseIdentities(page, svg), `${label} / ${comments}`).toEqual([`a-PartContour=${expected}#3`]);
+  }
+});
+
+test('service words never become the order name, however the label is grouped', async ({page}) => {
+  for (const service of ['18MM', 'mdf16', 'Лист1']) {
+    const layouts = [
+      `<g id="orderNumLayer"><g><text x="120" y="60">3160-1</text></g><text x="120" y="80">${service}</text><text x="120" y="100"># 12</text><text x="120" y="120">200*200</text></g>`,
+      `<g id="orderNumLayer"><text x="120" y="60">3160-1</text><g><text x="120" y="80">${service}</text><text x="120" y="100"># 12</text><text x="120" y="120">200*200</text></g></g>`,
+      `<text x="120" y="60">3160-1</text><text x="120" y="80">${service}</text><text x="120" y="100"># 12</text><text x="120" y="120">200*200</text>`,
+    ];
+    for (const layout of layouts) {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000mm" height="500mm" viewBox="0 0 1000 500">
+        <rect id="a-PartContour" x="20" y="20" width="200" height="200"><metadata><odm name="Comments" value="3160-1#12#@200*200@"/></metadata></rect>
+        ${layout}
+      </svg>`;
+      expect(await parseIdentities(page, svg), `${service}: ${layout}`).toEqual(['a-PartContour=3160-1#12']);
+    }
+  }
+});
