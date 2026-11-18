@@ -72,13 +72,20 @@ export class NotificationService {
     return { updatedCount };
   }
 
-  async claimBalloons(input: { currentUser: CurrentUser | undefined; token: string; limit: number; capabilities?: readonly string[] }) {
+  async claimBalloons(input: {
+    currentUser: CurrentUser | undefined; token: string; limit: number; capabilities?: readonly string[]; openNotificationIds?: readonly string[];
+  }) {
     const currentUser = requireCurrentUser(input.currentUser);
     const token = parseNotificationId(input.token);
-    const limit = Math.min(Math.max(Math.trunc(input.limit), 1), MAX_BALLOONS_PER_CLAIM);
+    const limit = Math.min(Math.max(Math.trunc(input.limit), 0), MAX_BALLOONS_PER_CLAIM);
     const mandatory = (input.capabilities ?? []).includes(MANDATORY_BALLOON_CAPABILITY);
-    const items = await this.deps.repository.claimBalloonsForUser({ viewer: currentUser, token, limit, mandatory });
-    return { items };
+    const items = limit > 0 ? await this.deps.repository.claimBalloonsForUser({ viewer: currentUser, token, limit, mandatory }) : [];
+    // Balloons the tab still shows that a newer balloon of their slot replaced: the tab closes them.
+    const open = [...new Set((input.openNotificationIds ?? []).map(parseNotificationId))];
+    const superseded = open.length && this.deps.repository.supersededBalloonsForUser
+      ? await this.deps.repository.supersededBalloonsForUser({ viewer: currentUser, notificationIds: open })
+      : [];
+    return { items, superseded };
   }
 
   async ackBalloons(input: { currentUser: CurrentUser | undefined; token: string; notificationIds: string[] }) {

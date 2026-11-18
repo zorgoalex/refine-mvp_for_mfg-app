@@ -23,6 +23,8 @@ import {
   importanceRank,
   levelForImportance,
   maxImportance,
+  onecAlertBalloonSlot,
+  onecAlertSlotKinds,
   onecAlertGroup,
   onecAlertGroupOf,
   quietHoursEnd,
@@ -402,6 +404,11 @@ export class OnecAlertNotifier {
         members: members.map((episode) => ({ ...episode, severity: episode.severityMax })),
       });
       const level = levelOf(plan.stage, importance);
+      // The balloon slot shows the current condition (review R1-3): a recovery notice while another alarm of the slot is
+      // still open goes to the bell only, so it never replaces that alarm's balloon.
+      const balloon = plan.stage === 'resolved' && (await this.repository.hasOpenAlertsInSlot(tx, plan.sourceId, onecAlertSlotKinds(plan.group)))
+        ? null
+        : { mode: 'mandatory' as const, slot: onecAlertBalloonSlot(plan.group, plan.sourceId) };
       const rows: RecipientRowInput[] = [];
       for (const user of chosen.users) {
         const { notificationId } = await this.write.insertIfAbsent(tx, {
@@ -414,10 +421,12 @@ export class OnecAlertNotifier {
           sourceType: ONEC_ALERT_NOTIFICATION_SOURCE,
           sourceId: String(dispatchId),
           idempotencyKey: `${ONEC_ALERT_NOTIFICATION_SOURCE}:${dispatchId}:${user.userId}`,
-          balloonMode: 'mandatory',
+          // One balloon per 1C source and condition: a fresh alarm or «восстановлен» replaces the previous balloon.
+          balloonMode: balloon?.mode ?? null,
+          balloonSlot: balloon?.slot ?? null,
         });
         rows.push({ channel: 'in_app', userId: user.userId, fallbackLevel: chosen.level, status: 'written', notificationId });
-        rows.push({ channel: 'balloon', userId: user.userId, fallbackLevel: chosen.level, status: 'written', notificationId });
+        if (balloon) rows.push({ channel: 'balloon', userId: user.userId, fallbackLevel: chosen.level, status: 'written', notificationId });
       }
       if (externalState === 'suppressed') {
         rows.push(...targets.map((target) => skippedRow(target, 'RESOLVED_BEFORE_SEND')));

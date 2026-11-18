@@ -14,6 +14,8 @@ import { OnecAlertNotifier } from './onec-alert-notifier';
 import { OnecAlertProjector } from './onec-alert-projector';
 import { OnecAuditWriter } from './onec-audit';
 import { OnecEtlRevocationService } from './onec-etl-revocation.service';
+import { etlAutoResetDue, etlStall } from '../domain/onec-etl-stall';
+import { OnecCommandsService } from './onec-commands.service';
 
 /** Monitor events are system-initiated; one request/correlation id per tick. */
 function systemEventBase(now: Date) {
@@ -28,6 +30,8 @@ const OUTBOX_BATCH = 50;
 const OUTBOX_MAX_ATTEMPTS = 10;
 const OUTBOX_STALE_LOCK_MS = 10 * 60 * 1000;
 const WORKER_ID = `onec-monitor-${process.pid}`;
+/** Source module of ERP's own `etl_reset` (idempotency keys are per source module). */
+const ETL_AUTO_RESET_SOURCE = 'onec-monitor';
 
 /**
  * Owner-gated background loop (BACKEND_ONEC_MONITOR_OWNER=in_process):
@@ -52,6 +56,7 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
     @Inject(OnecAuditWriter) private readonly audit: OnecAuditWriter,
     @Inject(OnecEtlRevocationService) private readonly revocation: OnecEtlRevocationService,
     @Optional() @Inject(OnecAlertNotifier) private readonly notifier?: OnecAlertNotifier,
+    @Optional() @Inject(OnecCommandsService) private readonly commandsService?: OnecCommandsService,
   ) {}
 
   onModuleInit(): void {
@@ -72,6 +77,7 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
     try {
       await this.database.withAdvisoryLock('onec-agent-monitor', async () => {
         await this.detectSilentAgents(now);
+        await this.detectStalledEtl(now);
         await this.detectExpiringCertificates(now);
         await this.expireUndeliveredCommands(now);
         await this.recoverEtl(now);
@@ -145,6 +151,99 @@ export class OnecMonitorService implements OnModuleInit, OnModuleDestroy {
           idempotencyKey: `onec.agent.silent:${row.agent_id}:${silentSince}`,
         }),
       );
+    }
+  }
+
+  /**
+   * «Выгрузка стоит» (incident 12–18.11.2026): an online agent with no successful run for the threshold raises a
+   * critical alert; a later success resolves it. A silent agent is reported by agent_silent instead.
+   */
+  async detectStalledEtl(now: Date): Promise<void> {
+    const silentAfterMs = this.runtime.get().heartbeatIntervalMs * 3;
+    for (const row of await this.repository.listEtlStallFacts()) {
+      const receivedAt: Date | null = row.received_at ?? null;
+      if (!receivedAt || now.getTime() - receivedAt.getTime() > silentAfterMs) continue;
+      const stall = etlStall({
+        now,
+        mode: row.mode ?? null,
+        etlIntervalMinutes: row.etl_interval_minutes ?? null,
+        lastSuccessAt: row.last_success_at ?? null,
+        firstRunAt: row.first_run_at ?? null,
+      });
+      if (!stall) continue;
+      await this.repository.insertOutboxEvent(
+        this.repository.db,
+        buildOnecEvent({
+          ...systemEventBase(now),
+          eventType: 'onec.etl.stalled',
+          severity: 'critical',
+          agentId: row.agent_id,
+          sourceId: Number(row.source_id),
+          subject: { type: 'onec_agent', id: row.agent_id },
+          data: { lastSuccessAt: row.last_success_at ? new Date(row.last_success_at).toISOString() : null, since: stall.since.toISOString(), thresholdMinutes: stall.thresholdMinutes },
+          occurredAt: now,
+          idempotencyKey: `onec.etl.stalled:${row.agent_id}:${stall.key}`,
+        }),
+      );
+      if (etlAutoResetDue(now, stall.since, row.agent_version ?? null)) {
+        await this.autoResetEtl(row.agent_id, stall.key, stall.since, row.last_success_at ? new Date(row.last_success_at) : null, now);
+      }
+    }
+  }
+
+  /**
+   * The second safeguard (agent-bridge to-onec/0192, to-erp/0219): a stall of 24 h makes ERP send `etl_reset` itself —
+   * once per stall (idempotency key by the last success). The agent closes its stuck runs and queues one full run; a
+   * second reset of the same run is refused by the agent, so a duplicate is harmless. Audited, the agent is woken.
+   */
+  async autoResetEtl(agentId: string, stallKey: string, since: Date, lastSuccessAt: Date | null, now: Date): Promise<void> {
+    if (!this.commandsService) return;
+    const idempotencyKey = `etl-auto-reset:${agentId}:${stallKey}`;
+    try {
+      await this.commands.transaction(async (tx) => {
+        // Once per stall: an existing command of this stall ends here, before a new expiry would make the intent differ
+        // (review R2-2).
+        if (await this.commands.findByIdempotencyKey(tx, ETL_AUTO_RESET_SOURCE, idempotencyKey)) return;
+        // Only the runs of THIS stall (review R2-1), chosen in ONE statement together with the check that the stall is
+        // still current (review R3-1): when the last success moved since the stall was read, nothing is chosen, so a run
+        // of a newer episode never gets into the command. Runs opened since the stall began that did not succeed,
+        // newest first (the agent caps 100).
+        const runs = await tx.query<{ run_id: string }>(
+          `WITH last AS (
+             SELECT max(completed_at) AS ts FROM onec_etl_runs
+              WHERE agent_id = $1 AND status = 'completed' AND COALESCE(entities_failed, 0) = 0)
+           SELECT r.run_id::text FROM onec_etl_runs r, last
+            WHERE r.agent_id = $1 AND r.created_at >= $2
+              AND NOT (r.status = 'completed' AND COALESCE(r.entities_failed, 0) = 0)
+              AND ((last.ts IS NULL AND $3::timestamptz IS NULL)
+                   OR date_trunc('milliseconds', last.ts) = date_trunc('milliseconds', $3::timestamptz))
+            ORDER BY r.created_at DESC LIMIT 100`,
+          [agentId, since, lastSuccessAt],
+        );
+        if (runs.rows.length === 0) return;
+        const enqueued = await this.commandsService!.enqueue(tx, {
+          agentId,
+          commandType: 'etl_reset',
+          payload: { runIds: runs.rows.map((row) => row.run_id), reason: 'ERP: выгрузка стоит больше 24 часов' },
+          expiresAtUtc: new Date(now.getTime() + 6 * 60 * 60_000).toISOString(),
+          requestedBy: { displayName: 'onec-monitor' },
+          sourceModule: ETL_AUTO_RESET_SOURCE,
+          sourceEntityType: 'onec_agent',
+          sourceEntityId: agentId,
+          idempotencyKey,
+        });
+        if (!enqueued.created) return;
+        await this.audit.bySystem(tx, 'onec-monitor', `onec-monitor:etl-auto-reset:${now.toISOString()}`, {
+          event: 'onec.command.enqueued',
+          entityType: 'onec_agent_command',
+          entityId: enqueued.command.commandId,
+          after: { commandType: 'etl_reset', payloadHash: enqueued.command.payloadHash, reason: 'etl_stalled_24h', stallKey, runIds: runs.rows.length },
+          metadata: { scheduledAt: now.toISOString() },
+        }, { agentId, sourceId: enqueued.command.sourceId, commandId: enqueued.command.commandId, correlationId: enqueued.command.correlationId ?? null });
+        this.logger.warn(`1C ETL stalled 24 h: etl_reset enqueued for ${agentId}`);
+      });
+    } catch (error) {
+      this.logger.error(`1C ETL auto reset failed for ${agentId}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

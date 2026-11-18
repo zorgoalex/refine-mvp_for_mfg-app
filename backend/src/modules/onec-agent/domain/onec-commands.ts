@@ -29,6 +29,8 @@ export const ONEC_ADMIN_COMMAND_TYPES = [
   'run_connectivity_test',
   'collect_diagnostics',
   'rotate_certificate_hint',
+  // Agent 1.3.17 (agent-bridge to-erp/0219): close stuck ETL runs and queue one new full run.
+  'etl_reset',
 ] as const;
 export type OnecAdminCommandType = (typeof ONEC_ADMIN_COMMAND_TYPES)[number];
 
@@ -44,6 +46,10 @@ export const OPERATOR_COMMAND_SCHEMAS: Record<string, z.ZodType<Record<string, u
   run_connectivity_test: empty,
   collect_diagnostics: empty,
   rotate_certificate_hint: empty,
+  etl_reset: z.object({
+    runIds: z.array(z.string().uuid()).min(1).max(100).optional(),
+    reason: z.string().trim().min(1).max(500).optional(),
+  }).strict(),
   integration_probe: z.object({ marker: z.string().min(1).max(256) }).strict(),
 };
 

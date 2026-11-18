@@ -31,7 +31,7 @@ export interface BatchAck {
 }
 
 /** 503 that attests nothing was stored; the agent resends the same batch (agent to-erp/0002 §5.1). */
-function notStored(message: string): ApiError {
+export function notStored(message: string): ApiError {
   return new ApiError(503, 'BATCH_NOT_STORED_RETRYABLE', message, { retryAfterSeconds: 30 });
 }
 

@@ -21613,7 +21613,12 @@ paths:
               required: [token, limit]
               properties:
                 token: { type: string, format: uuid, description: Токен вкладки (sessionStorage) }
-                limit: { type: integer, minimum: 1, maximum: 5 }
+                limit: { type: integer, minimum: 0, maximum: 5, description: '0 — без новых балунов, только ответ superseded' }
+                openNotificationIds:
+                  type: array
+                  maxItems: 20
+                  items: { type: string, format: uuid }
+                  description: Балуны, которые вкладка показывает сейчас; ответ назовёт заменённые свежим балуном того же слота.
       responses:
         '200':
           description: Leased balloons
@@ -21626,6 +21631,10 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Notification'
+                  superseded:
+                    type: array
+                    items: { type: string, format: uuid }
+                    description: Из openNotificationIds — заменённые свежим балуном того же слота; вкладка их закрывает.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':
@@ -29894,6 +29903,10 @@ components:
         - readAt
         - createdAt
       properties:
+        balloonSlot:
+          type: string
+          nullable: true
+          description: Слот балуна (только в ответе claim); открытый балун того же слота закрывается при показе этого.
         notificationId:
           type: string
           format: uuid
@@ -33424,7 +33437,7 @@ components:
       additionalProperties: false
       required: [commandType]
       properties:
-        commandType: {type: string, enum: [start_full_sync, reload_entity, pause_etl, resume_etl, run_connectivity_test, collect_diagnostics, rotate_certificate_hint, integration_probe]}
+        commandType: {type: string, enum: [start_full_sync, reload_entity, pause_etl, resume_etl, run_connectivity_test, collect_diagnostics, rotate_certificate_hint, etl_reset, integration_probe]}
         payload: {type: object, description: 'Per type: start_full_sync {entities: string[]}, reload_entity {entity}, integration_probe {marker 1..256}, others {}'}
         priority: {type: integer, minimum: -1000, maximum: 1000, default: 0}
         orderingKey: {type: string, nullable: true, maxLength: 200}
