@@ -1055,6 +1055,9 @@ probe_file() {
                        ) OR (
                          md5(pg_get_functiondef(oid)) = 'd4f7e31052321242dfea61056bae41e7'
                          AND obj_description(oid, 'pg_proc') = 'v109 exact current-revision panel reconciliation with one-product NULL product support'
+                       ) OR (
+                         md5(pg_get_functiondef(oid)) = '1499ff1d0ac9346e1bdb1280e9b33068'
+                         AND obj_description(oid, 'pg_proc') = 'v299 exact current-revision panel reconciliation, one-product NULL product, product names without .b3d'
                        )
                        FROM pg_proc
                        WHERE oid = to_regprocedure('reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)')
@@ -1137,12 +1140,14 @@ probe_file() {
                      "$(q_con_hash_on chk_cnc_tg_worker_observation_reason_codes cnc_telegram_worker_message_observations edb8109e18cd30146d4ab50cb75b151a)" ;;
     109_cnc_telegram_worker_audit_classification_codes*) probe_all \
                      "$(q_con_hash_on chk_cnc_tg_worker_observation_classification_code cnc_telegram_worker_message_observations d00cffd4b59ca731fd8c92aaa5e23409)" ;;
+    # 109 body is legitimately redefined by 299 (product names without .b3d): either version is PRESENT.
     109_bazis_single_product_reprojection*) probe_all \
-                     "$(q_fun_hash 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)' d4f7e31052321242dfea61056bae41e7)" \
+                     "$(q_fun_hash_either 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)' d4f7e31052321242dfea61056bae41e7 1499ff1d0ac9346e1bdb1280e9b33068)" \
                      "SELECT obj_description(
                        'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)'::regprocedure,
                        'pg_proc'
-                     ) = 'v109 exact current-revision panel reconciliation with one-product NULL product support';" ;;
+                     ) IN ('v109 exact current-revision panel reconciliation with one-product NULL product support',
+                           'v299 exact current-revision panel reconciliation, one-product NULL product, product names without .b3d');" ;;
     110_cnc_telegram_label_maps*) probe_all \
                      "$(q_tbl cnc_telegram_packet_evidence_set)" \
                      "$(q_tbl cnc_telegram_packet_item_evidence)" \
@@ -3195,6 +3200,16 @@ probe_file() {
       "$(q_con_on onec_write_mappings chk_onec_write_mappings_target)" \
       "SELECT EXISTS (SELECT 1 FROM permissions_catalog WHERE permission_name = 'onec.write.mappings' AND is_active);" \
       "SELECT EXISTS (SELECT 1 FROM role_permissions rp JOIN roles r USING (role_id) WHERE r.role_code = 'admin' AND rp.permission_name = 'onec.write.mappings');" ;;
+    # 299: Bazis product names compared without the .b3d model-file extension (function body only).
+    299_bazis_product_name_b3d*) probe_all \
+      "$(q_fun_hash 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)' 1499ff1d0ac9346e1bdb1280e9b33068)" \
+      "SELECT obj_description('reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)'::regprocedure, 'pg_proc') = 'v299 exact current-revision panel reconciliation, one-product NULL product, product names without .b3d';" ;;
+    # 298: Bazis milling mappings (bazis_material_mappings.milling_type_id + source/target kind 'milling').
+    298_bazis_milling_mappings*) probe_all \
+      "$(q_col bazis_material_mappings milling_type_id)" \
+      "SELECT COALESCE((SELECT pg_get_constraintdef(oid) LIKE '%''milling''%' FROM pg_constraint WHERE conname='bazis_material_mappings_source_kind_check' AND conrelid='public.bazis_material_mappings'::regclass), false);" \
+      "SELECT COALESCE((SELECT pg_get_constraintdef(oid) LIKE '%''milling''%' FROM pg_constraint WHERE conname='bazis_material_mappings_target_kind_check' AND conrelid='public.bazis_material_mappings'::regclass), false);" \
+      "SELECT COALESCE((SELECT pg_get_constraintdef(oid) LIKE '%milling_type_id IS NOT NULL%' FROM pg_constraint WHERE conname='bazis_material_mappings_target_chk' AND conrelid='public.bazis_material_mappings'::regclass), false);" ;;
     # 295: delivery of an order and its production start shift (four nullable orders columns + checks).
     295_order_delivery_start_shift*) probe_all \
       "$(q_col orders delivery_method)" \
@@ -3516,6 +3531,12 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     293_onec_write_mappings*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    299_bazis_product_name_b3d*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    298_bazis_milling_mappings*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     295_order_delivery_start_shift*)

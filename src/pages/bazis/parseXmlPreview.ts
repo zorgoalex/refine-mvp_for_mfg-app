@@ -104,7 +104,7 @@ export function parseXmlPreview(xmlText: string): XmlPreviewResult {
       const face = childByTag(element, faceKey);
       if (!face) continue;
       for (const plast of directChildren(face, 'Пласть')) {
-        recordMaterial('плёнка', textOfChild(plast, 'Наименование'));
+        recordMaterial('плёнка', formatBazisFaceFilmName(textOfChild(plast, 'Наименование')));
       }
     }
 
@@ -118,7 +118,10 @@ export function parseXmlPreview(xmlText: string): XmlPreviewResult {
   };
 
   const walk = (element: Element, fallbackTitle: string, kind: 'product' | 'assembly' | 'block' | 'object'): XmlPreviewNode => {
-    const title = buildTitle(element, fallbackTitle);
+    const title =
+      kind === 'product'
+        ? stripBazisModelFileExtension(textOfChild(element, 'Наименование')) ?? fallbackTitle
+        : buildTitle(element, fallbackTitle);
     const node: XmlPreviewNode = {
       key: next(),
       title,
@@ -155,7 +158,7 @@ export function parseXmlPreview(xmlText: string): XmlPreviewResult {
 
   const roots = products.map((product) => walk(product, 'Изделие', 'product'));
   const productNames = products
-    .map((product) => textOfChild(product, 'Наименование'))
+    .map((product) => stripBazisModelFileExtension(textOfChild(product, 'Наименование')))
     .filter((name): name is string => name !== null);
   const projectOrderName = project.getAttribute('Наименование')?.trim() || null;
   const firstProductOrderNo = products
@@ -168,6 +171,26 @@ export function parseXmlPreview(xmlText: string): XmlPreviewResult {
     tree: roots,
     breakdown,
   };
+}
+
+/**
+ * Зеркало backend bazis-panel-film: «Экспорт фасадов» пишет поставщика плёнки
+ * отдельной строкой («Название⏎Поставщик») → «Название; Поставщик», как в справочнике.
+ */
+export function formatBazisFaceFilmName(value: string | null): string | null {
+  if (value == null) return null;
+  const lines = value
+    .split(/[\r\n]+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  return lines.length > 0 ? lines.join('; ') : null;
+}
+
+/** «Радиусная вытяжка.b3d» → «Радиусная вытяжка» (зеркало backend). */
+export function stripBazisModelFileExtension(value: string | null): string | null {
+  if (value == null) return null;
+  const stripped = value.trim().replace(/\.b3d$/i, '').trim();
+  return stripped.length > 0 ? stripped : value.trim() || null;
 }
 
 function buildTitle(element: Element, fallbackTitle: string): string {

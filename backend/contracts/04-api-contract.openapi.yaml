@@ -10700,6 +10700,34 @@ paths:
                           type: string
                         usageCount:
                           type: integer
+                  millingsByName:
+                    type: array
+                    description: >-
+                      Milling names of panels (user property «Фрезировка»/«Фрезеровка») and how each resolves to an
+                      ERP milling type: a 'milling' mapping first (or 'ignore'), else a milling type with the same name.
+                    items:
+                      type: object
+                      required:
+                        - name
+                        - usageCount
+                        - millingTypeId
+                        - millingTypeName
+                        - mappingTargetKind
+                      properties:
+                        name:
+                          type: string
+                        usageCount:
+                          type: integer
+                        millingTypeId:
+                          type: integer
+                          nullable: true
+                        millingTypeName:
+                          type: string
+                          nullable: true
+                        mappingTargetKind:
+                          type: string
+                          nullable: true
+                          enum: [milling, ignore, null]
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -11403,6 +11431,9 @@ paths:
                     edgeTypeId:
                       type: integer
                       nullable: true
+                    millingTypeId:
+                      type: integer
+                      nullable: true
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -11445,6 +11476,7 @@ paths:
                           - sheet
                           - film
                           - edge
+                          - milling
                       bazisName:
                         type: string
                         minLength: 1
@@ -11455,6 +11487,7 @@ paths:
                           - sheet
                           - film
                           - edge
+                          - milling
                           - ignore
                       sheetMaterialTypeId:
                         type: integer
@@ -11463,6 +11496,9 @@ paths:
                         type: integer
                         nullable: true
                       edgeTypeId:
+                        type: integer
+                        nullable: true
+                      millingTypeId:
                         type: integer
                         nullable: true
       responses:
@@ -11498,6 +11534,9 @@ paths:
                       type: integer
                       nullable: true
                     edgeTypeId:
+                      type: integer
+                      nullable: true
+                    millingTypeId:
                       type: integer
                       nullable: true
         '401':

@@ -11,6 +11,7 @@ const references = {
   ],
   films: [{ value: 3, label: 'Тест плёнки', sortOrder: 30 }],
   edgeTypes: [{ value: 4, label: 'Тест кромки', sortOrder: 40 }],
+  millingTypes: [{ value: 666, label: 'Тест по фото/схеме', sortOrder: 50 }],
 };
 vi.mock('../../hooks/useOrderFormData', () => ({
   useOrderFormData: () => ({ enabled: fixture.enabled, error: fixture.error, references }),
@@ -22,7 +23,9 @@ vi.mock('@refinedev/core', () => ({ useList: (props: any) => {
     ? references.sheetMaterialTypes.map(item => ({ sheet_material_type_id: item.value, name: item.label, is_cuttable: item.isCuttable }))
     : props.resource === 'films'
       ? references.films.map(item => ({ film_id: item.value, film_name: item.label }))
-      : references.edgeTypes.map(item => ({ edge_type_id: item.value, edge_type_name: item.label }));
+      : props.resource === 'milling_types'
+        ? references.millingTypes.map(item => ({ milling_type_id: item.value, milling_type_name: item.label }))
+        : references.edgeTypes.map(item => ({ edge_type_id: item.value, edge_type_name: item.label }));
   return { data: { data } };
 } }));
 vi.mock('../../ui/tooltipDelay', () => ({ Table: ({ columns, dataSource }: any) => <>{dataSource.map((row: any) => (
@@ -79,6 +82,22 @@ describe.each([true, false])('material options backend=%s', enabled => {
       ['film:тест', { targetKind: 'ignore', targetId: null }],
       ['edge:тест', { targetKind: 'edge', targetId: 4 }],
     ]);
+  });
+});
+
+describe.each([true, false])('milling mapping backend=%s', enabled => {
+  it('offers ERP milling types and maps a choice to targetKind milling', () => {
+    fixture.enabled = enabled;
+    const onChange = vi.fn();
+    const millingItems = [{ name: 'Выборка по фото', kindGuess: 'milling', usageCount: 1 }];
+    act(() => { tree = create(<MaterialMappingStep items={millingItems} values={{}} onChange={onChange} />); });
+    const [select] = tree.root.findAllByType('test-select');
+    expect(select.props.options.map(({ value, label }: any) => ({ value, label }))).toEqual([
+      { value: 'ignore', label: 'Пропустить (фрезеровка по умолчанию)' },
+      { value: 666, label: 'Тест по фото/схеме' },
+    ]);
+    act(() => select.props.onChange(666));
+    expect(onChange).toHaveBeenCalledWith('milling:выборка по фото', { targetKind: 'milling', targetId: 666 });
   });
 });
 

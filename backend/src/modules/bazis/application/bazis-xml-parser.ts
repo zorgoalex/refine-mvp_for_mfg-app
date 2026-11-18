@@ -1,5 +1,13 @@
 import { assertSafeXml, decodeXmlText } from '../../../shared/xml-text';
 import { XMLParser } from 'fast-xml-parser';
+import {
+  BAZIS_MILLING_PROPERTY_NAMES,
+  bazisFaceFilms,
+  bazisPanelPropertyFilmName,
+  bazisUserPropertyValue,
+  normalizeBazisReferenceName,
+  stripBazisModelFileExtension,
+} from './bazis-panel-film';
 
 export interface ParsedBazisNode {
   index: number;
@@ -31,6 +39,12 @@ export interface ParsedBazisMaterialUsage {
   usageCount: number;
 }
 
+/** Фрезеровка панелей (свойство «Фрезировка»/«Фрезеровка»), уникальная без учёта регистра. */
+export interface ParsedBazisMillingUsage {
+  name: string;
+  usageCount: number;
+}
+
 export interface ParsedBazisRevision {
   bazisVersion: string | null;
   bazisOrderNo: string | null;
@@ -40,6 +54,8 @@ export interface ParsedBazisRevision {
   productPrice: number | null;
   nodes: ParsedBazisNode[];
   materials: ParsedBazisMaterialUsage[];
+  /** Отдельно от materials: summary.uniqueMaterials и список материалов не меняются. */
+  millings: ParsedBazisMillingUsage[];
   summary: {
     totalNodes: number;
     panels: number;
@@ -173,34 +189,19 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
     return copy;
   };
 
-  const userPropertyValue = (
-    element: BazisElement,
-    acceptedNames: ReadonlySet<string>,
-  ): string | null => {
-    const propertyCandidates: unknown[] = [];
-    const nested = element['ПользовательскиеСвойства'];
-    if (typeof nested === 'object' && nested !== null && !Array.isArray(nested)) {
-      propertyCandidates.push((nested as BazisElement)['Свойство']);
+  const millingUsage = new Map<string, ParsedBazisMillingUsage>();
+  const recordMilling = (element: BazisElement): void => {
+    const name = bazisUserPropertyValue(element, BAZIS_MILLING_PROPERTY_NAMES);
+    if (!name) {
+      return;
     }
-    propertyCandidates.push(element['Свойство']);
-
-    for (const candidate of propertyCandidates) {
-      const properties = Array.isArray(candidate) ? candidate : candidate ? [candidate] : [];
-      for (const property of properties) {
-        if (typeof property !== 'object' || property === null || Array.isArray(property)) {
-          continue;
-        }
-        const row = property as BazisElement;
-        const name = toText(row['Имя'] ?? row['Наименование']);
-        if (
-          name &&
-          acceptedNames.has(name.toLocaleLowerCase('ru-RU').replace(/ё/g, 'е').replace(/\s+/g, ' '))
-        ) {
-          return toText(row['Значение']);
-        }
-      }
+    const key = normalizeBazisReferenceName(name);
+    const existing = millingUsage.get(key);
+    if (existing) {
+      existing.usageCount += 1;
+      return;
     }
-    return null;
+    millingUsage.set(key, { name, usageCount: 1 });
   };
 
   const recordMaterial = (
@@ -232,17 +233,14 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
       recordMaterial(mainName, 'hardware');
     }
 
-    const customFilmName =
-      objectType === 'Панель' ? userPropertyValue(element, new Set(['пленка'])) : null;
+    // Плёнка из свойств панели («Пленка», «Пленка (обр)»; с поставщиком, если он есть
+    // на пласти), иначе — плёнки пластей. Тот же выбор, что при создании ERP-заказа.
+    const customFilmName = objectType === 'Панель' ? bazisPanelPropertyFilmName(element) : null;
     if (customFilmName) {
       recordMaterial(customFilmName, 'film');
     } else {
-      for (const faceKey of ['ОблицовкаПласти1', 'ОблицовкаПласти2']) {
-        const face = element[faceKey] as BazisElement | undefined;
-        const plasti = (face?.['Пласть'] ?? []) as BazisElement[];
-        for (const plast of plasti) {
-          recordMaterial(toText(plast['Наименование']), 'film');
-        }
+      for (const film of bazisFaceFilms(element)) {
+        recordMaterial(film.name, 'film');
       }
     }
 
@@ -276,7 +274,11 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
       nodeKind: kind,
       productOrderNo: kind === 'product' && parentIndex === null ? toText(element['Заказ']) : null,
       objectType,
-      name: toText(element['Наименование']),
+      // Корень-изделие «Экспорта фасадов» назван по файлу модели («Шкаф.b3d») — расширение отрезаем.
+      name:
+        kind === 'product' && parentIndex === null
+          ? stripBazisModelFileExtension(toText(element['Наименование']))
+          : toText(element['Наименование']),
       detailCode: toText(element['КодДетали']),
       position: toText(element['Позиция']),
       designation: toText(element['Обозначение']),
@@ -299,6 +301,9 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
     });
 
     collectMaterials(element, objectType);
+    if (objectType === 'Панель') {
+      recordMilling(element);
+    }
 
     const children = element['СписокЭлементов'] as BazisElement | undefined;
     if (!children || typeof children !== 'object') {
@@ -338,7 +343,7 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
     nodes.filter(predicate).length;
 
   const productNames = products
-    .map((product) => toText(product['Наименование']))
+    .map((product) => stripBazisModelFileExtension(toText(product['Наименование'])))
     .filter((name): name is string => name !== null);
   const productPrices = products
     .map((product) => toNumber(product['Цена']))
@@ -364,6 +369,7 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
         : null,
     nodes,
     materials,
+    millings: [...millingUsage.values()].sort((left, right) => right.usageCount - left.usageCount),
     summary: {
       totalNodes: nodes.length,
       panels: count((node) => node.objectType === 'Панель'),

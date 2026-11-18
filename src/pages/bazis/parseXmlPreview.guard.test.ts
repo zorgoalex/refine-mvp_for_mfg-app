@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { swapImportedBazisPanelDimensions } from './parseXmlPreview';
+import {
+  formatBazisFaceFilmName,
+  stripBazisModelFileExtension,
+  swapImportedBazisPanelDimensions,
+} from './parseXmlPreview';
 
 /**
  * DOMParser недоступен в node-тест-окружении (без jsdom), поэтому
@@ -58,5 +62,21 @@ describe('parseXmlPreview panel dimensions', () => {
     expect(source).toContain(
       'swapImportedBazisPanelDimensions(sourceHeight, sourceWidth)',
     );
+  });
+});
+
+describe('parseXmlPreview facade export («Экспорт фасадов»)', () => {
+  it('shows face film vendor as «Название; Поставщик», plain names unchanged', () => {
+    expect(formatBazisFaceFilmName('Шагрень черный\rDECOR +')).toBe('Шагрень черный; DECOR +');
+    expect(formatBazisFaceFilmName('  AL 31  Белый мат ')).toBe('AL 31  Белый мат');
+    expect(formatBazisFaceFilmName(null)).toBeNull();
+    expect(source).toContain("formatBazisFaceFilmName(textOfChild(plast, 'Наименование'))");
+  });
+
+  it('drops the .b3d extension from product names in the header and tree', () => {
+    expect(stripBazisModelFileExtension('Радиусная вытяжка.b3d')).toBe('Радиусная вытяжка');
+    expect(stripBazisModelFileExtension('Кухня')).toBe('Кухня');
+    expect(source).toContain("stripBazisModelFileExtension(textOfChild(product, 'Наименование'))");
+    expect(source).toContain("stripBazisModelFileExtension(textOfChild(element, 'Наименование'))");
   });
 });

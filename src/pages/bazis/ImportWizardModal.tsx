@@ -525,6 +525,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
               sheetMaterialTypeId: mapping.targetKind === 'sheet' ? mapping.targetId : null,
               filmId: mapping.targetKind === 'film' ? mapping.targetId : null,
               edgeTypeId: mapping.targetKind === 'edge' ? mapping.targetId : null,
+              millingTypeId: mapping.targetKind === 'milling' ? mapping.targetId : null,
             };
           }),
         );
@@ -943,12 +944,14 @@ function buildMappingValueState(items: MaterialMapping[]): Record<string, Materi
         ? item.filmId
         : item.targetKind === 'edge'
           ? item.edgeTypeId
-          : null;
+          : item.targetKind === 'milling'
+            ? item.millingTypeId
+            : null;
 
     return [
       materialMappingKey({ name: item.bazisName, kindGuess: item.sourceKind }),
       {
-        targetKind: item.targetKind === 'ignore' || item.targetKind === 'sheet' || item.targetKind === 'film' || item.targetKind === 'edge'
+        targetKind: item.targetKind === 'ignore' || item.targetKind === 'sheet' || item.targetKind === 'film' || item.targetKind === 'edge' || item.targetKind === 'milling'
           ? item.targetKind
           : null,
         targetId: targetId ?? null,
@@ -957,8 +960,8 @@ function buildMappingValueState(items: MaterialMapping[]): Record<string, Materi
   }));
 }
 
-function normalizeSourceKind(value: string): 'sheet' | 'film' | 'edge' | null {
-  if (value === 'sheet' || value === 'film' || value === 'edge') {
+function normalizeSourceKind(value: string): 'sheet' | 'film' | 'edge' | 'milling' | null {
+  if (value === 'sheet' || value === 'film' || value === 'edge' || value === 'milling') {
     return value;
   }
 
