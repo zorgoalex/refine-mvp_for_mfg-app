@@ -1,3 +1,4 @@
+import { ORDER_MANAGER_CANDIDATE_SQL } from '../domain/order-manager-assignment';
 import type { QueryResultRow } from 'pg';
 import { appendOrderReadVisibilitySql } from '../../../permissions/policies/order-read-scope-sql';
 import { readOrderCatalogLines } from './pg-order-catalog-lines';
@@ -800,7 +801,7 @@ export class PgOrderReadRepository
         o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
         o.hdf_min_threshold_mm,
         ${headerSheetCols}${deletedHeaderSelect}
-        , (SELECT COALESCE(NULLIF(e.full_name,''), NULLIF(u.full_name,''), u.username) FROM users u
+        , (SELECT ${ORDER_MANAGER_LABEL_SQL} FROM users u
              LEFT JOIN employees e ON e.employee_id = u.employee_id WHERE u.user_id=o.manager_id) AS manager_name
         , (SELECT CASE WHEN u.is_service_account THEN 'Сервис интеграции ERP' ELSE COALESCE(NULLIF(u.full_name,''),u.username) END FROM users u WHERE u.user_id=o.created_by) AS created_by_label
         , (SELECT CASE WHEN u.is_service_account THEN 'Сервис интеграции ERP' ELSE COALESCE(NULLIF(u.full_name,''),u.username) END FROM users u WHERE u.user_id=o.edited_by) AS edited_by_label
@@ -1594,11 +1595,18 @@ function mapSheetMaterialTypeLookup(row: SheetMaterialTypeLookupRow) {
  * Who may be chosen as the manager of an order: active ERP users that are not service accounts (orders.manager_id →
  * users), named as the MDF board names them (employee via users.employee_id, else the user).
  */
+/**
+ * Label of an ERP user as the manager of an order: the linked employee's (or the user's) name, with the login in
+ * brackets when it differs — «Тасбауов Алексей (admin)» — so a person can tell which account they choose.
+ */
+export const ORDER_MANAGER_LABEL_SQL =
+  "CASE WHEN COALESCE(NULLIF(e.full_name,''), NULLIF(u.full_name,''), u.username) = u.username THEN u.username ELSE COALESCE(NULLIF(e.full_name,''), NULLIF(u.full_name,'')) || ' (' || u.username || ')' END";
+
 export const ORDER_MANAGER_OPTIONS_SQL = `
-  SELECT u.user_id AS id, COALESCE(NULLIF(e.full_name, ''), NULLIF(u.full_name, ''), u.username) AS full_name
+  SELECT u.user_id AS id, ${ORDER_MANAGER_LABEL_SQL} AS full_name
     FROM users u
     LEFT JOIN employees e ON e.employee_id = u.employee_id
-   WHERE u.is_active AND NOT u.is_service_account
+   WHERE ${ORDER_MANAGER_CANDIDATE_SQL}
    ORDER BY 2 ASC, u.user_id ASC
 `;
 

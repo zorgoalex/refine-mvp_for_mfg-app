@@ -1,3 +1,4 @@
+import { ORDER_MANAGER_CANDIDATE_SQL } from '../../orders/domain/order-manager-assignment';
 import { beginPaymentAuditCapture, recordCapturedPaymentChanges } from '../../payments/application/payment-change-audit';
 import { assertOrderReadable } from '../../../permissions/policies/order-read-visibility';
 import { createHash, randomUUID } from 'node:crypto';
@@ -4875,7 +4876,11 @@ async function materializeCrmRequestOrder(
   return { requestId: incomingRequestId, erpOrderId: orderId };
 }
 
-async function resolveMappedManagerId(
+/**
+ * ERP manager of a deal's order from its Bitrix24 responsible: the mapped ERP user, only if they may be an order
+ * manager (the shared rule — active, non-service, can see orders). An ineligible mapping behaves as no mapping.
+ */
+export async function resolveMappedManagerId(
   tx: TransactionClient,
   bitrixUserId: string | null,
 ): Promise<number | null> {
@@ -4883,11 +4888,10 @@ async function resolveMappedManagerId(
   const manager = await tx.query<{ erp_user_id: string | number }>(
     `SELECT mapping.erp_user_id
        FROM bitrix24_user_mapping mapping
-       JOIN users target ON target.user_id=mapping.erp_user_id
+       JOIN users u ON u.user_id=mapping.erp_user_id
       WHERE mapping.bitrix_user_id=$1
         AND mapping.is_active=true
-        AND target.is_active=true
-        AND target.is_service_account=false
+        AND ${ORDER_MANAGER_CANDIDATE_SQL}
       LIMIT 1`,
     [bitrixUserId],
   );

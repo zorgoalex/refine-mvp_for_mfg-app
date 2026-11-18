@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
-import { resolveOrderManagerAssignment, type OrderManagerAssignmentInput } from './order-manager-assignment';
+import { ORDER_MANAGER_CANDIDATE_SQL, resolveOrderManagerAssignment, type OrderManagerAssignmentInput } from './order-manager-assignment';
 
 const base: OrderManagerAssignmentInput = {
   mode: 'update',
@@ -63,5 +63,13 @@ describe('resolveOrderManagerAssignment', () => {
   it('the new field wins over the former one', () => {
     expect(resolveOrderManagerAssignment({ ...base, managerUserId: 12, legacyManagerId: 3, canChangeManager: true }).managerId)
       .toBe('12');
+  });
+});
+
+describe('ORDER_MANAGER_CANDIDATE_SQL', () => {
+  it('a manager is an active non-service user who can see orders (integration accounts without orders.view are not)', () => {
+    expect(ORDER_MANAGER_CANDIDATE_SQL).toContain('u.is_active AND NOT u.is_service_account');
+    expect(ORDER_MANAGER_CANDIDATE_SQL).toContain('FROM user_effective_permissions p');
+    expect(ORDER_MANAGER_CANDIDATE_SQL).toContain("p.permission_name = 'orders.view'");
   });
 });
