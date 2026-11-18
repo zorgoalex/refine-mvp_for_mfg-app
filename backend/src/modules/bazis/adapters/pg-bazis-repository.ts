@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
-import type { TransactionClient } from '../../../database/database.types';
+import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { OrderTransactionService } from '../../orders/application/order-transaction.service';
 import type { OrderDto } from '../../orders/dto/order.dto';
@@ -15,7 +15,7 @@ import {
   mapBazisCutSnapshotFields,
   resolveBazisDetailLabels,
 } from '../../bazis-cut/application/bazis-cut-snapshot-mapper';
-import type { ParsedBazisNode } from '../application/bazis-xml-parser';
+import type { ParsedBazisMillingUsage, ParsedBazisNode } from '../application/bazis-xml-parser';
 import { matchBazisDesignEngineer } from '../application/bazis-design-engineer';
 import type {
   AddToOrderCommand,
@@ -34,16 +34,26 @@ import {
   bazisReferenceLookupKey,
   buildDraftDetails,
   clientKeyForNode,
-  collectUnmappedSheetNames,
+  collectUnmappedMaterialNames,
+  collectUnresolvedMillingNames,
+  UNMAPPED_MILLING_SUFFIX,
   computeTargetOrderDuplicates,
   normalizeBazisReferenceName,
   orderDtoToSaveDto,
   panelCustomFilmName,
   panelCustomMillingName,
   panelCustomPaintName,
-  panelPreferredFilmName,
+  panelFilmNameCandidates,
+  panelLegacyLookupFilmName,
+  panelLookupFilmName,
 } from './bazis-order-draft';
 import type { BazisDraftReferenceLookup } from './bazis-order-draft';
+import {
+  BAZIS_NAME_NORMALIZED_SQL,
+  lockMillingMappingNames,
+  syncMillingMappingSpellings,
+  upsertMaterialMappingRow,
+} from './bazis-material-mapping-writes';
 import {
   assertCardCreatable,
   assertCardWritable,
@@ -72,6 +82,7 @@ import type {
   BazisProjectCardDto,
   BazisProjectListItemDto,
   BazisProjectNameDto,
+  BazisMillingUsageDto,
   BazisRevisionMaterialsSummaryDto,
   BazisRevisionOrderDto,
   BazisTreeNodeDto,
@@ -122,10 +133,22 @@ const HAS_DRILLING_SQL = `(
   + jsonb_array_length(${jsonArrayOrEmpty(`n.raw_json->'Отверстие'`)})
 ) > 0`;
 
+// Название плёнки пласти как в bazis-panel-film.parseBazisFaceFilmName: «Экспорт фасадов»
+// пишет поставщика отдельной строкой («Название⏎Поставщик») → «Название; Поставщик».
+// В штатном экспорте переводов строк нет — название только обрезается по краям.
+const BAZIS_FACE_FILM_NAME_SQL = `regexp_replace(
+          btrim(e.elem->>'Наименование', ' ' || chr(9) || chr(10) || chr(13)),
+          '[[:space:]]*[' || chr(10) || chr(13) || ']+[[:space:]]*',
+          '; ',
+          'g'
+        )`;
+
 // Общий SELECT-фрагмент для ОБОИХ tree-запросов (getTreeChildren + listAllTreeNodes).
 const TREE_NODE_EXTRA_SELECT = `n.notes,
              n.raw_json->'ПользовательскиеСвойства' AS user_properties,
              n.raw_json->'Свойство' AS legacy_user_properties,
+             n.raw_json->'ОблицовкаПласти1' AS face_coating_1,
+             n.raw_json->'ОблицовкаПласти2' AS face_coating_2,
              ${EDGE_COUNT_SQL} AS edge_count,
              ${HAS_DRILLING_SQL} AS has_drilling`;
 
@@ -197,6 +220,8 @@ interface TreeNodeRow {
   notes: string | null;
   user_properties: unknown;
   legacy_user_properties: unknown;
+  face_coating_1: unknown;
+  face_coating_2: unknown;
   edge_count: number | string;
   has_drilling: boolean;
   linked_orders: Array<{ orderId: number | string; orderName: string | null; orderDeleted?: boolean | null }> | null;
@@ -212,6 +237,7 @@ interface MaterialMappingRow {
   sheet_material_type_id: number | string | null;
   film_id: number | string | null;
   edge_type_id: number | string | null;
+  milling_type_id: number | string | null;
 }
 
 interface BazisCommandIdempotencyRow<TResponse = unknown> {
@@ -312,6 +338,7 @@ interface MaterialLookupRow {
   sheet_material_type_id: number | string | null;
   film_id: number | string | null;
   edge_type_id: number | string | null;
+  milling_type_id: number | string | null;
 }
 
 interface PanelReferenceLookupRow {
@@ -754,9 +781,18 @@ export class PgBazisRepository implements BazisRepositoryPort {
           )
         : { rows: [], rowCount: 0 };
       const mappedSet = new Set(mapped.rows.map((row) => `${row.source_kind}:${row.name}`));
-      const unmappedMaterials = lookup.filter(
-        (material) => !mappedSet.has(`${material.kindGuess}:${material.name.toLowerCase()}`),
-      );
+      const unmappedMaterials: Array<{ name: string; kindGuess: string; usageCount: number }> = [
+        ...lookup.filter(
+          (material) => !mappedSet.has(`${material.kindGuess}:${material.name.toLowerCase()}`),
+        ),
+        // Фрезеровки, которых нет ни в справочнике (точное название), ни в сопоставлениях:
+        // пользователь выбирает фрезеровку ERP на шаге «Материалы».
+        ...(await findUnresolvedMillings(tx, command.parsed.millings ?? [])).map((milling) => ({
+          name: milling.name,
+          kindGuess: 'milling',
+          usageCount: milling.usageCount,
+        })),
+      ];
 
       await auditService.record(tx, {
         event: 'bazis.revision_imported',
@@ -1971,7 +2007,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
 
     const films = await this.database.query<RawUsageRow>(
       `
-      SELECT e.elem->>'Наименование' AS name, count(*)::int AS usage_count
+      SELECT ${BAZIS_FACE_FILM_NAME_SQL} AS name, count(*)::int AS usage_count
       FROM bazis_nodes n
       CROSS JOIN LATERAL (
         SELECT jsonb_array_elements(
@@ -2008,7 +2044,107 @@ export class PgBazisRepository implements BazisRepositoryPort {
         totalLengthMm: row.total_length_mm != null ? Number(row.total_length_mm) : null,
       })),
       filmsByName: films.rows.map((row) => ({ name: row.name, usageCount: Number(row.usage_count), totalLengthMm: null })),
+      millingsByName: await this.loadRevisionMillingUsage(revisionId),
     };
+  }
+
+  // Фрезеровки панелей ревизии и их фрезеровка ERP — тем же правилом, что при создании
+  // заказа (resolvePanelMillingTypeId): сопоставление 'milling'/'ignore' → точное название.
+  private async loadRevisionMillingUsage(revisionId: number): Promise<BazisMillingUsageDto[]> {
+    const panels = await this.database.query<{ user_properties: unknown; legacy_user_properties: unknown }>(
+      `
+      SELECT n.raw_json->'ПользовательскиеСвойства' AS user_properties,
+             n.raw_json->'Свойство' AS legacy_user_properties
+      FROM bazis_nodes n
+      WHERE n.revision_id = $1 AND n.object_type = 'Панель'
+      `,
+      [revisionId],
+    );
+    const usage = new Map<string, { name: string; usageCount: number }>();
+    for (const row of panels.rows) {
+      const name = panelCustomMillingName({
+        ПользовательскиеСвойства: row.user_properties,
+        Свойство: row.legacy_user_properties,
+      });
+      if (!name) {
+        continue;
+      }
+      const key = normalizeBazisReferenceName(name);
+      const existing = usage.get(key);
+      if (existing) {
+        existing.usageCount += 1;
+      } else {
+        usage.set(key, { name, usageCount: 1 });
+      }
+    }
+    if (usage.size === 0) {
+      return [];
+    }
+
+    const entries = [...usage.values()];
+    const resolved = await this.database.query<{
+      source: 'mapping' | 'catalog';
+      name: string;
+      target_kind: string | null;
+      milling_type_id: number | string | null;
+      milling_type_name: string | null;
+      sort_at: Date | string | null;
+      sort_id: number | string;
+    }>(
+      `
+      SELECT 'mapping'::text AS source, ${BAZIS_NAME_NORMALIZED_SQL('m.bazis_name')} AS name, m.target_kind,
+             m.milling_type_id, mt.milling_type_name, m.updated_at AS sort_at, m.bazis_material_mapping_id AS sort_id
+      FROM bazis_material_mappings m
+      LEFT JOIN milling_types mt ON mt.milling_type_id = m.milling_type_id
+      WHERE m.source_kind = 'milling' AND ${BAZIS_NAME_NORMALIZED_SQL('m.bazis_name')} = ANY($1::text[])
+      UNION ALL
+      SELECT 'catalog'::text AS source, ${BAZIS_NAME_NORMALIZED_SQL('milling_type_name')} AS name,
+             NULL::text AS target_kind, milling_type_id, milling_type_name, NULL::timestamptz, milling_type_id
+      FROM milling_types
+      WHERE ${BAZIS_NAME_NORMALIZED_SQL('milling_type_name')} = ANY($1::text[])
+      `,
+      [entries.map((entry) => normalizeBazisReferenceName(entry.name))],
+    );
+    // Как loadMaterialMappingsForPanels: из нескольких написаний — последнее сохранённое;
+    // из справочника — первая по id (как loadPanelReferenceLookup).
+    const mappingByKey = new Map<string, (typeof resolved.rows)[number]>();
+    const catalogByKey = new Map<string, (typeof resolved.rows)[number]>();
+    const sortTime = (value: Date | string | null): number => (value == null ? 0 : new Date(value).getTime());
+    const ordered = [...resolved.rows].sort((left, right) =>
+      sortTime(left.sort_at) - sortTime(right.sort_at) || Number(left.sort_id) - Number(right.sort_id));
+    for (const row of ordered) {
+      const key = normalizeBazisReferenceName(row.name);
+      if (row.source === 'mapping') {
+        mappingByKey.set(key, row);
+      } else if (!catalogByKey.has(key)) {
+        catalogByKey.set(key, row);
+      }
+    }
+
+    return entries
+      .map((entry) => {
+        const key = normalizeBazisReferenceName(entry.name);
+        const mapping = mappingByKey.get(key);
+        if (mapping?.target_kind === 'ignore') {
+          return { ...entry, millingTypeId: null, millingTypeName: null, mappingTargetKind: 'ignore' as const };
+        }
+        if (mapping?.target_kind === 'milling' && mapping.milling_type_id != null) {
+          return {
+            ...entry,
+            millingTypeId: Number(mapping.milling_type_id),
+            millingTypeName: mapping.milling_type_name,
+            mappingTargetKind: 'milling' as const,
+          };
+        }
+        const catalog = catalogByKey.get(key);
+        return {
+          ...entry,
+          millingTypeId: catalog?.milling_type_id != null ? Number(catalog.milling_type_id) : null,
+          millingTypeName: catalog?.milling_type_name ?? null,
+          mappingTargetKind: null,
+        };
+      })
+      .sort((left, right) => right.usageCount - left.usageCount || left.name.localeCompare(right.name, 'ru'));
   }
 
   async listRevisionOrders(revisionId: number): Promise<BazisRevisionOrderDto[]> {
@@ -2155,7 +2291,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
              target_kind,
              sheet_material_type_id,
              film_id,
-             edge_type_id
+             edge_type_id,
+             milling_type_id
       FROM bazis_material_mappings
       WHERE ($1::text[] IS NULL OR lower(bazis_name) = ANY($1::text[]))
       ORDER BY source_kind, bazis_name
@@ -2173,34 +2310,13 @@ export class PgBazisRepository implements BazisRepositoryPort {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, currentUser.id);
       const saved: MaterialMappingDto[] = [];
+      await lockMillingMappingNames(tx, items);
+      const actorUserId = numericUserId(currentUser);
 
       for (const item of items) {
         try {
-          const result = await tx.query<MaterialMappingRow>(
-            `
-            INSERT INTO bazis_material_mappings
-              (source_kind, bazis_name, target_kind, sheet_material_type_id, film_id, edge_type_id, created_by, updated_by)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$7)
-            ON CONFLICT (source_kind, lower(bazis_name)) DO UPDATE SET
-              target_kind = EXCLUDED.target_kind,
-              sheet_material_type_id = EXCLUDED.sheet_material_type_id,
-              film_id = EXCLUDED.film_id,
-              edge_type_id = EXCLUDED.edge_type_id,
-              updated_by = EXCLUDED.updated_by,
-              updated_at = now()
-            RETURNING *
-            `,
-            [
-              item.sourceKind,
-              item.bazisName,
-              item.targetKind,
-              item.sheetMaterialTypeId ?? null,
-              item.filmId ?? null,
-              item.edgeTypeId ?? null,
-              numericUserId(currentUser),
-            ],
-          );
-          saved.push(mapMaterialMappingRow(result.rows[0]));
+          saved.push(mapMaterialMappingRow(await upsertMaterialMappingRow(tx, item, actorUserId)));
+          await syncMillingMappingSpellings(tx, item, actorUserId);
         } catch (error) {
           if (isForeignKeyViolation(error)) {
             throw new BazisReferenceNotFoundError(item.bazisName);
@@ -2279,10 +2395,10 @@ export class PgBazisRepository implements BazisRepositoryPort {
 
       const mappings = await this.loadMaterialMappingsForPanels(panels);
       const referenceLookup = await this.loadPanelReferenceLookup(panels);
-      const unmappedSheetNames = collectUnmappedSheetNames(panels, mappings);
-      if (unmappedSheetNames.length > 0) {
+      const unmappedNames = collectUnmappedMaterialNames(panels, mappings, referenceLookup);
+      if (unmappedNames.length > 0) {
         await this.failCreateOrderIdempotency(command);
-        throw new BazisUnmappedMaterialsError(unmappedSheetNames);
+        throw new BazisUnmappedMaterialsError(unmappedNames);
       }
       const dto = buildOrderCreateDto(command, revision, panels, mappings, referenceLookup);
       let response: CreateOrderFromRevisionResponseDto | null = null;
@@ -2379,6 +2495,23 @@ export class PgBazisRepository implements BazisRepositoryPort {
         command.nodes.map((node) => node.bazisNodeId),
         'nodes',
       );
+      // Черновик собран раньше (или пришёл прямым POST): фрезеровка панели, которой нет ни в
+      // сопоставлениях, ни в справочнике, не должна молча уйти в заказ — как в остальных командах.
+      const draftPanels = await this.loadSelectedPanels(
+        command.revisionId,
+        uniqueNumbers(command.nodes.map((node) => node.bazisNodeId)),
+      );
+      const unresolvedMillings = collectUnresolvedMillingNames(
+        draftPanels,
+        await this.loadMaterialMappingsForPanels(draftPanels),
+        await this.loadPanelReferenceLookup(draftPanels),
+      );
+      if (unresolvedMillings.length > 0) {
+        await this.failCreateOrderIdempotency(command);
+        throw new BazisUnmappedMaterialsError(
+          unresolvedMillings.map((name) => `${name}${UNMAPPED_MILLING_SUFFIX}`),
+        );
+      }
       let response: CreateOrderFromRevisionResponseDto | null = null;
       const clientKeyByNodeId = new Map(command.nodes.map((node) => [node.bazisNodeId, node.clientKey]));
 
@@ -2463,10 +2596,10 @@ export class PgBazisRepository implements BazisRepositoryPort {
 
       const mappings = await this.loadMaterialMappingsForPanels(panels);
       const referenceLookup = await this.loadPanelReferenceLookup(panels);
-      const unmappedSheetNames = collectUnmappedSheetNames(panels, mappings);
-      if (unmappedSheetNames.length > 0) {
+      const unmappedNames = collectUnmappedMaterialNames(panels, mappings, referenceLookup);
+      if (unmappedNames.length > 0) {
         await this.failBazisIdempotency(command.currentUser, command.idempotencyKey);
-        throw new BazisUnmappedMaterialsError(unmappedSheetNames);
+        throw new BazisUnmappedMaterialsError(unmappedNames);
       }
 
       const merge = buildAddToOrderSaveDto({
@@ -2627,9 +2760,9 @@ export class PgBazisRepository implements BazisRepositoryPort {
 
     const mappings = await this.loadMaterialMappingsForPanels(panels);
     const referenceLookup = await this.loadPanelReferenceLookup(panels);
-    const unmappedSheetNames = collectUnmappedSheetNames(panels, mappings);
-    if (unmappedSheetNames.length > 0) {
-      throw new BazisUnmappedMaterialsError(unmappedSheetNames);
+    const unmappedNames = collectUnmappedMaterialNames(panels, mappings, referenceLookup);
+    if (unmappedNames.length > 0) {
+      throw new BazisUnmappedMaterialsError(unmappedNames);
     }
 
     if (command.targetOrderId != null) {
@@ -2689,12 +2822,12 @@ export class PgBazisRepository implements BazisRepositoryPort {
     }
 
     const mappings = await this.loadMaterialMappingsForPanels(panels);
-    const unmappedSheetNames = collectUnmappedSheetNames(panels, mappings);
-    if (unmappedSheetNames.length > 0) {
-      throw new BazisUnmappedMaterialsError(unmappedSheetNames);
+    const referenceLookup = await this.loadPanelReferenceLookup(panels);
+    const unmappedNames = collectUnmappedMaterialNames(panels, mappings, referenceLookup);
+    if (unmappedNames.length > 0) {
+      throw new BazisUnmappedMaterialsError(unmappedNames);
     }
 
-    const referenceLookup = await this.loadPanelReferenceLookup(panels);
     const draftDetails = buildDraftDetails(panels, mappings, revision, referenceLookup);
     const rootProductCount = revision.rootProductCount;
     const exportReferences = await this.loadCutExportReferences(draftDetails);
@@ -3059,6 +3192,9 @@ export class PgBazisRepository implements BazisRepositoryPort {
     }>,
   ): Promise<Map<string, MaterialLookupRow>> {
     const pairs = new Map<string, { sourceKind: string; name: string }>();
+    // Фрезеровки ищутся по нормализованному имени (регистр, ё/е, пробелы) — как группирует
+    // их импорт; при нескольких написаниях одного имени побеждает последнее сохранённое.
+    const millingNames = new Set<string>();
 
     for (const panel of panels) {
       if (panel.mainMaterialName) {
@@ -3068,17 +3204,20 @@ export class PgBazisRepository implements BazisRepositoryPort {
           name: lowered,
         });
       }
-      const filmName = panelPreferredFilmName(panel.rawJson);
-      if (filmName) {
-        const lowered = filmName.toLowerCase();
+      // Новое имя плёнки («Название; Поставщик») и прежнее — сохранённый ранее выбор не теряется.
+      for (const filmName of panelFilmNameCandidates(panel.rawJson)) {
         pairs.set(`film:${normalizeBazisReferenceName(filmName)}`, {
           sourceKind: 'film',
-          name: lowered,
+          name: filmName.toLowerCase(),
         });
+      }
+      const millingName = panelCustomMillingName(panel.rawJson);
+      if (millingName) {
+        millingNames.add(normalizeBazisReferenceName(millingName));
       }
     }
 
-    if (pairs.size === 0) {
+    if (pairs.size === 0 && millingNames.size === 0) {
       return new Map();
     }
 
@@ -3089,14 +3228,18 @@ export class PgBazisRepository implements BazisRepositoryPort {
              target_kind,
              sheet_material_type_id,
              film_id,
-             edge_type_id
+             edge_type_id,
+             milling_type_id
       FROM bazis_material_mappings
       WHERE (source_kind, lower(bazis_name)) IN
             (SELECT unnest($1::text[]), unnest($2::text[]))
+         OR (source_kind = 'milling' AND ${BAZIS_NAME_NORMALIZED_SQL('bazis_name')} = ANY($3::text[]))
+      ORDER BY updated_at, bazis_material_mapping_id
       `,
       [
         [...pairs.values()].map((pair) => pair.sourceKind),
         [...pairs.values()].map((pair) => pair.name),
+        [...millingNames],
       ],
     );
 
@@ -3119,9 +3262,10 @@ export class PgBazisRepository implements BazisRepositoryPort {
       if (millingName) {
         millingNames.add(normalizeBazisReferenceName(millingName));
       }
-      const filmName = panelCustomFilmName(panel.rawJson);
-      if (filmName) {
-        filmNames.add(normalizeBazisReferenceName(filmName));
+      for (const filmName of [panelLookupFilmName(panel.rawJson), panelLegacyLookupFilmName(panel.rawJson)]) {
+        if (filmName) {
+          filmNames.add(normalizeBazisReferenceName(filmName));
+        }
       }
     }
 
@@ -3540,12 +3684,40 @@ function parseNumeric(value: string | null | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+// Фрезеровка находится, если есть сопоставление 'milling' (любое, включая «Пропустить»)
+// или фрезеровка ERP с тем же названием (нормализация как normalizeBazisReferenceName).
+async function findUnresolvedMillings(
+  db: Pick<DatabaseClient, 'query'>,
+  millings: ReadonlyArray<ParsedBazisMillingUsage>,
+): Promise<ParsedBazisMillingUsage[]> {
+  if (millings.length === 0) {
+    return [];
+  }
+  const result = await db.query<{ name: string }>(
+    `
+    SELECT ${BAZIS_NAME_NORMALIZED_SQL('bazis_name')} AS name
+    FROM bazis_material_mappings
+    WHERE source_kind = 'milling' AND ${BAZIS_NAME_NORMALIZED_SQL('bazis_name')} = ANY($1::text[])
+    UNION ALL
+    SELECT ${BAZIS_NAME_NORMALIZED_SQL('milling_type_name')}
+    FROM milling_types
+    WHERE ${BAZIS_NAME_NORMALIZED_SQL('milling_type_name')} = ANY($1::text[])
+    `,
+    [millings.map((milling) => normalizeBazisReferenceName(milling.name))],
+  );
+  const found = new Set(result.rows.map((row) => row.name));
+  return millings.filter((milling) => !found.has(normalizeBazisReferenceName(milling.name)));
+}
+
 function mapTreeNodeRow(row: TreeNodeRow): BazisTreeNodeDto {
   const rawUserProperties = row.user_properties == null && row.legacy_user_properties == null
     ? null
     : {
         ПользовательскиеСвойства: row.user_properties,
         Свойство: row.legacy_user_properties,
+        // Пласти нужны, чтобы плёнка из свойств получила поставщика («Экспорт фасадов»).
+        ОблицовкаПласти1: row.face_coating_1,
+        ОблицовкаПласти2: row.face_coating_2,
       };
   return {
     bazisNodeId: Number(row.bazis_node_id),
@@ -3630,6 +3802,7 @@ function mapMaterialMappingRow(row: MaterialMappingRow): MaterialMappingDto {
     sheetMaterialTypeId: nullableNumber(row.sheet_material_type_id),
     filmId: nullableNumber(row.film_id),
     edgeTypeId: nullableNumber(row.edge_type_id),
+    millingTypeId: nullableNumber(row.milling_type_id),
   };
 }
 

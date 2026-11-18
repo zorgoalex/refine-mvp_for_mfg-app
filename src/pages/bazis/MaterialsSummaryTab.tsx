@@ -4,7 +4,8 @@ import { Table } from '../../ui/tooltipDelay';
 // длиной), плёнки и фурнитура. Сводка по узлам живёт на вкладке «Дерево».
 // Здесь же — ПОСТ-импортное сопоставление листов: если в визарде выбрали
 // «Пропустить» (или маппинга нет), заказ из панелей падает с 422 — чинится
-// кнопкой «Сопоставить материалы» без переимпорта.
+// кнопкой «Сопоставить материалы» без переимпорта. Так же — фрезеровки панелей,
+// которых нет в справочнике ERP (иначе заказ из панелей тоже падает 422).
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Empty, Modal, Space, Spin, Tag, message } from 'antd';
@@ -24,12 +25,13 @@ interface MaterialsSummaryTabProps {
   canManage: boolean;
 }
 
-type MaterialKind = 'sheet' | 'edge' | 'film' | 'hardware';
+type MaterialKind = 'sheet' | 'edge' | 'film' | 'milling' | 'hardware';
 
 const KIND_LABELS: Record<MaterialKind, { label: string; color: string }> = {
   sheet: { label: 'Листовой материал', color: 'blue' },
   edge: { label: 'Кромка', color: 'orange' },
   film: { label: 'Плёнка', color: 'cyan' },
+  milling: { label: 'Фрезеровка', color: 'purple' },
   hardware: { label: 'Фурнитура', color: 'green' },
 };
 
@@ -132,21 +134,36 @@ export const MaterialsSummaryTab: React.FC<MaterialsSummaryTabProps> = ({ revisi
       lengthM: null,
     }));
 
-    return [...sheets, ...edges, ...films, ...hardware];
+    const millings: MaterialRow[] = (summary.millingsByName ?? []).map((item, index) => ({
+      key: `milling-${index}`,
+      kind: 'milling',
+      name: item.name,
+      erpMatch: item.millingTypeName
+        ?? (item.millingTypeId != null ? `#${item.millingTypeId}` : null),
+      mappingTargetKind: item.mappingTargetKind,
+      usage: item.usageCount,
+      quantity: null,
+      areaM2: null,
+      lengthM: null,
+    }));
+
+    return [...sheets, ...edges, ...films, ...millings, ...hardware];
   }, [summary]);
 
   // Листы, требующие внимания: без ERP-соответствия ИЛИ явно пропущенные в
   // визарде («ignore»). Оба состояния валят создание заказа из панелей 422.
+  // Фрезеровки: только не найденные («Пропустить» = фрезеровка по умолчанию, заказ создаётся).
   const remappableSheets = useMemo<UnmappedMaterialRow[]>(
     () =>
       rows
         .filter(
           (row) =>
-            row.kind === 'sheet'
-            && row.name !== '—'
-            && (row.mappingTargetKind === 'ignore' || !row.erpMatch),
+            (row.kind === 'sheet'
+              && row.name !== '—'
+              && (row.mappingTargetKind === 'ignore' || !row.erpMatch))
+            || (row.kind === 'milling' && row.mappingTargetKind !== 'ignore' && !row.erpMatch),
         )
-        .map((row) => ({ name: row.name, kindGuess: 'sheet', usageCount: row.usage ?? 0 })),
+        .map((row) => ({ name: row.name, kindGuess: row.kind, usageCount: row.usage ?? 0 })),
     [rows],
   );
 
@@ -183,12 +200,13 @@ export const MaterialsSummaryTab: React.FC<MaterialsSummaryTabProps> = ({ revisi
         remappableSheets.map((item) => {
           const value = mappingValues[materialMappingKey(item)];
           return {
-            sourceKind: 'sheet' as const,
+            sourceKind: item.kindGuess === 'milling' ? ('milling' as const) : ('sheet' as const),
             bazisName: item.name,
             targetKind: value.targetKind ?? 'ignore',
             sheetMaterialTypeId: value.targetKind === 'sheet' ? value.targetId : null,
             filmId: null,
             edgeTypeId: null,
+            millingTypeId: value.targetKind === 'milling' ? value.targetId : null,
           };
         }),
       );
@@ -219,6 +237,11 @@ export const MaterialsSummaryTab: React.FC<MaterialsSummaryTabProps> = ({ revisi
         key: 'erp',
         width: 220,
         render: (_, row) => {
+          if (row.kind === 'milling') {
+            if (row.mappingTargetKind === 'ignore') return <Tag>по умолчанию</Tag>;
+            if (row.erpMatch) return <Tag color="green">{row.erpMatch}</Tag>;
+            return <Tag color="red">нет в справочнике</Tag>;
+          }
           if (row.kind !== 'sheet') return '—';
           if (row.mappingTargetKind === 'ignore') return <Tag>игнор</Tag>;
           if (row.erpMatch) return <Tag color="green">{row.erpMatch}</Tag>;
@@ -263,7 +286,7 @@ export const MaterialsSummaryTab: React.FC<MaterialsSummaryTabProps> = ({ revisi
         <Alert
           type="warning"
           showIcon
-          message={`Листовых материалов без ERP-соответствия: ${remappableSheets.length}. Пока они не сопоставлены, создать заказ из панелей с этими материалами нельзя.`}
+          message={`Материалов и фрезеровок без ERP-соответствия: ${remappableSheets.length}. Пока они не сопоставлены, создать заказ из панелей с ними нельзя.`}
           action={
             canManage ? (
               <Button size="small" type="primary" onClick={openMapping}>

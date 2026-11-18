@@ -31,6 +31,7 @@ const fixtureParsed = {
   productPrice: 100,
   nodes: [],
   materials: [],
+  millings: [],
   summary: {
     totalNodes: 0,
     panels: 0,

@@ -214,6 +214,17 @@ export interface BazisRevisionMaterialsSummary {
   hardwareByName: BazisHardwareSummary[];
   edgesByName: BazisRawMaterialUsage[];
   filmsByName: BazisRawMaterialUsage[];
+  /** Фрезеровки панелей и их фрезеровка ERP; отсутствует у backend до migr 298. */
+  millingsByName?: BazisMillingUsage[];
+}
+
+export interface BazisMillingUsage {
+  name: string;
+  usageCount: number;
+  /** null — не найдена в справочнике и не сопоставлена, либо «Пропустить». */
+  millingTypeId: number | null;
+  millingTypeName: string | null;
+  mappingTargetKind: 'milling' | 'ignore' | null;
 }
 
 export interface BazisRevisionOrder {
@@ -233,15 +244,17 @@ export interface MaterialMapping {
   sheetMaterialTypeId: number | null;
   filmId: number | null;
   edgeTypeId: number | null;
+  millingTypeId?: number | null;
 }
 
 export interface UpsertMaterialMapping {
-  sourceKind: 'sheet' | 'film' | 'edge';
+  sourceKind: 'sheet' | 'film' | 'edge' | 'milling';
   bazisName: string;
-  targetKind: 'sheet' | 'film' | 'edge' | 'ignore';
+  targetKind: 'sheet' | 'film' | 'edge' | 'milling' | 'ignore';
   sheetMaterialTypeId?: number | null;
   filmId?: number | null;
   edgeTypeId?: number | null;
+  millingTypeId?: number | null;
 }
 
 export interface CreateOrderFromRevisionResponse {

@@ -8,7 +8,7 @@ import { createBackendSelectProps, useOrderFormData, type ReferenceOption, type 
 const { Text } = Typography;
 
 export interface MaterialMappingValue {
-  targetKind: 'sheet' | 'film' | 'edge' | 'ignore' | null;
+  targetKind: 'sheet' | 'film' | 'edge' | 'milling' | 'ignore' | null;
   targetId: number | null;
 }
 
@@ -27,6 +27,7 @@ const KIND_GUESS_LABELS_RU: Record<string, string> = {
   sheet: 'Лист',
   film: 'Плёнка',
   edge: 'Кромка',
+  milling: 'Фрезеровка',
   hardware: 'Фурнитура',
 };
 
@@ -57,6 +58,11 @@ interface EdgeTypeRecord {
   edge_type_name: string;
 }
 
+interface MillingTypeRecord {
+  milling_type_id: number;
+  milling_type_name: string;
+}
+
 export const MaterialMappingStep: React.FC<MaterialMappingStepProps> = ({
   items,
   values,
@@ -82,6 +88,13 @@ export const MaterialMappingStep: React.FC<MaterialMappingStepProps> = ({
 
   const { data: edgeTypesData } = useList<EdgeTypeRecord>({
     resource: 'edge_types',
+    pagination: { pageSize: 10000 },
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    queryOptions: { enabled: !useBackendReferences },
+  });
+
+  const { data: millingTypesData } = useList<MillingTypeRecord>({
+    resource: 'milling_types',
     pagination: { pageSize: 10000 },
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     queryOptions: { enabled: !useBackendReferences },
@@ -119,6 +132,17 @@ export const MaterialMappingStep: React.FC<MaterialMappingStepProps> = ({
     return (edgeTypesData?.data ?? []).map((item) => ({ value: item.edge_type_id, label: item.edge_type_name }));
   }, [edgeTypesData?.data, orderFormData.references.edgeTypes, useBackendReferences]);
 
+  const millingOptions = useMemo(() => {
+    if (useBackendReferences) {
+      return (orderFormData.references.millingTypes ?? []).map(toOption);
+    }
+
+    return (millingTypesData?.data ?? []).map((item) => ({
+      value: item.milling_type_id,
+      label: item.milling_type_name,
+    }));
+  }, [millingTypesData?.data, orderFormData.references.millingTypes, useBackendReferences]);
+
   const columns = useMemo<ColumnsType<UnmappedMaterialRow>>(
     () => [
       {
@@ -150,7 +174,9 @@ export const MaterialMappingStep: React.FC<MaterialMappingStepProps> = ({
               ? filmOptions
               : sourceKind === 'edge'
                 ? edgeOptions
-                : [];
+                : sourceKind === 'milling'
+                  ? millingOptions
+                  : [];
           const currentValue = values[materialMappingKey(record)];
 
           if (sourceKind == null) {
@@ -165,7 +191,11 @@ export const MaterialMappingStep: React.FC<MaterialMappingStepProps> = ({
               placeholder="Выберите соответствие"
               value={currentValue?.targetKind === 'ignore' ? 'ignore' : currentValue?.targetId ?? undefined}
               options={[
-                { value: 'ignore', label: 'Пропустить' },
+                {
+                  value: 'ignore',
+                  // Фрезеровку нельзя «не указать»: пропуск = фрезеровка по умолчанию.
+                  label: sourceKind === 'milling' ? 'Пропустить (фрезеровка по умолчанию)' : 'Пропустить',
+                },
                 ...options,
               ]}
               onChange={(value) => {
@@ -185,7 +215,7 @@ export const MaterialMappingStep: React.FC<MaterialMappingStepProps> = ({
         },
       },
     ],
-    [edgeOptions, filmOptions, onChange, sheetOptions, values],
+    [edgeOptions, filmOptions, millingOptions, onChange, sheetOptions, values],
   );
 
   if (useBackendReferences && orderFormData.error) {
@@ -197,7 +227,7 @@ export const MaterialMappingStep: React.FC<MaterialMappingStepProps> = ({
       <Alert
         type="info"
         showIcon
-        message="Сопоставьте материалы Базиса со справочниками ERP или явно пропустите ненужные позиции."
+        message="Сопоставьте материалы и фрезеровки Базиса со справочниками ERP или явно пропустите ненужные позиции."
       />
       <Table
         rowKey={(record) => materialMappingKey(record)}
@@ -216,8 +246,8 @@ function toOption(item: ReferenceOption | SheetMaterialTypeOption): Pick<Referen
   };
 }
 
-function normalizeKind(value: string): 'sheet' | 'film' | 'edge' | null {
-  if (value === 'sheet' || value === 'film' || value === 'edge') {
+function normalizeKind(value: string): 'sheet' | 'film' | 'edge' | 'milling' | null {
+  if (value === 'sheet' || value === 'film' || value === 'edge' || value === 'milling') {
     return value;
   }
 

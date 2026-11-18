@@ -22,6 +22,12 @@ describe('post-import material remapping', () => {
     expect(materialsTab).toMatch(/setMappingOpen\(false\);\s*reload\(\)/);
   });
 
+  it('Материалы tab also remaps millings missing from the ERP catalog (migr 298)', () => {
+    expect(materialsTab).toContain("summary.millingsByName ?? []");
+    expect(materialsTab).toMatch(/row\.kind === 'milling' && row\.mappingTargetKind !== 'ignore' && !row\.erpMatch/);
+    expect(materialsTab).toContain("millingTypeId: value.targetKind === 'milling' ? value.targetId : null");
+  });
+
   it('view page passes canManage into the Материалы tab', () => {
     expect(viewPage).toMatch(/<MaterialsSummaryTab[\s\S]*?canManage=\{canManage\}/);
   });

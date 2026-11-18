@@ -567,6 +567,7 @@ describe('PgBazisRepository reads + mappings', () => {
         sheetMaterialTypeId: 10,
         filmId: null,
         edgeTypeId: null,
+        millingTypeId: null,
       },
       {
         bazisMaterialMappingId: 2,
@@ -576,6 +577,7 @@ describe('PgBazisRepository reads + mappings', () => {
         sheetMaterialTypeId: null,
         filmId: null,
         edgeTypeId: null,
+        millingTypeId: null,
       },
     ]);
 
@@ -1994,6 +1996,58 @@ describe('PgBazisRepository.createOrderFromDraft', () => {
     expect(normalizedSql(database.queries)).toContain("UPDATE command_idempotency_keys SET status = 'failed'");
   });
 
+  it('rejects a saved draft whose panel milling is neither mapped nor in the catalog (review R2 finding 1)', async () => {
+    const draftPanel = (bazisNodeId: number) => ({
+      bazis_node_id: bazisNodeId,
+      object_type: 'Панель',
+      name: 'Фронтальная',
+      position: 'В.8',
+      designation: 'D-02',
+      cumulative_quantity: 1,
+      length_mm: 700,
+      width_mm: 100,
+      main_material_name: 'Laminate White',
+      product_name: 'Ванна',
+      product_order_no: '1721',
+      raw_json: { ПользовательскиеСвойства: { Свойство: [{ Имя: 'Фрезировка', Значение: 'Выборка по фото' }] } },
+    });
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: {
+          bazis_revision_id: 82,
+          bazis_project_id: 41,
+          project_id: 77,
+          bazis_project_name: 'Шкаф Nova',
+          revision_bazis_order_no: '1457',
+          project_client_id: 5,
+          root_product_count: 1,
+        },
+        draftNodeRows: [
+          { bazis_node_id: 101, object_type: 'Панель' },
+          { bazis_node_id: 102, object_type: 'Панель' },
+        ],
+        panelRows: [draftPanel(101), draftPanel(102)],
+        mappingRows: [],
+        referenceRows: [{ reference_kind: 'milling', reference_id: 1, name: 'модерн' }],
+      },
+    });
+    let created = false;
+    const orderTransactions: Pick<OrderTransactionService, 'create'> = {
+      create: async () => {
+        created = true;
+        throw new Error('must not create an order');
+      },
+    };
+    const repository = new PgBazisRepository(database.service, orderTransactions);
+
+    await expect(repository.createOrderFromDraft(createOrderFromDraftCommand())).rejects.toMatchObject({
+      code: 'BAZIS_UNMAPPED_MATERIALS',
+      details: { unmappedMaterials: ['Выборка по фото (фрезеровка)'] },
+    });
+    expect(created).toBe(false);
+    expect(normalizedSql(database.queries)).toContain("UPDATE command_idempotency_keys SET status = 'failed'");
+  });
+
   it('rejects duplicate bazisNodeId in nodes before touching bazis_nodes', async () => {
     const database = createDatabase({
       createOrderState: {
@@ -2833,14 +2887,88 @@ describe('PgBazisRepository.buildOrderDraft', () => {
     const mappingQuery = database.queries.find((query) =>
       normalizeSql(query.text).startsWith('SELECT source_kind, lower(bazis_name) AS name'),
     );
+    // Фрезеровка тоже ищется в сопоставлениях (migr 298) — по нормализованному имени,
+    // до точного названия в справочнике.
     expect(mappingQuery?.params).toEqual([
       ['sheet', 'film'],
       ['laminate white', 'белый глянец'],
+      ['модерн'],
     ]);
+    expect(normalizeSql(mappingQuery?.text ?? '')).toContain("source_kind = 'milling' AND regexp_replace(");
     const referenceQuery = database.queries.find((query) =>
       normalizeSql(query.text).startsWith("SELECT 'milling'::text AS reference_kind"),
     );
     expect(referenceQuery?.params).toEqual([['модерн'], ['белый глянец']]);
+  });
+
+  it('rejects a milling found neither in mappings nor in the catalog instead of defaulting to «модерн»', async () => {
+    const panelRow = (millingName: string) => ({
+      bazis_node_id: 102,
+      object_type: 'Панель',
+      name: 'Фронтальная',
+      position: 'В.8',
+      designation: 'D-02',
+      cumulative_quantity: 1,
+      length_mm: 700,
+      width_mm: 100,
+      main_material_name: 'Laminate White',
+      product_name: 'Ванна',
+      product_order_no: '1721',
+      raw_json: { ПользовательскиеСвойства: { Свойство: [{ Имя: 'Фрезировка', Значение: millingName }] } },
+    });
+    const state = (millingName: string, mappingRows: Array<Record<string, unknown>>) => ({
+      revisionRow: {
+        bazis_revision_id: 83,
+        bazis_project_id: 41,
+        project_id: 77,
+        bazis_project_name: '1721',
+        revision_bazis_order_no: '1721',
+        project_client_id: 5,
+        client_name: 'ООО Клиент',
+      },
+      panelRows: [panelRow(millingName)],
+      mappingRows: [
+        {
+          source_kind: 'sheet',
+          name: 'laminate white',
+          target_kind: 'sheet',
+          sheet_material_type_id: 501,
+          film_id: null,
+          edge_type_id: null,
+          milling_type_id: null,
+        },
+        ...mappingRows,
+      ],
+      referenceRows: [{ reference_kind: 'milling', reference_id: 1, name: 'модерн' }],
+    });
+
+    const unresolved = new PgBazisRepository(
+      createDatabase({ orderDraftState: state('Выборка по фото', []) }).service,
+    );
+    await expect(
+      unresolved.buildOrderDraft({ currentUser: currentUser(), revisionId: 83, selectedNodeIds: [102] }),
+    ).rejects.toMatchObject({
+      code: 'BAZIS_UNMAPPED_MATERIALS',
+      details: { unmappedMaterials: ['Выборка по фото (фрезеровка)'] },
+    });
+
+    const mapped = new PgBazisRepository(
+      createDatabase({
+        orderDraftState: state('Выборка по фото', [
+          {
+            source_kind: 'milling',
+            name: 'выборка по фото',
+            target_kind: 'milling',
+            sheet_material_type_id: null,
+            film_id: null,
+            edge_type_id: null,
+            milling_type_id: 666,
+          },
+        ]),
+      }).service,
+    );
+    const result = await mapped.buildOrderDraft({ currentUser: currentUser(), revisionId: 83, selectedNodeIds: [102] });
+    expect(result.details[0]).toMatchObject({ millingTypeId: 666 });
   });
 
   it('throws BazisRevisionNotFoundError when the revision is missing', async () => {
