@@ -3205,6 +3205,12 @@ probe_file() {
       "$(q_con_on orders chk_orders_delivery_address_len)" \
       "$(q_con_on orders chk_orders_delivery_notes_len)" \
       "$(q_con_on orders chk_orders_start_shift)" ;;
+    # 296: balloon slots of notifications (a newer balloon of the slot replaces the older one).
+    296_notification_balloon_slot*) probe_all \
+      "$(q_col notifications balloon_slot)" \
+      "$(q_col notifications balloon_superseded_at)" \
+      "$(q_con_on notifications chk_notifications_balloon_slot)" \
+      "$(q_idx idx_notifications_balloon_slot_live)" ;;
     290_bazis_wins_saw_backfill*) probe_all \
       "SELECT EXISTS (SELECT 1 FROM audit_log WHERE event='orders.saw_status_backfill' AND entity_type='migration' AND entity_id='290');" \
       "SELECT pg_get_functiondef('public.trg_order_detail_saw_route()'::regprocedure) LIKE '%IN (''new'', ''drawn'')%';" ;;
@@ -3513,6 +3519,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     295_order_delivery_start_shift*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    296_notification_balloon_slot*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     290_bazis_wins_saw_backfill*)

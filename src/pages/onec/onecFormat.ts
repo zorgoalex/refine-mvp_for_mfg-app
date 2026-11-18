@@ -186,6 +186,7 @@ export const ONEC_COMMAND_TYPE_LABELS: Record<string, string> = {
   run_connectivity_test: 'Проверить связь',
   collect_diagnostics: 'Собрать диагностику',
   rotate_certificate_hint: 'Запросить смену сертификата',
+  etl_reset: 'Сбросить зависшую выгрузку',
 };
 
 export function onecCommandTypeLabel(type: string): string {
@@ -203,6 +204,8 @@ export const ONEC_COMMAND_TYPE_DESCRIPTIONS: Record<string, string> = {
   run_connectivity_test: 'Просит агента проверить соединение с 1С и сообщить результат.',
   collect_diagnostics: 'Просит агента собрать диагностическую информацию о своей работе.',
   rotate_certificate_hint: 'Сообщает агенту, что пора запросить смену клиентского сертификата.',
+  etl_reset:
+    'Агент закрывает зависшие прогоны выгрузки и ставит одну новую полную выгрузку (агент 1.3.17+). ERP сам шлёт её, если выгрузка стоит больше 24 часов.',
 };
 
 export function onecCommandTypeDescription(type: string): string {
@@ -279,6 +282,9 @@ export function onecCommandPayloadFromForm(
       return { entity: (values.entity ?? '').trim() };
     case 'integration_probe':
       return { marker: (values.marker ?? '').trim() };
+    case 'etl_reset':
+      // Without runIds the agent resets every unresolved run.
+      return {};
     case 'pause_etl':
     case 'resume_etl':
     case 'run_connectivity_test':

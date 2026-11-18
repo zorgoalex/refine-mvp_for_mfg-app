@@ -59,6 +59,7 @@ export interface NotificationRow {
   created_at: string | Date;
   balloon_mode: string | null;
   balloon_shown_at?: string | Date | null;
+  balloon_slot?: string | null;
 }
 
 interface NotificationCountRow {
@@ -229,12 +230,23 @@ export class PgNotificationRepository implements NotificationRepositoryPort {
         FROM candidates c
        WHERE n.notification_id = c.notification_id
       RETURNING n.notification_id, n.user_id::text, n.level, n.title, n.message, n.entity_type, n.entity_id,
-        n.source_type, n.source_id, n.read_at, n.created_at, n.balloon_mode, n.balloon_shown_at, c.own
+        n.source_type, n.source_id, n.read_at, n.created_at, n.balloon_mode, n.balloon_shown_at, n.balloon_slot, c.own
       `,
       params,
     );
     // Тот же порядок, что в SQL (UPDATE … RETURNING его не сохраняет): своя аренда, обязательные, уровень, время.
     return result.rows.sort(compareClaimed).map(mapRow);
+  }
+
+  /** Which of the balloons a tab shows were replaced by a newer balloon of their slot (the tab closes them). */
+  async supersededBalloonsForUser(input: { viewer: NotificationViewer; notificationIds: string[] }): Promise<string[]> {
+    if (input.notificationIds.length === 0) return [];
+    const result = await this.database.query<{ notification_id: string }>(
+      `SELECT notification_id::text FROM notifications
+        WHERE user_id = $1 AND notification_id = ANY($2::uuid[]) AND balloon_superseded_at IS NOT NULL`,
+      [input.viewer.id, input.notificationIds],
+    );
+    return result.rows.map((row) => row.notification_id);
   }
 
   async ackBalloonsForUser(input: { viewer: NotificationViewer; token: string; notificationIds: string[] }): Promise<number> {
@@ -286,6 +298,7 @@ function mapRow(row: NotificationRow): NotificationDto {
     balloonMode:
       row.balloon_mode === 'auto' || row.balloon_mode === 'persistent' || row.balloon_mode === 'mandatory' ? row.balloon_mode : null,
     balloonPending: row.balloon_mode === 'mandatory' && !row.balloon_shown_at,
+    ...(row.balloon_slot !== undefined ? { balloonSlot: row.balloon_slot } : {}),
   };
 }
 

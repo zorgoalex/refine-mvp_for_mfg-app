@@ -96,6 +96,7 @@ export class NotificationsController {
       token: input.token,
       limit: input.limit,
       capabilities: parseBalloonCapabilities(capabilities),
+      openNotificationIds: input.openNotificationIds,
     });
   }
 
@@ -145,7 +146,13 @@ export function parseNotificationListQuery(
   return result.data;
 }
 
-const claimBalloonsSchema = z.object({ token: z.string().uuid(), limit: z.number().int().min(1).max(5) }).strict();
+const claimBalloonsSchema = z.object({
+  token: z.string().uuid(),
+  /** 0 — no new balloon (the tab has no free place), only the answer which open balloons were replaced. */
+  limit: z.number().int().min(0).max(5),
+  /** Balloons the tab shows now: the answer names those replaced by a newer balloon of their slot. */
+  openNotificationIds: z.array(z.string().uuid()).max(20).optional(),
+}).strict();
 const ackBalloonsSchema = z.object({ token: z.string().uuid(), notificationIds: z.array(z.string().uuid()).min(1).max(20) }).strict();
 const markAllReadSchema = z.object({ notificationIds: z.array(z.string().uuid()).max(200) }).strict();
 

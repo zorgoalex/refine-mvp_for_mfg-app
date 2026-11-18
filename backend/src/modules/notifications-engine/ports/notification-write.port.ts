@@ -16,6 +16,11 @@ export interface InsertNotificationInput {
    * 1С (план 2026-10-19 §2.7): правила его не выбирают, его пишет только диспетчер оповещений 1С.
    */
   balloonMode?: BalloonMode | 'mandatory' | null;
+  /**
+   * Слот балуна (запрос пользователя 18.11.2026): свежее уведомление того же пользователя и слота заменяет прежний
+   * балун, а не копится. Колокольчик хранит всю историю. Только вместе с балуном; 1–200 символов.
+   */
+  balloonSlot?: string | null;
 }
 
 export interface NotificationWritePort {

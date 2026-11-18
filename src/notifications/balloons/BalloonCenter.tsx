@@ -12,6 +12,9 @@ import {
 import { NOTIFICATIONS_CHANGED_EVENT } from './notificationEvents';
 import { startNotificationSync } from './notificationSync';
 
+/** Сколько открытых балунов вкладка сообщает серверу для проверки замены (≤ 5 на экране, лимит API 20). */
+const MAX_OPEN_REPORTED = 20;
+
 /** CSS-класс балуна центра (оформление — styles/app.css). */
 export const BALLOON_CLASS_NAME = 'app-balloon';
 /** Критичный обязательный балун (оповещения 1С) — красная полоса слева, `.app-balloon--critical` в styles/app.css. */
@@ -72,6 +75,10 @@ export class CenterSession {
   memoryShown = new Set<string>();
   /** Ключи, чьё тело балуна фактически смонтировано (R2-1 code review): повторный ack — только для них. */
   mounted = new Set<string>();
+  /** Открытые балуны сервера: ключ → id уведомления и слот (свежий балун слота заменяет прежний, 18.11.2026). */
+  serverOpen = new Map<string, { id: string; slot: string | null }>();
+  /** Backend понимает слоты (openNotificationIds, limit 0); старый отвечает 422 — тогда не слать. */
+  slotsSupported = true;
   constructor(readonly userId: string, readonly token: string) {}
 }
 
@@ -89,6 +96,16 @@ export const BalloonCenterProvider: React.FC<{ children: React.ReactNode }> = ({
   const navigate = useNavigate();
   const stateRef = useRef<CenterSession | null>(null);
 
+  /** Закрыть балун сервера, заменённый свежим балуном его слота; освободившееся место заполнит следующий проход. */
+  const closeServerBalloon = useCallback((st: CenterSession, key: string) => {
+    if (!st.serverOpen.has(key) && !st.slots.isOpen(key)) return;
+    api.destroy(key);
+    st.slots.close(key);
+    st.mounted.delete(key);
+    st.serverOpen.delete(key);
+    st.again = true;
+  }, [api]);
+
   const open = useCallback((st: CenterSession, input: {
     key: string; kind: BalloonKind; title: string; text: string; mode: BalloonMode; fromReserve: boolean;
     onShown: () => void; onClick?: () => void;
@@ -98,6 +115,7 @@ export const BalloonCenterProvider: React.FC<{ children: React.ReactNode }> = ({
       if (!st.alive) return;
       st.slots.close(input.key);
       st.mounted.delete(input.key);
+      st.serverOpen.delete(input.key);
       void pumpRef.current();
     };
     const shown = () => { st.mounted.add(input.key); input.onShown(); };
@@ -163,15 +181,25 @@ export const BalloonCenterProvider: React.FC<{ children: React.ReactNode }> = ({
         } });
         if (opened) st.memory = st.memory.filter((item) => item.key !== balloon.key);
       }
-      // 2. Уведомления сервера — резерв мест ДО запроса, один запрос в полёте на сессию (R3-2).
+      // 2. Уведомления сервера — резерв мест ДО запроса, один запрос в полёте на сессию (R3-2). Открытые балуны
+      // передаются серверу: он назовёт заменённые свежим балуном их слота — они закрываются (и без свободных мест).
       if (!st.alive || !st.serverSupported || !isVisible()) return;
+      const openIds = st.slotsSupported ? [...st.serverOpen.values()].map((entry) => entry.id).slice(0, MAX_OPEN_REPORTED) : [];
       const reserved = st.slots.reserve(st.slots.free());
-      if (reserved === 0) return;
+      if (reserved === 0 && openIds.length === 0) return;
       try {
-        const { items } = await notificationsApi.claimBalloons({ token: st.token, limit: reserved });
+        const { items, superseded } = await notificationsApi.claimBalloons({
+          token: st.token, limit: reserved, ...(openIds.length ? { openNotificationIds: openIds } : {}),
+        });
         if (!st.alive) return;
+        for (const id of superseded ?? []) closeServerBalloon(st, `notification-${id}`);
         for (const item of items) {
           const key = `notification-${item.notificationId}`;
+          // Свежий балун слота заменяет открытый прежний (не копятся: запрос пользователя 18.11.2026).
+          const slot = item.balloonSlot ?? null;
+          if (slot) {
+            for (const [openKey, entry] of [...st.serverOpen]) if (entry.slot === slot && openKey !== key) closeServerBalloon(st, openKey);
+          }
           const ack = () => {
             if (!st.alive) return;
             if (typeof window !== 'undefined') window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT));
@@ -183,7 +211,7 @@ export const BalloonCenterProvider: React.FC<{ children: React.ReactNode }> = ({
           if (st.slots.isOpen(key)) { if (st.mounted.has(key)) ack(); continue; }
           if (!item.balloonMode) continue;
           const path = entityPath(item);
-          open(st, {
+          const opened = open(st, {
             key, kind: serverKind(item.level), title: item.title ?? 'Уведомление', text: item.message, mode: item.balloonMode,
             fromReserve: true, onShown: ack,
             onClick: () => {
@@ -192,9 +220,12 @@ export const BalloonCenterProvider: React.FC<{ children: React.ReactNode }> = ({
               if (path) navigate(path);
             },
           });
+          if (opened) st.serverOpen.set(key, { id: item.notificationId, slot });
         }
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) st.serverSupported = false;
+        // Старый backend не знает слотов (строгая схема → 422): дальше без них, следующий запрос — как раньше.
+        else if (error instanceof ApiError && error.status === 422 && st.slotsSupported) { st.slotsSupported = false; st.again = true; }
       } finally {
         st.slots.release(st.slots.reserved);
       }
@@ -202,7 +233,7 @@ export const BalloonCenterProvider: React.FC<{ children: React.ReactNode }> = ({
       st.pumping = false;
       if (st.again && st.alive) { st.again = false; void pumpRef.current(); }
     }
-  }, [navigate, open]);
+  }, [closeServerBalloon, navigate, open]);
   const pumpRef = useRef(pump);
   pumpRef.current = pump;
 

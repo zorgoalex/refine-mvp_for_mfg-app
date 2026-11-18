@@ -7,6 +7,7 @@ import { RateLimitService } from '../../../rate-limit/rate-limit.service';
 import type { RateLimitConsumeInput } from '../../../rate-limit/rate-limit.types';
 import { PgOnecRepository } from '../adapters/pg-onec-repository';
 import { ONEC_AGENT_AUDIT_SOURCE, type OnecAgentContext } from '../application/onec-audit';
+import { notStored } from '../application/onec-etl-ingest.service';
 import { fingerprintFromForwardedHeader } from '../domain/onec-certificates';
 import { OnecRuntimeConfigService } from '../onec-runtime-config.service';
 
@@ -23,10 +24,19 @@ const DENIED_AUDIT_WINDOW_MS = 60_000;
 type DenyReason = 'ingress_auth_failed' | 'cert_required' | 'unknown_certificate' | 'agent_cert_mismatch' | 'agent_blocked';
 
 interface AgentRequest {
+  method?: string;
+  originalUrl?: string;
+  url?: string;
   headers: Record<string, string | string[] | undefined>;
   socket?: { localPort?: number; remoteAddress?: string };
   requestId?: string;
   onecAgent?: OnecAgentContext;
+}
+
+/** `POST …/etl/batches` — a batch upload (not the lookup `GET …/etl/batches/:id`). */
+export function isBatchUpload(request: Pick<AgentRequest, 'method' | 'originalUrl' | 'url'>): boolean {
+  const path = (request.originalUrl ?? request.url ?? '').split('?')[0].replace(/\/+$/, '');
+  return request.method === 'POST' && path.endsWith('/etl/batches');
 }
 
 const header = (request: AgentRequest, name: string): string | undefined => {
@@ -73,7 +83,7 @@ export class OnecAgentAuthGuard implements CanActivate {
       rule: PREAUTH_FAILURE_RULE,
       subject: { route: 'onec-agent-auth', ipAddress: clientIp },
     };
-    await this.rateLimit.assertAllowed(failureBudget);
+    await this.limit(request, failureBudget);
 
     if (!matchesAnySecret(header(request, INGRESS_AUTH_HEADER), config.ingressSecrets)) {
       await this.deny('ingress_auth_failed', ids, {});
@@ -103,12 +113,28 @@ export class OnecAgentAuthGuard implements CanActivate {
       throw new ApiError(403, 'AGENT_BLOCKED', 'Agent is blocked');
     }
     await this.rateLimit.refund(failureBudget);
-    await this.rateLimit.assertAllowed({
+    await this.limit(request, {
       rule: AGENT_REQUEST_RULE,
       subject: { route: 'onec-agent', resourceId: match.agentId },
     });
     request.onecAgent = { agentId: match.agentId, sourceId: match.sourceId, certId: match.certId, ...ids };
     return true;
+  }
+
+  /**
+   * The rate limit, with one exception (incident 12–18.11.2026): when its storage is unavailable, a batch upload is
+   * refused with `503 BATCH_NOT_STORED_RETRYABLE` — nothing was stored, and the agent re-sends the same batch instead of
+   * treating the bare 503 as an unknown outcome that blocks the run.
+   */
+  private async limit(request: AgentRequest, input: RateLimitConsumeInput): Promise<void> {
+    try {
+      await this.rateLimit.assertAllowed(input);
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'RATE_LIMIT_UNAVAILABLE' && isBatchUpload(request)) {
+        throw notStored('Rate limit storage is unavailable');
+      }
+      throw error;
+    }
   }
 
   /**

@@ -99,7 +99,8 @@ suite('1C alerts → WhatsApp — real channel port, isolated PostgreSQL', () =>
       CREATE TABLE notifications(notification_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id bigint, level text NOT NULL,
         title text NOT NULL, message text NOT NULL, entity_type text, entity_id text, source_type text NOT NULL, source_id text,
         is_read boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now(), idempotency_key text,
-        balloon_mode text, balloon_shown_at timestamptz);
+        balloon_mode text, balloon_shown_at timestamptz,
+        balloon_slot text, balloon_superseded_at timestamptz);
       CREATE UNIQUE INDEX ON notifications(idempotency_key) WHERE idempotency_key IS NOT NULL;
       CREATE TABLE audit_log(LIKE public.audit_log INCLUDING ALL);
       CREATE TABLE audit_log_related_entity(LIKE public.audit_log_related_entity INCLUDING ALL);`);

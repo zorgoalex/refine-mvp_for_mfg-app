@@ -67,7 +67,8 @@ suite('1C alert notifications — isolated PostgreSQL', () => {
       CREATE TABLE notifications(notification_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id bigint, level text NOT NULL,
         title text NOT NULL, message text NOT NULL, entity_type text, entity_id text, source_type text NOT NULL, source_id text,
         is_read boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now(), idempotency_key text,
-        balloon_mode text, balloon_shown_at timestamptz);
+        balloon_mode text, balloon_shown_at timestamptz,
+        balloon_slot text, balloon_superseded_at timestamptz);
       CREATE UNIQUE INDEX ON notifications(idempotency_key) WHERE idempotency_key IS NOT NULL;
       CREATE TABLE audit_log(LIKE public.audit_log INCLUDING ALL);
       CREATE TABLE audit_log_related_entity(LIKE public.audit_log_related_entity INCLUDING ALL);`);
@@ -170,13 +171,40 @@ suite('1C alert notifications — isolated PostgreSQL', () => {
     expect(keys[0].title).toBe('1С — Агент молчит');
     expect(await q(`SELECT channel FROM onec_alert_dispatch_recipients ORDER BY channel`)).toEqual([{ channel: 'balloon' }, { channel: 'in_app' }]);
 
+    // The alarm's balloon was shown and acknowledged on a screen (review R1-1): the recovery still replaces it.
+    await pool.query(`UPDATE ${schema}.notifications SET balloon_shown_at = now()`);
     await resolve('silent:b');
     expect(sent(await notifier.tick())).toHaveLength(1);
     const stages = await q<{ stage: string }>(`SELECT stage FROM onec_alert_dispatches ORDER BY dispatch_id`);
     expect(stages.map((s) => s.stage)).toEqual(['opened', 'resolved']);
     const resolvedRow = await q<{ level: string; title: string }>(`SELECT level, title FROM notifications ORDER BY created_at DESC LIMIT 1`);
     expect(resolvedRow[0]).toEqual({ level: 'info', title: '1С — Восстановлено: Агент молчит' });
+    // Balloon slot (18.11.2026): «Восстановлено» replaces the alarm's balloon (not yet shown → shown + superseded); the bell keeps both.
+    const balloons = await q<{ title: string; balloon_slot: string; superseded: boolean; shown: boolean }>(
+      `SELECT title, balloon_slot, balloon_superseded_at IS NOT NULL AS superseded, balloon_shown_at IS NOT NULL AS shown
+         FROM notifications ORDER BY created_at, notification_id`);
+    expect(balloons.map((row) => row.balloon_slot)).toEqual([expect.stringMatching(/^onec_alert:(\d+|none):agent$/), expect.stringMatching(/^onec_alert:(\d+|none):agent$/)]);
+    expect(balloons.find((row) => row.title === '1С — Агент молчит')).toMatchObject({ superseded: true, shown: true });
+    expect(balloons.find((row) => row.title.startsWith('1С — Восстановлено'))).toMatchObject({ superseded: false, shown: false });
     expect(sent(await notifier.tick())).toHaveLength(0);
+  });
+
+  it('review R1-3: a new alarm and the recovery of an older one of the same slot in one tick — the recovery goes to the bell only', async () => {
+    flags.alertNotifications = true;
+    await notifier.tick();
+    await raise('agent_silent', 'silent:old');
+    sent(await notifier.tick());
+    await raise('agent_state', 'state:new', 'critical');
+    await resolve('silent:old');
+    await pool.query(`UPDATE ${schema}.onec_alert_episodes SET created_at = now() - interval '61 seconds' WHERE kind = 'agent_state'`);
+    await notifier.tick();
+    const rows = await q<{ title: string; balloon_mode: string | null; superseded: boolean }>(
+      `SELECT title, balloon_mode, balloon_superseded_at IS NOT NULL AS superseded FROM notifications ORDER BY created_at, notification_id`);
+    const recovery = rows.find((row) => row.title.startsWith('1С — Восстановлено'));
+    const alarm = rows.find((row) => row.title.includes('Состояние агента'));
+    expect(recovery).toMatchObject({ balloon_mode: null });
+    expect(alarm).toMatchObject({ balloon_mode: 'mandatory', superseded: false });
+    expect(rows.find((row) => row.title === '1С — Агент молчит')).toMatchObject({ superseded: true });
   });
 
   it('an alert opened and resolved between two ticks still gets both stages', async () => {

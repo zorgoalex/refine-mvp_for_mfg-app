@@ -2,6 +2,9 @@ import { createClient, type RedisClientType } from 'redis';
 import { createRateLimitKey } from './rate-limit-keys';
 import type { RateLimitConsumeInput, RateLimitResult, RateLimitStore } from './rate-limit.types';
 
+/** A rate limit check must not hang a request when the store is unreachable. */
+const CONNECT_TIMEOUT_MS = 2_000;
+
 export interface RedisRateLimitStoreOptions {
   url: string;
   client?: RedisRateLimitClient;
@@ -83,18 +86,42 @@ export class RedisRateLimitStore implements RateLimitStore {
       return this.client;
     }
 
+    // A client whose connection dropped is never reused (incident 12–18.11.2026: with `reconnectStrategy: false` the
+    // closed client stayed cached and every call failed until the backend restarted): forget it and connect anew.
+    if (this.client) {
+      const stale = this.client;
+      this.client = null;
+      this.connectPromise = null;
+      void Promise.resolve().then(() => stale.disconnect()).catch(() => undefined);
+    }
+
     if (!this.connectPromise) {
       const client = createClient({
         url: this.options.url,
         socket: {
           reconnectStrategy: false,
+          connectTimeout: CONNECT_TIMEOUT_MS,
         },
       });
       client.on('error', () => undefined);
-      this.connectPromise = client.connect().then(() => {
-        this.client = client as RedisClientType;
-        return this.client;
+      client.on('end', () => {
+        if (this.client === client) {
+          this.client = null;
+          this.connectPromise = null;
+        }
       });
+      const attempt = client.connect().then(
+        () => {
+          this.client = client as RedisClientType;
+          return this.client;
+        },
+        (error: unknown) => {
+          // A failed connect is not cached either: the next call tries again.
+          if (this.connectPromise === attempt) this.connectPromise = null;
+          throw error;
+        },
+      );
+      this.connectPromise = attempt;
     }
 
     return this.connectPromise;

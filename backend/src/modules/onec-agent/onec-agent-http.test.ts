@@ -12,6 +12,7 @@ import { OnecEtlCompletionService } from './application/onec-etl-completion.serv
 import { OnecEtlIngestService } from './application/onec-etl-ingest.service';
 import { ApiErrorFilter } from '../../common/errors/api-error.filter';
 import { PgOnecRepository } from './adapters/pg-onec-repository';
+import { ApiError } from '../../common/errors/api-error';
 import { RateLimitService } from '../../rate-limit/rate-limit.service';
 import { OnecRuntimeConfigService } from './onec-runtime-config.service';
 import { OnecAgentController } from './http/onec-agent.controller';
@@ -32,6 +33,8 @@ const DER = new X509Certificate(readFileSync(join(__dirname, '__fixtures__', 'te
 const CERT_HEADER = encodeURIComponent(DER.toString('base64'));
 const FINGERPRINT = createHash('sha256').update(DER).digest();
 let agentPort = 0;
+/** The rate-limit storage is down (incident 12–18.11.2026). */
+let limiterDown = false;
 // The real OnecAgentAuthGuard runs; only its collaborators are stubbed.
 const runtimeStub = {
   get: () => ({ enabled: true, agentPort, ingressSecrets: [SECRET], clientCertHeader: 'x-forwarded-tls-client-cert', sessionTtlMs: 600000, heartbeatIntervalMs: 60000, monitorOwner: 'none', monitorIntervalMs: 60000 }),
@@ -64,7 +67,15 @@ Module({
       },
     },
     { provide: OnecEtlCompletionService, useValue: { complete: async () => undefined } },
-    { provide: RateLimitService, useValue: { assertAllowed: async () => undefined, refund: async () => undefined } },
+    {
+      provide: RateLimitService,
+      useValue: {
+        assertAllowed: async () => {
+          if (limiterDown) throw new ApiError(503, 'RATE_LIMIT_UNAVAILABLE', 'Rate limit storage is unavailable', { feature: 'onec_agent_requests' });
+        },
+        refund: async () => undefined,
+      },
+    },
     { provide: PgOnecRepository, useValue: repositoryStub },
     {
       provide: OnecAgentProtocolService,
@@ -164,5 +175,24 @@ describe('1C agent HTTP wiring (real Nest + Express, two listeners)', () => {
     });
     expect(anonymous.status).toBe(403);
     expect((await post(agentUrl, '/api/integration/1c-agents/v1/etl/runs/not-a-uuid/complete', {})).status).toBe(404);
+  });
+
+  it('rate-limit storage down: a batch upload gets 503 BATCH_NOT_STORED_RETRYABLE (safe to re-send); other routes keep the plain 503', async () => {
+    limiterDown = true;
+    try {
+      const batch = await fetch(`${agentUrl}/api/integration/1c-agents/v1/etl/batches`, {
+        method: 'POST', headers: { 'content-type': 'application/x-ndjson', 'content-encoding': 'gzip', ...agentHeaders }, body: 'x',
+      });
+      expect(batch.status).toBe(503);
+      expect((await batch.json()).error).toMatchObject({ code: 'BATCH_NOT_STORED_RETRYABLE', details: { retryAfterSeconds: 30 } });
+      const heartbeat = await post(agentUrl, '/api/integration/1c-agents/v1/heartbeat', { agentId: 'a' });
+      expect(heartbeat.status).toBe(503);
+      expect((await heartbeat.json()).error.code).toBe('RATE_LIMIT_UNAVAILABLE');
+      const lookup = await fetch(`${agentUrl}/api/integration/1c-agents/v1/etl/batches/abc`, { headers: agentHeaders });
+      expect(lookup.status).toBe(503);
+      expect((await lookup.json()).error.code).toBe('RATE_LIMIT_UNAVAILABLE');
+    } finally {
+      limiterDown = false;
+    }
   });
 });
