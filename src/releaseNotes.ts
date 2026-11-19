@@ -37,7 +37,7 @@ export const releaseNotes: ReleaseNoteEntry[] = [
     ],
   },
   {
-    version: APP_VERSION, date: "2026-11-19", title: "Базис: XML «Экспорт фасадов» и сопоставление фрезеровок",
+    version: "0.5.68", date: "2026-11-19", title: "Базис: XML «Экспорт фасадов» и сопоставление фрезеровок",
     services: ["ERP"], repositories: ["repo_erp"],
     added: [
       "Импорт Базис-XML: принимается и новая выгрузка «Экспорт фасадов» — наравне с прежней.",
