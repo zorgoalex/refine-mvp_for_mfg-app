@@ -66,7 +66,7 @@ export interface NotificationRepositoryPort {
     notificationId: string;
     viewer: NotificationViewer;
   }): Promise<NotificationDto | null>;
-  markAllReadForUser(viewer: NotificationViewer): Promise<number>;
+  markAllReadForUser(viewer: NotificationViewer, notificationIds?: readonly string[]): Promise<number>;
   /** `balloon_pending` — обязательный балун строки ещё не показан, строка не удалена. */
   deleteForUser(input: { notificationId: string; viewer: NotificationViewer }): Promise<'deleted' | 'not_found' | 'balloon_pending'>;
   /**

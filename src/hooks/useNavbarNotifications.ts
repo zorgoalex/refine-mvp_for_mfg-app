@@ -36,10 +36,12 @@ export function useNavbarNotifications(userId?: string): BackendNotificationsSta
     [backend, localIds, userId],
   );
 
-  const markAllAsRead = useCallback(async () => {
-    useNotificationStore.getState().markAllAsRead(userId);
-    await backend.markAllAsRead();
-  }, [backend, userId]);
+  // Только показанное в списке (shownIds из панели): локальные — в своём хранилище, серверные — на сервере.
+  const markAllAsRead = useCallback(async (shownIds: string[]) => {
+    const { local, remote } = splitShownIds(shownIds, localIds);
+    if (local.length > 0) useNotificationStore.getState().markAsRead(local, userId);
+    await backend.markAllAsRead(remote);
+  }, [backend, localIds, userId]);
 
   const deleteNotification = useCallback(
     async (ids: string | string[]) => {
@@ -97,6 +99,14 @@ export function toLocalPanelNotification(notification: Notification): PanelNotif
     sourceType: 'frontend-warning',
     sourceId: null,
     deletable: true,
+  };
+}
+
+/** Показанные в колокольчике id → локальные (хранилище браузера) и серверные. */
+export function splitShownIds(shownIds: string[], localIds: ReadonlySet<string>): { local: string[]; remote: string[] } {
+  return {
+    local: shownIds.filter((id) => localIds.has(id)),
+    remote: shownIds.filter((id) => !localIds.has(id)),
   };
 }
 
