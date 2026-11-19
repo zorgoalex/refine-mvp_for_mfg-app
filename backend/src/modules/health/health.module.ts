@@ -2,11 +2,12 @@ import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../../database/database.module';
 import { RateLimitModule } from '../../rate-limit/rate-limit.module';
 import { OrderRealtimeModule } from '../order-realtime/order-realtime.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { HealthController } from './health.controller';
 import { HealthService } from './health.service';
 
 @Module({
-  imports: [DatabaseModule, RateLimitModule, OrderRealtimeModule],
+  imports: [DatabaseModule, RateLimitModule, OrderRealtimeModule, NotificationsModule],
   controllers: [HealthController],
   providers: [HealthService],
 })

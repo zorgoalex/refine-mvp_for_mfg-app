@@ -4,6 +4,7 @@ import type { BackendEnv } from '../../config/env.validation';
 import { DatabaseService } from '../../database/database.service';
 import { RateLimitService } from '../../rate-limit/rate-limit.service';
 import { OrderRealtimeStreamService } from '../order-realtime/application/order-realtime-stream.service';
+import { NotificationStreamService } from '../notifications/application/notification-stream.service';
 import {
   createLiveHealthResponse,
   createReadyHealthResponse,
@@ -23,6 +24,9 @@ export class HealthService {
     @Optional()
     @Inject(OrderRealtimeStreamService)
     private readonly orderRealtime?: OrderRealtimeStreamService,
+    @Optional()
+    @Inject(NotificationStreamService)
+    private readonly notificationStream?: NotificationStreamService,
   ) {}
 
   live(): LiveHealthResponse {
@@ -41,6 +45,8 @@ export class HealthService {
       redis: await this.redisCheck(),
       config: await this.configCheck(),
       ...(this.orderRealtime ? { realtime: this.orderRealtime.healthCheck() } : {}),
+      // Degraded never makes readiness fail: tabs fall back to polling.
+      ...(this.notificationStream ? { notificationStream: this.notificationStream.healthCheck() } : {}),
     });
   }
 

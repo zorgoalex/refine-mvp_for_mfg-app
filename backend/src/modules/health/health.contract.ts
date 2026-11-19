@@ -23,6 +23,7 @@ export interface ReadyHealthResponse {
     redis: HealthCheckStatus;
     config: HealthCheckStatus;
     realtime?: HealthCheckStatus;
+    notificationStream?: HealthCheckStatus;
     integrations?: Record<string, HealthCheckStatus>;
   };
   timestamp: string;
@@ -50,6 +51,7 @@ export function createReadyHealthResponse(options: {
   redis: HealthCheckStatus;
   config?: HealthCheckStatus;
   realtime?: HealthCheckStatus;
+  notificationStream?: HealthCheckStatus;
   integrations?: Record<string, HealthCheckStatus>;
 }): ReadyHealthResponse {
   const config = options.config ?? { status: 'ok' };
@@ -58,6 +60,7 @@ export function createReadyHealthResponse(options: {
     redis: options.redis,
     config,
     ...(options.realtime ? { realtime: options.realtime } : {}),
+    ...(options.notificationStream ? { notificationStream: options.notificationStream } : {}),
     ...(options.integrations ? { integrations: options.integrations } : {}),
   };
   const status = Object.values(checks)
