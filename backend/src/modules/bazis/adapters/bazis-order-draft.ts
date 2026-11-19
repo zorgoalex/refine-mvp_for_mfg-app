@@ -9,6 +9,16 @@ import type {
   SaveOrderRequirementDto,
   SaveOrderWorkshopDto,
 } from '../../orders/dto/save-order.dto';
+import {
+  BAZIS_MILLING_PROPERTY_NAMES,
+  bazisPanelLegacyFilmName,
+  bazisPanelPropertyFilmName,
+  bazisPanelUniqueFaceFilm,
+  bazisUserPropertyValue,
+  normalizeBazisReferenceName,
+} from '../application/bazis-panel-film';
+
+export { normalizeBazisReferenceName };
 
 export interface BazisDraftPanel {
   bazisNodeId: number;
@@ -34,7 +44,13 @@ export interface BazisDraftMaterialMapping {
   target_kind: string;
   sheet_material_type_id: number | string | null;
   film_id: number | string | null;
+  milling_type_id?: number | string | null;
 }
+
+/** Фрезеровка по умолчанию, когда у панели нет свойства «Фрезировка» или оно явно пропущено. */
+export const DEFAULT_BAZIS_MILLING_TYPE_ID = 1;
+/** Подпись фрезеровки в списке несопоставленного (ошибка BAZIS_UNMAPPED_MATERIALS). */
+export const UNMAPPED_MILLING_SUFFIX = ' (фрезеровка)';
 
 export type BazisDraftReferenceKind = 'film' | 'milling';
 export type BazisDraftReferenceLookup = ReadonlyMap<string, number>;
@@ -111,6 +127,64 @@ export function collectUnmappedSheetNames(
   return [...names];
 }
 
+// Фрезеровка панели: сопоставление «milling» (выбор пользователя при импорте) →
+// фрезеровка ERP с тем же названием → не найдена (undefined). Без свойства или при
+// «Пропустить» — фрезеровка по умолчанию.
+export function resolvePanelMillingTypeId(
+  rawJson: Record<string, unknown> | null,
+  mappings: Map<string, BazisDraftMaterialMapping>,
+  referenceLookup: BazisDraftReferenceLookup,
+): number | undefined {
+  const millingName = panelCustomMillingName(rawJson);
+  if (!millingName) {
+    return DEFAULT_BAZIS_MILLING_TYPE_ID;
+  }
+  const mapping = mappings.get(`milling:${normalizeBazisReferenceName(millingName)}`);
+  if (mapping?.target_kind === 'ignore') {
+    return DEFAULT_BAZIS_MILLING_TYPE_ID;
+  }
+  if (mapping?.target_kind === 'milling') {
+    const mapped = toNullableNumber(mapping.milling_type_id);
+    if (mapped != null) {
+      return mapped;
+    }
+  }
+  return referenceLookup.get(bazisReferenceLookupKey('milling', millingName));
+}
+
+// Фрезеровки выбранных панелей, которых нет ни в сопоставлениях, ни в справочнике ERP.
+export function collectUnresolvedMillingNames(
+  panels: ReadonlyArray<Pick<BazisDraftPanel, 'rawJson'>>,
+  mappings: Map<string, BazisDraftMaterialMapping>,
+  referenceLookup: BazisDraftReferenceLookup,
+): string[] {
+  const names = new Map<string, string>();
+  for (const panel of panels) {
+    if (resolvePanelMillingTypeId(panel.rawJson, mappings, referenceLookup) !== undefined) {
+      continue;
+    }
+    const millingName = panelCustomMillingName(panel.rawJson);
+    if (millingName) {
+      names.set(normalizeBazisReferenceName(millingName), millingName);
+    }
+  }
+  return [...names.values()];
+}
+
+// Всё, что мешает собрать детали ERP: листы без сопоставления и ненайденные фрезеровки.
+export function collectUnmappedMaterialNames(
+  panels: ReadonlyArray<Pick<BazisDraftPanel, 'mainMaterialName' | 'rawJson'>>,
+  mappings: Map<string, BazisDraftMaterialMapping>,
+  referenceLookup: BazisDraftReferenceLookup,
+): string[] {
+  return [
+    ...collectUnmappedSheetNames(panels, mappings),
+    ...collectUnresolvedMillingNames(panels, mappings, referenceLookup).map(
+      (name) => `${name}${UNMAPPED_MILLING_SUFFIX}`,
+    ),
+  ];
+}
+
 export function buildDraftDetails(
   panels: ReadonlyArray<BazisDraftPanel>,
   mappings: Map<string, BazisDraftMaterialMapping>,
@@ -119,21 +193,25 @@ export function buildDraftDetails(
 ): BazisDraftDetail[] {
   return panels.map((panel) => {
     const filmName = panelPreferredFilmName(panel.rawJson);
-    const filmMapping = filmName
-      ? mappings.get(`film:${normalizeBazisReferenceName(filmName)}`)
-      : undefined;
+    const filmMapping = panelFilmNameCandidates(panel.rawJson)
+      .map((name) => mappings.get(`film:${normalizeBazisReferenceName(name)}`))
+      .find((mapping) => mapping != null);
+    const legacyLookupName = panelLegacyLookupFilmName(panel.rawJson);
     const sheetMapping = panel.mainMaterialName
       ? mappings.get(`sheet:${normalizeBazisReferenceName(panel.mainMaterialName)}`)
       : undefined;
-    const millingName = panelCustomMillingName(panel.rawJson);
-    const millingTypeId = millingName
-      ? referenceLookup.get(bazisReferenceLookupKey('milling', millingName)) ?? 1
-      : 1;
+    // Ненайденную фрезеровку команды заказа отбивают раньше (collectUnmappedMaterialNames);
+    // здесь — прежний запасной вариант для выгрузки раскроя и старых вызовов.
+    const millingTypeId =
+      resolvePanelMillingTypeId(panel.rawJson, mappings, referenceLookup) ??
+      DEFAULT_BAZIS_MILLING_TYPE_ID;
     const filmId =
       filmMapping == null
-        ? filmName
-          ? referenceLookup.get(bazisReferenceLookupKey('film', filmName)) ?? null
-          : null
+        ? (filmName ? referenceLookup.get(bazisReferenceLookupKey('film', filmName)) : undefined)
+          ?? (legacyLookupName
+            ? referenceLookup.get(bazisReferenceLookupKey('film', legacyLookupName))
+            : undefined)
+          ?? null
         : filmMapping.target_kind === 'film'
           ? toNullableNumber(filmMapping.film_id)
           : null;
@@ -168,14 +246,6 @@ export function buildDraftDetails(
   });
 }
 
-export function normalizeBazisReferenceName(value: string): string {
-  return value
-    .trim()
-    .toLocaleLowerCase('ru-RU')
-    .replace(/ё/g, 'е')
-    .replace(/\s+/g, ' ');
-}
-
 export function bazisReferenceLookupKey(
   kind: BazisDraftReferenceKind,
   value: string,
@@ -183,16 +253,18 @@ export function bazisReferenceLookupKey(
   return `${kind}:${normalizeBazisReferenceName(value)}`;
 }
 
+// Плёнка из свойств панели: «Пленка», иначе «Пленка (обр)»; если на пласти та же
+// плёнка с поставщиком («Экспорт фасадов») — «Название; Поставщик».
 export function panelCustomFilmName(
   rawJson: Record<string, unknown> | null,
 ): string | null {
-  return panelUserPropertyValue(rawJson, new Set(['пленка']));
+  return bazisPanelPropertyFilmName(rawJson);
 }
 
 export function panelCustomMillingName(
   rawJson: Record<string, unknown> | null,
 ): string | null {
-  return panelUserPropertyValue(rawJson, new Set(['фрезировка', 'фрезеровка']));
+  return panelUserPropertyValue(rawJson, BAZIS_MILLING_PROPERTY_NAMES);
 }
 
 export function panelCustomPaintName(
@@ -204,16 +276,40 @@ export function panelCustomPaintName(
 export function panelPreferredFilmName(
   rawJson: Record<string, unknown> | null,
 ): string | null {
-  const customFilmName = panelCustomFilmName(rawJson);
-  if (customFilmName) {
-    return customFilmName;
-  }
+  return panelCustomFilmName(rawJson) ?? bazisPanelUniqueFaceFilm(rawJson)?.name ?? null;
+}
 
-  const uniqueFilmNames = new Map<string, string>();
-  for (const filmName of extractFilmNames(rawJson)) {
-    uniqueFilmNames.set(normalizeBazisReferenceName(filmName), filmName);
+// Имена плёнки для поиска сохранённого сопоставления: новое (с поставщиком), затем прежнее
+// (правило до «Экспорта фасадов») — ранее сохранённый выбор, включая «Пропустить», не теряется.
+export function panelFilmNameCandidates(rawJson: Record<string, unknown> | null): string[] {
+  const names = new Map<string, string>();
+  for (const name of [panelPreferredFilmName(rawJson), bazisPanelLegacyFilmName(rawJson)]) {
+    if (name && !names.has(normalizeBazisReferenceName(name))) {
+      names.set(normalizeBazisReferenceName(name), name);
+    }
   }
-  return uniqueFilmNames.size === 1 ? [...uniqueFilmNames.values()][0] ?? null : null;
+  return [...names.values()];
+}
+
+// Прежнее имя для прямого поиска в справочнике (до 2026-11-18 искалось только свойство «Пленка»):
+// если плёнки «Название; Поставщик» в справочнике нет, а без поставщика — есть, деталь получает её.
+export function panelLegacyLookupFilmName(rawJson: Record<string, unknown> | null): string | null {
+  return panelUserPropertyValue(rawJson, new Set(['пленка']));
+}
+
+// Имя плёнки для прямого поиска в справочнике плёнок (без сопоставления материалов):
+// плёнка из свойств, либо единственная плёнка пластей, если в ней указан поставщик
+// («Название; Поставщик» — формат справочника ERP). Плёнку пласти без поставщика
+// (штатный экспорт Базиса) по-прежнему подставляет только сопоставление материалов.
+export function panelLookupFilmName(
+  rawJson: Record<string, unknown> | null,
+): string | null {
+  const custom = panelCustomFilmName(rawJson);
+  if (custom) {
+    return custom;
+  }
+  const face = bazisPanelUniqueFaceFilm(rawJson);
+  return face?.withVendor ? face.name : null;
 }
 
 export async function computeTargetOrderDuplicates(
@@ -289,74 +385,11 @@ export function orderDtoToSaveDto(order: OrderDto): SaveOrderDto {
   };
 }
 
-function extractFilmNames(rawJson: Record<string, unknown> | null): string[] {
-  if (!rawJson) {
-    return [];
-  }
-
-  const result: string[] = [];
-  for (const faceKey of ['ОблицовкаПласти1', 'ОблицовкаПласти2']) {
-    const face = rawJson[faceKey];
-    if (typeof face !== 'object' || face === null) {
-      continue;
-    }
-    const plasti = (face as Record<string, unknown>)['Пласть'];
-    const list = Array.isArray(plasti) ? plasti : plasti ? [plasti] : [];
-    for (const plast of list) {
-      if (typeof plast !== 'object' || plast === null) {
-        continue;
-      }
-      const value = (plast as Record<string, unknown>)['Наименование'];
-      if (typeof value === 'string' && value.trim().length > 0) {
-        result.push(value.trim());
-      }
-    }
-  }
-  return result;
-}
-
 function panelUserPropertyValue(
   rawJson: Record<string, unknown> | null,
   acceptedNames: ReadonlySet<string>,
 ): string | null {
-  if (!rawJson) {
-    return null;
-  }
-
-  const propertyCandidates: unknown[] = [];
-  const nested = rawJson['ПользовательскиеСвойства'];
-  if (typeof nested === 'object' && nested !== null && !Array.isArray(nested)) {
-    propertyCandidates.push((nested as Record<string, unknown>)['Свойство']);
-  }
-  propertyCandidates.push(rawJson['Свойство']);
-
-  for (const candidate of propertyCandidates) {
-    const properties = Array.isArray(candidate) ? candidate : candidate ? [candidate] : [];
-    for (const property of properties) {
-      if (typeof property !== 'object' || property === null || Array.isArray(property)) {
-        continue;
-      }
-      const row = property as Record<string, unknown>;
-      const propertyName = textValue(row['Имя'] ?? row['Наименование']);
-      if (!propertyName || !acceptedNames.has(normalizeBazisReferenceName(propertyName))) {
-        continue;
-      }
-      const propertyValue = textValue(row['Значение']);
-      if (propertyValue) {
-        return propertyValue;
-      }
-    }
-  }
-
-  return null;
-}
-
-function textValue(value: unknown): string | null {
-  if (typeof value !== 'string' && typeof value !== 'number') {
-    return null;
-  }
-  const text = String(value).trim();
-  return text.length > 0 ? text : null;
+  return bazisUserPropertyValue(rawJson, acceptedNames);
 }
 
 function toNullableNumber(value: number | string | null | undefined): number | null {

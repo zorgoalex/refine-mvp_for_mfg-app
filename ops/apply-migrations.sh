@@ -291,6 +291,8 @@ q_con_def_on_safe() { echo "SELECT COALESCE((SELECT pg_get_constraintdef(oid)=\$
 q_con_hash_on() { echo "SELECT COALESCE((SELECT md5(pg_get_constraintdef(oid))='$3' FROM pg_constraint WHERE conname='$1' AND conrelid='public.$2'::regclass), false);"; }
 q_idx_hash() { echo "SELECT COALESCE((SELECT md5(indexdef)='$2' FROM pg_indexes WHERE schemaname='public' AND indexname='$1'), false);"; }
 q_fun_hash() { echo "SELECT COALESCE((SELECT md5(pg_get_functiondef(oid))='$2' FROM pg_proc WHERE oid=to_regprocedure('$1')), false);"; }
+# A function legitimately redefined in place by a later migration: either the original or the later body.
+q_fun_hash_either() { echo "SELECT COALESCE((SELECT md5(pg_get_functiondef(oid)) IN ('$2','$3') FROM pg_proc WHERE oid=to_regprocedure('$1')), false);"; }
 q_colset_hash() { echo "SELECT COALESCE((SELECT md5(string_agg(format('%s|%s|%s|%s|%s',ordinal_position,column_name,data_type,is_nullable,COALESCE(column_default,'∅')), ', ' ORDER BY ordinal_position))='$3' FROM information_schema.columns WHERE table_schema='public' AND table_name='$1' AND column_name=ANY(string_to_array('$2',','))), false);"; }
 q_conset_hash() { echo "SELECT COALESCE((SELECT md5(string_agg(conname||'|'||contype::text||'|'||confdeltype::text||'|'||pg_get_constraintdef(oid), ', ' ORDER BY conname))='$3' FROM pg_constraint WHERE connamespace='public'::regnamespace AND conrelid::regclass::text='$1' AND conname=ANY(string_to_array('$2',','))), false);"; }
 q_idxset_hash() { echo "SELECT COALESCE((SELECT md5(string_agg(indexname||'|'||indexdef, ', ' ORDER BY indexname))='$3' FROM pg_indexes WHERE schemaname='public' AND tablename='$1' AND indexname=ANY(string_to_array('$2',','))), false);"; }
@@ -1093,6 +1095,9 @@ probe_file() {
                        ) OR (
                          md5(pg_get_functiondef(oid)) = 'd4f7e31052321242dfea61056bae41e7'
                          AND obj_description(oid, 'pg_proc') = 'v109 exact current-revision panel reconciliation with one-product NULL product support'
+                       ) OR (
+                         md5(pg_get_functiondef(oid)) = '1499ff1d0ac9346e1bdb1280e9b33068'
+                         AND obj_description(oid, 'pg_proc') = 'v299 exact current-revision panel reconciliation, one-product NULL product, product names without .b3d'
                        )
                        FROM pg_proc
                        WHERE oid = to_regprocedure('reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)')
@@ -1175,12 +1180,14 @@ probe_file() {
                      "$(q_con_hash_on chk_cnc_tg_worker_observation_reason_codes cnc_telegram_worker_message_observations edb8109e18cd30146d4ab50cb75b151a)" ;;
     109_cnc_telegram_worker_audit_classification_codes*) probe_all \
                      "$(q_con_hash_on chk_cnc_tg_worker_observation_classification_code cnc_telegram_worker_message_observations d00cffd4b59ca731fd8c92aaa5e23409)" ;;
+    # 109 body is legitimately redefined by 299 (product names without .b3d): either version is PRESENT.
     109_bazis_single_product_reprojection*) probe_all \
-                     "$(q_fun_hash 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)' d4f7e31052321242dfea61056bae41e7)" \
+                     "$(q_fun_hash_either 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)' d4f7e31052321242dfea61056bae41e7 1499ff1d0ac9346e1bdb1280e9b33068)" \
                      "SELECT obj_description(
                        'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)'::regprocedure,
                        'pg_proc'
-                     ) = 'v109 exact current-revision panel reconciliation with one-product NULL product support';" ;;
+                     ) IN ('v109 exact current-revision panel reconciliation with one-product NULL product support',
+                           'v299 exact current-revision panel reconciliation, one-product NULL product, product names without .b3d');" ;;
     110_cnc_telegram_label_maps*) probe_all \
                      "$(q_tbl cnc_telegram_packet_evidence_set)" \
                      "$(q_tbl cnc_telegram_packet_item_evidence)" \
@@ -3030,6 +3037,16 @@ probe_file() {
       "$(q_fun_hash 'public.trg_orders_close_rework_round()' b5591f65ae646e55dd5232ad77f8cac7)" ;;
     # «Переделка» 1.1: срок готовности круга и отметка сверки итогового дедлайна (аддитивно).
     # Incoming signals: several occurrences of one signal per message (one per order); 173's probe accepts both keys.
+    # 299: Bazis product names compared without the .b3d model-file extension (function body only).
+    299_bazis_product_name_b3d*) probe_all \
+      "$(q_fun_hash 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)' 1499ff1d0ac9346e1bdb1280e9b33068)" \
+      "SELECT obj_description('reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)'::regprocedure, 'pg_proc') = 'v299 exact current-revision panel reconciliation, one-product NULL product, product names without .b3d';" ;;
+    # 298: Bazis milling mappings (bazis_material_mappings.milling_type_id + source/target kind 'milling').
+    298_bazis_milling_mappings*) probe_all \
+      "$(q_col bazis_material_mappings milling_type_id)" \
+      "SELECT COALESCE((SELECT pg_get_constraintdef(oid) LIKE '%''milling''%' FROM pg_constraint WHERE conname='bazis_material_mappings_source_kind_check' AND conrelid='public.bazis_material_mappings'::regclass), false);" \
+      "SELECT COALESCE((SELECT pg_get_constraintdef(oid) LIKE '%''milling''%' FROM pg_constraint WHERE conname='bazis_material_mappings_target_kind_check' AND conrelid='public.bazis_material_mappings'::regclass), false);" \
+      "SELECT COALESCE((SELECT pg_get_constraintdef(oid) LIKE '%milling_type_id IS NOT NULL%' FROM pg_constraint WHERE conname='bazis_material_mappings_target_chk' AND conrelid='public.bazis_material_mappings'::regclass), false);" ;;
     # 296: balloon slots of notifications (a newer balloon of the slot replaces the older one).
     296_notification_balloon_slot*) probe_all \
       "$(q_col notifications balloon_slot)" \
@@ -3211,6 +3228,12 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     282_order_stage_letters*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    299_bazis_product_name_b3d*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    298_bazis_milling_mappings*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     296_notification_balloon_slot*)

@@ -176,6 +176,29 @@ describe('BazisController', () => {
     });
   });
 
+  it('accepts milling mappings (migr 298) and validates their target id', () => {
+    expect(
+      parseUpsertMaterialMappingsBody({
+        items: [
+          { sourceKind: 'milling', bazisName: 'Выборка по фото', targetKind: 'milling', millingTypeId: 666 },
+          { sourceKind: 'milling', bazisName: 'Выборка 2 ступ.', targetKind: 'ignore' },
+        ],
+      }).items,
+    ).toEqual([
+      expect.objectContaining({ sourceKind: 'milling', targetKind: 'milling', millingTypeId: 666 }),
+      expect.objectContaining({ sourceKind: 'milling', targetKind: 'ignore' }),
+    ]);
+    for (const item of [
+      { sourceKind: 'milling', bazisName: 'Выборка', targetKind: 'milling' },
+      { sourceKind: 'milling', bazisName: 'Выборка', targetKind: 'milling', millingTypeId: 2, filmId: 3 },
+      { sourceKind: 'milling', bazisName: 'Выборка', targetKind: 'ignore', millingTypeId: 2 },
+      { sourceKind: 'sheet', bazisName: 'ЛДСП', targetKind: 'sheet', sheetMaterialTypeId: 1, millingTypeId: 2 },
+      { sourceKind: 'milling', bazisName: 'Выборка', targetKind: 'film', filmId: 3 },
+    ]) {
+      expect(() => parseUpsertMaterialMappingsBody({ items: [item] }), JSON.stringify(item)).toThrowError(ApiError);
+    }
+  });
+
   it('rejects cross-kind material mappings (targetKind must match sourceKind or be ignore)', () => {
     expect(() =>
       parseUpsertMaterialMappingsBody({

@@ -86,14 +86,23 @@ const materialMappingsQuerySchema = z.object({
   names: z.string().trim().min(1).optional(),
 });
 
+// Поле id цели для каждого target_kind (зеркало bazis_material_mappings_target_chk, migr 298).
+const MAPPING_TARGET_ID_FIELDS = {
+  sheet: 'sheetMaterialTypeId',
+  film: 'filmId',
+  edge: 'edgeTypeId',
+  milling: 'millingTypeId',
+} as const;
+
 const materialMappingItemSchema = z
   .object({
-    sourceKind: z.enum(['sheet', 'film', 'edge']),
+    sourceKind: z.enum(['sheet', 'film', 'edge', 'milling']),
     bazisName: humanName(Number.MAX_SAFE_INTEGER),
-    targetKind: z.enum(['sheet', 'film', 'edge', 'ignore']),
+    targetKind: z.enum(['sheet', 'film', 'edge', 'milling', 'ignore']),
     sheetMaterialTypeId: optionalNumericIdSchema.nullish(),
     filmId: optionalNumericIdSchema.nullish(),
     edgeTypeId: optionalNumericIdSchema.nullish(),
+    millingTypeId: optionalNumericIdSchema.nullish(),
   })
   .superRefine((item, ctx) => {
     // Кросс-контекстный маппинг (sheet→film и т.п.) семантически невозможен:
@@ -108,57 +117,22 @@ const materialMappingItemSchema = z
       return;
     }
 
-    const present = {
-      sheetMaterialTypeId: item.sheetMaterialTypeId ?? null,
-      filmId: item.filmId ?? null,
-      edgeTypeId: item.edgeTypeId ?? null,
-    };
-
-    if (item.targetKind === 'sheet') {
-      if (present.sheetMaterialTypeId == null) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['sheetMaterialTypeId'], message: 'sheetMaterialTypeId is required for targetKind=sheet' });
-      }
-      if (present.filmId != null) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['filmId'], message: 'filmId must be empty for targetKind=sheet' });
-      }
-      if (present.edgeTypeId != null) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['edgeTypeId'], message: 'edgeTypeId must be empty for targetKind=sheet' });
-      }
+    const requiredField =
+      item.targetKind === 'ignore' ? null : MAPPING_TARGET_ID_FIELDS[item.targetKind];
+    if (requiredField != null && (item[requiredField] ?? null) == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [requiredField],
+        message: `${requiredField} is required for targetKind=${item.targetKind}`,
+      });
     }
-
-    if (item.targetKind === 'film') {
-      if (present.filmId == null) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['filmId'], message: 'filmId is required for targetKind=film' });
-      }
-      if (present.sheetMaterialTypeId != null) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['sheetMaterialTypeId'], message: 'sheetMaterialTypeId must be empty for targetKind=film' });
-      }
-      if (present.edgeTypeId != null) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['edgeTypeId'], message: 'edgeTypeId must be empty for targetKind=film' });
-      }
-    }
-
-    if (item.targetKind === 'edge') {
-      if (present.edgeTypeId == null) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['edgeTypeId'], message: 'edgeTypeId is required for targetKind=edge' });
-      }
-      if (present.sheetMaterialTypeId != null) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['sheetMaterialTypeId'], message: 'sheetMaterialTypeId must be empty for targetKind=edge' });
-      }
-      if (present.filmId != null) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['filmId'], message: 'filmId must be empty for targetKind=edge' });
-      }
-    }
-
-    if (item.targetKind === 'ignore') {
-      if (present.sheetMaterialTypeId != null) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['sheetMaterialTypeId'], message: 'sheetMaterialTypeId must be empty for targetKind=ignore' });
-      }
-      if (present.filmId != null) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['filmId'], message: 'filmId must be empty for targetKind=ignore' });
-      }
-      if (present.edgeTypeId != null) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['edgeTypeId'], message: 'edgeTypeId must be empty for targetKind=ignore' });
+    for (const field of Object.values(MAPPING_TARGET_ID_FIELDS)) {
+      if (field !== requiredField && (item[field] ?? null) != null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [field],
+          message: `${field} must be empty for targetKind=${item.targetKind}`,
+        });
       }
     }
   });
@@ -251,12 +225,13 @@ const upsertMappingsRequestSwaggerSchema = {
         type: 'object',
         required: ['sourceKind', 'bazisName', 'targetKind'],
         properties: {
-          sourceKind: { type: 'string', enum: ['sheet', 'film', 'edge'] },
+          sourceKind: { type: 'string', enum: ['sheet', 'film', 'edge', 'milling'] },
           bazisName: { type: 'string', minLength: 1 },
-          targetKind: { type: 'string', enum: ['sheet', 'film', 'edge', 'ignore'] },
+          targetKind: { type: 'string', enum: ['sheet', 'film', 'edge', 'milling', 'ignore'] },
           sheetMaterialTypeId: { type: 'integer', nullable: true },
           filmId: { type: 'integer', nullable: true },
           edgeTypeId: { type: 'integer', nullable: true },
+          millingTypeId: { type: 'integer', nullable: true },
         },
       },
     },

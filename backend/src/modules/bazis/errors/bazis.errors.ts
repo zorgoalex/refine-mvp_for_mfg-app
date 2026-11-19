@@ -60,11 +60,13 @@ export class BazisUnmappedMaterialsError extends ApiError {
   constructor(names: string[]) {
     // Variant B: у каждой детали заказа sheet_material_type_id ОБЯЗАТЕЛЕН
     // (order-validation.ts requirePositiveInteger) — панель без sheet-маппинга
-    // не может стать деталью; отбиваем до create понятным списком.
+    // не может стать деталью; отбиваем до create понятным списком. Туда же —
+    // фрезеровки, которых нет ни в справочнике, ни в сопоставлениях (migr 298):
+    // они приходят с подписью « (фрезеровка)».
     super(
       422,
       'BAZIS_UNMAPPED_MATERIALS',
-      `Сначала сопоставьте материалы листов: ${names.join(', ')}`,
+      `Сначала сопоставьте материалы: ${names.join(', ')}`,
       { unmappedMaterials: names },
     );
   }

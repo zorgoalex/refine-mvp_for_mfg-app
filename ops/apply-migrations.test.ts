@@ -524,8 +524,11 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
 
   it('pins migration 109 and lets its function supersede the migration 104 marker', () => {
     expect(probeFn).toContain('109_bazis_single_product_reprojection*');
+    // The helper must be defined in the runner itself, otherwise every probe that uses it reads as PENDING.
+    expect(scriptText).toMatch(/^q_fun_hash_either\(\) \{ echo "SELECT COALESCE\(\(SELECT md5\(pg_get_functiondef\(oid\)\) IN \('\$2','\$3'\)/m);
+    // 299 redefines the same function (product names without .b3d): 109 accepts either body.
     expect(probeFn).toContain(
-      "q_fun_hash 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)' d4f7e31052321242dfea61056bae41e7",
+      "q_fun_hash_either 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)' d4f7e31052321242dfea61056bae41e7 1499ff1d0ac9346e1bdb1280e9b33068",
     );
     const migration104Probe = probeFn.slice(
       probeFn.indexOf('104_bazis_panel_order_links*'),
@@ -533,6 +536,17 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     );
     expect(migration104Probe).toContain('14cfb20b020779a070e7ee2ba070ba0d');
     expect(migration104Probe).toContain('d4f7e31052321242dfea61056bae41e7');
+    expect(migration104Probe).toContain('1499ff1d0ac9346e1bdb1280e9b33068');
+  });
+
+  it('pins migration 299 (Bazis product names without .b3d) to its function body and marker', () => {
+    expect(probeFn).toContain('299_bazis_product_name_b3d*');
+    expect(probeFn).toContain(
+      "q_fun_hash 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)' 1499ff1d0ac9346e1bdb1280e9b33068",
+    );
+    expect(probeFn).toContain(
+      'v299 exact current-revision panel reconciliation, one-product NULL product, product names without .b3d',
+    );
   });
 
   it('pins migration 107 Bazis ERP identity completion marker', () => {

@@ -204,6 +204,18 @@ export interface BazisRevisionMaterialsSummaryDto {
   hardwareByName: BazisHardwareSummaryDto[];
   edgesByName: BazisRawMaterialUsageDto[];
   filmsByName: BazisRawMaterialUsageDto[];
+  /** Фрезеровки панелей и их фрезеровка ERP (сопоставление → точное название → не найдена). */
+  millingsByName: BazisMillingUsageDto[];
+}
+
+export interface BazisMillingUsageDto {
+  name: string;
+  usageCount: number;
+  /** Фрезеровка ERP; null — не найдена (нужно сопоставление) или «Пропустить». */
+  millingTypeId: number | null;
+  millingTypeName: string | null;
+  /** Сопоставление пользователя: 'milling' | 'ignore'; null — нет (найдена по названию либо не найдена). */
+  mappingTargetKind: 'milling' | 'ignore' | null;
 }
 
 export interface BazisEstimateMaterialDto {
@@ -259,15 +271,17 @@ export interface MaterialMappingDto {
   sheetMaterialTypeId: number | null;
   filmId: number | null;
   edgeTypeId: number | null;
+  millingTypeId: number | null;
 }
 
 export interface UpsertMaterialMappingDto {
-  sourceKind: 'sheet' | 'film' | 'edge';
+  sourceKind: 'sheet' | 'film' | 'edge' | 'milling';
   bazisName: string;
-  targetKind: 'sheet' | 'film' | 'edge' | 'ignore';
+  targetKind: 'sheet' | 'film' | 'edge' | 'milling' | 'ignore';
   sheetMaterialTypeId?: number | null;
   filmId?: number | null;
   edgeTypeId?: number | null;
+  millingTypeId?: number | null;
 }
 
 export interface CreateOrderFromRevisionResponseDto {
