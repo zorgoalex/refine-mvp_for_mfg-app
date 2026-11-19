@@ -168,6 +168,54 @@ describe('BalloonCenterProvider (code review R1)', () => {
     expect(mocks.claim.mock.calls.length).toBeGreaterThan(claimsBeforeClose);
   });
 
+  it('slots (18.11.2026): a fresh balloon of the slot closes the open older one; the open ones are reported on the next claim', async () => {
+    const slot = 'onec_alert:1:agent';
+    mocks.claim
+      .mockResolvedValueOnce({ items: [item(ID(1), { balloonMode: 'mandatory', balloonSlot: slot }), item(ID(2), { balloonSlot: 'other' })], superseded: [] })
+      .mockResolvedValueOnce({ items: [item(ID(3), { balloonMode: 'mandatory', balloonSlot: slot })], superseded: [] })
+      .mockResolvedValue({ items: [], superseded: [] });
+    await mount();
+    await act(async () => { await center!.enqueueLocal('7', [{ key: `w-${Math.random()}`, kind: 'info', title: 'W', text: 'pump', mode: 'auto' }]); });
+    await flush();
+    const second = mocks.claim.mock.calls[1][0];
+    expect(second.openNotificationIds).toEqual([ID(1), ID(2)]);
+    expect(mocks.destroyed).toContain(`notification-${ID(1)}`);
+    expect(mocks.destroyed).not.toContain(`notification-${ID(2)}`);
+    expect(mocks.opened.map((o) => o.key)).toContain(`notification-${ID(3)}`);
+  });
+
+  it('slots: the server names an open balloon as replaced — it closes even when no place is free (limit 0)', async () => {
+    const five = [1, 2, 3, 4, 5].map((n) => item(ID(n), { balloonMode: 'mandatory', balloonSlot: `s${n}` }));
+    mocks.claim
+      .mockResolvedValueOnce({ items: five, superseded: [] })
+      .mockResolvedValueOnce({ items: [], superseded: [ID(2)] })
+      .mockResolvedValue({ items: [], superseded: [] });
+    await mount();
+    await act(async () => { await center!.enqueueLocal('7', [{ key: `w-${Math.random()}`, kind: 'info', title: 'W', text: 'pump', mode: 'auto' }]); });
+    await flush();
+    const second = mocks.claim.mock.calls[1][0];
+    expect(second.limit).toBe(0);
+    expect(second.openNotificationIds).toHaveLength(5);
+    expect(mocks.destroyed).toContain(`notification-${ID(2)}`);
+    // The freed place triggers another pass.
+    expect(mocks.claim.mock.calls.length).toBeGreaterThan(2);
+  });
+
+  it('slots: an older backend refuses the new fields (422) — the tab stops sending them', async () => {
+    const { ApiError } = await import('../../api/apiError');
+    mocks.claim
+      .mockResolvedValueOnce({ items: [item(ID(1), { balloonSlot: 's' })] })
+      .mockRejectedValueOnce(new ApiError({ message: 'Invalid', code: 'VALIDATION_ERROR' as never, status: 422 }))
+      .mockResolvedValue({ items: [] });
+    await mount();
+    await act(async () => { await center!.enqueueLocal('7', [{ key: `w-${Math.random()}`, kind: 'info', title: 'W', text: 'pump', mode: 'auto' }]); });
+    await flush();
+    const calls = mocks.claim.mock.calls.map((call) => call[0]);
+    expect(calls[1].openNotificationIds).toEqual([ID(1)]);
+    expect(calls.slice(2).every((call) => call.openNotificationIds === undefined)).toBe(true);
+    expect(calls.length).toBeGreaterThan(2);
+  });
+
   it('local balloons: accepted keys returned; storage failure falls back to memory and still shows', async () => {
     mocks.claim.mockResolvedValue({ items: [] });
     await mount();

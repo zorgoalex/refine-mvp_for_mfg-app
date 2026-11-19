@@ -51,6 +51,7 @@ export const ONEC_ALERT_KINDS: Readonly<Record<string, { group: OnecAlertGroupCo
   etl_full_sync_required: { group: 'sync', label: 'Нужна полная выгрузка' },
   etl_snapshot_not_updated: { group: 'sync', label: 'Снимок не обновлён' },
   onec_nightly_full_sync_missed: { group: 'sync', label: 'Ночная полная выгрузка не прошла' },
+  etl_stalled: { group: 'sync', label: 'Выгрузка стоит: давно нет успешного прогона' },
   command_expired_undelivered: { group: 'commands', label: 'Команда не доставлена в срок' },
   command_dead_letter: { group: 'commands', label: 'Команда не выполнена' },
   config_rejected: { group: 'config_source', label: 'Агент отклонил конфигурацию' },
@@ -64,6 +65,21 @@ export const ONEC_ALERT_KINDS: Readonly<Record<string, { group: OnecAlertGroupCo
   onec_document_conflict: { group: 'other', label: 'Документ 1С изменился — конфликт с распределениями' },
   [NO_RECIPIENTS_ALERT_KIND]: { group: 'other', label: 'Оповещения 1С некому доставить' },
 };
+
+/**
+ * Balloon slot of a 1C alert notification (user request 18.11.2026): the agent's condition (offline / state) shares one
+ * slot per 1C source, every other group has its own. A newer notification of the slot replaces the older balloon.
+ */
+/** Alert kinds whose notifications share the balloon slot of `group` (agent_offline + agent_state together). */
+export function onecAlertSlotKinds(group: OnecAlertGroupCode): string[] {
+  const slotOf = (code: OnecAlertGroupCode) => (code === 'agent_offline' || code === 'agent_state' ? 'agent' : code);
+  return Object.entries(ONEC_ALERT_KINDS).filter(([, value]) => slotOf(value.group) === slotOf(group)).map(([kind]) => kind);
+}
+
+export function onecAlertBalloonSlot(group: OnecAlertGroupCode, sourceId: number | null): string {
+  const slot = group === 'agent_offline' || group === 'agent_state' ? 'agent' : group;
+  return `onec_alert:${sourceId ?? 'none'}:${slot}`;
+}
 
 export function isOnecAlertGroupCode(value: string): value is OnecAlertGroupCode {
   return (ONEC_ALERT_GROUP_CODES as readonly string[]).includes(value);

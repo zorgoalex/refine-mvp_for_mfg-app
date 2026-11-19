@@ -492,6 +492,16 @@ export class PgOnecAlertNotificationsRepository {
    * Locks the chosen episodes (FOR UPDATE SKIP LOCKED: a writer resolving one of them right now keeps it for the
    * next tick) and re-reads them after the lock, so the stage is decided on committed values.
    */
+  /** An alert of these kinds is still open for the 1C source (the balloon slot's current condition is an alarm). */
+  async hasOpenAlertsInSlot(tx: DatabaseClient, sourceId: number | null, kinds: readonly string[]): Promise<boolean> {
+    if (kinds.length === 0) return false;
+    const { rows } = await tx.query(
+      `SELECT 1 FROM onec_alerts WHERE source_id IS NOT DISTINCT FROM $1 AND kind = ANY($2::text[]) AND state <> 'resolved' LIMIT 1`,
+      [sourceId, kinds],
+    );
+    return rows.length > 0;
+  }
+
   async lockCandidates(tx: DatabaseClient, episodeIds: readonly number[]): Promise<EpisodeCandidate[]> {
     if (episodeIds.length === 0) return [];
     const locked = await tx.query<{ episode_id: string }>(

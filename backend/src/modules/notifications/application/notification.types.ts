@@ -24,6 +24,8 @@ export interface NotificationDto {
   balloonMode: NotificationBalloonMode | null;
   /** Обязательный балун ещё не показан: строку нельзя удалить (409), колокольчик прячет удаление. */
   balloonPending: boolean;
+  /** Слот балуна: балун с тем же слотом, открытый на экране, закрывается при показе этого (свежего). */
+  balloonSlot?: string | null;
 }
 
 export interface NotificationListQuery {
@@ -74,6 +76,8 @@ export interface NotificationRepositoryPort {
    * (`mandatory`) — только клиенту, заявившему эту возможность (`mandatory: true`), без срока и независимо от прочтения.
    */
   claimBalloonsForUser(input: { viewer: NotificationViewer; token: string; limit: number; mandatory: boolean }): Promise<NotificationDto[]>;
+  /** Of the given balloons the tab shows, those a newer balloon of their slot replaced. */
+  supersededBalloonsForUser?(input: { viewer: NotificationViewer; notificationIds: string[] }): Promise<string[]>;
   /** Подтверждение показа своих арендованных балунов; повтор — no-op. */
   ackBalloonsForUser(input: { viewer: NotificationViewer; token: string; notificationIds: string[] }): Promise<number>;
 }

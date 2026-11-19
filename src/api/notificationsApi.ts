@@ -27,7 +27,7 @@ export const notificationsApi = {
    * Аренда непоказанных балунов вкладкой (план 2026-10-03 §3.2). Заголовок заявляет поддержку обязательных балунов
    * (план 2026-10-19 §2.7): только такой вкладке backend их выдаёт; тело запроса прежнее — старый backend не ломается.
    */
-  claimBalloons(body: { token: string; limit: number }): Promise<ClaimBalloonsResponse> {
+  claimBalloons(body: { token: string; limit: number; openNotificationIds?: string[] }): Promise<ClaimBalloonsResponse> {
     return httpClient.post<ClaimBalloonsResponse>(apiRoutes.notifications.balloonsClaim, body, {
       headers: { [BALLOON_CAPABILITIES_HEADER]: BALLOON_CAPABILITIES },
     });

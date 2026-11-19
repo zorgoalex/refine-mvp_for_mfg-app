@@ -3030,6 +3030,12 @@ probe_file() {
       "$(q_fun_hash 'public.trg_orders_close_rework_round()' b5591f65ae646e55dd5232ad77f8cac7)" ;;
     # «Переделка» 1.1: срок готовности круга и отметка сверки итогового дедлайна (аддитивно).
     # Incoming signals: several occurrences of one signal per message (one per order); 173's probe accepts both keys.
+    # 296: balloon slots of notifications (a newer balloon of the slot replaces the older one).
+    296_notification_balloon_slot*) probe_all \
+      "$(q_col notifications balloon_slot)" \
+      "$(q_col notifications balloon_superseded_at)" \
+      "$(q_con_on notifications chk_notifications_balloon_slot)" \
+      "$(q_idx idx_notifications_balloon_slot_live)" ;;
     289_inbound_signal_segments*) probe_all \
       "$(q_col inbound_signal_occurrences segment_index)" \
       "$(q_col inbound_signal_occurrences segment_text)" \
@@ -3201,6 +3207,9 @@ verify_applied_effect() {
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     282_order_stage_letters*)
+      probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
+      ;;
+    296_notification_balloon_slot*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; not recorded in schema_migrations."
       ;;
     289_inbound_signal_segments*)

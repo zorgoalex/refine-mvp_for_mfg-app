@@ -383,6 +383,7 @@ describe('onecCommandTypeLabel / onecCommandTypeDescription (admin commands)', (
       'run_connectivity_test',
       'collect_diagnostics',
       'rotate_certificate_hint',
+      'etl_reset',
       'integration_probe',
     ];
     for (const type of types) {
@@ -463,7 +464,7 @@ describe('onecCommandPayloadFromForm', () => {
   });
 
   it('builds an empty object for every no-field admin command', () => {
-    for (const type of ['pause_etl', 'resume_etl', 'run_connectivity_test', 'collect_diagnostics', 'rotate_certificate_hint']) {
+    for (const type of ['pause_etl', 'resume_etl', 'run_connectivity_test', 'collect_diagnostics', 'rotate_certificate_hint', 'etl_reset']) {
       expect(onecCommandPayloadFromForm(type, { entities: ['x'], entity: 'y', marker: 'z' })).toEqual({});
     }
   });

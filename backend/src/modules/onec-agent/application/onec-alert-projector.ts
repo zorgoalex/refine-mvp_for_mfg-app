@@ -2,6 +2,9 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { DatabaseClient } from '../../../database/database.types';
 import { PgOnecRepository, type OutboxEventRecord } from '../adapters/pg-onec-repository';
 
+/** Degraded reasons that stop the data flow until someone acts. */
+const CRITICAL_DEGRADED_REASONS = new Set(['ETL_RUNS_UNRESOLVED']);
+
 /** Agent states that need an operator's attention. */
 const ATTENTION_STATES = new Set(['degraded', 'offline_onec', 'storage_critical', 'incompatible_version']);
 
@@ -24,6 +27,29 @@ const int = (value: unknown): number | null => (typeof value === 'number' && Num
 @Injectable()
 export class OnecAlertProjector {
   constructor(@Inject(PgOnecRepository) private readonly repository: PgOnecRepository) {}
+
+  /**
+   * «Выгрузка стоит» ends only with a success after the stall began (review R1-2): the run is checked in the database
+   * (completed, no failed entity), and only stalls whose last success is older than this run's completion are closed —
+   * a delayed or replayed event of an older run never closes a current stall.
+   */
+  private async resolveStallsEndedBy(tx: DatabaseClient, agentId: string, runId: string): Promise<void> {
+    const run = (await tx.query<{ completed_at: Date | null }>(
+      `SELECT completed_at FROM onec_etl_runs
+        WHERE run_id::text = $1 AND agent_id = $2 AND status = 'completed' AND COALESCE(entities_failed, 0) = 0`,
+      [runId, agentId],
+    )).rows[0];
+    if (!run?.completed_at) return;
+    const open = await tx.query<{ dedupe_key: string; last_success_at: string | null }>(
+      `SELECT dedupe_key, details->>'lastSuccessAt' AS last_success_at FROM onec_alerts
+        WHERE agent_id = $1 AND kind = 'etl_stalled' AND state <> 'resolved'`,
+      [agentId],
+    );
+    for (const alert of open.rows) {
+      const last = alert.last_success_at ? Date.parse(alert.last_success_at) : Number.NEGATIVE_INFINITY;
+      if (run.completed_at.getTime() > last) await this.repository.resolveAlertByDedupeKey(tx, alert.dedupe_key);
+    }
+  }
 
   async project(tx: DatabaseClient, event: OutboxEventRecord): Promise<void> {
     // Envelope (domain/onec-events.ts): identity at the top level, event data in `data`.
@@ -73,7 +99,8 @@ export class OnecAlertProjector {
           agentId,
           sourceId,
           certId: null,
-          severity: state === 'degraded' ? 'warning' : 'critical',
+          // A run waiting for a person blocks every later run (incident 12–18.11.2026): critical, not a mere warning.
+          severity: state === 'degraded' && !CRITICAL_DEGRADED_REASONS.has(reason) ? 'warning' : 'critical',
           dedupeKey,
           details: { state, stateReason: reason || null },
         });
@@ -175,6 +202,7 @@ export class OnecAlertProjector {
         // Current state wins: only the run that is still the entity's latest may open/resolve its alert.
         const runId = str(p.runId);
         const entities = Array.isArray(p.entities) ? (p.entities as Array<Record<string, unknown>>) : [];
+        if (agentId && runId) await this.resolveStallsEndedBy(tx, agentId, runId);
         for (const entity of entities) {
           const code = str(entity.entity);
           if (!code || sourceId === null) continue;
@@ -215,6 +243,28 @@ export class OnecAlertProjector {
             await this.repository.resolveAlertByDedupeKey(tx, dedupeKey);
           }
         }
+        return;
+      }
+      case 'onec.etl.stalled': {
+        // Current state wins: a run that succeeded after the stall was detected closes it before the alert opens.
+        if (!agentId) return;
+        const { rows } = await tx.query(
+          `SELECT max(completed_at) AS last_success_at FROM onec_etl_runs
+            WHERE agent_id = $1 AND status = 'completed' AND COALESCE(entities_failed, 0) = 0`,
+          [agentId],
+        );
+        const current: Date | null = rows[0]?.last_success_at ?? null;
+        const reported = str(p.lastSuccessAt);
+        if (current !== null && (reported === null || current.getTime() > Date.parse(reported))) return;
+        await this.repository.upsertAlert(tx, {
+          kind: 'etl_stalled',
+          agentId,
+          sourceId,
+          certId: null,
+          severity: 'critical',
+          dedupeKey: `etl_stalled:${agentId}:${reported ?? 'never'}`,
+          details: { lastSuccessAt: reported, since: str(p.since), thresholdMinutes: int(p.thresholdMinutes) },
+        });
         return;
       }
       case 'onec.etl.run_abandoned':

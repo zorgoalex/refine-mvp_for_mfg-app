@@ -16,10 +16,14 @@ export interface BackendNotificationDto {
   balloonMode?: 'auto' | 'persistent' | 'mandatory' | null;
   /** Обязательный балун ещё не показан — удалить строку нельзя (backend ответит 409). Нет у старого backend. */
   balloonPending?: boolean;
+  /** Слот балуна: открытый балун того же слота закрывается при показе этого (свежего). Нет у старого backend. */
+  balloonSlot?: string | null;
 }
 
 export interface ClaimBalloonsResponse {
   items: BackendNotificationDto[];
+  /** Из переданных openNotificationIds — заменённые свежим балуном того же слота. Нет у старого backend. */
+  superseded?: string[];
 }
 
 export interface AckBalloonsResponse {

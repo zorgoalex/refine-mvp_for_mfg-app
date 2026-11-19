@@ -881,6 +881,23 @@ export class PgOnecRepository {
     return rows;
   }
 
+  /** Per active agent: the active config mode/interval, the last successful run and the first run (ETL stall check). */
+  async listEtlStallFacts(): Promise<QueryResultRow[]> {
+    const { rows } = await this.database.query(
+      `SELECT a.agent_id, a.source_id, st.received_at, st.agent_version,
+              (v.configuration_canonical::jsonb)->>'mode' AS mode,
+              ((v.configuration_canonical::jsonb)->>'etlIntervalMinutes')::int AS etl_interval_minutes,
+              (SELECT max(r.completed_at) FROM onec_etl_runs r
+                WHERE r.agent_id = a.agent_id AND r.status = 'completed' AND COALESCE(r.entities_failed, 0) = 0) AS last_success_at,
+              (SELECT min(r.created_at) FROM onec_etl_runs r WHERE r.agent_id = a.agent_id) AS first_run_at
+         FROM onec_agents a
+         JOIN onec_agent_status st ON st.agent_id = a.agent_id
+         LEFT JOIN onec_agent_config_versions v ON v.agent_id = a.agent_id AND v.config_version = st.active_config_version
+        WHERE a.status = 'active'`,
+    );
+    return rows;
+  }
+
   async listExpiringCertificates(withinDays: number): Promise<QueryResultRow[]> {
     const { rows } = await this.database.query(
       `SELECT c.cert_id, c.agent_id, a.source_id, c.not_after

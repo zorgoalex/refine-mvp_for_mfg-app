@@ -36,6 +36,8 @@ export const ONEC_ADMIN_COMMAND_TYPES = [
   'run_connectivity_test',
   'collect_diagnostics',
   'rotate_certificate_hint',
+  // Agent 1.3.17: close stuck ETL runs and queue one new full run.
+  'etl_reset',
 ] as const;
 export type OnecAdminCommandType = (typeof ONEC_ADMIN_COMMAND_TYPES)[number];
 
