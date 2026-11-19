@@ -291,6 +291,8 @@ q_con_def_on_safe() { echo "SELECT COALESCE((SELECT pg_get_constraintdef(oid)=\$
 q_con_hash_on() { echo "SELECT COALESCE((SELECT md5(pg_get_constraintdef(oid))='$3' FROM pg_constraint WHERE conname='$1' AND conrelid='public.$2'::regclass), false);"; }
 q_idx_hash() { echo "SELECT COALESCE((SELECT md5(indexdef)='$2' FROM pg_indexes WHERE schemaname='public' AND indexname='$1'), false);"; }
 q_fun_hash() { echo "SELECT COALESCE((SELECT md5(pg_get_functiondef(oid))='$2' FROM pg_proc WHERE oid=to_regprocedure('$1')), false);"; }
+# A function legitimately redefined in place by a later migration: either the original or the later body.
+q_fun_hash_either() { echo "SELECT COALESCE((SELECT md5(pg_get_functiondef(oid)) IN ('$2','$3') FROM pg_proc WHERE oid=to_regprocedure('$1')), false);"; }
 q_colset_hash() { echo "SELECT COALESCE((SELECT md5(string_agg(format('%s|%s|%s|%s|%s',ordinal_position,column_name,data_type,is_nullable,COALESCE(column_default,'∅')), ', ' ORDER BY ordinal_position))='$3' FROM information_schema.columns WHERE table_schema='public' AND table_name='$1' AND column_name=ANY(string_to_array('$2',','))), false);"; }
 q_conset_hash() { echo "SELECT COALESCE((SELECT md5(string_agg(conname||'|'||contype::text||'|'||confdeltype::text||'|'||pg_get_constraintdef(oid), ', ' ORDER BY conname))='$3' FROM pg_constraint WHERE connamespace='public'::regnamespace AND conrelid::regclass::text='$1' AND conname=ANY(string_to_array('$2',','))), false);"; }
 q_idxset_hash() { echo "SELECT COALESCE((SELECT md5(string_agg(indexname||'|'||indexdef, ', ' ORDER BY indexname))='$3' FROM pg_indexes WHERE schemaname='public' AND tablename='$1' AND indexname=ANY(string_to_array('$2',','))), false);"; }
